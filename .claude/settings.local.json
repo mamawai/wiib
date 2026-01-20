@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__mcpServers__search",
+      "mcp__mcpServers__fetch_content",
+      "Bash(dir:*)"
+    ]
+  }
+}
