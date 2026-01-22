@@ -1,12 +1,15 @@
 package com.mawai.wiibservice.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.metadata.IPage;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.mawai.wiibcommon.annotation.RateLimiter;
 import com.mawai.wiibcommon.constant.RateLimiterType;
 import com.mawai.wiibcommon.dto.OrderResponse;
 import com.mawai.wiibcommon.dto.OrderRequest;
 import com.mawai.wiibcommon.entity.Order;
+import com.mawai.wiibcommon.entity.Position;
 import com.mawai.wiibcommon.entity.Settlement;
 import com.mawai.wiibcommon.entity.Stock;
 import com.mawai.wiibcommon.entity.User;
@@ -14,16 +17,23 @@ import com.mawai.wiibcommon.enums.ErrorCode;
 import com.mawai.wiibcommon.enums.OrderSide;
 import com.mawai.wiibcommon.enums.OrderStatus;
 import com.mawai.wiibcommon.enums.OrderType;
+import com.mawai.wiibcommon.event.AssetChangeEvent;
+import com.mawai.wiibcommon.event.OrderStatusEvent;
+import com.mawai.wiibcommon.event.PositionChangeEvent;
 import com.mawai.wiibcommon.exception.BizException;
 import com.mawai.wiibcommon.util.SpringUtils;
 import com.mawai.wiibservice.config.TradingConfig;
 import com.mawai.wiibservice.mapper.OrderMapper;
 import com.mawai.wiibservice.service.CacheService;
+import com.mawai.wiibservice.service.EventPublisher;
+import com.mawai.wiibservice.service.MarginAccountService;
 import com.mawai.wiibservice.service.OrderService;
 import com.mawai.wiibservice.service.PositionService;
 import com.mawai.wiibservice.service.SettlementService;
+import com.mawai.wiibservice.service.StockCacheService;
 import com.mawai.wiibservice.service.StockService;
 import com.mawai.wiibservice.service.UserService;
+import com.mawai.wiibservice.service.BuffService;
 import com.mawai.wiibservice.util.RedisLockUtil;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -32,10 +42,11 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
-import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -59,16 +70,17 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
 
     private final UserService userService;
     private final StockService stockService;
+    private final StockCacheService stockCacheService;
     private final PositionService positionService;
     private final SettlementService settlementService;
     private final CacheService cacheService;
     private final TradingConfig tradingConfig;
     private final RedisLockUtil redisLockUtil;
+    private final EventPublisher eventPublisher;
+    private final MarginAccountService marginAccountService;
+    private final BuffService buffService;
 
-    /** 时间戳容差：3秒 */
-    private static final long TIMESTAMP_TOLERANCE_MS = 3000;
-    /** 请求ID过期时间：5分钟 */
-    private static final long REQUEST_ID_EXPIRE_MINUTES = 5;
+    private static final int TRIGGERED_ORDER_BATCH_SIZE = 200;
 
     @Override
     @RateLimiter(type = RateLimiterType.BUY, permitsPerSecond = 0.5, bucketCapacity = 5)
@@ -80,8 +92,14 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         }
 
         validateRequest(request);
-        Stock stock = getAndValidateStock(request.getStockCode());
+        Stock stock = getAndValidateStock(request.getStockId());
         User user = userService.getById(userId);
+        if (user == null) {
+            throw new BizException(ErrorCode.USER_NOT_FOUND);
+        }
+        if (Boolean.TRUE.equals(user.getIsBankrupt())) {
+            throw new BizException(ErrorCode.USER_BANKRUPT);
+        }
 
         // 从Redis获取实时价格
         BigDecimal price = cacheService.getCurrentPrice(stock.getId());
@@ -90,28 +108,71 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
             price = stock.getOpen() != null ? stock.getOpen() : stock.getPrevClose();
         }
 
+        int leverageMultiple = marginAccountService.normalizeLeverageMultiple(request.getLeverageMultiple());
+
         if (OrderType.MARKET.getCode().equals(request.getOrderType())) {
             // 市价单：立即成交，包含手续费
             BigDecimal amount = price.multiply(BigDecimal.valueOf(request.getQuantity()));
             BigDecimal commission = tradingConfig.calculateCommission(amount);
-            BigDecimal totalCost = amount.add(commission);
 
-            if (user.getBalance().compareTo(totalCost) < 0) {
+            // 应用折扣Buff
+            BigDecimal discountRate = null;
+            if (request.getUseBuffId() != null) {
+                if (leverageMultiple > 1) {
+                    throw new BizException(ErrorCode.DISCOUNT_NO_LEVERAGE);
+                }
+                discountRate = buffService.getDiscountRate(request.getUseBuffId());
+                if (discountRate != null) {
+                    amount = amount.multiply(discountRate).setScale(2, RoundingMode.HALF_UP);
+                    commission = tradingConfig.calculateCommission(amount);
+                }
+            }
+
+            // 杠杆小于等1
+            if (leverageMultiple <= 1) {
+                BigDecimal totalCost = amount.add(commission);
+                if (user.getBalance().compareTo(totalCost) < 0) {
+                    throw new BizException(ErrorCode.BALANCE_NOT_ENOUGH);
+                }
+                OrderResponse response = executeMarketBuy(userId, stock, request.getQuantity(), price, amount, commission);
+                if (discountRate != null) {
+                    buffService.markUsed(request.getUseBuffId());
+                }
+                return response;
+            }
+
+            if (!tradingConfig.getMargin().isEnabled()) {
+                throw new BizException(ErrorCode.LEVERAGE_MULTIPLE_INVALID);
+            }
+            if (leverageMultiple > tradingConfig.getMargin().getMaxLeverage()) {
+                throw new BizException(ErrorCode.LEVERAGE_MULTIPLE_INVALID);
+            }
+
+            BigDecimal margin = amount.divide(BigDecimal.valueOf(leverageMultiple), 2, RoundingMode.CEILING);
+            BigDecimal borrowed = amount.subtract(margin);
+            BigDecimal cashNeed = margin.add(commission);
+
+            if (user.getBalance().compareTo(cashNeed) < 0) {
                 throw new BizException(ErrorCode.BALANCE_NOT_ENOUGH);
             }
-            return executeMarketBuy(userId, stock, request.getQuantity(), price, commission, request.getRequestId());
-        } else {
-            // 限价单：冻结资金（含预估手续费），进入订单池
-            validateLimitPrice(request.getLimitPrice(), price, true);
-            BigDecimal freezeAmount = request.getLimitPrice().multiply(BigDecimal.valueOf(request.getQuantity()));
-            BigDecimal estimatedCommission = tradingConfig.calculateCommission(freezeAmount);
-            BigDecimal totalFreeze = freezeAmount.add(estimatedCommission);
-
-            if (user.getBalance().compareTo(totalFreeze) < 0) {
-                throw new BizException(ErrorCode.BALANCE_NOT_ENOUGH);
-            }
-            return createLimitBuyOrder(userId, stock, request, totalFreeze);
+            return executeMarketBuyWithLeverage(userId, stock, request.getQuantity(), price, amount, commission,
+                    margin, borrowed);
         }
+
+        if (leverageMultiple > 1) {
+            throw new BizException(ErrorCode.LEVERAGE_ONLY_FOR_MARKET_BUY);
+        }
+
+        // 限价单：冻结资金（含预估手续费），进入订单池
+        validateLimitPrice(request.getLimitPrice(), price);
+        BigDecimal freezeAmount = request.getLimitPrice().multiply(BigDecimal.valueOf(request.getQuantity()));
+        BigDecimal estimatedCommission = tradingConfig.calculateCommission(freezeAmount);
+        BigDecimal totalFreeze = freezeAmount.add(estimatedCommission);
+
+        if (user.getBalance().compareTo(totalFreeze) < 0) {
+            throw new BizException(ErrorCode.BALANCE_NOT_ENOUGH);
+        }
+        return createLimitBuyOrder(userId, stock, request, totalFreeze);
     }
 
     @Override
@@ -124,7 +185,14 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         }
 
         validateRequest(request);
-        Stock stock = getAndValidateStock(request.getStockCode());
+        Stock stock = getAndValidateStock(request.getStockId());
+        User user = userService.getById(userId);
+        if (user == null) {
+            throw new BizException(ErrorCode.USER_NOT_FOUND);
+        }
+        if (Boolean.TRUE.equals(user.getIsBankrupt())) {
+            throw new BizException(ErrorCode.USER_BANKRUPT);
+        }
 
         var position = positionService.findByUserAndStock(userId, stock.getId());
         if (position == null || position.getQuantity() < request.getQuantity()) {
@@ -141,9 +209,9 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         if (OrderType.MARKET.getCode().equals(request.getOrderType())) {
             BigDecimal amount = price.multiply(BigDecimal.valueOf(request.getQuantity()));
             BigDecimal commission = tradingConfig.calculateCommission(amount);
-            return executeMarketSell(userId, stock, request.getQuantity(), price, commission, request.getRequestId());
+            return executeMarketSell(userId, stock, request.getQuantity(), price, commission);
         } else {
-            validateLimitPrice(request.getLimitPrice(), price, false);
+            validateLimitPrice(request.getLimitPrice(), price);
             return createLimitSellOrder(userId, stock, request);
         }
     }
@@ -168,6 +236,14 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
      */
     @Transactional(rollbackFor = Exception.class)
     protected OrderResponse doCancelOrder(Long userId, Long orderId) {
+        User user = userService.getById(userId);
+        if (user == null) {
+            throw new BizException(ErrorCode.USER_NOT_FOUND);
+        }
+        if (Boolean.TRUE.equals(user.getIsBankrupt())) {
+            throw new BizException(ErrorCode.USER_BANKRUPT);
+        }
+
         Order order = baseMapper.selectById(orderId);
         if (order == null || !order.getUserId().equals(userId)) {
             throw new BizException(ErrorCode.ORDER_NOT_FOUND);
@@ -203,20 +279,31 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
     }
 
     @Override
-    public List<OrderResponse> getUserOrders(Long userId, String status, int limit) {
+    public IPage<OrderResponse> getUserOrders(Long userId, String status, int pageNum, int pageSize) {
+        Page<Order> page = new Page<>(pageNum, pageSize);
         LambdaQueryWrapper<Order> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(Order::getUserId, userId);
         if (status != null && !status.isEmpty()) {
             wrapper.eq(Order::getStatus, status);
         }
-        wrapper.orderByDesc(Order::getCreatedAt).last("LIMIT " + limit);
+        wrapper.orderByDesc(Order::getCreatedAt);
 
-        return baseMapper.selectList(wrapper).stream()
-                .map(order -> {
-                    Stock stock = stockService.getById(order.getStockId());
-                    return buildOrderResponse(order, stock);
-                })
-                .collect(Collectors.toList());
+        baseMapper.selectPage(page, wrapper);
+
+        return page.convert(this::buildOrderResponseFromCache);
+    }
+
+    /** 从Redis缓存构建OrderResponse（只需code和name） */
+    private OrderResponse buildOrderResponseFromCache(Order order) {
+        Map<String, String> stockStatic = stockCacheService.getStockStatic(order.getStockId());
+        String stockCode = stockStatic != null ? stockStatic.get("code") : "";
+        String stockName = stockStatic != null ? stockStatic.get("name") : "";
+
+        OrderResponse resp = new OrderResponse();
+        resp.setOrderId(order.getId());
+        resp.setStockCode(stockCode);
+        resp.setStockName(stockName);
+        return getOrderResponse(order, resp);
     }
 
     /**
@@ -285,7 +372,7 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
                     log.warn("订单检测超时");
                     failCount++;
                 } catch (Exception e) {
-                    log.debug("订单检测异常: {}", e.getMessage());
+                    log.info("订单检测异常: {}", e.getMessage());
                     failCount++;
                 }
             }
@@ -302,10 +389,18 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
      */
     private boolean checkAndMarkTriggered(Order order) {
         try {
-            Stock stock = stockService.getById(order.getStockId());
-            BigDecimal currentPrice = cacheService.getCurrentPrice(stock.getId());
+            Long stockId = order.getStockId();
+            BigDecimal currentPrice = cacheService.getCurrentPrice(stockId);
             if (currentPrice == null) {
-                currentPrice = stock.getPrevClose();
+                // 缓存没有实时价格，从静态缓存取prevClose
+                Map<String, String> stockStatic = stockCacheService.getStockStatic(stockId);
+                if (stockStatic != null && stockStatic.get("prevClose") != null) {
+                    currentPrice = new BigDecimal(stockStatic.get("prevClose"));
+                } else {
+                    // 极端情况：Redis完全没数据才查DB
+                    Stock stock = stockService.getById(stockId);
+                    currentPrice = stock.getPrevClose();
+                }
             }
 
             boolean shouldTrigger;
@@ -326,7 +421,7 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
                         redisLockUtil.unlock(lockKey, lockValue);
                     }
                 } else {
-                    log.debug("限价单{}正在被其他实例处理", order.getId());
+                    log.info("限价单{}正在被其他实例处理", order.getId());
                 }
             }
             return false;
@@ -352,86 +447,152 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
      * 批量处理TRIGGERED订单
      */
     @Override
-    @Transactional(rollbackFor = Exception.class)
     public void executeTriggeredOrders() {
-        LambdaQueryWrapper<Order> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(Order::getStatus, OrderStatus.TRIGGERED.getCode())
-                .eq(Order::getOrderType, OrderType.LIMIT.getCode());
-
-        List<Order> triggeredOrders = baseMapper.selectList(wrapper);
-        if (triggeredOrders.isEmpty())
-            return;
-
-        log.info("开始批量执行{}个已触发订单", triggeredOrders.size());
         long startTime = System.currentTimeMillis();
-
-        // 步骤1：计算每个订单的成交信息
-        List<Settlement> settlements = new ArrayList<>();
-        for (Order order : triggeredOrders) {
-            BigDecimal executePrice = order.getTriggerPrice();
-            BigDecimal amount = executePrice.multiply(BigDecimal.valueOf(order.getQuantity()));
-            BigDecimal commission = tradingConfig.calculateCommission(amount);
-
-            order.setFilledPrice(executePrice);
-            order.setFilledAmount(amount);
-            order.setCommission(commission);
-            order.setStatus(OrderStatus.FILLED.getCode());
-
-            // 收集卖出订单的结算记录
-            if (OrderSide.SELL.getCode().equals(order.getOrderSide())) {
-                BigDecimal netAmount = amount.subtract(commission);
-                Settlement settlement = new Settlement();
-                settlement.setUserId(order.getUserId());
-                settlement.setOrderId(order.getId());
-                settlement.setAmount(netAmount);
-                settlement.setSettleDate(LocalDate.now().plusDays(1));
-                settlement.setStatus("PENDING");
-                settlements.add(settlement);
-            }
-        }
-
-        // 步骤2：批量更新订单状态
-        updateBatchById(triggeredOrders);
-        log.info("批量更新{}个订单状态完成", triggeredOrders.size());
-
-        // 步骤3：处理余额和持仓
+        long lastId = 0L;
+        int scannedCount = 0;
         int successCount = 0;
+        int skippedCount = 0;
         int failCount = 0;
-        for (Order order : triggeredOrders) {
-            try {
-                if (OrderSide.BUY.getCode().equals(order.getOrderSide())) {
-                    // 买入：扣冻结资金 + 退多余 + 增持仓
-                    BigDecimal frozenAmount = order.getFrozenAmount();
-                    BigDecimal actualCost = order.getFilledAmount().add(order.getCommission());
-                    BigDecimal refund = frozenAmount.subtract(actualCost);
 
-                    userService.deductFrozenBalance(order.getUserId(), frozenAmount);
-                    if (refund.compareTo(BigDecimal.ZERO) > 0) {
-                        userService.updateBalance(order.getUserId(), refund);
-                    }
-                    positionService.addPosition(order.getUserId(), order.getStockId(),
-                            order.getQuantity(), order.getFilledPrice());
-                } else {
-                    // 卖出：扣冻结持仓
-                    positionService.deductFrozenPosition(order.getUserId(), order.getStockId(),
-                            order.getQuantity());
+        // 1) 小批次扫描 TRIGGERED（控内存）
+        for (;;) {
+            List<Order> batch = baseMapper.selectList(new LambdaQueryWrapper<Order>()
+                    .eq(Order::getStatus, OrderStatus.TRIGGERED.getCode())
+                    .eq(Order::getOrderType, OrderType.LIMIT.getCode())
+                    .gt(Order::getId, lastId)
+                    .orderByAsc(Order::getId)
+                    .last("LIMIT " + TRIGGERED_ORDER_BATCH_SIZE));
+
+            if (batch.isEmpty()) {
+                break;
+            }
+
+            scannedCount += batch.size();
+            lastId = batch.getLast().getId();
+
+            // 2) 预加载 Stock（避免循环 N 次查库）
+            Set<Long> stockIds = batch.stream()
+                    .map(Order::getStockId)
+                    .collect(Collectors.toSet());
+            Map<Long, Stock> stockMap = stockService.listByIds(stockIds).stream()
+                    .collect(Collectors.toMap(Stock::getId, s -> s));
+
+            // 3) 逐单处理：单单事务 + CAS 抢占
+            for (Order order : batch) {
+                Stock stock = stockMap.get(order.getStockId());
+                if (stock == null) {
+                    log.warn("触发订单{}关联Stock不存在 stockId={}", order.getId(), order.getStockId());
+                    failCount++;
+                    continue;
                 }
-                successCount++;
-            } catch (Exception e) {
-                log.error("处理订单{}的余额持仓失败", order.getId(), e);
-                failCount++;
+
+                try {
+                    boolean processed = SpringUtils.getAopProxy(this).processTriggeredOrder(order, stock);
+                    if (processed) {
+                        successCount++;
+                    } else {
+                        skippedCount++;
+                    }
+                } catch (Exception e) {
+                    log.error("执行触发订单失败 orderId={}", order.getId(), e);
+                    failCount++;
+                }
             }
         }
 
-        // 步骤4：批量插入结算记录
-        if (!settlements.isEmpty()) {
-            settlementService.saveBatch(settlements);
-            log.info("批量插入{}条结算记录", settlements.size());
+        // 4) 汇总
+        long elapsed = System.currentTimeMillis() - startTime;
+        if (scannedCount > 0) {
+            log.info("已触发订单执行完成，扫描{}个，成功{}个，跳过{}个，失败{}个，耗时{}ms",
+                    scannedCount, successCount, skippedCount, failCount, elapsed);
+        }
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    protected boolean processTriggeredOrder(Order order, Stock stock) {
+        // 1) 校验状态
+        if (order == null) {
+            return false;
+        }
+        if (!OrderStatus.TRIGGERED.getCode().equals(order.getStatus())) {
+            return false;
+        }
+        if (!OrderType.LIMIT.getCode().equals(order.getOrderType())) {
+            return false;
         }
 
-        long elapsed = System.currentTimeMillis() - startTime;
-        log.info("已触发订单执行完成，共{}个订单，成功{}个，失败{}个，耗时{}ms",
-                triggeredOrders.size(), successCount, failCount, elapsed);
+        User user = userService.getById(order.getUserId());
+        if (user != null && Boolean.TRUE.equals(user.getIsBankrupt())) {
+            int affected = baseMapper.casUpdateStatus(order.getId(), OrderStatus.TRIGGERED.getCode(),
+                    OrderStatus.CANCELLED.getCode());
+            if (affected > 0) {
+                order.setStatus(OrderStatus.CANCELLED.getCode());
+                Thread.startVirtualThread(() -> publishOrderStatusEvent(order, stock,
+                        OrderStatus.TRIGGERED.getCode(), OrderStatus.CANCELLED.getCode()));
+            }
+            return false;
+        }
+
+        // 2) 计算成交信息
+        BigDecimal executePrice = order.getTriggerPrice();
+        if (executePrice == null) {
+            log.warn("触发订单{}缺少triggerPrice", order.getId());
+            return false;
+        }
+
+        BigDecimal amount = executePrice.multiply(BigDecimal.valueOf(order.getQuantity()));
+        BigDecimal commission = tradingConfig.calculateCommission(amount);
+
+        // 3) CAS 改为 FILLED
+        int affected = baseMapper.casUpdateToFilled(order.getId(), executePrice, amount, commission);
+        if (affected == 0) {
+            return false;
+        }
+
+        order.setFilledPrice(executePrice);
+        order.setFilledAmount(amount);
+        order.setCommission(commission);
+        order.setStatus(OrderStatus.FILLED.getCode());
+
+        // 4) 落资金/持仓/结算（失败抛异常回滚本单）
+        if (OrderSide.BUY.getCode().equals(order.getOrderSide())) {
+            BigDecimal frozenAmount = order.getFrozenAmount();
+            if (frozenAmount == null) {
+                throw new BizException(ErrorCode.SYSTEM_ERROR.getCode(), "订单冻结金额为空");
+            }
+            BigDecimal actualCost = amount.add(commission);
+            BigDecimal refund = frozenAmount.subtract(actualCost);
+
+            userService.deductFrozenBalance(order.getUserId(), frozenAmount);
+            if (refund.compareTo(BigDecimal.ZERO) > 0) {
+                userService.updateBalance(order.getUserId(), refund);
+            }
+            positionService.addPosition(order.getUserId(), order.getStockId(), order.getQuantity(), executePrice);
+        } else {
+            positionService.deductFrozenPosition(order.getUserId(), order.getStockId(), order.getQuantity());
+
+            BigDecimal netAmount = amount.subtract(commission);
+            Settlement settlement = new Settlement();
+            settlement.setUserId(order.getUserId());
+            settlement.setOrderId(order.getId());
+            settlement.setAmount(netAmount);
+            settlement.setSettleTime(LocalDateTime.now().plusDays(1));
+            settlement.setStatus("PENDING");
+            if (!settlementService.save(settlement)) {
+                throw new BizException(ErrorCode.SYSTEM_ERROR.getCode(), "创建结算记录失败");
+            }
+        }
+
+        // 5) 推送事件（实时刷新用）
+        Thread.startVirtualThread(() -> {
+            publishOrderFilledEvents(order.getUserId(), order.getStockId(),
+                    stock.getCode(), stock.getName(), order.getOrderSide(),
+                    order.getQuantity());
+            publishOrderStatusEvent(order, stock, OrderStatus.TRIGGERED.getCode(), OrderStatus.FILLED.getCode());
+        });
+
+        return true;
     }
 
     /**
@@ -504,7 +665,7 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
                     log.warn("过期订单处理超时");
                     failCount++;
                 } catch (Exception e) {
-                    log.debug("过期订单处理异常: {}", e.getMessage());
+                    log.info("过期订单处理异常: {}", e.getMessage());
                     failCount++;
                 }
             }
@@ -523,7 +684,7 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         String lockKey = "order:execute:" + order.getId();
         String lockValue = redisLockUtil.tryLock(lockKey, 30);
         if (lockValue == null) {
-            log.debug("限价单{}正在被其他操作处理，跳过过期检查", order.getId());
+            log.info("限价单{}正在被其他操作处理，跳过过期检查", order.getId());
             return;
         }
 
@@ -562,34 +723,15 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         }
     }
 
-    /** 校验请求（时间戳、幂等性） */
+    /** 校验请求（时间戳） */
     private void validateRequest(OrderRequest request) {
         if (request.getQuantity() == null || request.getQuantity() <= 0) {
             throw new BizException(ErrorCode.TRADE_QUANTITY_INVALID);
         }
-
-        // 时间戳校验
-        if (request.getClientTimestamp() != null) {
-            long serverTime = System.currentTimeMillis();
-            long diff = Math.abs(serverTime - request.getClientTimestamp());
-            if (diff > TIMESTAMP_TOLERANCE_MS) {
-                log.warn("时间戳异常 client={} server={} diff={}ms", request.getClientTimestamp(), serverTime, diff);
-                throw new BizException(ErrorCode.TIMESTAMP_INVALID);
-            }
-        }
-
-        // 幂等性校验
-        if (request.getRequestId() != null && !request.getRequestId().isEmpty()) {
-            String key = "order:request:" + request.getRequestId();
-            boolean absent = cacheService.setIfAbsent(key, "1", REQUEST_ID_EXPIRE_MINUTES, TimeUnit.MINUTES);
-            if (!absent) {
-                throw new BizException(ErrorCode.DUPLICATE_REQUEST);
-            }
-        }
     }
 
-    private Stock getAndValidateStock(String stockCode) {
-        Stock stock = stockService.findByCode(stockCode);
+    private Stock getAndValidateStock(Long stockId) {
+        Stock stock = stockService.findById(stockId);
         if (stock == null) {
             throw new BizException(ErrorCode.STOCK_NOT_FOUND);
         }
@@ -597,7 +739,7 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
     }
 
     /** 校验限价（市价的50%~150%范围内） */
-    private void validateLimitPrice(BigDecimal limitPrice, BigDecimal marketPrice, boolean isBuy) {
+    private void validateLimitPrice(BigDecimal limitPrice, BigDecimal marketPrice) {
         if (limitPrice == null || limitPrice.compareTo(BigDecimal.ZERO) <= 0) {
             throw new BizException(ErrorCode.LIMIT_PRICE_INVALID);
         }
@@ -609,32 +751,63 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
 
     /** 执行市价买入（含手续费） */
     private OrderResponse executeMarketBuy(Long userId, Stock stock, int quantity, BigDecimal price,
-            BigDecimal commission, String requestId) {
-        BigDecimal amount = price.multiply(BigDecimal.valueOf(quantity));
+            BigDecimal amount, BigDecimal commission) {
         BigDecimal totalCost = amount.add(commission);
 
         userService.updateBalance(userId, totalCost.negate());
         positionService.addPosition(userId, stock.getId(), quantity, price);
 
         Order order = createOrder(userId, stock.getId(), OrderSide.BUY.getCode(), OrderType.MARKET.getCode(),
-                quantity, null, price, amount, commission, null, OrderStatus.FILLED.getCode(), requestId, null);
+                quantity, null, price, amount, commission, null, OrderStatus.FILLED.getCode(), null);
         baseMapper.insert(order);
 
         log.info("市价买入成交 userId={} stock={} qty={} price={} amount={} commission={}",
                 userId, stock.getCode(), quantity, price, amount, commission);
+
+        // 发布订单成交事件
+        Thread.startVirtualThread(() -> {
+            publishOrderFilledEvents(userId, stock.getId(), stock.getCode(), stock.getName(),
+                    OrderSide.BUY.getCode(), quantity);
+            publishOrderStatusEvent(order, stock, null, OrderStatus.FILLED.getCode());
+        });
+
+        return buildOrderResponse(order, stock);
+    }
+
+    private OrderResponse executeMarketBuyWithLeverage(Long userId, Stock stock, int quantity, BigDecimal price,
+            BigDecimal amount, BigDecimal commission, BigDecimal margin, BigDecimal borrowed) {
+        BigDecimal cashNeed = margin.add(commission);
+
+        userService.updateBalance(userId, cashNeed.negate());
+        marginAccountService.addLoanPrincipal(userId, borrowed);
+        positionService.addPosition(userId, stock.getId(), quantity, price);
+
+        Order order = createOrder(userId, stock.getId(), OrderSide.BUY.getCode(), OrderType.MARKET.getCode(),
+                quantity, null, price, amount, commission, null, OrderStatus.FILLED.getCode(), null);
+        baseMapper.insert(order);
+
+        log.info("市价杠杆买入成交 userId={} stock={} qty={} price={} amount={} margin={} borrowed={} commission={}",
+                userId, stock.getCode(), quantity, price, amount, margin, borrowed, commission);
+
+        Thread.startVirtualThread(() -> {
+            publishOrderFilledEvents(userId, stock.getId(), stock.getCode(), stock.getName(),
+                    OrderSide.BUY.getCode(), quantity);
+            publishOrderStatusEvent(order, stock, null, OrderStatus.FILLED.getCode());
+        });
+
         return buildOrderResponse(order, stock);
     }
 
     /** 执行市价卖出（资金T+1到账） */
     private OrderResponse executeMarketSell(Long userId, Stock stock, int quantity, BigDecimal price,
-            BigDecimal commission, String requestId) {
+            BigDecimal commission) {
         BigDecimal amount = price.multiply(BigDecimal.valueOf(quantity));
         BigDecimal netAmount = amount.subtract(commission);
 
         positionService.reducePosition(userId, stock.getId(), quantity);
 
         Order order = createOrder(userId, stock.getId(), OrderSide.SELL.getCode(), OrderType.MARKET.getCode(),
-                quantity, null, price, amount, commission, null, OrderStatus.FILLED.getCode(), requestId, null);
+                quantity, null, price, amount, commission, null, OrderStatus.FILLED.getCode(), null);
         baseMapper.insert(order);
 
         // T+1结算
@@ -642,6 +815,14 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
 
         log.info("市价卖出成交 userId={} stock={} qty={} price={} amount={} commission={} (T+1到账)",
                 userId, stock.getCode(), quantity, price, amount, commission);
+
+        // 发布订单成交事件
+        Thread.startVirtualThread(() -> {
+            publishOrderFilledEvents(userId, stock.getId(), stock.getCode(), stock.getName(),
+                    OrderSide.SELL.getCode(), quantity);
+            publishOrderStatusEvent(order, stock, null, OrderStatus.FILLED.getCode());
+        });
+
         return buildOrderResponse(order, stock);
     }
 
@@ -654,8 +835,7 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
 
         Order order = createOrder(userId, stock.getId(), OrderSide.BUY.getCode(), OrderType.LIMIT.getCode(),
                 request.getQuantity(), request.getLimitPrice(), null, null, null, freezeAmount,
-                OrderStatus.PENDING.getCode(), request.getRequestId(), expireAt);
-        order.setClientTimestamp(request.getClientTimestamp());
+                OrderStatus.PENDING.getCode(), expireAt);
         baseMapper.insert(order);
 
         log.info("限价买单创建 userId={} stock={} qty={} limitPrice={} frozen={} expireAt={}",
@@ -672,8 +852,7 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
 
         Order order = createOrder(userId, stock.getId(), OrderSide.SELL.getCode(), OrderType.LIMIT.getCode(),
                 request.getQuantity(), request.getLimitPrice(), null, null, null, null,
-                OrderStatus.PENDING.getCode(), request.getRequestId(), expireAt);
-        order.setClientTimestamp(request.getClientTimestamp());
+                OrderStatus.PENDING.getCode(), expireAt);
         baseMapper.insert(order);
 
         log.info("限价卖单创建 userId={} stock={} qty={} limitPrice={} expireAt={}",
@@ -681,53 +860,10 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         return buildOrderResponse(order, stock);
     }
 
-    /** 执行限价单（事务内，调用前需获取分布式锁） */
-    @Transactional(rollbackFor = Exception.class)
-    protected void executeLimitOrder(Order order, Stock stock, BigDecimal executePrice) {
-        BigDecimal amount = executePrice.multiply(BigDecimal.valueOf(order.getQuantity()));
-        BigDecimal commission = tradingConfig.calculateCommission(amount);
-
-        // CAS更新订单状态为FILLED（防止分布式锁失效时的并发问题）
-        int affected = baseMapper.casUpdateToFilled(order.getId(), executePrice, amount, commission);
-        if (affected == 0) {
-            // 状态已被其他操作改变（可能已取消或已过期）
-            log.info("限价单{}状态已变更，跳过执行", order.getId());
-            return;
-        }
-
-        // 状态更新成功后，安全执行资金和持仓操作
-        if (OrderSide.BUY.getCode().equals(order.getOrderSide())) {
-            // 买入限价单成交：
-            // 1. 增加持仓
-            // 2. 扣除冻结资金
-            // 3. 退还多冻结的资金（冻结额 - 实际成交额 - 手续费）
-            positionService.addPosition(order.getUserId(), order.getStockId(), order.getQuantity(), executePrice);
-
-            BigDecimal frozenAmount = order.getFrozenAmount();
-            BigDecimal actualCost = amount.add(commission);
-            BigDecimal refund = frozenAmount.subtract(actualCost);
-
-            userService.deductFrozenBalance(order.getUserId(), frozenAmount);
-            if (refund.compareTo(BigDecimal.ZERO) > 0) {
-                userService.updateBalance(order.getUserId(), refund);
-            }
-        } else {
-            // 卖出限价单成交：
-            // 1. 扣除冻结持仓
-            // 2. T+1结算
-            positionService.deductFrozenPosition(order.getUserId(), order.getStockId(), order.getQuantity());
-            BigDecimal netAmount = amount.subtract(commission);
-            settlementService.createSettlement(order.getUserId(), order.getId(), netAmount);
-        }
-
-        log.info("限价单成交 orderId={} stock={} qty={} limitPrice={} executePrice={} commission={}",
-                order.getId(), stock.getCode(), order.getQuantity(), order.getLimitPrice(), executePrice, commission);
-    }
-
     private Order createOrder(Long userId, Long stockId, String orderSide, String orderType,
             int quantity, BigDecimal limitPrice, BigDecimal filledPrice,
             BigDecimal filledAmount, BigDecimal commission, BigDecimal frozenAmount,
-            String status, String requestId, LocalDateTime expireAt) {
+            String status, LocalDateTime expireAt) {
         Order order = new Order();
         order.setUserId(userId);
         order.setStockId(stockId);
@@ -740,7 +876,6 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         order.setCommission(commission);
         order.setFrozenAmount(frozenAmount);
         order.setStatus(status);
-        order.setRequestId(requestId);
         order.setExpireAt(expireAt);
         return order;
     }
@@ -750,17 +885,100 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         resp.setOrderId(order.getId());
         resp.setStockCode(stock.getCode());
         resp.setStockName(stock.getName());
+        return getOrderResponse(order, resp);
+    }
+
+    private OrderResponse getOrderResponse(Order order, OrderResponse resp) {
         resp.setOrderSide(order.getOrderSide());
         resp.setOrderType(order.getOrderType());
         resp.setQuantity(order.getQuantity());
         resp.setLimitPrice(order.getLimitPrice());
         resp.setFilledPrice(order.getFilledPrice());
         resp.setFilledAmount(order.getFilledAmount());
+        resp.setCommission(order.getCommission());
         resp.setTriggerPrice(order.getTriggerPrice());
         resp.setTriggeredAt(order.getTriggeredAt());
         resp.setStatus(order.getStatus());
         resp.setExpireAt(order.getExpireAt());
         resp.setCreatedAt(order.getCreatedAt());
         return resp;
+    }
+
+    /**
+     * 发布订单成交后的资产和持仓变化事件
+     */
+    private void publishOrderFilledEvents(Long userId, Long stockId, String stockCode, String stockName,
+                                          String orderSide, Integer quantity) {
+        try {
+            // 获取用户最新资产信息
+            User user = userService.getById(userId);
+            BigDecimal positionMarketValue = positionService.calculateTotalMarketValue(userId);
+            
+            // 计算待结算金额
+            BigDecimal pendingSettlement = settlementService.getPendingSettlements(userId).stream()
+                    .map(Settlement::getAmount)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+            // 发布资产变化事件
+            AssetChangeEvent assetEvent = new AssetChangeEvent(
+                    userId,
+                    user.getBalance(),
+                    user.getFrozenBalance(),
+                    positionMarketValue,
+                    pendingSettlement,
+                    user.getMarginLoanPrincipal(),
+                    user.getMarginInterestAccrued(),
+                    Boolean.TRUE.equals(user.getIsBankrupt()),
+                    user.getBankruptCount(),
+                    user.getBankruptResetDate(),
+                    "ORDER_FILLED"
+            );
+            eventPublisher.publishAssetChange(assetEvent);
+
+            // 发布持仓变化事件
+            Position position = positionService.findByUserAndStock(userId, stockId);
+            if (position != null) {
+                BigDecimal currentPrice = cacheService.getCurrentPrice(stockId);
+                PositionChangeEvent positionEvent = new PositionChangeEvent(
+                        userId,
+                        stockId,
+                        stockCode,
+                        stockName,
+                        position.getQuantity(),
+                        position.getFrozenQuantity(),
+                        position.getAvgCost(),
+                        currentPrice,
+                        orderSide,
+                        OrderSide.BUY.getCode().equals(orderSide) ? quantity : -quantity
+                );
+                eventPublisher.publishPositionChange(positionEvent);
+            }
+        } catch (Exception e) {
+            log.error("发布订单成交事件失败 userId={} stockCode={}", userId, stockCode, e);
+        }
+    }
+
+    /**
+     * 发布订单状态变化事件
+     */
+    private void publishOrderStatusEvent(Order order, Stock stock, String oldStatus, String newStatus) {
+        try {
+            OrderStatusEvent event = new OrderStatusEvent(
+                    order.getUserId(),
+                    order.getId(),
+                    stock.getCode(),
+                    stock.getName(),
+                    order.getOrderType(),
+                    order.getOrderSide(),
+                    order.getQuantity(),
+                    order.getLimitPrice() != null ? order.getLimitPrice() : order.getFilledPrice(),
+                    oldStatus,
+                    newStatus
+            );
+            event.setExecutePrice(order.getFilledPrice());
+            eventPublisher.publishOrderStatus(event);
+        } catch (Exception e) {
+            log.error("发布订单状态变化事件失败 orderId={}", order.getId(), e);
+        }
     }
 }

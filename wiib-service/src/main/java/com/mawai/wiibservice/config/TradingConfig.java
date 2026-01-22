@@ -6,6 +6,7 @@ import org.springframework.context.annotation.Configuration;
 
 import java.math.BigDecimal;
 import java.time.DayOfWeek;
+import java.time.LocalDate;
 import java.time.LocalTime;
 
 /**
@@ -29,6 +30,19 @@ public class TradingConfig {
     /** 限价单最长有效期（小时） */
     private int limitOrderMaxHours = 24;
 
+    /** 杠杆/融资配置 */
+    private Margin margin = new Margin();
+
+    @Data
+    public static class Margin {
+        /** 是否启用杠杆 */
+        private boolean enabled = true;
+        /** 最大杠杆倍率 */
+        private int maxLeverage = 50;
+        /** 日利率（默认0.05%/天） */
+        private BigDecimal dailyInterestRate = new BigDecimal("0.0005");
+    }
+
     /** 乐观锁最大重试次数 */
     private int optimisticLockMaxRetries = 3;
 
@@ -44,7 +58,7 @@ public class TradingConfig {
     }
 
     /** 是否启用交易时段限制 */
-    private boolean tradingHoursEnabled = false;
+    private boolean tradingHoursEnabled = true;
 
     /** 交易时段配置 */
     private TradingHours tradingHours = new TradingHours();
@@ -66,7 +80,7 @@ public class TradingConfig {
             return false;
         }
 
-        DayOfWeek day = java.time.LocalDate.now().getDayOfWeek();
+        DayOfWeek day = LocalDate.now().getDayOfWeek();
         if (day == DayOfWeek.SATURDAY || day == DayOfWeek.SUNDAY) {
             return true;
         }

@@ -1,19 +1,17 @@
 package com.mawai.wiibservice.controller;
 
-import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.baomidou.mybatisplus.core.metadata.IPage;
+import com.mawai.wiibcommon.dto.DayTickDTO;
 import com.mawai.wiibcommon.dto.StockDTO;
 import com.mawai.wiibcommon.util.Result;
 import com.mawai.wiibservice.service.MarketDataService;
 import com.mawai.wiibservice.service.StockService;
-import com.mawai.wiibservice.service.impl.StockServiceImpl;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
-import java.time.LocalDate;
 import java.util.List;
-import java.util.Map;
 
 /**
  * 股票Controller
@@ -25,7 +23,6 @@ import java.util.Map;
 public class StockController {
 
     private final StockService stockService;
-    private final StockServiceImpl stockServiceImpl;
     private final MarketDataService marketDataService;
 
     /**
@@ -43,20 +40,20 @@ public class StockController {
      */
     @GetMapping("/page")
     @Operation(summary = "分页查询股票列表")
-    public Result<Page<StockDTO>> listStocksByPage(
+    public Result<IPage<StockDTO>> listStocksByPage(
             @RequestParam(defaultValue = "1") int pageNum,
             @RequestParam(defaultValue = "10") int pageSize) {
-        Page<StockDTO> page = stockServiceImpl.listStocksByPage(pageNum, pageSize);
+        IPage<StockDTO> page = stockService.listStocksByPage(pageNum, pageSize);
         return Result.ok(page);
     }
 
     /**
      * 获取股票详情
      */
-    @GetMapping("/{code}")
+    @GetMapping("/{id}")
     @Operation(summary = "获取股票详情")
-    public Result<StockDTO> getStockDetail(@PathVariable String code) {
-        StockDTO stock = stockService.getStockDetail(code);
+    public Result<StockDTO> getStockDetail(@PathVariable Long id) {
+        StockDTO stock = stockService.getStockDetail(id);
         return Result.ok(stock);
     }
 
@@ -85,23 +82,9 @@ public class StockController {
      */
     @GetMapping("/{stockId}/ticks")
     @Operation(summary = "获取当日分时数据")
-    public Result<List<Map<String, Object>>> getDayTicks(
-            @PathVariable Long stockId,
-            @RequestParam(required = false) LocalDate date) {
-        LocalDate queryDate = date != null ? date : LocalDate.now();
-        List<Map<String, Object>> ticks = marketDataService.getDayTicks(stockId, queryDate);
+    public Result<List<DayTickDTO>> getDayTicks(@PathVariable Long stockId) {
+        List<DayTickDTO> ticks = marketDataService.getDayTicks(stockId);
         return Result.ok(ticks);
     }
 
-    /**
-     * 获取历史收盘价
-     */
-    @GetMapping("/{stockId}/history")
-    @Operation(summary = "获取历史收盘价")
-    public Result<List<Map<String, Object>>> getHistoryClose(
-            @PathVariable Long stockId,
-            @RequestParam(defaultValue = "30") int days) {
-        List<Map<String, Object>> history = marketDataService.getHistoryClose(stockId, days);
-        return Result.ok(history);
-    }
 }

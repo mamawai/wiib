@@ -1,5 +1,7 @@
 package com.mawai.wiibservice.service;
 
+import com.mawai.wiibcommon.dto.DayTickDTO;
+
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.util.List;
@@ -23,28 +25,26 @@ public interface MarketDataService {
     void loadDayDataToRedis(LocalDate date);
 
     /**
-     * 获取指定股票在指定时间的价格
-     * @return {price, volume} 或 null
-     */
-    Map<String, Object> getTickByTime(Long stockId, LocalDate date, LocalTime time);
-
-    /**
-     * 获取指定日期的所有分时数据
+     * 获取当日分时数据（到当前时间为止）
      * @return 按时间排序的tick列表
      */
-    List<Map<String, Object>> getDayTicks(Long stockId, LocalDate date);
-
-    /**
-     * 获取历史每日收盘价
-     * @param days 天数
-     * @return 每日收盘价列表
-     */
-    List<Map<String, Object>> getHistoryClose(Long stockId, int days);
+    List<DayTickDTO> getDayTicks(Long stockId);
 
     /**
      * 获取实时行情（用于WebSocket推送）
-     * 包含：price, volume, time, open, high, low, prevClose
+     * 包含：price, time, open, high, low, prevClose
      * 同时更新当日最高最低价
      */
     Map<String, Object> getRealtimeQuote(Long stockId, LocalDate date, LocalTime time);
+
+    /**
+     * 管理接口：将[开盘到指定时间]之间的所有ticks重建到当日汇总缓存（open/high/low/last）
+     *
+     * <p>用于修复：行情推送从中途开始，导致high/low/last未包含早盘波动的问题。</p>
+     *
+     * @param date 指定日期（通常是今天）
+     * @param time 截止时间（通常是当前时间）
+     * @return {date, time, updated, skipped}
+     */
+    Map<String, Object> refreshDailyCacheFromTicks(LocalDate date, LocalTime time);
 }

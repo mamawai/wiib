@@ -55,12 +55,6 @@ public class Order {
     /** PENDING/TRIGGERED/FILLED/CANCELLED/EXPIRED */
     private String status;
 
-    /** 请求ID（幂等性校验） */
-    private String requestId;
-
-    /** 客户端时间戳（防作弊校验） */
-    private Long clientTimestamp;
-
     /** 过期时间（限价单有效期，最长一天） */
     private LocalDateTime expireAt;
 

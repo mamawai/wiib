@@ -5,8 +5,7 @@ import com.mawai.wiibcommon.dto.OrderResponse;
 import com.mawai.wiibcommon.dto.OrderRequest;
 import com.mawai.wiibcommon.entity.Order;
 
-import java.time.LocalDate;
-import java.util.List;
+import com.baomidou.mybatisplus.core.metadata.IPage;
 
 /**
  * 订单服务接口
@@ -29,9 +28,9 @@ public interface OrderService extends IService<Order> {
     OrderResponse cancel(Long userId, Long orderId);
 
     /**
-     * 查询用户订单列表
+     * 查询用户订单列表（分页）
      */
-    List<OrderResponse> getUserOrders(Long userId, String status, int limit);
+    IPage<OrderResponse> getUserOrders(Long userId, String status, int pageNum, int pageSize);
 
     /**
      * 触发限价单（定时任务调用）

@@ -2,7 +2,7 @@ package com.mawai.wiibcommon.entity;
 
 import com.baomidou.mybatisplus.annotation.*;
 import lombok.Data;
-import java.math.BigDecimal;
+
 import java.time.LocalDateTime;
 
 /**
@@ -27,9 +27,6 @@ public class News {
 
     /** 新闻类型 */
     private String newsType;
-
-    /** 影响系数 */
-    private BigDecimal impact;
 
     /** 发布时间 */
     private LocalDateTime publishTime;

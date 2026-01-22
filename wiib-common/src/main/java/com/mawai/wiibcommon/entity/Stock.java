@@ -31,11 +31,8 @@ public class Stock {
     /** 开盘价 */
     private BigDecimal open;
 
-    /** 历史总成交量 */
-    private Long volume;
-
-    /** 历史总成交额 */
-    private BigDecimal turnover;
+    /** 近十日涨跌趋势（1涨 -1跌 0平，逗号分隔，如"1,-1,1,1,-1,1,0,1,1,-1"） */
+    private String trendList;
 
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdAt;

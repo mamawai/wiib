@@ -42,12 +42,6 @@ public class StockDTO {
     /** 涨跌幅 */
     private BigDecimal changePct;
 
-    /** 成交量 */
-    private Long volume;
-
-    /** 成交额 */
-    private BigDecimal turnover;
-
     /** 市值 */
     private BigDecimal marketCap;
 
@@ -56,4 +50,7 @@ public class StockDTO {
 
     /** 公司简介 */
     private String companyDesc;
+
+    /** 近十日涨跌趋势（1涨 -1跌 0平） */
+    private java.util.List<Integer> trendList;
 }

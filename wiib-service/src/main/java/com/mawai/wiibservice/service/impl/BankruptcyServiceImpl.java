@@ -1,0 +1,204 @@
+package com.mawai.wiibservice.service.impl;
+
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.mawai.wiibcommon.entity.Settlement;
+import com.mawai.wiibcommon.entity.User;
+import com.mawai.wiibcommon.enums.ErrorCode;
+import com.mawai.wiibcommon.event.AssetChangeEvent;
+import com.mawai.wiibcommon.exception.BizException;
+import com.mawai.wiibcommon.util.SpringUtils;
+import com.mawai.wiibservice.config.TradingConfig;
+import com.mawai.wiibservice.mapper.OrderMapper;
+import com.mawai.wiibservice.mapper.PositionMapper;
+import com.mawai.wiibservice.mapper.SettlementMapper;
+import com.mawai.wiibservice.mapper.UserMapper;
+import com.mawai.wiibservice.service.BankruptcyService;
+import com.mawai.wiibservice.service.EventPublisher;
+import com.mawai.wiibservice.service.PositionService;
+import com.mawai.wiibservice.service.SettlementService;
+import com.mawai.wiibservice.service.UserService;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.math.BigDecimal;
+import java.time.DayOfWeek;
+import java.time.LocalDate;
+import java.util.List;
+
+@Slf4j
+@Service
+@RequiredArgsConstructor
+public class BankruptcyServiceImpl implements BankruptcyService {
+
+    private final UserService userService;
+    private final UserMapper userMapper;
+    private final OrderMapper orderMapper;
+    private final PositionMapper positionMapper;
+    private final SettlementMapper settlementMapper;
+    private final PositionService positionService;
+    private final SettlementService settlementService;
+    private final EventPublisher eventPublisher;
+    private final TradingConfig tradingConfig;
+
+    @Value("${trading.initial-balance:100000}")
+    private BigDecimal initialBalance;
+
+    @Override
+    public void checkAndLiquidateAll() {
+        if (!tradingConfig.getMargin().isEnabled()) {
+            return;
+        }
+
+        List<User> users = userService.list(new LambdaQueryWrapper<User>()
+                .eq(User::getIsBankrupt, false)
+                .and(w -> w.gt(User::getMarginLoanPrincipal, BigDecimal.ZERO)
+                        .or()
+                        .gt(User::getMarginInterestAccrued, BigDecimal.ZERO)));
+        if (users.isEmpty()) {
+            return;
+        }
+
+        LocalDate today = LocalDate.now();
+        for (User user : users) {
+            try {
+                if (shouldBankrupt(user.getId())) {
+                    SpringUtils.getAopProxy(this).liquidateUser(user.getId(), today);
+                }
+            } catch (Exception e) {
+                log.error("爆仓检查失败 userId={}", user.getId(), e);
+            }
+        }
+    }
+
+    @Override
+    public void resetBankruptUsers(LocalDate today) {
+        if (today == null) {
+            return;
+        }
+
+        List<User> users = userService.list(new LambdaQueryWrapper<User>()
+                .eq(User::getIsBankrupt, true)
+                .le(User::getBankruptResetDate, today));
+        if (users.isEmpty()) {
+            return;
+        }
+
+        for (User user : users) {
+            try {
+                SpringUtils.getAopProxy(this).resetUser(user.getId(), today);
+            } catch (Exception e) {
+                log.error("破产恢复失败 userId={}", user.getId(), e);
+            }
+        }
+    }
+
+    private boolean shouldBankrupt(Long userId) {
+        User user = userService.getById(userId);
+        if (user == null) {
+            throw new BizException(ErrorCode.USER_NOT_FOUND);
+        }
+        if (Boolean.TRUE.equals(user.getIsBankrupt())) {
+            return false;
+        }
+
+        BigDecimal balance = user.getBalance() != null ? user.getBalance() : BigDecimal.ZERO;
+        BigDecimal frozen = user.getFrozenBalance() != null ? user.getFrozenBalance() : BigDecimal.ZERO;
+        BigDecimal principal = user.getMarginLoanPrincipal() != null ? user.getMarginLoanPrincipal() : BigDecimal.ZERO;
+        BigDecimal interest = user.getMarginInterestAccrued() != null ? user.getMarginInterestAccrued() : BigDecimal.ZERO;
+
+        BigDecimal marketValue = positionService.calculateTotalMarketValue(userId);
+        BigDecimal pendingSettlement = settlementService.getPendingSettlements(userId).stream()
+                .map(Settlement::getAmount)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        BigDecimal netAssets = balance
+                .add(frozen)
+                .add(marketValue)
+                .add(pendingSettlement)
+                .subtract(principal)
+                .subtract(interest);
+
+        return netAssets.compareTo(BigDecimal.ZERO) <= 0;
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    protected void liquidateUser(Long userId, LocalDate today) {
+        LocalDate resetDate = nextTradingDay(today);
+
+        int affected = userMapper.markBankrupt(userId, resetDate, today);
+        if (affected == 0) {
+            return;
+        }
+
+        orderMapper.cancelOpenOrdersByUserId(userId);
+        positionMapper.deleteByUserId(userId);
+        settlementMapper.deletePendingByUserId(userId);
+
+        User user = userService.getById(userId);
+        AssetChangeEvent event = new AssetChangeEvent(
+                userId,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                true,
+                user != null && user.getBankruptCount() != null ? user.getBankruptCount() : 0,
+                user != null ? user.getBankruptResetDate() : resetDate,
+                "BANKRUPT"
+        );
+        eventPublisher.publishAssetChange(event);
+
+        log.warn("用户爆仓 userId={} resetDate={}", userId, resetDate);
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    protected void resetUser(Long userId, LocalDate today) {
+        int affected = userMapper.resetAfterBankruptcy(userId, initialBalance, today);
+        if (affected == 0) {
+            return;
+        }
+
+        orderMapper.cancelOpenOrdersByUserId(userId);
+        positionMapper.deleteByUserId(userId);
+        settlementMapper.deletePendingByUserId(userId);
+
+        User user = userService.getById(userId);
+        int bankruptCount = user != null && user.getBankruptCount() != null ? user.getBankruptCount() : 0;
+        AssetChangeEvent event = new AssetChangeEvent(
+                userId,
+                initialBalance,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                false,
+                bankruptCount,
+                null,
+                "BANKRUPTCY_RESET"
+        );
+        eventPublisher.publishAssetChange(event);
+
+        log.info("用户恢复初始资金 userId={} balance={}", userId, initialBalance);
+    }
+
+    @Override
+    public LocalDate nextTradingDay(LocalDate d) {
+        if (d == null) {
+            return null;
+        }
+        LocalDate next = d.plusDays(1);
+        DayOfWeek dow = next.getDayOfWeek();
+        if (dow == DayOfWeek.SATURDAY) {
+            next = next.plusDays(2);
+        } else if (dow == DayOfWeek.SUNDAY) {
+            next = next.plusDays(1);
+        }
+        return next;
+    }
+}

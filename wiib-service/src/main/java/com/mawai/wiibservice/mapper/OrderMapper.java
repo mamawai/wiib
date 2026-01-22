@@ -20,7 +20,7 @@ public interface OrderMapper extends BaseMapper<Order> {
      * @param newStatus      要更新的新状态
      * @return 影响行数（0表示状态已被其他操作改变）
      */
-    @Update("UPDATE \"order\" SET status = #{newStatus}, updated_at = NOW() " +
+    @Update("UPDATE orders SET status = #{newStatus}, updated_at = NOW() " +
             "WHERE id = #{orderId} AND status = #{expectedStatus}")
     int casUpdateStatus(@Param("orderId") Long orderId,
             @Param("expectedStatus") String expectedStatus,
@@ -34,7 +34,7 @@ public interface OrderMapper extends BaseMapper<Order> {
      * @param triggerPrice 触发价格
      * @return 影响行数（0表示状态已被其他操作改变）
      */
-    @Update("UPDATE \"order\" SET status = 'TRIGGERED', trigger_price = #{triggerPrice}, " +
+    @Update("UPDATE orders SET status = 'TRIGGERED', trigger_price = #{triggerPrice}, " +
             "triggered_at = NOW(), updated_at = NOW() " +
             "WHERE id = #{orderId} AND status = 'PENDING'")
     int casUpdateToTriggered(@Param("orderId") Long orderId,
@@ -50,11 +50,16 @@ public interface OrderMapper extends BaseMapper<Order> {
      * @param commission   手续费
      * @return 影响行数（0表示状态已被其他操作改变）
      */
-    @Update("UPDATE \"order\" SET status = 'FILLED', filled_price = #{filledPrice}, " +
+    @Update("UPDATE orders SET status = 'FILLED', filled_price = #{filledPrice}, " +
             "filled_amount = #{filledAmount}, commission = #{commission}, updated_at = NOW() " +
             "WHERE id = #{orderId} AND status = 'TRIGGERED'")
     int casUpdateToFilled(@Param("orderId") Long orderId,
             @Param("filledPrice") BigDecimal filledPrice,
             @Param("filledAmount") BigDecimal filledAmount,
             @Param("commission") BigDecimal commission);
+
+    /** 取消用户所有未完结订单（爆仓/恢复兜底用） */
+    @Update("UPDATE orders SET status = 'CANCELLED', updated_at = NOW() " +
+            "WHERE user_id = #{userId} AND status IN ('PENDING', 'TRIGGERED')")
+    int cancelOpenOrdersByUserId(@Param("userId") Long userId);
 }

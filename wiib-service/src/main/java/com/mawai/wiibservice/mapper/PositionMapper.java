@@ -29,17 +29,25 @@ public interface PositionMapper extends BaseMapper<Position> {
             "WHERE user_id = #{userId} AND stock_id = #{stockId} AND frozen_quantity >= #{quantity}")
     int atomicDeductFrozenPosition(@Param("userId") Long userId, @Param("stockId") Long stockId, @Param("quantity") int quantity);
 
-    /** 删除空持仓（可用+冻结都为0） */
+    /**
+     * 删除空持仓（可用+冻结都为0）
+     */
     @Delete("DELETE FROM position WHERE user_id = #{userId} AND stock_id = #{stockId} AND quantity = 0 AND frozen_quantity = 0")
-    int deleteEmptyPosition(@Param("userId") Long userId, @Param("stockId") Long stockId);
+    void deleteEmptyPosition(@Param("userId") Long userId, @Param("stockId") Long stockId);
 
-    /** UPSERT: 新建或更新持仓（加权平均成本） */
+    /**
+     * UPSERT: 新建或更新持仓（加权平均成本）
+     */
     @Insert("INSERT INTO position (user_id, stock_id, quantity, frozen_quantity, avg_cost, created_at, updated_at) " +
             "VALUES (#{userId}, #{stockId}, #{quantity}, 0, #{price}, NOW(), NOW()) " +
             "ON CONFLICT (user_id, stock_id) DO UPDATE SET " +
             "avg_cost = (position.avg_cost * position.quantity + #{price} * #{quantity}) / (position.quantity + #{quantity}), " +
             "quantity = position.quantity + #{quantity}, " +
             "updated_at = NOW()")
-    int upsertPosition(@Param("userId") Long userId, @Param("stockId") Long stockId,
+    void upsertPosition(@Param("userId") Long userId, @Param("stockId") Long stockId,
                        @Param("quantity") int quantity, @Param("price") BigDecimal price);
+
+    /** 删除用户全部持仓（爆仓/恢复兜底用） */
+    @Delete("DELETE FROM position WHERE user_id = #{userId}")
+    int deleteByUserId(@Param("userId") Long userId);
 }

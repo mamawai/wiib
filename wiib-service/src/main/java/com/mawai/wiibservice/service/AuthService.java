@@ -8,11 +8,6 @@ import com.mawai.wiibcommon.dto.UserDTO;
 public interface AuthService {
 
     /**
-     * 获取LinuxDo授权URL
-     */
-    String getLinuxDoAuthUrl();
-
-    /**
      * 处理LinuxDo回调，完成登录
      * @return 登录Token
      */

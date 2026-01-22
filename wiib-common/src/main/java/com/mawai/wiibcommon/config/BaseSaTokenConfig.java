@@ -29,7 +29,7 @@ public abstract class BaseSaTokenConfig implements WebMvcConfigurer {
 
     @Bean
     @Primary
-    public SaTokenConfig getSaTokenConfig() {
+    public SaTokenConfig baseSaTokenConfig() {
         SaTokenConfig config = new SaTokenConfig();
         config.setTokenName("satoken");
         config.setActiveTimeout(60 * 60 * 24 * 7); // 7天无操作过期
@@ -63,7 +63,7 @@ public abstract class BaseSaTokenConfig implements WebMvcConfigurer {
                 try {
                     String prefix = "satoken:login:token:";
                     Set<String> keys = stringRedisTemplate.keys(prefix + tokenValue);
-                    if (keys != null && !keys.isEmpty()) {
+                    if (!keys.isEmpty()) {
                         stringRedisTemplate.delete(keys);
                     }
                 } catch (Exception e) {

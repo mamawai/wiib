@@ -20,16 +20,6 @@ public class AuthController {
     private final AuthService authService;
 
     /**
-     * 获取LinuxDo授权URL
-     */
-    @GetMapping("/linuxdo/url")
-    @Operation(summary = "获取LinuxDo授权URL")
-    public Result<String> getLinuxDoAuthUrl() {
-        String url = authService.getLinuxDoAuthUrl();
-        return Result.ok(url);
-    }
-
-    /**
      * LinuxDo回调处理
      */
     @GetMapping("/callback/linuxdo")

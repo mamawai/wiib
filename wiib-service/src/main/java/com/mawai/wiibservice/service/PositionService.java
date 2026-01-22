@@ -31,7 +31,7 @@ public interface PositionService extends IService<Position> {
     /**
      * 减少持仓（卖出时调用，带乐观锁重试）
      */
-    boolean reducePosition(Long userId, Long stockId, int quantity);
+    void reducePosition(Long userId, Long stockId, int quantity);
 
     /**
      * 计算用户持仓总市值

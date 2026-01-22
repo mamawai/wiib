@@ -3,6 +3,7 @@ package com.mawai.wiibcommon.entity;
 import com.baomidou.mybatisplus.annotation.*;
 import lombok.Data;
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 /**
@@ -31,6 +32,27 @@ public class User {
 
     /** 冻结余额（限价买单冻结的资金） */
     private BigDecimal frozenBalance;
+
+    /** 杠杆借款本金 */
+    private BigDecimal marginLoanPrincipal;
+
+    /** 杠杆应计利息（未支付） */
+    private BigDecimal marginInterestAccrued;
+
+    /** 杠杆计息上次日期（用于补记） */
+    private LocalDate marginInterestLastDate;
+
+    /** 是否破产（爆仓后禁用交易） */
+    private Boolean isBankrupt;
+
+    /** 破产次数 */
+    private Integer bankruptCount;
+
+    /** 爆仓时间 */
+    private LocalDateTime bankruptAt;
+
+    /** 恢复日期（交易日09:00恢复） */
+    private LocalDate bankruptResetDate;
 
     /** 创建时间 */
     @TableField(fill = FieldFill.INSERT)

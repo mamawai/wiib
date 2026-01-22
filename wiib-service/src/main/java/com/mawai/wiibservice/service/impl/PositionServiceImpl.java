@@ -17,7 +17,11 @@ import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.util.Collections;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -44,12 +48,28 @@ public class PositionServiceImpl extends ServiceImpl<PositionMapper, Position> i
     public List<PositionDTO> getUserPositions(Long userId) {
         LambdaQueryWrapper<Position> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(Position::getUserId, userId)
-                .gt(Position::getQuantity, 0);
+                // 总持仓(quantity+frozenQuantity)，避免全冻结持仓被过滤
+                .and(w -> w.gt(Position::getQuantity, 0)
+                        .or()
+                        .gt(Position::getFrozenQuantity, 0));
 
         List<Position> positions = baseMapper.selectList(wrapper);
 
+        if (positions.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        Set<Long> stockIds = positions.stream()
+                .map(Position::getStockId)
+                .collect(Collectors.toSet());
+        Map<Long, Stock> stockById = stockMapper.selectList(new LambdaQueryWrapper<Stock>()
+                        .in(Stock::getId, stockIds))
+                .stream()
+                .collect(Collectors.toMap(Stock::getId, stock -> stock));
+
         return positions.stream()
-                .map(this::buildPositionDTO)
+                .map(position -> buildPositionDTO(position, stockById.get(position.getStockId())))
+                .filter(Objects::nonNull)
                 .collect(Collectors.toList());
     }
 
@@ -60,14 +80,13 @@ public class PositionServiceImpl extends ServiceImpl<PositionMapper, Position> i
     }
 
     @Override
-    public boolean reducePosition(Long userId, Long stockId, int quantity) {
+    public void reducePosition(Long userId, Long stockId, int quantity) {
         int affected = baseMapper.atomicReduceQuantity(userId, stockId, quantity);
         if (affected == 0) {
             throw new BizException(ErrorCode.POSITION_NOT_ENOUGH);
         }
         baseMapper.deleteEmptyPosition(userId, stockId);
         log.info("用户{}减少持仓 股票{} 数量{}", userId, stockId, quantity);
-        return true;
     }
 
     @Override
@@ -107,8 +126,7 @@ public class PositionServiceImpl extends ServiceImpl<PositionMapper, Position> i
         log.info("用户{}扣除冻结持仓 股票{} 数量{}", userId, stockId, quantity);
     }
 
-    private PositionDTO buildPositionDTO(Position position) {
-        Stock stock = stockMapper.selectById(position.getStockId());
+    private PositionDTO buildPositionDTO(Position position, Stock stock) {
         if (stock == null) {
             log.warn("持仓关联股票不存在: {}", position.getStockId());
             return null;

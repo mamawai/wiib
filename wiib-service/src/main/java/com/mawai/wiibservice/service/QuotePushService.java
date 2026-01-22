@@ -9,16 +9,14 @@ public interface QuotePushService {
 
     /**
      * 推送股票行情到指定主题
-     * @param stockCode 股票代码
+     * @param stockId 股票ID
      * @param date 日期
-     * @param tickIndex 行情索引
      */
-    void pushQuote(String stockCode, LocalDate date, int tickIndex);
+    void pushQuote(Long stockId, LocalDate date);
 
     /**
      * 推送所有股票行情
      * @param date 日期
-     * @param tickIndex 行情索引
      */
-    void pushAllQuotes(LocalDate date, int tickIndex);
+    void pushAllQuotes(LocalDate date);
 }

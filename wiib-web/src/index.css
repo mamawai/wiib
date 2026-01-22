@@ -1,0 +1,154 @@
+@import "tailwindcss";
+
+/* Dark theme (default) */
+@theme {
+  --color-background: #18181b; /* Zinc 900 - Lighter black (Dark Gray) */
+  --color-foreground: #fafafa;
+  --color-card: #27272a;       /* Zinc 800 - Lighter than background */
+  --color-card-foreground: #fafafa;
+  --color-primary: #3b82f6;
+  --color-primary-foreground: #fafafa;
+  --color-secondary: #27272a;  /* Match Card */
+  --color-secondary-foreground: #fafafa;
+  --color-muted: #27272a;
+  --color-muted-foreground: #a1a1aa;
+  --color-accent: #3f3f46;     /* Zinc 700 */
+  --color-accent-foreground: #fafafa;
+  --color-destructive: #ef4444;
+  --color-border: #3f3f46;     /* Zinc 700 */
+  --color-input: #3f3f46;
+  --color-ring: #60a5fa;
+  --color-success: #22c55e;
+  --color-warning: #f59e0b;
+  --radius-sm: 0.25rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+  --radius-xl: 1rem;
+}
+
+/* Light theme */
+html.light {
+  --color-background: #f4f4f5; /* Zinc 100 - Distinct Light Gray */
+  --color-foreground: #09090b;
+  --color-card: #ffffff;       /* Pure White for contrast */
+  --color-card-foreground: #09090b;
+  --color-primary: #2563eb;
+  --color-primary-foreground: #ffffff;
+  --color-secondary: #e4e4e7;  /* Zinc 200 */
+  --color-secondary-foreground: #18181b;
+  --color-muted: #f4f4f5;
+  --color-muted-foreground: #71717a;
+  --color-accent: #e4e4e7;
+  --color-accent-foreground: #18181b;
+  --color-destructive: #dc2626;
+  --color-border: #d4d4d8;     /* Zinc 300 */
+  --color-input: #d4d4d8;
+  --color-ring: #2563eb;
+  --color-success: #16a34a;
+  --color-warning: #d97706;
+}
+
+* {
+  border-color: var(--color-border);
+}
+
+html {
+  color-scheme: dark;
+}
+
+html.light {
+  color-scheme: light;
+}
+
+body {
+  background-color: var(--color-background);
+  color: var(--color-foreground);
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: color-mix(in oklab, var(--color-primary) 35%, transparent);
+}
+
+#root {
+  min-height: 100vh;
+}
+
+/* View Transition for theme toggle */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+
+::view-transition-old(root) {
+  z-index: 1;
+}
+
+::view-transition-new(root) {
+  z-index: 9999;
+}
+
+html.dark::view-transition-old(root) {
+  z-index: 9999;
+}
+
+html.dark::view-transition-new(root) {
+  z-index: 1;
+}
+
+@layer utilities {
+  @keyframes wiib-fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+
+  @keyframes wiib-slide-in-from-bottom-2 {
+    from { transform: translate3d(0, 0.5rem, 0); }
+    to { transform: translate3d(0, 0, 0); }
+  }
+
+  @keyframes wiib-slide-in-from-top-2 {
+    from { transform: translate3d(0, -0.5rem, 0); }
+    to { transform: translate3d(0, 0, 0); }
+  }
+
+  @keyframes wiib-zoom-in-95 {
+    from { transform: scale(0.95); }
+    to { transform: scale(1); }
+  }
+
+  @keyframes wiib-toast-progress {
+    from { transform: scaleX(1); }
+    to { transform: scaleX(0); }
+  }
+
+  .animate-in {
+    animation-duration: 180ms;
+    animation-fill-mode: both;
+    animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .fade-in {
+    animation-name: wiib-fade-in;
+  }
+
+  .slide-in-from-bottom-2 {
+    animation-name: wiib-slide-in-from-bottom-2;
+  }
+
+  .slide-in-from-top-2 {
+    animation-name: wiib-slide-in-from-top-2;
+  }
+
+  .zoom-in-95 {
+    animation-name: wiib-zoom-in-95;
+  }
+
+  .wiib-toast-progress {
+    animation-name: wiib-toast-progress;
+    animation-timing-function: linear;
+    animation-fill-mode: both;
+  }
+}

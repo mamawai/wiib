@@ -1,6 +1,7 @@
 package com.mawai.wiibservice.service;
 
 import com.baomidou.mybatisplus.extension.service.IService;
+import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.mawai.wiibcommon.dto.StockDTO;
 import com.mawai.wiibcommon.entity.Stock;
 
@@ -12,24 +13,32 @@ import java.util.List;
 public interface StockService extends IService<Stock> {
 
     /**
-     * 根据股票代码查找
-     * @param code 股票代码
+     * 根据股票ID查找
+     * @param id 股票ID
      * @return 股票实体
      */
-    Stock findByCode(String code);
+    Stock findById(Long id);
 
     /**
      * 获取股票详情（含公司信息）
-     * @param code 股票代码
+     * @param id 股票ID
      * @return 股票DTO
      */
-    StockDTO getStockDetail(String code);
+    StockDTO getStockDetail(Long id);
 
     /**
      * 获取所有股票列表
      * @return 股票列表
      */
     List<StockDTO> listAllStocks();
+
+    /**
+     * 分页查询股票列表
+     * @param pageNum 页码（从1开始）
+     * @param pageSize 每页大小
+     * @return 分页结果
+     */
+    IPage<StockDTO> listStocksByPage(int pageNum, int pageSize);
 
     /**
      * 获取涨幅榜

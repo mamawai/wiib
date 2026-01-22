@@ -22,9 +22,6 @@ public class PriceTick {
     /** 价格 */
     private BigDecimal price;
 
-    /** 成交量 */
-    private Long volume;
-
     /** tick时间 */
     private LocalDateTime tickTime;
 

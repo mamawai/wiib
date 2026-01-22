@@ -20,7 +20,6 @@ public class SaTokenConfig extends BaseSaTokenConfig {
     @Override
     protected List<String> getExcludePaths() {
         List<String> paths = new ArrayList<>(getDefaultExcludePaths());
-        paths.add("/api/auth/linuxdo/url");
         paths.add("/api/auth/callback/**");
         paths.add("/ws/**");
         return paths;

@@ -1,20 +1,30 @@
 package com.mawai.wiibservice.service.impl;
 
 import cn.dev33.satoken.stp.StpUtil;
-import cn.hutool.http.HttpRequest;
 import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
 import com.mawai.wiibcommon.dto.UserDTO;
 import com.mawai.wiibcommon.entity.User;
 import com.mawai.wiibcommon.enums.ErrorCode;
 import com.mawai.wiibcommon.exception.BizException;
+import com.mawai.wiibservice.config.LinuxDoConfig;
+import com.mawai.wiibservice.dto.LinuxDoUserInfo;
 import com.mawai.wiibservice.service.AuthService;
 import com.mawai.wiibservice.service.UserService;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.LinkedMultiValueMap;
+import org.springframework.util.MultiValueMap;
+import org.springframework.web.client.RestClientException;
+import org.springframework.web.client.RestClientResponseException;
+import org.springframework.web.client.RestTemplate;
 
 import java.math.BigDecimal;
 
@@ -24,35 +34,25 @@ import java.math.BigDecimal;
  */
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class AuthServiceImpl implements AuthService {
 
     private final UserService userService;
+    private final LinuxDoConfig linuxDoConfig;
+    private final RestTemplate linuxDoRestTemplate;
 
-    @Value("${linuxdo.client-id}")
-    private String clientId;
-
-    @Value("${linuxdo.client-secret}")
-    private String clientSecret;
-
-    @Value("${linuxdo.redirect-uri}")
-    private String redirectUri;
-
-    // LinuxDo OAuth接口地址
-    private static final String LINUXDO_AUTH_URL = "https://connect.linux.do/oauth/authorize";
-    private static final String LINUXDO_TOKEN_URL = "https://connect.linux.do/oauth/token";
-    private static final String LINUXDO_USER_URL = "https://connect.linux.do/api/user";
-
-    /**
-     * 获取LinuxDo授权URL
-     */
-    @Override
-    public String getLinuxDoAuthUrl() {
-        return LINUXDO_AUTH_URL + "?client_id=" + clientId
-                + "&redirect_uri=" + redirectUri
-                + "&response_type=code"
-                + "&scope=read";
+    public AuthServiceImpl(
+            UserService userService,
+            LinuxDoConfig linuxDoConfig,
+            @Qualifier("linuxDoRestTemplate") RestTemplate linuxDoRestTemplate
+    )
+    {
+        this.userService = userService;
+        this.linuxDoConfig = linuxDoConfig;
+        this.linuxDoRestTemplate = linuxDoRestTemplate;
     }
+
+    @Value("${trading.initial-balance:100000}")
+    private BigDecimal initialBalance;
 
     /**
      * 处理LinuxDo回调，完成登录
@@ -66,21 +66,24 @@ public class AuthServiceImpl implements AuthService {
             String accessToken = exchangeToken(code);
 
             // 2. 用token获取用户信息
-            JSONObject userInfo = getUserInfo(accessToken);
+            LinuxDoUserInfo userInfo = getUserInfo(accessToken);
 
-            String linuxDoId = userInfo.getStr("id");
-            String username = userInfo.getStr("username");
-            String avatar = userInfo.getStr("avatar_url");
+            if (userInfo.getId() == null) {
+                throw new BizException("获取用户信息失败: id为空");
+            }
+            String linuxDoId = String.valueOf(userInfo.getId());
+            String username = userInfo.getUsername();
+            String avatar = userInfo.getAvatarUrl();
 
             // 3. 查找或创建用户
             User user = userService.findByLinuxDoId(linuxDoId);
             if (user == null) {
-                // 首次登录，创建用户并赠送10万初始资金
+                // 首次登录，创建用户并赠送初始资金
                 user = new User();
                 user.setLinuxDoId(linuxDoId);
                 user.setUsername(username);
                 user.setAvatar(avatar);
-                user.setBalance(new BigDecimal("100000"));
+                user.setBalance(initialBalance);
                 userService.save(user);
                 log.info("新用户注册: {} LinuxDoId={}", username, linuxDoId);
             } else {
@@ -125,14 +128,28 @@ public class AuthServiceImpl implements AuthService {
      * 用授权码换取access_token
      */
     private String exchangeToken(String code) {
-        String response = HttpRequest.post(LINUXDO_TOKEN_URL)
-                .form("grant_type", "authorization_code")
-                .form("code", code)
-                .form("client_id", clientId)
-                .form("client_secret", clientSecret)
-                .form("redirect_uri", redirectUri)
-                .execute()
-                .body();
+        MultiValueMap<String, String> form = new LinkedMultiValueMap<>();
+        form.add("grant_type", "authorization_code");
+        form.add("code", code);
+        form.add("client_id", linuxDoConfig.getClientId());
+        form.add("client_secret", linuxDoConfig.getClientSecret());
+        form.add("redirect_uri", linuxDoConfig.getRedirectUri());
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_FORM_URLENCODED);
+
+        HttpEntity<MultiValueMap<String, String>> entity = new HttpEntity<>(form, headers);
+
+        String response;
+        try {
+            response = linuxDoRestTemplate.postForObject(linuxDoConfig.getTokenUrl(), entity, String.class);
+        } catch (RestClientResponseException e) {
+            throw new BizException("获取access_token失败: " + e.getResponseBodyAsString());
+        }
+
+        if (response == null) {
+            throw new BizException("获取access_token失败: 空响应");
+        }
 
         JSONObject json = JSONUtil.parseObj(response);
         if (json.getStr("access_token") == null) {
@@ -145,17 +162,32 @@ public class AuthServiceImpl implements AuthService {
     /**
      * 用access_token获取用户信息
      */
-    private JSONObject getUserInfo(String accessToken) {
-        String response = HttpRequest.get(LINUXDO_USER_URL)
-                .header("Authorization", "Bearer " + accessToken)
-                .execute()
-                .body();
+    private LinuxDoUserInfo getUserInfo(String accessToken) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.set("Authorization", "Bearer " + accessToken);
+        HttpEntity<Void> entity = new HttpEntity<>(headers);
 
-        JSONObject json = JSONUtil.parseObj(response);
-        if (json.getStr("id") == null) {
-            throw new BizException("获取用户信息失败: " + response);
+        LinuxDoUserInfo userInfo;
+        try {
+            userInfo = linuxDoRestTemplate.exchange(
+                    linuxDoConfig.getUserUrl(),
+                    HttpMethod.GET,
+                    entity,
+                    LinuxDoUserInfo.class
+            ).getBody();
+        } catch (RestClientResponseException e) {
+            throw new BizException("获取用户信息失败: " + e.getResponseBodyAsString());
+        } catch (RestClientException e) {
+            throw new BizException("解析用户信息失败: " + e.getMessage());
         }
 
-        return json;
+        if (userInfo == null) {
+            throw new BizException("获取用户信息失败: 空响应");
+        }
+
+        if (userInfo.getId() == null) {
+            throw new BizException("获取用户信息失败: id为空");
+        }
+        return userInfo;
     }
 }

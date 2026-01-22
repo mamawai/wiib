@@ -4,7 +4,6 @@ import com.baomidou.mybatisplus.annotation.*;
 import lombok.Data;
 
 import java.math.BigDecimal;
-import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 /**
@@ -26,8 +25,8 @@ public class Settlement {
     /** 结算金额（卖出净额=成交额-手续费） */
     private BigDecimal amount;
 
-    /** 到账日期（卖出次日） */
-    private LocalDate settleDate;
+    /** 到账时间（卖出时刻+24小时） */
+    private LocalDateTime settleTime;
 
     /** PENDING/SETTLED */
     private String status;

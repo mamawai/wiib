@@ -27,7 +27,7 @@ public interface SettlementService extends IService<Settlement> {
     List<Settlement> getPendingSettlements(Long userId);
 
     /**
-     * 查询用户待结算总额
+     * 查询所有待结算列表
      */
-    BigDecimal getPendingAmount(Long userId);
+    List<Settlement> getAllPendingSettlements();
 }

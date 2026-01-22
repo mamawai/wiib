@@ -38,6 +38,9 @@ public class OrderResponse {
     /** 成交金额（已成交时有值） */
     private BigDecimal filledAmount;
 
+    /** 手续费 */
+    private BigDecimal commission;
+
     /** 触发价格（限价单触发时有值） */
     private BigDecimal triggerPrice;
 

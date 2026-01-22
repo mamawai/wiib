@@ -24,7 +24,6 @@ public enum ErrorCode {
     ORDER_NOT_FOUND(1007, "订单不存在"),
     ORDER_CANNOT_CANCEL(1008, "订单无法取消"),
     DUPLICATE_REQUEST(1009, "重复请求"),
-    TIMESTAMP_INVALID(1010, "时间戳异常"),
     LIMIT_PRICE_INVALID(1011, "限价无效"),
 
     // 并发控制错误码 1100+
@@ -38,10 +37,20 @@ public enum ErrorCode {
     NOT_IN_TRADING_HOURS(1201, "非交易时段"),
     SLIPPAGE_EXCEEDED(1202, "价格波动过大，请重新下单"),
     RATE_LIMIT_EXCEEDED(1203, "请求过于频繁，请稍后再试"),
+    USER_BANKRUPT(1204, "已爆仓，交易已禁用"),
+    LEVERAGE_ONLY_FOR_MARKET_BUY(1205, "杠杆仅支持市价买入"),
+    LEVERAGE_MULTIPLE_INVALID(1206, "杠杆倍率无效"),
 
     // WebSocket错误码 1300+
     WEBSOCKET_CONNECTION_LIMIT(1301, "连接数已达上限"),
-    WEBSOCKET_AUTH_REQUIRED(1302, "需要登录后连接");
+    WEBSOCKET_AUTH_REQUIRED(1302, "需要登录后连接"),
+
+    // Buff错误码 1400+
+    BUFF_ALREADY_DRAWN(1401, "今日已抽奖"),
+    BUFF_NOT_FOUND(1402, "Buff不存在"),
+    BUFF_EXPIRED(1403, "Buff已过期"),
+    BUFF_ALREADY_USED(1404, "Buff已使用"),
+    DISCOUNT_NO_LEVERAGE(1405, "使用折扣时不支持杠杆");
 
     private final int code;
     private final String msg;

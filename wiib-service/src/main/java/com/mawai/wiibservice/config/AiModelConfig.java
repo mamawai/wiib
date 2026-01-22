@@ -46,6 +46,11 @@ public class AiModelConfig {
         private String model;
 
         /**
+         * 鉴权方式（authorization / x-api-key）
+         */
+        private String authType = "authorization";
+
+        /**
          * 优先级（数字越小优先级越高）
          */
         private Integer priority;
@@ -58,11 +63,16 @@ public class AiModelConfig {
         /**
          * 超时时间（毫秒）
          */
-        private Integer timeout = 30000;
+        private Integer timeout = 60000;
 
         /**
          * 最大重试次数
          */
-        private Integer maxRetries = 2;
+        private Integer maxRetries = 3;
+
+        /**
+         * 采样温度（越大越随机，0更确定）
+         */
+        private Double temperature;
     }
 }

@@ -24,11 +24,11 @@ public interface UserService extends IService<User> {
 
     /**
      * 更新用户余额（带乐观锁重试）
+     *
      * @param userId 用户ID
      * @param amount 变动金额（正数增加，负数减少）
-     * @return 更新后的余额
      */
-    BigDecimal updateBalance(Long userId, BigDecimal amount);
+    void updateBalance(Long userId, BigDecimal amount);
 
     /**
      * 冻结余额（限价买单时调用）
@@ -36,9 +36,8 @@ public interface UserService extends IService<User> {
      *
      * @param userId 用户ID
      * @param amount 冻结金额
-     * @return 冻结后的可用余额
      */
-    BigDecimal freezeBalance(Long userId, BigDecimal amount);
+    void freezeBalance(Long userId, BigDecimal amount);
 
     /**
      * 解冻余额（订单取消/过期时调用）
@@ -46,9 +45,8 @@ public interface UserService extends IService<User> {
      *
      * @param userId 用户ID
      * @param amount 解冻金额
-     * @return 解冻后的可用余额
      */
-    BigDecimal unfreezeBalance(Long userId, BigDecimal amount);
+    void unfreezeBalance(Long userId, BigDecimal amount);
 
     /**
      * 扣除冻结余额（限价买单成交时调用）

@@ -1,6 +1,5 @@
 package com.mawai.wiibservice.service.impl;
 
-import cn.hutool.http.HttpRequest;
 import cn.hutool.json.JSONArray;
 import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
@@ -8,29 +7,30 @@ import com.mawai.wiibservice.config.AiModelConfig;
 import com.mawai.wiibservice.service.AiService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.client.reactive.ReactorClientHttpConnector;
 import org.springframework.stereotype.Service;
+import org.springframework.web.reactive.function.client.WebClient;
+import reactor.netty.http.client.HttpClient;
+import reactor.netty.resources.ConnectionProvider;
+import io.netty.channel.ChannelOption;
 
+import java.time.Duration;
 import java.util.Comparator;
 import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
 
-/**
- * AI调用服务实现
- * 多模型优先级重试机制，确保生成可靠性
- */
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class AiServiceImpl implements AiService {
 
     private final AiModelConfig aiModelConfig;
+    private final ConcurrentHashMap<String, WebClient> webClientCache = new ConcurrentHashMap<>();
 
-    /**
-     * 调用AI（按优先级重试）
-     * 流程：按priority排序 -> 依次尝试 -> 失败则尝试下一个
-     */
     @Override
     public String chat(String prompt) {
-        // 获取启用的提供商，按优先级排序
         List<AiModelConfig.ModelProvider> enabledProviders = aiModelConfig.getProviders().stream()
                 .filter(AiModelConfig.ModelProvider::getEnabled)
                 .sorted(Comparator.comparing(AiModelConfig.ModelProvider::getPriority))
@@ -41,7 +41,6 @@ public class AiServiceImpl implements AiService {
             throw new RuntimeException("没有启用的AI提供商");
         }
 
-        // 按优先级依次尝试
         Exception lastException = null;
         for (AiModelConfig.ModelProvider provider : enabledProviders) {
             try {
@@ -52,18 +51,13 @@ public class AiServiceImpl implements AiService {
             } catch (Exception e) {
                 log.warn("AI调用失败: {} - {}", provider.getName(), e.getMessage());
                 lastException = e;
-                // 继续尝试下一个提供商
             }
         }
 
-        // 所有提供商都失败
         log.error("所有AI提供商调用失败");
         throw new RuntimeException("所有AI提供商调用失败", lastException);
     }
 
-    /**
-     * 调用指定提供商
-     */
     @Override
     public String chatWithProvider(String providerName, String prompt) {
         AiModelConfig.ModelProvider provider = aiModelConfig.getProviders().stream()
@@ -74,9 +68,6 @@ public class AiServiceImpl implements AiService {
         return callAiWithRetry(provider, prompt);
     }
 
-    /**
-     * 调用AI（带重试）
-     */
     private String callAiWithRetry(AiModelConfig.ModelProvider provider, String prompt) {
         int maxRetries = provider.getMaxRetries();
         Exception lastException = null;
@@ -88,9 +79,8 @@ public class AiServiceImpl implements AiService {
                 lastException = e;
                 if (i < maxRetries) {
                     log.warn("AI调用失败，重试 {}/{}: {}", i + 1, maxRetries, e.getMessage());
-                    // 重试延迟
                     try {
-                        Thread.sleep(1000 * (i + 1)); // 递增延迟
+                        Thread.sleep(1000L * (i + 1));
                     } catch (InterruptedException ie) {
                         Thread.currentThread().interrupt();
                     }
@@ -101,11 +91,40 @@ public class AiServiceImpl implements AiService {
         throw new RuntimeException("AI调用失败，已重试" + maxRetries + "次", lastException);
     }
 
-    /**
-     * 实际调用AI（OpenAI Compatible API）
-     */
     private String callAi(AiModelConfig.ModelProvider provider, String prompt) {
-        // 构建请求体
+        JSONObject requestBody = getRequestBody(provider, prompt);
+
+        WebClient webClient = getOrCreateWebClient(provider);
+        int timeoutMs = resolveTimeoutMs(provider);
+        String response = webClient.post()
+                .uri("/chat/completions")
+                .contentType(MediaType.APPLICATION_JSON)
+                .headers(headers -> applyAuth(headers, provider))
+                .bodyValue(requestBody.toString())
+                .retrieve()
+                .bodyToMono(String.class)
+                .block(Duration.ofMillis(timeoutMs));
+
+        if (response == null) {
+            throw new RuntimeException("AI返回内容为空");
+        }
+
+        JSONObject json = JSONUtil.parseObj(response);
+
+        if (json.containsKey("error")) {
+            String errorMsg = json.getByPath("error.message", String.class);
+            throw new RuntimeException("AI返回错误: " + errorMsg);
+        }
+
+        String content = json.getByPath("choices[0].message.content", String.class);
+        if (content == null || content.trim().isEmpty()) {
+            throw new RuntimeException("AI返回内容为空");
+        }
+
+        return content;
+    }
+
+    private static JSONObject getRequestBody(AiModelConfig.ModelProvider provider, String prompt) {
         JSONObject requestBody = new JSONObject();
         requestBody.set("model", provider.getModel());
 
@@ -115,31 +134,53 @@ public class AiServiceImpl implements AiService {
         message.set("content", prompt);
         messages.add(message);
         requestBody.set("messages", messages);
+        requestBody.set("stream", false);
 
-        // 发送请求
-        String response = HttpRequest.post(provider.getBaseUrl() + "/chat/completions")
-                .header("Authorization", "Bearer " + provider.getApiKey())
-                .header("Content-Type", "application/json")
-                .body(requestBody.toString())
-                .timeout(provider.getTimeout())
-                .execute()
-                .body();
-
-        // 解析响应
-        JSONObject json = JSONUtil.parseObj(response);
-
-        // 检查错误
-        if (json.containsKey("error")) {
-            String errorMsg = json.getByPath("error.message", String.class);
-            throw new RuntimeException("AI返回错误: " + errorMsg);
+        if (provider.getTemperature() != null) {
+            requestBody.set("temperature", provider.getTemperature());
         }
+        return requestBody;
+    }
 
-        // 提取内容
-        String content = json.getByPath("choices[0].message.content", String.class);
-        if (content == null || content.trim().isEmpty()) {
-            throw new RuntimeException("AI返回内容为空");
+    private WebClient getOrCreateWebClient(AiModelConfig.ModelProvider provider) {
+        return webClientCache.computeIfAbsent(provider.getName(), name -> {
+            int timeoutMs = resolveTimeoutMs(provider);
+
+            ConnectionProvider connectionProvider = ConnectionProvider.builder(name)
+                    .maxConnections(2)
+                    .maxIdleTime(Duration.ofSeconds(60))
+                    .build();
+
+            HttpClient httpClient = HttpClient.create(connectionProvider)
+                    .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, timeoutMs)
+                    .responseTimeout(Duration.ofMillis(timeoutMs));
+
+            return WebClient.builder()
+                    .baseUrl(provider.getBaseUrl())
+                    .clientConnector(new ReactorClientHttpConnector(httpClient))
+                    .build();
+        });
+    }
+
+    private int resolveTimeoutMs(AiModelConfig.ModelProvider provider) {
+        Integer timeout = provider.getTimeout();
+        if (timeout == null || timeout <= 0) {
+            return 30000;
         }
+        return timeout;
+    }
 
-        return content;
+    private void applyAuth(HttpHeaders headers, AiModelConfig.ModelProvider provider) {
+        String authType = provider.getAuthType();
+        String apiKey = provider.getApiKey();
+        if (authType == null || authType.isBlank() || "authorization".equalsIgnoreCase(authType)) {
+            headers.set(HttpHeaders.AUTHORIZATION, "Bearer " + apiKey);
+            return;
+        }
+        if ("x-api-key".equalsIgnoreCase(authType)) {
+            headers.set("x-api-key", apiKey);
+            return;
+        }
+        throw new RuntimeException("不支持的鉴权方式: " + authType);
     }
 }

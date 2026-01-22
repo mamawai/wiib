@@ -10,7 +10,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.List;
+import com.baomidou.mybatisplus.core.metadata.IPage;
 
 /**
  * 订单Controller
@@ -46,10 +46,11 @@ public class OrderController {
 
     @GetMapping("/list")
     @Operation(summary = "查询订单列表")
-    public Result<List<OrderResponse>> list(
+    public Result<IPage<OrderResponse>> list(
             @RequestParam(required = false) String status,
-            @RequestParam(defaultValue = "50") int limit) {
+            @RequestParam(defaultValue = "1") int pageNum,
+            @RequestParam(defaultValue = "10") int pageSize) {
         Long userId = StpUtil.getLoginIdAsLong();
-        return Result.ok(orderService.getUserOrders(userId, status, limit));
+        return Result.ok(orderService.getUserOrders(userId, status, pageNum, pageSize));
     }
 }

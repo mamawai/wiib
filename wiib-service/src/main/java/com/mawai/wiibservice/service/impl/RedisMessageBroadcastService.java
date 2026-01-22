@@ -55,7 +55,7 @@ public class RedisMessageBroadcastService implements MessageListener {
             // 消息格式：stockCode|message
             String payload = stockCode + "|" + message;
             redisTemplate.convertAndSend(CHANNEL_PREFIX + "stock", payload);
-            log.debug("广播股票行情: {}", stockCode);
+            log.info("广播股票行情: {}", stockCode);
         } catch (Exception e) {
             log.error("广播股票行情失败: {}", stockCode, e);
         }
@@ -67,7 +67,7 @@ public class RedisMessageBroadcastService implements MessageListener {
     @Override
     public void onMessage(Message message, byte[] pattern) {
         try {
-            String payload = new String(message.getBody());
+            String payload = new String(message.getBody(), java.nio.charset.StandardCharsets.UTF_8);
             int separatorIndex = payload.indexOf('|');
             if (separatorIndex <= 0) {
                 log.warn("无效的广播消息格式: {}", payload);
@@ -78,8 +78,8 @@ public class RedisMessageBroadcastService implements MessageListener {
             String jsonMessage = payload.substring(separatorIndex + 1);
 
             // 推送到本地WebSocket连接
-            messagingTemplate.convertAndSend("/topic/stock/" + stockCode, jsonMessage);
-            log.debug("本地推送股票行情: {}", stockCode);
+            messagingTemplate.convertAndSend("/topic/quote/" + stockCode, jsonMessage);
+            log.info("本地推送股票行情: {}", stockCode);
         } catch (Exception e) {
             log.error("处理Redis广播消息失败", e);
         }

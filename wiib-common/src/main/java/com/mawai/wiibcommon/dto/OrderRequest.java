@@ -10,8 +10,8 @@ import java.math.BigDecimal;
 @Data
 public class OrderRequest {
 
-    /** 股票代码 */
-    private String stockCode;
+    /** 股票ID */
+    private Long stockId;
 
     /** 交易数量 */
     private Integer quantity;
@@ -22,9 +22,9 @@ public class OrderRequest {
     /** 限价（限价单必填） */
     private BigDecimal limitPrice;
 
-    /** 请求ID（幂等性，防重复提交） */
-    private String requestId;
+    /** 杠杆倍率（2-10），仅市价买入支持；null或<=1表示不加杠杆 */
+    private Integer leverageMultiple;
 
-    /** 客户端时间戳ms（防作弊，与服务端时间差不超过3秒） */
-    private Long clientTimestamp;
+    /** 使用的折扣Buff ID（可选） */
+    private Long useBuffId;
 }
