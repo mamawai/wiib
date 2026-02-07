@@ -93,13 +93,15 @@ public class MarketDataServiceImpl implements MarketDataService {
 
             if (daily == null || daily.getPrices() == null || daily.getPrices().isEmpty()) continue;
 
-            // 分时数据
+            // 分时数据写入Hash，field=index, value=price, 单点查O(1)
             String tickKey = String.format("tick:%s:%d", date, stock.getId());
-            // List没有幂等写入，先删再写
             cacheService.delete(tickKey);
-            List<String> priceStrings = daily.getPrices().stream()
-                .map(BigDecimal::toPlainString).toList();
-            cacheService.lRightPushAll(tickKey, priceStrings);
+            Map<String, String> tickMap = new HashMap<>();
+            List<BigDecimal> prices = daily.getPrices();
+            for (int i = 0; i < prices.size(); i++) {
+                tickMap.put(String.valueOf(i), prices.get(i).toPlainString());
+            }
+            cacheService.hSetAll(tickKey, tickMap);
 
             // 当日汇总：只预热open和prevClose，high/low由实时行情动态更新
             BigDecimal open = daily.getPrices().getFirst();
@@ -127,12 +129,15 @@ public class MarketDataServiceImpl implements MarketDataService {
         int endIndex = TickTimeUtil.effectiveEndIndex(LocalTime.now());
         if (endIndex < 0) return Collections.emptyList();
 
-        List<String> prices = cacheService.lRange(key, 0, endIndex);
-        if (prices == null || prices.isEmpty()) return Collections.emptyList();
+        Map<String, String> tickMap = cacheService.hGetAll(key);
+        if (tickMap.isEmpty()) return Collections.emptyList();
 
-        List<DayTickDTO> result = new ArrayList<>(prices.size());
-        for (int i = 0; i < prices.size(); i++) {
-            result.add(new DayTickDTO(TickTimeUtil.indexToTime(i).toString(), new BigDecimal(prices.get(i))));
+        List<DayTickDTO> result = new ArrayList<>();
+        for (int i = 0; i <= endIndex; i++) {
+            String price = tickMap.get(String.valueOf(i));
+            if (price != null) {
+                result.add(new DayTickDTO(TickTimeUtil.indexToTime(i).toString(), new BigDecimal(price)));
+            }
         }
         return result;
     }
@@ -143,7 +148,7 @@ public class MarketDataServiceImpl implements MarketDataService {
         String tickKey = String.format("tick:%s:%d", date, stockId);
         int index = TickTimeUtil.timeToIndex(time);
         if (index < 0) return null;
-        String tickValue = cacheService.lIndex(tickKey, index);
+        String tickValue = cacheService.hGet(tickKey, String.valueOf(index));
         if (tickValue == null) return null;
 
         BigDecimal price = new BigDecimal(tickValue);
@@ -199,23 +204,24 @@ public class MarketDataServiceImpl implements MarketDataService {
 
         for (Long stockId : allStockIds) {
             String tickKey = String.format("tick:%s:%d", targetDate, stockId);
-            List<String> prices = cacheService.lRange(tickKey, 0, -1);
-            if (prices == null || prices.isEmpty()) {
+            Map<String, String> tickMap = cacheService.hGetAll(tickKey);
+            if (tickMap.isEmpty()) {
                 skipped++;
                 continue;
             }
 
             int maxIndex = TickTimeUtil.effectiveEndIndex(asOfTime);
             if (maxIndex < 0) { skipped++; continue; }
-            maxIndex = Math.min(maxIndex, prices.size() - 1);
 
-            BigDecimal open = new BigDecimal(prices.getFirst());
+            BigDecimal open = new BigDecimal(tickMap.get("0"));
             BigDecimal last = null;
             BigDecimal high = null;
             BigDecimal low = null;
 
             for (int i = 0; i <= maxIndex; i++) {
-                BigDecimal price = new BigDecimal(prices.get(i));
+                String priceStr = tickMap.get(String.valueOf(i));
+                if (priceStr == null) continue;
+                BigDecimal price = new BigDecimal(priceStr);
                 if (high == null || price.compareTo(high) > 0) high = price;
                 if (low == null || price.compareTo(low) < 0) low = price;
                 last = price;
