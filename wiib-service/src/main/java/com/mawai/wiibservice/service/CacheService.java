@@ -146,6 +146,24 @@ public class CacheService {
         stringRedisTemplate.opsForHash().putAll(key, hash);
     }
 
+    // ==================== List操作 ====================
+
+    public void lRightPushAll(String key, List<String> values) {
+        stringRedisTemplate.opsForList().rightPushAll(key, values);
+    }
+
+    public List<String> lRange(String key, long start, long end) {
+        return stringRedisTemplate.opsForList().range(key, start, end);
+    }
+
+    public String lIndex(String key, long index) {
+        return stringRedisTemplate.opsForList().index(key, index);
+    }
+
+    public Long lLen(String key) {
+        return stringRedisTemplate.opsForList().size(key);
+    }
+
     // ==================== 对象序列化（使用RedisTemplate） ====================
 
     public void setObject(String key, Object obj, long timeout, TimeUnit unit) {

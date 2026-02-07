@@ -29,6 +29,7 @@ import {
   ChevronRight,
   Calendar,
   Sparkles,
+  ChartCandlestick,
 } from 'lucide-react';
 import type { Stock, DayTick, News, Position, PositionChangeEvent, OrderStatusEvent, AssetChangeEvent, UserBuff } from '../types';
 
@@ -431,6 +432,17 @@ export function StockDetail() {
       <Card>
         <CardContent className="p-4">
           <TickChart ticks={realtimeTicks} prevClose={stock.prevClose} />
+          <div className="mt-3 flex justify-end">
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5 text-xs"
+              onClick={() => navigate(`/stock/${id}/kline`, { state: { name: stock.name, code: stock.code } })}
+            >
+              <ChartCandlestick className="w-3.5 h-3.5" />
+              历史K线
+            </Button>
+          </div>
         </CardContent>
       </Card>
 

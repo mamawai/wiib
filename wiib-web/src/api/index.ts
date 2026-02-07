@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { Stock, User, Position, OrderRequest, Order, DayTick, Settlement, PageResult, News, RankingItem, OptionChainItem, OptionQuote, OptionPosition, OptionOrder, OptionOrderRequest, OptionOrderResult, BuffStatus, UserBuff } from '../types';
+import type { Stock, User, Position, OrderRequest, Order, DayTick, Kline, Settlement, PageResult, News, RankingItem, OptionChainItem, OptionQuote, OptionPosition, OptionOrder, OptionOrderRequest, OptionOrderResult, BuffStatus, UserBuff } from '../types';
 
 const api = axios.create({
   baseURL: '/api',
@@ -61,6 +61,12 @@ export const stockApi = {
   losers: (limit = 10) => api.get<unknown, Stock[]>('/stock/losers', { params: { limit } }),
   // 获取当日分时数据
   ticks: (stockId: number) => api.get<unknown, DayTick[]>(`/stock/${stockId}/ticks`),
+  // 获取历史某天分时数据
+  historyTicks: (stockId: number, date: string, signal?: AbortSignal) =>
+    api.get<unknown, DayTick[]>(`/stock/${stockId}/history-ticks`, { params: { date }, signal }),
+  // 获取日K线
+  kline: (stockId: number, days = 30) =>
+    api.get<unknown, Kline[]>(`/stock/${stockId}/kline`, { params: { days } }),
 };
 
 // ========== 订单接口 ==========
@@ -127,8 +133,8 @@ export const adminApi = {
   startSettlement: () => api.post<unknown, void>('/admin/task/settlement/start'),
   stopSettlement: () => api.post<unknown, void>('/admin/task/settlement/stop'),
   expireOrders: () => api.post<unknown, void>('/admin/task/expire-orders'),
-  generateData: () => api.post<unknown, void>('/admin/task/generate-data'),
-  generateTodayData: () => api.post<unknown, void>('/admin/task/generate-today-data'),
+  generateData: (offset = 1) =>
+    api.post<unknown, void>('/admin/task/generate-data', null, { params: { offset } }),
   loadRedis: () => api.post<unknown, void>('/admin/task/load-redis'),
   refreshStockCache: () => api.post<unknown, RefreshStockCacheResult>('/admin/task/refresh-stock-cache'),
   bankruptcyCheck: () => api.post<unknown, void>('/admin/task/bankruptcy/check'),

@@ -1,6 +1,7 @@
 package com.mawai.wiibservice.service;
 
 import com.mawai.wiibcommon.dto.DayTickDTO;
+import com.mawai.wiibcommon.dto.KlineDTO;
 
 import java.time.LocalDate;
 import java.time.LocalTime;
@@ -47,4 +48,18 @@ public interface MarketDataService {
      * @return {date, time, updated, skipped}
      */
     Map<String, Object> refreshDailyCacheFromTicks(LocalDate date, LocalTime time);
+
+    /**
+     * 获取历史某天的分时数据（K线悬停用）
+     *
+     * @param stockId 股票ID
+     * @param  date  日期
+     * @return 按时间排序的tick列表
+     */
+    List<DayTickDTO> getHistoryDayTicks(Long stockId, LocalDate date);
+
+    /**
+     * 获取日K线数据（带Redis缓存）
+     */
+    List<KlineDTO> getKlineData(Long stockId, int days);
 }
