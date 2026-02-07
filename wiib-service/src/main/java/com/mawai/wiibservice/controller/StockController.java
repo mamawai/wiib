@@ -2,6 +2,7 @@ package com.mawai.wiibservice.controller;
 
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.mawai.wiibcommon.dto.DayTickDTO;
+import com.mawai.wiibcommon.dto.KlineDTO;
 import com.mawai.wiibcommon.dto.StockDTO;
 import com.mawai.wiibcommon.util.Result;
 import com.mawai.wiibservice.service.MarketDataService;
@@ -9,8 +10,10 @@ import com.mawai.wiibservice.service.StockService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.LocalDate;
 import java.util.List;
 
 /**
@@ -85,6 +88,23 @@ public class StockController {
     public Result<List<DayTickDTO>> getDayTicks(@PathVariable Long stockId) {
         List<DayTickDTO> ticks = marketDataService.getDayTicks(stockId);
         return Result.ok(ticks);
+    }
+
+    @GetMapping("/{stockId}/history-ticks")
+    @Operation(summary = "获取历史某天分时数据")
+    public Result<List<DayTickDTO>> getHistoryDayTicks(
+            @PathVariable Long stockId,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
+        List<DayTickDTO> ticks = marketDataService.getHistoryDayTicks(stockId, date);
+        return Result.ok(ticks);
+    }
+
+    @GetMapping("/{stockId}/kline")
+    @Operation(summary = "获取日K线数据")
+    public Result<List<KlineDTO>> getKlineData(
+            @PathVariable Long stockId,
+            @RequestParam(defaultValue = "30") int days) {
+        return Result.ok(marketDataService.getKlineData(stockId, days));
     }
 
 }

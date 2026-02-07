@@ -13,6 +13,7 @@ export function Admin() {
   const [status, setStatus] = useState<TaskStatus | null>(null);
   const [loading, setLoading] = useState(false);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [generateOffset, setGenerateOffset] = useState(0);
   const [interestRateDecimal, setInterestRateDecimal] = useState<number | null>(null);
   const [interestRatePct, setInterestRatePct] = useState('');
   const [rateLoading, setRateLoading] = useState(false);
@@ -239,20 +240,21 @@ export function Admin() {
               >
                 手动计息
               </Button>
-              <Button
-                variant="outline"
-                onClick={() => handleAction(adminApi.generateData, 'generate')}
-                disabled={actionLoading !== null}
-              >
-                生成次日行情
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() => handleAction(adminApi.generateTodayData, 'generateToday')}
-                disabled={actionLoading !== null}
-              >
-                生成当日行情
-              </Button>
+              <div className="flex items-center gap-2">
+                <Input
+                  type="number"
+                  value={generateOffset}
+                  onChange={(e) => setGenerateOffset(Number(e.target.value) || 0)}
+                  className="w-20 h-9"
+                />
+                <Button
+                  variant="outline"
+                  onClick={() => handleAction(() => adminApi.generateData(generateOffset), 'generate')}
+                  disabled={actionLoading !== null}
+                >
+                  生成行情(偏移{generateOffset >= 0 ? '+' : ''}{generateOffset}天)
+                </Button>
+              </div>
               <Button
                 variant="outline"
                 onClick={() => handleAction(adminApi.loadRedis, 'loadRedis')}

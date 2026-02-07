@@ -90,6 +90,14 @@ export interface DayTick {
   price: number;
 }
 
+export interface Kline {
+  date: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+}
+
 export interface Settlement {
   id: number;
   orderId: number;

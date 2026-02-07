@@ -4,6 +4,7 @@ import { Layout } from './components/Layout';
 import { Home } from './pages/Home';
 import { StockList } from './pages/StockList';
 import { StockDetail } from './pages/StockDetail';
+import { StockKline } from './pages/StockKline';
 import { Portfolio } from './pages/Portfolio';
 import { Options } from './pages/Options';
 import { Gold } from './pages/Gold';
@@ -37,6 +38,7 @@ function App() {
                 <Route path="/" element={<Home />} />
                 <Route path="/stocks" element={<StockList />} />
                 <Route path="/stock/:id" element={<StockDetail />} />
+                <Route path="/stock/:id/kline" element={<StockKline />} />
                 <Route path="/portfolio" element={<Portfolio />} />
                 <Route path="/options" element={<Options />} />
                 <Route path="/gold" element={<Gold />} />

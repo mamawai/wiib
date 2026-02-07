@@ -202,8 +202,10 @@ public class StockServiceImpl extends ServiceImpl<StockMapper, Stock> implements
                 dto.setChangePct(changePct);
             }
         } else {
-            // 无实时数据时用开盘价（AI预生成）
-            dto.setPrice(stock.getOpen() != null ? stock.getOpen() : stock.getPrevClose());
+            BigDecimal prevLast = cacheService.getPrevTradingDayLast(stock.getId());
+            if (prevLast != null) {
+                dto.setPrevClose(prevLast);
+            }
         }
 
         // 公司信息

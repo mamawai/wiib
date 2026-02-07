@@ -88,18 +88,10 @@ public class TaskController {
     }
 
     @PostMapping("/generate-data")
-    @Operation(summary = "生成次日行情数据")
-    public Result<Void> generateData() {
+    @Operation(summary = "生成行情数据（offset: 0=当天, 1=明天, -1=昨天）")
+    public Result<Void> generateData(@RequestParam(defaultValue = "1") int offset) {
         checkAdmin();
-        marketDataTask.generateNextDayData();
-        return Result.ok();
-    }
-
-    @PostMapping("/generate-today-data")
-    @Operation(summary = "生成当日行情数据")
-    public Result<Void> generateTodayData() {
-        checkAdmin();
-        marketDataTask.generateTodayData();
+        marketDataTask.generateData(offset);
         return Result.ok();
     }
 

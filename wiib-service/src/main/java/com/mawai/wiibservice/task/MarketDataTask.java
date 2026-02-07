@@ -17,17 +17,14 @@ public class MarketDataTask {
 
     @Scheduled(cron = "0 0 21 * * SUN-THU")
     public void generateNextDayData() {
-        Thread.startVirtualThread(() -> {
-            LocalDate tomorrow = LocalDate.now().plusDays(1);
-            log.info("定时任务：预生成明天行情 {}", tomorrow);
-            marketDataService.generateNextDayMarketData(tomorrow);
-        });
+        generateData(1);
     }
 
-    public void generateTodayData() {
+    public void generateData(int offsetDays) {
+        LocalDate target = LocalDate.now().plusDays(offsetDays);
         Thread.startVirtualThread(() -> {
-            log.info("定时任务：预生成当天行情 {}", LocalDate.now());
-            marketDataService.generateNextDayMarketData(LocalDate.now());
+            log.info("生成行情数据: {} (offset={})", target, offsetDays);
+            marketDataService.generateNextDayMarketData(target);
         });
     }
 

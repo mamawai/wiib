@@ -94,6 +94,18 @@ public class CacheService {
         return result;
     }
 
+    public BigDecimal getPrevTradingDayLast(Long stockId) {
+        LocalDate today = LocalDate.now();
+        LocalDate prevTradeDay = switch (today.getDayOfWeek()) {
+            case SUNDAY -> today.minusDays(2);
+            case MONDAY -> today.minusDays(3);
+            default -> today.minusDays(1);
+        };
+        String key = String.format("stock:daily:%s:%d", prevTradeDay, stockId);
+        String last = (String) stringRedisTemplate.opsForHash().get(key, "last");
+        return last != null ? new BigDecimal(last) : null;
+    }
+
     // ==================== 通用缓存 ====================
 
     public void set(String key, String value, long timeout, TimeUnit unit) {
@@ -144,6 +156,24 @@ public class CacheService {
 
     public void hSetAll(String key, Map<String, String> hash) {
         stringRedisTemplate.opsForHash().putAll(key, hash);
+    }
+
+    // ==================== List操作 ====================
+
+    public void lRightPushAll(String key, List<String> values) {
+        stringRedisTemplate.opsForList().rightPushAll(key, values);
+    }
+
+    public List<String> lRange(String key, long start, long end) {
+        return stringRedisTemplate.opsForList().range(key, start, end);
+    }
+
+    public String lIndex(String key, long index) {
+        return stringRedisTemplate.opsForList().index(key, index);
+    }
+
+    public Long lLen(String key) {
+        return stringRedisTemplate.opsForList().size(key);
     }
 
     // ==================== 对象序列化（使用RedisTemplate） ====================

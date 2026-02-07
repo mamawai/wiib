@@ -4,14 +4,15 @@ import cn.hutool.json.JSONArray;
 import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.baomidou.mybatisplus.extension.toolkit.Db;
 import com.mawai.wiibcommon.dto.DayTickDTO;
+import com.mawai.wiibcommon.dto.KlineDTO;
 import com.mawai.wiibcommon.entity.Company;
 import com.mawai.wiibcommon.entity.News;
-import com.mawai.wiibcommon.entity.PriceTick;
+import com.mawai.wiibcommon.entity.PriceTickDaily;
 import com.mawai.wiibcommon.entity.Stock;
+import com.mawai.wiibcommon.util.TickTimeUtil;
 import com.mawai.wiibservice.mapper.NewsMapper;
-import com.mawai.wiibservice.mapper.PriceTickMapper;
+import com.mawai.wiibservice.mapper.PriceTickDailyMapper;
 import com.mawai.wiibservice.service.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -19,6 +20,7 @@ import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
@@ -33,7 +35,7 @@ public class MarketDataServiceImpl implements MarketDataService {
 
     private final StockService stockService;
     private final CompanyService companyService;
-    private final PriceTickMapper priceTickMapper;
+    private final PriceTickDailyMapper priceTickDailyMapper;
     private final NewsMapper newsMapper;
     private final CacheService cacheService;
     private final AiService aiService;
@@ -52,9 +54,21 @@ public class MarketDataServiceImpl implements MarketDataService {
         List<Stock> stocks = stockService.list();
 
         for (Stock stock : stocks) {
-            List<PriceTick> ticks = generateStockTicks(stock, targetDate, marketSentiment);
-            Db.saveBatch(ticks);
-            log.info("生成股票{}走势完成，共{}个点", stock.getCode(), ticks.size());
+            List<BigDecimal> prices = generateStockPrices(stock, targetDate, marketSentiment);
+            PriceTickDaily daily = new PriceTickDaily();
+            daily.setStockId(stock.getId());
+            daily.setTradeDate(targetDate);
+            daily.setPrices(prices);
+            priceTickDailyMapper.insert(daily);
+            log.info("生成股票{}走势完成，共{}个点", stock.getCode(), prices.size());
+
+            // 预缓存K线OHLC
+            BigDecimal kOpen = prices.getFirst();
+            BigDecimal kClose = prices.getLast();
+            BigDecimal kHigh = prices.stream().max(Comparator.naturalOrder()).orElseThrow();
+            BigDecimal kLow = prices.stream().min(Comparator.naturalOrder()).orElseThrow();
+            cacheService.hSet("kline:" + stock.getId(), targetDate.toString(),
+                    kOpen + "," + kHigh + "," + kLow + "," + kClose);
         }
 
         // 刷新缓存
@@ -69,29 +83,26 @@ public class MarketDataServiceImpl implements MarketDataService {
         log.info("加载{}行情到Redis", date);
 
         List<Stock> stocks = stockService.list();
-        LocalDateTime startTime = date.atTime(9, 30);
-        LocalDateTime endTime = date.atTime(15, 0);
 
         for (Stock stock : stocks) {
-            List<PriceTick> ticks = priceTickMapper.selectList(
-                new LambdaQueryWrapper<PriceTick>()
-                    .eq(PriceTick::getStockId, stock.getId())
-                    .between(PriceTick::getTickTime, startTime, endTime)
-                    .orderByAsc(PriceTick::getTickTime)
+            PriceTickDaily daily = priceTickDailyMapper.selectOne(
+                new LambdaQueryWrapper<PriceTickDaily>()
+                    .eq(PriceTickDaily::getStockId, stock.getId())
+                    .eq(PriceTickDaily::getTradeDate, date)
             );
 
-            if (ticks.isEmpty()) continue;
+            if (daily == null || daily.getPrices() == null || daily.getPrices().isEmpty()) continue;
 
             // 分时数据
             String tickKey = String.format("tick:%s:%d", date, stock.getId());
-            for (PriceTick tick : ticks) {
-                String field = tick.getTickTime().toLocalTime().toString();
-                String value = tick.getPrice().toString();
-                cacheService.hSet(tickKey, field, value);
-            }
+            // List没有幂等写入，先删再写
+            cacheService.delete(tickKey);
+            List<String> priceStrings = daily.getPrices().stream()
+                .map(BigDecimal::toPlainString).toList();
+            cacheService.lRightPushAll(tickKey, priceStrings);
 
             // 当日汇总：只预热open和prevClose，high/low由实时行情动态更新
-            BigDecimal open = ticks.getFirst().getPrice();
+            BigDecimal open = daily.getPrices().getFirst();
 
             String dailyKey = String.format("stock:daily:%s:%d", date, stock.getId());
             cacheService.hSet(dailyKey, "open", open.toString());
@@ -104,26 +115,25 @@ public class MarketDataServiceImpl implements MarketDataService {
             cacheService.expire(tickKey, 7, TimeUnit.DAYS);
             cacheService.expire(dailyKey, 7, TimeUnit.DAYS);
 
-            log.info("加载股票{}行情到Redis，共{}个点", stock.getCode(), ticks.size());
+            log.info("加载股票{}行情到Redis，共{}个点", stock.getCode(), daily.getPrices().size());
         }
     }
 
     @Override
     public List<DayTickDTO> getDayTicks(Long stockId) {
         LocalDate date = LocalDate.now();
-        LocalTime endTime = LocalTime.now();
         String key = String.format("tick:%s:%d", date, stockId);
-        Map<String, String> entries = cacheService.hGetAll(key);
 
-        List<DayTickDTO> result = new ArrayList<>();
-        entries.forEach((time, value) -> {
-            LocalTime tickTime = LocalTime.parse(time);
-            if (!tickTime.isAfter(endTime)) {
-                result.add(new DayTickDTO(time, new BigDecimal(value)));
-            }
-        });
+        int endIndex = TickTimeUtil.effectiveEndIndex(LocalTime.now());
+        if (endIndex < 0) return Collections.emptyList();
 
-        result.sort(Comparator.comparing(DayTickDTO::getTime));
+        List<String> prices = cacheService.lRange(key, 0, endIndex);
+        if (prices == null || prices.isEmpty()) return Collections.emptyList();
+
+        List<DayTickDTO> result = new ArrayList<>(prices.size());
+        for (int i = 0; i < prices.size(); i++) {
+            result.add(new DayTickDTO(TickTimeUtil.indexToTime(i).toString(), new BigDecimal(prices.get(i))));
+        }
         return result;
     }
 
@@ -131,7 +141,9 @@ public class MarketDataServiceImpl implements MarketDataService {
     public Map<String, Object> getRealtimeQuote(Long stockId, LocalDate date, LocalTime time) {
         // 获取当前tick
         String tickKey = String.format("tick:%s:%d", date, stockId);
-        String tickValue = cacheService.hGet(tickKey, time.toString());
+        int index = TickTimeUtil.timeToIndex(time);
+        if (index < 0) return null;
+        String tickValue = cacheService.lIndex(tickKey, index);
         if (tickValue == null) return null;
 
         BigDecimal price = new BigDecimal(tickValue);
@@ -187,55 +199,29 @@ public class MarketDataServiceImpl implements MarketDataService {
 
         for (Long stockId : allStockIds) {
             String tickKey = String.format("tick:%s:%d", targetDate, stockId);
-            Map<String, String> ticks = cacheService.hGetAll(tickKey);
-            if (ticks.isEmpty()) {
+            List<String> prices = cacheService.lRange(tickKey, 0, -1);
+            if (prices == null || prices.isEmpty()) {
                 skipped++;
                 continue;
             }
 
-            LocalTime openTime = null;
-            LocalTime lastTime = null;
-            BigDecimal open = null;
+            int maxIndex = TickTimeUtil.effectiveEndIndex(asOfTime);
+            if (maxIndex < 0) { skipped++; continue; }
+            maxIndex = Math.min(maxIndex, prices.size() - 1);
+
+            BigDecimal open = new BigDecimal(prices.getFirst());
             BigDecimal last = null;
             BigDecimal high = null;
             BigDecimal low = null;
 
-            for (Map.Entry<String, String> entry : ticks.entrySet()) {
-                LocalTime tickTime;
-                try {
-                    tickTime = LocalTime.parse(entry.getKey());
-                } catch (Exception ignore) {
-                    continue;
-                }
-
-                if (tickTime.isAfter(asOfTime)) {
-                    continue;
-                }
-
-                BigDecimal price;
-                try {
-                    price = new BigDecimal(entry.getValue());
-                } catch (Exception ignore) {
-                    continue;
-                }
-
-                if (openTime == null || tickTime.isBefore(openTime)) {
-                    openTime = tickTime;
-                    open = price;
-                }
-                if (lastTime == null || tickTime.isAfter(lastTime)) {
-                    lastTime = tickTime;
-                    last = price;
-                }
-                if (high == null || price.compareTo(high) > 0) {
-                    high = price;
-                }
-                if (low == null || price.compareTo(low) < 0) {
-                    low = price;
-                }
+            for (int i = 0; i <= maxIndex; i++) {
+                BigDecimal price = new BigDecimal(prices.get(i));
+                if (high == null || price.compareTo(high) > 0) high = price;
+                if (low == null || price.compareTo(low) < 0) low = price;
+                last = price;
             }
 
-            if (open == null || last == null || high == null || low == null) {
+            if (last == null || high == null || low == null) {
                 skipped++;
                 continue;
             }
@@ -249,11 +235,7 @@ public class MarketDataServiceImpl implements MarketDataService {
             update.put("last", last.toPlainString());
 
             String prevClose = cacheService.hGet(dailyKey, "prevClose");
-            if (prevClose != null) {
-                update.put("prevClose", prevClose);
-            } else {
-                update.put("prevClose", open.toPlainString());
-            }
+            update.put("prevClose", Objects.requireNonNullElseGet(prevClose, open::toPlainString));
 
             cacheService.hSetAll(dailyKey, update);
             cacheService.expire(tickKey, 7, TimeUnit.DAYS);
@@ -270,9 +252,7 @@ public class MarketDataServiceImpl implements MarketDataService {
         return result;
     }
 
-    private List<PriceTick> generateStockTicks(Stock stock, LocalDate date, int marketSentiment) {
-        List<PriceTick> ticks = new ArrayList<>();
-
+    private List<BigDecimal> generateStockPrices(Stock stock, LocalDate date, int marketSentiment) {
         // 查询昨日收盘价（优先Redis，不命中则查库）
         LocalDate prevDate = date.minusDays(1);
         String prevDailyKey = String.format("stock:daily:%s:%d", prevDate, stock.getId());
@@ -282,17 +262,13 @@ public class MarketDataServiceImpl implements MarketDataService {
         if (prevCloseStr != null) {
             stock.setPrevClose(new BigDecimal(prevCloseStr));
         } else {
-            LocalDateTime prevStart = prevDate.atTime(9, 30);
-            LocalDateTime prevEnd = prevDate.atTime(15, 0);
-            PriceTick lastTick = priceTickMapper.selectOne(
-                new LambdaQueryWrapper<PriceTick>()
-                    .eq(PriceTick::getStockId, stock.getId())
-                    .between(PriceTick::getTickTime, prevStart, prevEnd)
-                    .orderByDesc(PriceTick::getTickTime)
-                    .last("LIMIT 1")
+            PriceTickDaily prevDaily = priceTickDailyMapper.selectOne(
+                new LambdaQueryWrapper<PriceTickDaily>()
+                    .eq(PriceTickDaily::getStockId, stock.getId())
+                    .eq(PriceTickDaily::getTradeDate, prevDate)
             );
-            if (lastTick != null && lastTick.getPrice() != null) {
-                stock.setPrevClose(lastTick.getPrice());
+            if (prevDaily != null && prevDaily.getPrices() != null && !prevDaily.getPrices().isEmpty()) {
+                stock.setPrevClose(prevDaily.getPrices().getLast());
             }
         }
         
@@ -393,19 +369,12 @@ public class MarketDataServiceImpl implements MarketDataService {
             if (prices[i] < 0.01) prices[i] = 0.01;
         }
 
-        // 转换为PriceTick
+        List<BigDecimal> result = new ArrayList<>(steps);
         for (int i = 0; i < steps; i++) {
-            LocalTime time = calculateTickTime(i);
-            LocalDateTime tickTime = date.atTime(time);
-
-            PriceTick tick = new PriceTick();
-            tick.setStockId(stock.getId());
-            tick.setPrice(BigDecimal.valueOf(prices[i]).setScale(2, RoundingMode.HALF_UP));
-            tick.setTickTime(tickTime);
-            ticks.add(tick);
+            result.add(BigDecimal.valueOf(prices[i]).setScale(2, RoundingMode.HALF_UP));
         }
 
-        return ticks;
+        return result;
     }
 
     private static List<String> getTrends(Stock stock, BigDecimal oldPrevClose) {
@@ -509,16 +478,65 @@ public class MarketDataServiceImpl implements MarketDataService {
         return STABLE_INDUSTRIES.stream().anyMatch(lower::contains);
     }
 
-    private LocalTime calculateTickTime(int index) {
-        int morningTicks = 720; // 120分钟 × 6
-        if (index < morningTicks) {
-            int seconds = index * 10;
-            return LocalTime.of(9, 30).plusSeconds(seconds);
-        } else {
-            int afternoonIndex = index - morningTicks;
-            int seconds = afternoonIndex * 10;
-            return LocalTime.of(13, 0).plusSeconds(seconds);
+    @Override
+    public List<DayTickDTO> getHistoryDayTicks(Long stockId, LocalDate date) {
+        String cacheKey = String.format("history-ticks:%d:%s", stockId, date);
+        String cached = cacheService.get(cacheKey);
+        if (cached != null) return JSONUtil.toList(cached, DayTickDTO.class);
+
+        PriceTickDaily daily = priceTickDailyMapper.selectOne(
+            new LambdaQueryWrapper<PriceTickDaily>()
+                .eq(PriceTickDaily::getStockId, stockId)
+                .eq(PriceTickDaily::getTradeDate, date)
+        );
+        if (daily == null || daily.getPrices() == null) {
+            return Collections.emptyList();
         }
+
+        List<BigDecimal> prices = daily.getPrices();
+        List<DayTickDTO> result = new ArrayList<>(prices.size());
+        for (int i = 0; i < prices.size(); i++) {
+            result.add(new DayTickDTO(TickTimeUtil.indexToTime(i).toString(), prices.get(i)));
+        }
+        cacheService.set(cacheKey, JSONUtil.toJsonStr(result), Duration.ofHours(1));
+        return result;
+    }
+
+    @Override
+    public List<KlineDTO> getKlineData(Long stockId, int days) {
+        String cacheKey = "kline:" + stockId;
+        // 15:00后收盘，当天K线可见；否则排除当天
+        LocalDate cutoff = LocalTime.now().isAfter(LocalTime.of(15, 0))
+                ? LocalDate.now().plusDays(1) : LocalDate.now();
+        String cutoffStr = cutoff.toString();
+        Map<String, String> cached = cacheService.hGetAll(cacheKey);
+
+        if (!cached.isEmpty()) {
+            List<KlineDTO> result = cached.entrySet().stream()
+                    .filter(e -> e.getKey().compareTo(cutoffStr) < 0)
+                    .map(e -> parseKline(e.getKey(), e.getValue()))
+                    .sorted(Comparator.comparing(KlineDTO::getDate).reversed())
+                    .limit(days)
+                    .toList();
+            if (!result.isEmpty()) return result;
+        }
+
+        // 冷启动：查PG并回填缓存
+        List<KlineDTO> fromDb = priceTickDailyMapper.selectKline(stockId, cutoff, days);
+        Map<String, String> toCache = new HashMap<>();
+        for (KlineDTO k : fromDb) {
+            toCache.put(k.getDate().toString(),
+                    k.getOpen() + "," + k.getHigh() + "," + k.getLow() + "," + k.getClose());
+        }
+        if (!toCache.isEmpty()) cacheService.hSetAll(cacheKey, toCache);
+        return fromDb;
+    }
+
+    private KlineDTO parseKline(String dateStr, String csv) {
+        String[] p = csv.split(",");
+        return new KlineDTO(LocalDate.parse(dateStr),
+                new BigDecimal(p[0]), new BigDecimal(p[1]),
+                new BigDecimal(p[2]), new BigDecimal(p[3]));
     }
 
     private void generateStockNews(Stock stock, Company company, LocalDate date, int marketSentiment) {
