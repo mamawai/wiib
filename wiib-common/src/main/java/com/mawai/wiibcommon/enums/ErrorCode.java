@@ -50,7 +50,17 @@ public enum ErrorCode {
     BUFF_NOT_FOUND(1402, "Buff不存在"),
     BUFF_EXPIRED(1403, "Buff已过期"),
     BUFF_ALREADY_USED(1404, "Buff已使用"),
-    DISCOUNT_NO_LEVERAGE(1405, "使用折扣时不支持杠杆");
+    DISCOUNT_NO_LEVERAGE(1405, "使用折扣时不支持杠杆"),
+
+    // Blackjack错误码 1500+
+    BJ_GAME_IN_PROGRESS(1501, "有未完成的牌局"),
+    BJ_NO_ACTIVE_GAME(1502, "没有进行中的牌局"),
+    BJ_CHIPS_NOT_ENOUGH(1503, "积分不足"),
+    BJ_INVALID_BET(1504, "下注金额无效"),
+    BJ_ACTION_NOT_ALLOWED(1505, "当前不可执行此操作"),
+    BJ_CONVERT_LIMIT(1506, "超出每日转出上限"),
+    BJ_CONVERT_INSUFFICIENT(1507, "可转出积分不足"),
+    BJ_POOL_EXHAUSTED(1508, "今日积分池已耗尽");
 
     private final int code;
     private final String msg;

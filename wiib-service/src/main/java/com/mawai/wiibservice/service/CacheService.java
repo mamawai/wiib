@@ -136,6 +136,10 @@ public class CacheService {
         stringRedisTemplate.expire(key, timeout, unit);
     }
 
+    public Long increment(String key, long delta) {
+        return stringRedisTemplate.opsForValue().increment(key, delta);
+    }
+
     // ==================== Hash操作 ====================
 
     public void hSet(String key, String field, String value) {

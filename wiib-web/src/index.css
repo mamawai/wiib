@@ -152,3 +152,153 @@ html.dark::view-transition-new(root) {
     animation-fill-mode: both;
   }
 }
+
+/* ========== Blackjack ========== */
+.bj-table {
+  background: radial-gradient(ellipse at 50% 40%, #1a5c2a 0%, #14532d 40%, #0f3d1f 100%);
+  border: 3px solid #2d7a3e;
+  box-shadow: inset 0 0 60px rgba(0,0,0,0.5), 0 4px 24px rgba(0,0,0,0.4);
+  position: relative;
+  overflow: hidden;
+}
+.bj-table::before {
+  content: '';
+  position: absolute;
+  inset: 8px;
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+.bj-card {
+  width: 4.2rem;
+  height: 6rem;
+  border-radius: 0.5rem;
+  flex-shrink: 0;
+  user-select: none;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3), 0 1px 2px rgba(0,0,0,0.2);
+  transition: transform 0.15s ease;
+}
+@media (min-width: 640px) {
+  .bj-card { width: 5rem; height: 7rem; border-radius: 0.6rem; }
+}
+.bj-card:hover { transform: translateY(-2px); }
+
+.bj-card-front {
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(135deg, #ffffff 0%, #f8f8f8 100%);
+  border-radius: inherit;
+  border: 1px solid #d4d4d8;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+}
+.bj-card-label {
+  text-shadow: 0 0 2px rgba(0,0,0,0.08);
+}
+
+.bj-card-back {
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(135deg, #1e40af, #3b82f6);
+  border-radius: inherit;
+  border: 1px solid #60a5fa;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+}
+.bj-card-back-pattern {
+  width: 100%;
+  height: 100%;
+  border-radius: 4px;
+  border: 1.5px solid rgba(255,255,255,0.25);
+  background-image: repeating-linear-gradient(
+    45deg,
+    transparent,
+    transparent 4px,
+    rgba(255,255,255,0.06) 4px,
+    rgba(255,255,255,0.06) 8px
+  );
+}
+
+@keyframes bj-deal {
+  from { opacity: 0; transform: translateY(-30px) scale(0.8); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.bj-deal-in {
+  animation: bj-deal 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+@keyframes bj-chip-pop {
+  0% { transform: scale(0.5); opacity: 0; }
+  60% { transform: scale(1.1); }
+  100% { transform: scale(1); opacity: 1; }
+}
+.bj-chip-pop {
+  animation: bj-chip-pop 0.25s ease-out both;
+}
+
+@keyframes bj-result-in {
+  from { opacity: 0; transform: scale(0.8) translateY(10px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+.bj-result-in {
+  animation: bj-result-in 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+@keyframes bj-pulse-glow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(59,130,246,0.4); }
+  50% { box-shadow: 0 0 0 6px rgba(59,130,246,0); }
+}
+.bj-pulse-glow {
+  animation: bj-pulse-glow 2s ease-in-out infinite;
+}
+
+.bj-chip {
+  width: 3.5rem;
+  height: 3.5rem;
+  border-radius: 9999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  position: relative;
+  border: 3px dashed rgba(255,255,255,0.4);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.2);
+  color: white;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+}
+.bj-chip:hover:not(:disabled) { transform: translateY(-3px) scale(1.08); }
+.bj-chip:active:not(:disabled) { transform: scale(0.95); }
+.bj-chip:disabled { opacity: 0.35; cursor: not-allowed; }
+.bj-chip.selected {
+  transform: translateY(-4px) scale(1.12);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.2);
+}
+
+@keyframes bj-flip {
+  0% { transform: perspective(600px) rotateY(-90deg); }
+  100% { transform: perspective(600px) rotateY(0); }
+}
+.bj-flip {
+  animation: bj-flip 0.45s ease-out both;
+}
+
+@keyframes bj-count-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.bj-count-up {
+  animation: bj-count-up 0.5s ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bj-deal-in, .bj-chip-pop, .bj-result-in, .bj-flip, .bj-count-up { animation: none; }
+  .bj-pulse-glow { animation: none; box-shadow: none; }
+}

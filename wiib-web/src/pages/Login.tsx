@@ -7,10 +7,15 @@ import { Card, CardContent } from '../components/ui/card';
 import { Typewriter } from '../components/ui/typewriter';
 import { TrendingUp, Loader2, Globe, BarChart3, Wallet, LineChart } from 'lucide-react';
 
+// const LINUXDO_CONFIG = {
+//   clientId: 'toCFytIO9bCHpbUbFKM1mTgvy1ax8tG2',
+//   authorizeUrl: 'https://connect.linux.do/oauth2/authorize',
+//   redirectUri: 'https://linuxdo.stockgame.icu/login',
+// };
 const LINUXDO_CONFIG = {
-  clientId: 'toCFytIO9bCHpbUbFKM1mTgvy1ax8tG2',
+  clientId: 'NIrMpQ09Jgzjb7r1ZgU3QYnuejk8Z3qS',
   authorizeUrl: 'https://connect.linux.do/oauth2/authorize',
-  redirectUri: 'https://linuxdo.stockgame.icu/login',
+  redirectUri: 'http://localhost:3000/login',
 };
 
 export function Login() {

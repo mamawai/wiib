@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { Stock, User, Position, OrderRequest, Order, DayTick, Kline, Settlement, PageResult, News, RankingItem, OptionChainItem, OptionQuote, OptionPosition, OptionOrder, OptionOrderRequest, OptionOrderResult, BuffStatus, UserBuff } from '../types';
+import type { Stock, User, Position, OrderRequest, Order, DayTick, Kline, Settlement, PageResult, News, RankingItem, OptionChainItem, OptionQuote, OptionPosition, OptionOrder, OptionOrderRequest, OptionOrderResult, BuffStatus, UserBuff, BlackjackStatus, GameState, ConvertResult } from '../types';
 
 const api = axios.create({
   baseURL: '/api',
@@ -172,4 +172,17 @@ export const buffApi = {
   status: () => api.get<unknown, BuffStatus>('/buff/status'),
   // 抽奖
   draw: () => api.post<unknown, UserBuff>('/buff/draw'),
+};
+
+// ========== Blackjack接口 ==========
+export const blackjackApi = {
+  status: () => api.get<unknown, BlackjackStatus>('/blackjack/status'),
+  bet: (amount: number) => api.post<unknown, GameState>('/blackjack/bet', { amount }),
+  hit: () => api.post<unknown, GameState>('/blackjack/hit'),
+  stand: () => api.post<unknown, GameState>('/blackjack/stand'),
+  double: () => api.post<unknown, GameState>('/blackjack/double'),
+  split: () => api.post<unknown, GameState>('/blackjack/split'),
+  insurance: () => api.post<unknown, GameState>('/blackjack/insurance'),
+  forfeit: () => api.post<unknown, GameState>('/blackjack/forfeit'),
+  convert: (amount: number) => api.post<unknown, ConvertResult>('/blackjack/convert', { amount }),
 };

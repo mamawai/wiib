@@ -88,39 +88,36 @@ public class RedisLockUtil {
     /**
      * 释放锁
      *
-     * @param key 锁的key
+     * @param key       锁的key
      * @param lockValue 获取锁时返回的value
-     * @return 是否成功释放
      */
-    public boolean unlock(String key, String lockValue) {
+    public void unlock(String key, String lockValue) {
         if (lockValue == null) {
-            return false;
+            return;
         }
 
         String lockKey = LOCK_PREFIX + key;
         DefaultRedisScript<Long> script = new DefaultRedisScript<>(UNLOCK_SCRIPT, Long.class);
         Long result = redisTemplate.execute(script, Collections.singletonList(lockKey), lockValue);
 
-        boolean success = result != null && result == 1;
+        boolean success = result == 1;
         if (success) {
             log.info("释放锁成功: {}", lockKey);
         } else {
             log.warn("释放锁失败（锁已过期或被他人持有）: {}", lockKey);
         }
-        return success;
     }
 
     /**
      * 在锁保护下执行操作
      * 注意：此方法内部不包含事务，如需事务请在supplier内部处理
      *
-     * @param key 锁的key
+     * @param key      锁的key
      * @param supplier 要执行的操作
-     * @return 操作结果
      * @throws RuntimeException 如果获取锁失败
      */
-    public <T> T executeWithLock(String key, Supplier<T> supplier) {
-        return executeWithLock(key, DEFAULT_LOCK_TIMEOUT, DEFAULT_WAIT_TIMEOUT, supplier);
+    public <T> void executeWithLock(String key, Supplier<T> supplier) {
+        executeWithLock(key, DEFAULT_LOCK_TIMEOUT, DEFAULT_WAIT_TIMEOUT, supplier);
     }
 
     /**

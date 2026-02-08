@@ -11,6 +11,7 @@ import { Gold } from './pages/Gold';
 import { Ranking } from './pages/Ranking';
 import { Login } from './pages/Login';
 import { Admin } from './pages/Admin';
+import { Blackjack } from './pages/Blackjack';
 import { useUserStore } from './stores/userStore';
 import { useDedupedEffect } from './hooks/useDedupedEffect';
 
@@ -44,6 +45,7 @@ function App() {
                 <Route path="/gold" element={<Gold />} />
                 <Route path="/ranking" element={<Ranking />} />
                 <Route path="/admin" element={<Admin />} />
+                <Route path="/blackjack" element={<Blackjack />} />
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Routes>
             </Layout>

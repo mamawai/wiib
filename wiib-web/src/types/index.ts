@@ -268,3 +268,51 @@ export interface BuffStatus {
   canDraw: boolean;
   todayBuff: UserBuff | null;
 }
+
+// ========== Blackjack相关类型 ==========
+export interface BlackjackStatus {
+  chips: number;
+  todayConverted: number;
+  convertable: number;
+  todayConvertLimit: number;
+  totalHands: number;
+  totalWon: number;
+  totalLost: number;
+  biggestWin: number;
+  dailyPool: number;
+  activeGame: GameState | null;
+}
+
+export interface GameState {
+  phase: 'PLAYER_TURN' | 'DEALER_TURN' | 'SETTLED';
+  playerHands: HandInfo[];
+  activeHandIndex: number;
+  dealerCards: string[];
+  dealerScore: number | null;
+  chips: number;
+  insurance: number | null;
+  actions: string[];
+  results: HandResult[] | null;
+}
+
+export interface HandInfo {
+  cards: string[];
+  bet: number;
+  score: number;
+  isBust: boolean;
+  isBlackjack: boolean;
+  isDoubled: boolean;
+}
+
+export interface HandResult {
+  handIndex: number;
+  result: 'WIN' | 'LOSE' | 'PUSH' | 'BLACKJACK';
+  payout: number;
+  net: number;
+}
+
+export interface ConvertResult {
+  chips: number;
+  balance: number;
+  todayConverted: number;
+}
