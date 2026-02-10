@@ -560,6 +560,7 @@ public class BlackjackServiceImpl implements BlackjackService {
 
     // ==================== 游戏引擎内部 ====================
 
+    // 当前手结束后：还有未行动的手则切过去，否则进庄家回合
     private GameStateDTO advanceOrSettle(Long userId, BlackjackSession session) {
         int nextActive = findNextActiveHand(session);
         if (nextActive >= 0) {
@@ -584,6 +585,7 @@ public class BlackjackServiceImpl implements BlackjackService {
     private GameStateDTO dealerTurnAndSettle(Long userId, BlackjackSession session) {
         boolean allBusted = session.getPlayerHands().stream().allMatch(SessionHand::isBusted);
 
+        // 玩家全爆则庄家不用补牌
         if (!allBusted) {
             runDealerTurn(session);
         }
@@ -599,6 +601,7 @@ public class BlackjackServiceImpl implements BlackjackService {
         long totalPayout = 0;
         long totalNet = 0;
 
+        // 结算优先级：爆牌 > 自然BJ > 庄爆 > 比点数
         for (int i = 0; i < session.getPlayerHands().size(); i++) {
             SessionHand hand = session.getPlayerHands().get(i);
             int playerScore = bestScore(hand.getCards());
@@ -645,6 +648,7 @@ public class BlackjackServiceImpl implements BlackjackService {
             results.add(makeResult(i, resultType, payout, net));
         }
 
+        // 保险结算：庄家BJ赔3倍，否则没收
         if (session.isInsuranceTaken()) {
             if (dealerBJ) {
                 long insurancePayout = session.getInsuranceBet() * 3;
@@ -695,17 +699,8 @@ public class BlackjackServiceImpl implements BlackjackService {
     }
 
     private void dealCard(BlackjackSession session, List<String> target) {
-        checkAndReshuffle(session);
         target.add(session.getShoe().get(session.getShoeIndex()));
         session.setShoeIndex(session.getShoeIndex() + 1);
-    }
-
-    private void checkAndReshuffle(BlackjackSession session) {
-        int remaining = session.getShoe().size() - session.getShoeIndex();
-        if (remaining < session.getShoe().size() / 4) {
-            session.setShoe(createShoe());
-            session.setShoeIndex(0);
-        }
     }
 
     // ==================== 点数计算 ====================
@@ -723,6 +718,7 @@ public class BlackjackServiceImpl implements BlackjackService {
         return card.substring(0, 1);
     }
 
+    // A先按11算，爆了再逐张降为1
     static int bestScore(List<String> cards) {
         int total = 0;
         int aces = 0;
@@ -852,6 +848,7 @@ public class BlackjackServiceImpl implements BlackjackService {
 
     // ==================== DTO 构建 ====================
 
+    // 玩家操作阶段隐藏庄家暗牌
     private GameStateDTO buildGameState(BlackjackSession session, long chips) {
         GameStateDTO dto = new GameStateDTO();
         dto.setPhase(session.getPhase());
