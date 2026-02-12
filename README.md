@@ -91,6 +91,71 @@ AI(LLM) → { openPrice, mu, sigma }  →  带跳跃的几何布朗运动  →  
 - **用户事件频道** `event:{type}:{userId}`：资产变动/持仓变化/订单状态，精准推送
 - 虚拟线程并发 + Semaphore(5) 限流，时间对齐到 10 秒整点
 
+### BTC 实时行情推送链路
+
+独立于AI模拟行情，接入 Binance 真实 BTC/USDT 市场数据：
+
+```
+Binance WSS (miniTicker ~1次/秒)
+        │
+        ▼
+BinanceWsClient.onText()
+        │  解析 symbol + close price + event time
+        ▼
+writeRedisAndPush(symbol, price, ts)
+        │
+        ├─① Redis SET "market:price:BTCUSDT"         ← 最新价缓存
+        │
+        ├─② Redis PUBLISH "ws:broadcast:crypto"       ← 集群广播
+        │       payload: "BTCUSDT|{\"price\":\"68878.50\",\"ts\":...}"
+        │       │
+        │       ▼
+        │   RedisMessageBroadcastService.onMessage()
+        │       │
+        │       ▼
+        │   SimpMessagingTemplate → /topic/crypto/BTCUSDT
+        │       │
+        │       ▼  SockJS + STOMP (端点 /ws/quotes, 心跳15s)
+        │       │
+        │   useCryptoStream hook (3秒节流)
+        │       │
+        │       ▼
+        │   Coin.tsx  ← 价格显示 + 1D K线实时追加
+        │
+        └─③ Virtual Thread → cryptoOrderService.onPriceUpdate()
+                │  Redis ZSet rangeByScore 匹配限价单
+                ▼
+            triggerAndExecuteOrder()
+```
+
+**数据源 — BinanceWsClient**
+- 订阅 `btcusdt@miniTicker`，Java 21 原生 `java.net.http.WebSocket`
+- 配置: `application.yml` → `binance.ws-url / symbols`，当前仅 BTCUSDT
+
+**写入与广播 — writeRedisAndPush()**
+- `market:price:{symbol}` 缓存最新价（供 REST 接口读取）
+- Redis Pub/Sub `ws:broadcast:crypto` 广播（集群多实例扇出）
+- 虚拟线程异步触发限价单检查
+
+**STOMP 推送 — RedisMessageBroadcastService**
+- 监听 Redis 频道，解析 `symbol|json`，推到 `/topic/crypto/{symbol}`
+- 集群只需一个实例连 Binance WS，所有实例通过 Redis 同步
+
+**前端消费 — useCryptoStream + Coin.tsx**
+- `@stomp/stompjs` + `sockjs-client` 连 `/ws/quotes`，订阅 `/topic/crypto/BTCUSDT`
+- 3秒节流(trailing)，避免高频 re-render
+- tick 实时追加到 1D K线图：同分钟更新 close/high/low，跨分钟新增K线点
+
+**限价单事件驱动 — onPriceUpdate()**
+- 买单/卖单索引: `crypto:limit:{buy|sell}:{symbol}` (ZSet, score=limitPrice)
+- 每 tick O(logN) `rangeByScore` 匹配，启动时 `rebuildLimitOrderZSets()` 从 DB 重建
+
+**断线容灾**
+```
+WS断线 → 指数退避重连 {1,2,5,10,30}s + REST轮询兜底(5s)
+重连成功 → 停止轮询 + recoverMissedLimitOrders() 拉最近1分钟高低价恢复
+```
+
 ### 订单撮合引擎
 
 **市价单**：即时成交，从 Redis 读取最新价。买入扣余额加持仓，卖出创建 T+1 结算记录。

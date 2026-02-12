@@ -18,6 +18,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.security.SecureRandom;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.*;
@@ -55,6 +56,7 @@ public class BlackjackServiceImpl implements BlackjackService {
     private static final long MAX_BET = 50_000L;
     /** 一局牌靴使用的副数（当前为单副牌）。 */
     private static final int SHOE_DECKS = 1;
+    private static final Random RANDOM = new SecureRandom();
 
     /** 每日积分池总额度。 */
     private static final long DAILY_POOL = 2_000_000L;
@@ -694,7 +696,7 @@ public class BlackjackServiceImpl implements BlackjackService {
                 }
             }
         }
-        Collections.shuffle(shoe);
+        Collections.shuffle(shoe, RANDOM);
         return shoe;
     }
 

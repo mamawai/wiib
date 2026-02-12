@@ -26,7 +26,7 @@ public interface PositionService extends IService<Position> {
     /**
      * 增加持仓（买入时调用，带乐观锁重试）
      */
-    void addPosition(Long userId, Long stockId, int quantity, BigDecimal price);
+    void addPosition(Long userId, Long stockId, int quantity, BigDecimal price, BigDecimal discount);
 
     /**
      * 减少持仓（卖出时调用，带乐观锁重试）

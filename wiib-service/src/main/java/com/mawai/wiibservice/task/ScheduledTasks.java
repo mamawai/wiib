@@ -2,6 +2,7 @@ package com.mawai.wiibservice.task;
 
 import com.mawai.wiibservice.service.OrderService;
 import com.mawai.wiibservice.service.OptionOrderService;
+import com.mawai.wiibservice.service.CryptoOrderService;
 import com.mawai.wiibservice.service.QuotePushService;
 import com.mawai.wiibservice.service.RankingService;
 import com.mawai.wiibservice.service.SettlementService;
@@ -56,6 +57,7 @@ public class ScheduledTasks {
     private final QuotePushService quotePushService;
     private final OrderService orderService;
     private final OptionOrderService optionOrderService;
+    private final CryptoOrderService cryptoOrderService;
     private final SettlementService settlementService;
     private final RankingService rankingService;
     private final MarginAccountService marginAccountService;
@@ -89,6 +91,7 @@ public class ScheduledTasks {
             QuotePushService quotePushService,
             OrderService orderService,
             OptionOrderService optionOrderService,
+            CryptoOrderService cryptoOrderService,
             SettlementService settlementService,
             RankingService rankingService,
             MarginAccountService marginAccountService,
@@ -98,6 +101,7 @@ public class ScheduledTasks {
         this.quotePushService = quotePushService;
         this.orderService = orderService;
         this.optionOrderService = optionOrderService;
+        this.cryptoOrderService = cryptoOrderService;
         this.settlementService = settlementService;
         this.rankingService = rankingService;
         this.marginAccountService = marginAccountService;
@@ -177,6 +181,21 @@ public class ScheduledTasks {
             log.info("补启动行情推送和订单执行任务");
             startMarketDataPush();
         }
+    }
+
+    /**
+     * crypto每小时：过期 + 孤儿TRIGGERED执行
+     */
+    @Scheduled(cron = "0 0 * * * *")
+    public void cryptoHourlyMaintenance() {
+        Thread.startVirtualThread(() -> {
+            try {
+                cryptoOrderService.executeTriggeredOrders();
+                cryptoOrderService.expireLimitOrders();
+            } catch (Exception e) {
+                log.error("crypto小时维护失败", e);
+            }
+        });
     }
 
     @PreDestroy

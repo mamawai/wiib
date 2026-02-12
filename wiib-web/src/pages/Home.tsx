@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { stockApi, buffApi } from '../api';
+import { stockApi, buffApi, orderApi, cryptoOrderApi } from '../api';
 import { StockCard } from '../components/StockCard';
 import { DailyBuffCard } from '../components/DailyBuffCard';
+import { LatestTradesCard } from '../components/LatestTradesCard';
+import type { TradeItem } from '../components/LatestTradesCard';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Skeleton } from '../components/ui/skeleton';
@@ -52,6 +54,8 @@ export function Home() {
   const [refreshNonce, setRefreshNonce] = useState(0);
   const [noticeOpen, setNoticeOpen] = useState(false);
   const [buffStatus, setBuffStatus] = useState<BuffStatus | null>(null);
+  const [latestTrades, setLatestTrades] = useState<TradeItem[]>([]);
+  const [tradesLoading, setTradesLoading] = useState(true);
   const requestKey = `home:gainers-losers:limit=5:refresh=${refreshNonce}`;
 
   // 首次加载时检查是否需要显示公告
@@ -69,6 +73,38 @@ export function Home() {
       setBuffStatus(null);
     }
   }, [isLoggedIn, refreshNonce]);
+
+  // 加载最新成交（股票+crypto合并）
+  useEffect(() => {
+    setTradesLoading(true);
+    Promise.all([
+      orderApi.live().catch(() => []),
+      cryptoOrderApi.live().catch(() => []),
+    ]).then(([stockOrders, cryptoOrders]) => {
+      const stockItems: TradeItem[] = stockOrders.map(o => ({
+        id: `s-${o.orderId}`,
+        orderSide: o.orderSide,
+        name: o.stockName,
+        quantity: o.quantity,
+        unit: '股',
+        filledAmount: o.filledAmount,
+        createdAt: o.createdAt,
+      }));
+      const cryptoItems: TradeItem[] = cryptoOrders.map(o => ({
+        id: `c-${o.orderId}`,
+        orderSide: o.orderSide,
+        name: o.symbol.replace('USDT', ''),
+        quantity: o.quantity,
+        unit: o.symbol.replace('USDT', ''),
+        filledAmount: o.filledAmount,
+        createdAt: o.createdAt,
+      }));
+      const merged = [...stockItems, ...cryptoItems]
+        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+        .slice(0, 20);
+      setLatestTrades(merged);
+    }).finally(() => setTradesLoading(false));
+  }, [refreshNonce]);
 
   const handleHideToday = () => {
     hideNoticeToday();
@@ -174,13 +210,16 @@ export function Home() {
         </CardContent>
       </Card>
 
-      {/* 每日福利 */}
-      {isLoggedIn && (
-        <DailyBuffCard
-          status={buffStatus}
-          onDrawn={() => buffApi.status().then(setBuffStatus)}
-        />
-      )}
+      {/* 每日福利 + 最新成交 并列 */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {isLoggedIn && (
+          <DailyBuffCard
+            status={buffStatus}
+            onDrawn={() => buffApi.status().then(setBuffStatus)}
+          />
+        )}
+        <LatestTradesCard trades={latestTrades} loading={tradesLoading} />
+      </div>
 
       {/* Gainers */}
       <Card>
@@ -303,6 +342,21 @@ export function Home() {
                 <li><strong>PUT看跌</strong>：跌得越多赚得越多</li>
                 <li>仅支持买入开仓，到期前可平仓或等待结算</li>
                 <li>现金结算，不涉及股票交割</li>
+              </ul>
+            </section>
+
+            <section>
+              <h3 className="font-semibold text-base mb-2 text-primary">BTC模拟交易</h3>
+              <ul className="list-disc list-inside text-muted-foreground space-y-1">
+                <li><strong>实时行情</strong>：接入Binance WebSocket，价格实时推送</li>
+                <li><strong>支持小数</strong>：最小交易量0.00001 BTC</li>
+                <li><strong>手续费</strong>：0.1%</li>
+                <li><strong>市价单</strong>：当前价立即成交</li>
+                <li><strong>限价单</strong>：设定价格（市价的50%-150%），触发后成交，24小时有效</li>
+                <li><strong>杠杆</strong>：市价买入可选1-10倍，仅需支付保证金+手续费，借款部分日息0.05%</li>
+                <li><strong>折扣券</strong>：与杠杆互斥，市价买入时可使用</li>
+                <li><strong>卖出到账</strong>：卖出后5分钟到账，到账金额自动优先偿还借款利息和本金</li>
+                <li><strong>总资产</strong>：BTC持仓按实时价格计入总资产和排行榜</li>
               </ul>
             </section>
 

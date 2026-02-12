@@ -385,7 +385,7 @@ export function Portfolio() {
                           <Badge variant={o.orderSide === 'BUY' ? 'destructive' : 'success'} className="text-xs">
                             {o.orderSide === 'BUY' ? '买入' : '卖出'}
                           </Badge>
-                          <Badge variant={o.status === 'PENDING' ? 'warning' : o.status === 'FILLED' ? 'success' : 'secondary'}>
+                          <Badge variant={o.status === 'PENDING' || o.status === 'SETTLING' ? 'warning' : o.status === 'FILLED' ? 'success' : 'secondary'}>
                             {o.status}
                           </Badge>
                         </div>

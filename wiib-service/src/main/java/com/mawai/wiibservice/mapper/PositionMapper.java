@@ -36,16 +36,18 @@ public interface PositionMapper extends BaseMapper<Position> {
     void deleteEmptyPosition(@Param("userId") Long userId, @Param("stockId") Long stockId);
 
     /**
-     * UPSERT: 新建或更新持仓（加权平均成本）
+     * UPSERT: 新建或更新持仓（加权平均成本 + 累加折扣）
      */
-    @Insert("INSERT INTO position (user_id, stock_id, quantity, frozen_quantity, avg_cost, created_at, updated_at) " +
-            "VALUES (#{userId}, #{stockId}, #{quantity}, 0, #{price}, NOW(), NOW()) " +
+    @Insert("INSERT INTO position (user_id, stock_id, quantity, frozen_quantity, avg_cost, total_discount, created_at, updated_at) " +
+            "VALUES (#{userId}, #{stockId}, #{quantity}, 0, #{price}, #{discount}, NOW(), NOW()) " +
             "ON CONFLICT (user_id, stock_id) DO UPDATE SET " +
             "avg_cost = (position.avg_cost * position.quantity + #{price} * #{quantity}) / (position.quantity + #{quantity}), " +
             "quantity = position.quantity + #{quantity}, " +
+            "total_discount = position.total_discount + #{discount}, " +
             "updated_at = NOW()")
     void upsertPosition(@Param("userId") Long userId, @Param("stockId") Long stockId,
-                       @Param("quantity") int quantity, @Param("price") BigDecimal price);
+                       @Param("quantity") int quantity, @Param("price") BigDecimal price,
+                       @Param("discount") BigDecimal discount);
 
     /** 删除用户全部持仓（爆仓/恢复兜底用） */
     @Delete("DELETE FROM position WHERE user_id = #{userId}")

@@ -3,17 +3,21 @@ package com.mawai.wiibservice.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.mawai.wiibcommon.dto.UserDTO;
+import com.mawai.wiibcommon.entity.CryptoPosition;
 import com.mawai.wiibcommon.entity.Settlement;
 import com.mawai.wiibcommon.entity.User;
 import com.mawai.wiibcommon.enums.ErrorCode;
 import com.mawai.wiibcommon.exception.BizException;
+import com.mawai.wiibservice.mapper.CryptoOrderMapper;
 import com.mawai.wiibservice.mapper.UserMapper;
+import com.mawai.wiibservice.service.CryptoPositionService;
 import com.mawai.wiibservice.service.PositionService;
 import com.mawai.wiibservice.service.SettlementService;
 import com.mawai.wiibservice.service.UserService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -30,6 +34,9 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
 
     private final PositionService positionService;
     private final SettlementService settlementService;
+    private final CryptoPositionService cryptoPositionService;
+    private final CryptoOrderMapper cryptoOrderMapper;
+    private final StringRedisTemplate stringRedisTemplate;
 
     @Value("${trading.initial-balance:100000}")
     private BigDecimal initialBalance;
@@ -49,6 +56,11 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         }
 
         BigDecimal marketValue = positionService.calculateTotalMarketValue(userId);
+
+        // crypto持仓市值（取查询时刻的BTC实时价格）
+        BigDecimal cryptoMarketValue = calculateCryptoMarketValue(userId);
+        marketValue = marketValue.add(cryptoMarketValue);
+
         BigDecimal frozenBalance = user.getFrozenBalance() != null ? user.getFrozenBalance() : BigDecimal.ZERO;
         BigDecimal marginLoanPrincipal = user.getMarginLoanPrincipal() != null ? user.getMarginLoanPrincipal() : BigDecimal.ZERO;
         BigDecimal marginInterestAccrued = user.getMarginInterestAccrued() != null ? user.getMarginInterestAccrued() : BigDecimal.ZERO;
@@ -57,6 +69,10 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         BigDecimal pendingSettlement = settlementService.getPendingSettlements(userId).stream()
                 .map(Settlement::getAmount)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        // crypto待结算（SETTLING状态）
+        BigDecimal cryptoSettling = cryptoOrderMapper.sumSettlingAmount(userId);
+        pendingSettlement = pendingSettlement.add(cryptoSettling);
 
         BigDecimal totalAssets = user.getBalance()
                 .add(frozenBalance)
@@ -146,5 +162,15 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
             throw new BizException(ErrorCode.FROZEN_BALANCE_NOT_ENOUGH);
         }
         log.info("用户{}扣除冻结余额: {}", userId, amount);
+    }
+
+    private BigDecimal calculateCryptoMarketValue(Long userId) {
+        String priceStr = stringRedisTemplate.opsForValue().get("market:price:BTCUSDT");
+        if (priceStr == null) return BigDecimal.ZERO;
+        BigDecimal btcPrice = new BigDecimal(priceStr);
+        return cryptoPositionService.getUserPositions(userId).stream()
+                .map(cp -> btcPrice.multiply(cp.getTotalQuantity()))
+                .reduce(BigDecimal.ZERO, BigDecimal::add)
+                .setScale(2, RoundingMode.HALF_UP);
     }
 }

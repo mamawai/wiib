@@ -41,9 +41,9 @@ export function Layout({ children }: Props) {
           <nav className="hidden md:flex items-center gap-1">
             <HeaderNavItem to="/" icon={<Home className="w-4 h-4" />} label="行情" />
             <HeaderNavItem to="/stocks" icon={<List className="w-4 h-4" />} label="股票" />
-            <HeaderNavItem to="/portfolio" icon={<Briefcase className="w-4 h-4" />} label="持仓" />
+            <HeaderNavItem to="/coin" icon={<Coins className="w-4 h-4" />} label="钱币" />
             <HeaderNavItem to="/options" icon={<LineChart className="w-4 h-4" />} label="期权" />
-            <HeaderNavItem to="/gold" icon={<Coins className="w-4 h-4" />} label="黄金" />
+            <HeaderNavItem to="/portfolio" icon={<Briefcase className="w-4 h-4" />} label="持仓" />
             <HeaderNavItem to="/ranking" icon={<Trophy className="w-4 h-4" />} label="排行" />
           </nav>
 
@@ -91,9 +91,9 @@ export function Layout({ children }: Props) {
         <div className="flex">
           <BottomNavItem to="/" icon={<Home className="w-5 h-5" />} label="行情" />
           <BottomNavItem to="/stocks" icon={<List className="w-5 h-5" />} label="股票" />
-          <BottomNavItem to="/portfolio" icon={<Briefcase className="w-5 h-5" />} label="持仓" />
+          <BottomNavItem to="/coin" icon={<Coins className="w-5 h-5" />} label="钱币" />
           <BottomNavItem to="/options" icon={<LineChart className="w-5 h-5" />} label="期权" />
-          <BottomNavItem to="/gold" icon={<Coins className="w-5 h-5" />} label="黄金" />
+          <BottomNavItem to="/portfolio" icon={<Briefcase className="w-5 h-5" />} label="持仓" />
           <BottomNavItem to="/ranking" icon={<Trophy className="w-5 h-5" />} label="排行" />
         </div>
       </nav>

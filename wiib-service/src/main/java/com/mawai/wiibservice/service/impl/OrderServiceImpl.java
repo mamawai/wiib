@@ -8,6 +8,7 @@ import com.mawai.wiibcommon.annotation.RateLimiter;
 import com.mawai.wiibcommon.constant.RateLimiterType;
 import com.mawai.wiibcommon.dto.OrderResponse;
 import com.mawai.wiibcommon.dto.OrderRequest;
+import com.mawai.wiibcommon.entity.CryptoPosition;
 import com.mawai.wiibcommon.entity.Order;
 import com.mawai.wiibcommon.entity.Position;
 import com.mawai.wiibcommon.entity.Settlement;
@@ -23,8 +24,10 @@ import com.mawai.wiibcommon.event.PositionChangeEvent;
 import com.mawai.wiibcommon.exception.BizException;
 import com.mawai.wiibcommon.util.SpringUtils;
 import com.mawai.wiibservice.config.TradingConfig;
+import com.mawai.wiibservice.mapper.CryptoOrderMapper;
 import com.mawai.wiibservice.mapper.OrderMapper;
 import com.mawai.wiibservice.service.CacheService;
+import com.mawai.wiibservice.service.CryptoPositionService;
 import com.mawai.wiibservice.service.EventPublisher;
 import com.mawai.wiibservice.service.MarginAccountService;
 import com.mawai.wiibservice.service.OrderService;
@@ -37,6 +40,7 @@ import com.mawai.wiibservice.service.BuffService;
 import com.mawai.wiibservice.util.RedisLockUtil;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -79,6 +83,9 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
     private final EventPublisher eventPublisher;
     private final MarginAccountService marginAccountService;
     private final BuffService buffService;
+    private final CryptoPositionService cryptoPositionService;
+    private final CryptoOrderMapper cryptoOrderMapper;
+    private final StringRedisTemplate stringRedisTemplate;
 
     private static final int TRIGGERED_ORDER_BATCH_SIZE = 200;
 
@@ -134,7 +141,8 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
                 if (user.getBalance().compareTo(totalCost) < 0) {
                     throw new BizException(ErrorCode.BALANCE_NOT_ENOUGH);
                 }
-                OrderResponse response = executeMarketBuy(userId, stock, request.getQuantity(), price, amount, commission);
+                BigDecimal discountPercent = discountRate != null ? discountRate.multiply(BigDecimal.valueOf(100)) : null;
+                OrderResponse response = executeMarketBuy(userId, stock, request.getQuantity(), price, amount, commission, discountPercent);
                 if (discountRate != null) {
                     buffService.markUsed(request.getUseBuffId());
                 }
@@ -164,7 +172,7 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         }
 
         // 限价单：冻结资金（含预估手续费），进入订单池
-        validateLimitPrice(request.getLimitPrice(), price);
+        tradingConfig.validateLimitPrice(request.getLimitPrice(), price);
         BigDecimal freezeAmount = request.getLimitPrice().multiply(BigDecimal.valueOf(request.getQuantity()));
         BigDecimal estimatedCommission = tradingConfig.calculateCommission(freezeAmount);
         BigDecimal totalFreeze = freezeAmount.add(estimatedCommission);
@@ -211,7 +219,7 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
             BigDecimal commission = tradingConfig.calculateCommission(amount);
             return executeMarketSell(userId, stock, request.getQuantity(), price, commission);
         } else {
-            validateLimitPrice(request.getLimitPrice(), price);
+            tradingConfig.validateLimitPrice(request.getLimitPrice(), price);
             return createLimitSellOrder(userId, stock, request);
         }
     }
@@ -291,6 +299,16 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         baseMapper.selectPage(page, wrapper);
 
         return page.convert(this::buildOrderResponseFromCache);
+    }
+
+    @Override
+    public List<OrderResponse> getLatestOrders() {
+        LambdaQueryWrapper<Order> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(Order::getStatus, OrderStatus.FILLED.getCode())
+                .orderByDesc(Order::getCreatedAt)
+                .last("LIMIT 20");
+        return baseMapper.selectList(wrapper).stream()
+                .map(this::buildOrderResponseFromCache).toList();
     }
 
     /** 从Redis缓存构建OrderResponse（只需code和name） */
@@ -568,7 +586,7 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
             if (refund.compareTo(BigDecimal.ZERO) > 0) {
                 userService.updateBalance(order.getUserId(), refund);
             }
-            positionService.addPosition(order.getUserId(), order.getStockId(), order.getQuantity(), executePrice);
+            positionService.addPosition(order.getUserId(), order.getStockId(), order.getQuantity(), executePrice, BigDecimal.ZERO);
         } else {
             positionService.deductFrozenPosition(order.getUserId(), order.getStockId(), order.getQuantity());
 
@@ -738,27 +756,18 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         return stock;
     }
 
-    /** 校验限价（市价的50%~150%范围内） */
-    private void validateLimitPrice(BigDecimal limitPrice, BigDecimal marketPrice) {
-        if (limitPrice == null || limitPrice.compareTo(BigDecimal.ZERO) <= 0) {
-            throw new BizException(ErrorCode.LIMIT_PRICE_INVALID);
-        }
-        BigDecimal ratio = limitPrice.divide(marketPrice, 4, RoundingMode.HALF_UP);
-        if (ratio.compareTo(new BigDecimal("0.5")) < 0 || ratio.compareTo(new BigDecimal("1.5")) > 0) {
-            throw new BizException(ErrorCode.LIMIT_PRICE_INVALID);
-        }
-    }
-
     /** 执行市价买入（含手续费） */
     private OrderResponse executeMarketBuy(Long userId, Stock stock, int quantity, BigDecimal price,
-            BigDecimal amount, BigDecimal commission) {
+            BigDecimal amount, BigDecimal commission, BigDecimal discountPercent) {
         BigDecimal totalCost = amount.add(commission);
 
         userService.updateBalance(userId, totalCost.negate());
-        positionService.addPosition(userId, stock.getId(), quantity, price);
+        BigDecimal discount = discountPercent != null ? price.multiply(BigDecimal.valueOf(quantity)).subtract(amount) : BigDecimal.ZERO;
+        positionService.addPosition(userId, stock.getId(), quantity, price, discount);
 
         Order order = createOrder(userId, stock.getId(), OrderSide.BUY.getCode(), OrderType.MARKET.getCode(),
                 quantity, null, price, amount, commission, null, OrderStatus.FILLED.getCode(), null);
+        order.setDiscountPercent(discountPercent);
         baseMapper.insert(order);
 
         log.info("市价买入成交 userId={} stock={} qty={} price={} amount={} commission={}",
@@ -780,7 +789,7 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
 
         userService.updateBalance(userId, cashNeed.negate());
         marginAccountService.addLoanPrincipal(userId, borrowed);
-        positionService.addPosition(userId, stock.getId(), quantity, price);
+        positionService.addPosition(userId, stock.getId(), quantity, price, BigDecimal.ZERO);
 
         Order order = createOrder(userId, stock.getId(), OrderSide.BUY.getCode(), OrderType.MARKET.getCode(),
                 quantity, null, price, amount, commission, null, OrderStatus.FILLED.getCode(), null);
@@ -899,6 +908,7 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         resp.setTriggerPrice(order.getTriggerPrice());
         resp.setTriggeredAt(order.getTriggeredAt());
         resp.setStatus(order.getStatus());
+        resp.setDiscountPercent(order.getDiscountPercent());
         resp.setExpireAt(order.getExpireAt());
         resp.setCreatedAt(order.getCreatedAt());
         return resp;
@@ -913,11 +923,20 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
             // 获取用户最新资产信息
             User user = userService.getById(userId);
             BigDecimal positionMarketValue = positionService.calculateTotalMarketValue(userId);
-            
-            // 计算待结算金额
+
+            // crypto持仓市值
+            String btcPriceStr = stringRedisTemplate.opsForValue().get("market:price:BTCUSDT");
+            if (btcPriceStr != null) {
+                BigDecimal btcPrice = new BigDecimal(btcPriceStr);
+                for (CryptoPosition cp : cryptoPositionService.getUserPositions(userId)) {
+                    positionMarketValue = positionMarketValue.add(btcPrice.multiply(cp.getTotalQuantity()));
+                }
+            }
+
             BigDecimal pendingSettlement = settlementService.getPendingSettlements(userId).stream()
                     .map(Settlement::getAmount)
                     .reduce(BigDecimal.ZERO, BigDecimal::add);
+            pendingSettlement = pendingSettlement.add(cryptoOrderMapper.sumSettlingAmount(userId));
 
             // 发布资产变化事件
             AssetChangeEvent assetEvent = new AssetChangeEvent(

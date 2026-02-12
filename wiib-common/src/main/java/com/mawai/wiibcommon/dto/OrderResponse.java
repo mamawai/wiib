@@ -50,6 +50,9 @@ public class OrderResponse {
     /** 订单状态 PENDING/TRIGGERED/FILLED/CANCELLED/EXPIRED */
     private String status;
 
+    /** 折扣率 */
+    private BigDecimal discountPercent;
+
     /** 过期时间（限价单） */
     private LocalDateTime expireAt;
 

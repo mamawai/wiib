@@ -7,6 +7,8 @@ import com.mawai.wiibcommon.entity.Order;
 
 import com.baomidou.mybatisplus.core.metadata.IPage;
 
+import java.util.List;
+
 /**
  * 订单服务接口
  */
@@ -31,6 +33,11 @@ public interface OrderService extends IService<Order> {
      * 查询用户订单列表（分页）
      */
     IPage<OrderResponse> getUserOrders(Long userId, String status, int pageNum, int pageSize);
+
+    /**
+     * 查询最新的20个订单匿名展示
+     */
+    List<OrderResponse> getLatestOrders();
 
     /**
      * 触发限价单（定时任务调用）

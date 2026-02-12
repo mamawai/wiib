@@ -74,8 +74,8 @@ public class PositionServiceImpl extends ServiceImpl<PositionMapper, Position> i
     }
 
     @Override
-    public void addPosition(Long userId, Long stockId, int quantity, BigDecimal price) {
-        baseMapper.upsertPosition(userId, stockId, quantity, price);
+    public void addPosition(Long userId, Long stockId, int quantity, BigDecimal price, BigDecimal discount) {
+        baseMapper.upsertPosition(userId, stockId, quantity, price, discount != null ? discount : BigDecimal.ZERO);
         log.info("用户{}增加持仓 股票{} 数量{} 价格{}", userId, stockId, quantity, price);
     }
 

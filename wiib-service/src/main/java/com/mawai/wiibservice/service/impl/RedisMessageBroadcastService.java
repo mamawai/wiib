@@ -34,13 +34,14 @@ public class RedisMessageBroadcastService implements MessageListener {
 
     /** Redis频道前缀 */
     private static final String CHANNEL_PREFIX = "ws:broadcast:";
+    private static final String STOCK_CHANNEL = CHANNEL_PREFIX + "stock";
+    private static final String CRYPTO_CHANNEL = CHANNEL_PREFIX + "crypto";
 
     @PostConstruct
     public void init() {
-        // 订阅股票行情广播频道
-        ChannelTopic stockTopic = new ChannelTopic(CHANNEL_PREFIX + "stock");
-        redisMessageListenerContainer.addMessageListener(this, stockTopic);
-        log.info("已订阅Redis广播频道: {}", stockTopic.getTopic());
+        redisMessageListenerContainer.addMessageListener(this, new ChannelTopic(STOCK_CHANNEL));
+        redisMessageListenerContainer.addMessageListener(this, new ChannelTopic(CRYPTO_CHANNEL));
+        log.info("已订阅Redis广播频道: {}, {}", STOCK_CHANNEL, CRYPTO_CHANNEL);
     }
 
     /**
@@ -52,12 +53,23 @@ public class RedisMessageBroadcastService implements MessageListener {
      */
     public void broadcastStockQuote(String stockCode, String message) {
         try {
-            // 消息格式：stockCode|message
             String payload = stockCode + "|" + message;
-            redisTemplate.convertAndSend(CHANNEL_PREFIX + "stock", payload);
-            log.info("广播股票行情: {}", stockCode);
+            redisTemplate.convertAndSend(STOCK_CHANNEL, payload);
+            log.debug("广播股票行情: {}", stockCode);
         } catch (Exception e) {
             log.error("广播股票行情失败: {}", stockCode, e);
+        }
+    }
+
+    /**
+     * 广播加密货币行情消息
+     */
+    public void broadcastCryptoQuote(String symbol, String message) {
+        try {
+            String payload = symbol + "|" + message;
+            redisTemplate.convertAndSend(CRYPTO_CHANNEL, payload);
+        } catch (Exception e) {
+            log.error("广播加密货币行情失败: {}", symbol, e);
         }
     }
 
@@ -67,6 +79,7 @@ public class RedisMessageBroadcastService implements MessageListener {
     @Override
     public void onMessage(Message message, byte[] pattern) {
         try {
+            String channel = new String(message.getChannel(), java.nio.charset.StandardCharsets.UTF_8);
             String payload = new String(message.getBody(), java.nio.charset.StandardCharsets.UTF_8);
             int separatorIndex = payload.indexOf('|');
             if (separatorIndex <= 0) {
@@ -74,12 +87,15 @@ public class RedisMessageBroadcastService implements MessageListener {
                 return;
             }
 
-            String stockCode = payload.substring(0, separatorIndex);
+            String code = payload.substring(0, separatorIndex);
             String jsonMessage = payload.substring(separatorIndex + 1);
 
-            // 推送到本地WebSocket连接
-            messagingTemplate.convertAndSend("/topic/quote/" + stockCode, jsonMessage);
-            log.info("本地推送股票行情: {}", stockCode);
+            if (CRYPTO_CHANNEL.equals(channel)) {
+                messagingTemplate.convertAndSend("/topic/crypto/" + code, jsonMessage);
+            } else {
+                messagingTemplate.convertAndSend("/topic/quote/" + code, jsonMessage);
+                log.debug("本地推送股票行情: {}", code);
+            }
         } catch (Exception e) {
             log.error("处理Redis广播消息失败", e);
         }

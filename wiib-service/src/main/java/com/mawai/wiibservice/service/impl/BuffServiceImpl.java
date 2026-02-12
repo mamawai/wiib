@@ -86,7 +86,7 @@ public class BuffServiceImpl extends ServiceImpl<UserBuffMapper, UserBuff> imple
                 List<Stock> stocks = stockService.list();
                 Stock stock = stocks.get(ThreadLocalRandom.current().nextInt(stocks.size()));
                 int qty = (int) buffType.getValue();
-                positionService.addPosition(userId, stock.getId(), qty, BigDecimal.ZERO);
+                positionService.addPosition(userId, stock.getId(), qty, BigDecimal.ZERO, BigDecimal.ZERO);
                 extraData = "{\"stockCode\":\"" + stock.getCode() + "\",\"stockName\":\"" + stock.getName() + "\",\"quantity\":" + qty + "}";
                 log.info("用户{}抽中股票{}{}股", userId, stock.getCode(), qty);
             }
@@ -134,9 +134,13 @@ public class BuffServiceImpl extends ServiceImpl<UserBuffMapper, UserBuff> imple
 
     @Override
     public void markUsed(Long buffId) {
+        UserBuff buff = baseMapper.selectById(buffId);
         int affected = baseMapper.markUsed(buffId);
         if (affected > 0) {
             log.info("Buff{}已使用", buffId);
+            if (buff != null) {
+                cacheService.delete("buff:status:" + buff.getUserId() + ":" + buff.getDrawDate());
+            }
         }
     }
 

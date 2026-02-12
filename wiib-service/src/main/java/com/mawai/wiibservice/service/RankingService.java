@@ -1,12 +1,15 @@
 package com.mawai.wiibservice.service;
 
 import com.mawai.wiibcommon.dto.RankingDTO;
+import com.mawai.wiibcommon.entity.CryptoPosition;
 import com.mawai.wiibcommon.entity.Position;
 import com.mawai.wiibcommon.entity.Settlement;
 import com.mawai.wiibcommon.entity.User;
+import com.mawai.wiibservice.mapper.CryptoOrderMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -26,9 +29,12 @@ public class RankingService {
 
     private final UserService userService;
     private final PositionService positionService;
+    private final CryptoPositionService cryptoPositionService;
     private final CacheService cacheService;
     private final SettlementService settlementService;
     private final StockCacheService stockCacheService;
+    private final CryptoOrderMapper cryptoOrderMapper;
+    private final StringRedisTemplate stringRedisTemplate;
 
     private static final String RANKING_KEY = "ranking:top";
     private static final int TOP_N = 50;
@@ -51,6 +57,21 @@ public class RankingService {
         List<User> users = userService.list();
         List<Position> allPositions = positionService.list();
         List<Settlement> pendingSettlements = settlementService.getAllPendingSettlements();
+
+        // crypto持仓 + BTC实时价格
+        List<CryptoPosition> allCryptoPositions = cryptoPositionService.list();
+        Map<Long, List<CryptoPosition>> cryptoPositionMap = allCryptoPositions.stream()
+                .collect(Collectors.groupingBy(CryptoPosition::getUserId));
+        BigDecimal btcPrice = BigDecimal.ZERO;
+        String btcPriceStr = stringRedisTemplate.opsForValue().get("market:price:BTCUSDT");
+        if (btcPriceStr != null) btcPrice = new BigDecimal(btcPriceStr);
+
+        // crypto待结算（SETTLING状态）
+        Map<Long, BigDecimal> cryptoSettlingMap = cryptoOrderMapper.sumAllSettlingAmounts().stream()
+                .collect(Collectors.toMap(
+                        m -> ((Number) m.get("user_id")).longValue(),
+                        m -> (BigDecimal) m.get("amount")
+                ));
 
         // userId -> positions
         Map<Long, List<Position>> positionMap = allPositions.stream()
@@ -102,8 +123,18 @@ public class RankingService {
             }
 
             BigDecimal pendingSettlement = pendingMap.getOrDefault(user.getId(), BigDecimal.ZERO);
+            pendingSettlement = pendingSettlement.add(cryptoSettlingMap.getOrDefault(user.getId(), BigDecimal.ZERO));
 
-            BigDecimal totalAssets = balance.add(frozen).add(marketValue).add(pendingSettlement)
+            // crypto持仓市值
+            BigDecimal cryptoMarketValue = BigDecimal.ZERO;
+            List<CryptoPosition> cryptoPositions = cryptoPositionMap.get(user.getId());
+            if (cryptoPositions != null && btcPrice.compareTo(BigDecimal.ZERO) > 0) {
+                for (CryptoPosition cp : cryptoPositions) {
+                    cryptoMarketValue = cryptoMarketValue.add(btcPrice.multiply(cp.getTotalQuantity()));
+                }
+            }
+
+            BigDecimal totalAssets = balance.add(frozen).add(marketValue).add(cryptoMarketValue).add(pendingSettlement)
                     .subtract(marginLoanPrincipal)
                     .subtract(marginInterestAccrued);
             RankingDTO dto = getRankingDTO(user, totalAssets);

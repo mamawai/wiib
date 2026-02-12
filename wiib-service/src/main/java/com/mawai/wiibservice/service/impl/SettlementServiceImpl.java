@@ -3,10 +3,13 @@ package com.mawai.wiibservice.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.mawai.wiibcommon.entity.CryptoPosition;
 import com.mawai.wiibcommon.entity.Settlement;
 import com.mawai.wiibcommon.entity.User;
 import com.mawai.wiibcommon.event.AssetChangeEvent;
+import com.mawai.wiibservice.mapper.CryptoOrderMapper;
 import com.mawai.wiibservice.mapper.SettlementMapper;
+import com.mawai.wiibservice.service.CryptoPositionService;
 import com.mawai.wiibservice.service.EventPublisher;
 import com.mawai.wiibservice.service.MarginAccountService;
 import com.mawai.wiibservice.service.PositionService;
@@ -16,6 +19,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Lazy;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -36,7 +40,10 @@ public class SettlementServiceImpl extends ServiceImpl<SettlementMapper, Settlem
     private UserService userService;
     private final EventPublisher eventPublisher;
     private final PositionService positionService;
+    private final CryptoPositionService cryptoPositionService;
+    private final CryptoOrderMapper cryptoOrderMapper;
     private final MarginAccountService marginAccountService;
+    private final StringRedisTemplate stringRedisTemplate;
 
     @Override
     public void createSettlement(Long userId, Long orderId, BigDecimal amount) {
@@ -105,9 +112,20 @@ public class SettlementServiceImpl extends ServiceImpl<SettlementMapper, Settlem
             try {
                 User user = userService.getById(userId);
                 BigDecimal marketValue = positionService.calculateTotalMarketValue(userId);
+
+                // crypto持仓市值
+                String btcPriceStr = stringRedisTemplate.opsForValue().get("market:price:BTCUSDT");
+                if (btcPriceStr != null) {
+                    BigDecimal btcPrice = new BigDecimal(btcPriceStr);
+                    for (CryptoPosition cp : cryptoPositionService.getUserPositions(userId)) {
+                        marketValue = marketValue.add(btcPrice.multiply(cp.getTotalQuantity()));
+                    }
+                }
+
                 BigDecimal pendingAmount = getPendingSettlements(userId).stream()
                         .map(Settlement::getAmount)
                         .reduce(BigDecimal.ZERO, BigDecimal::add);
+                pendingAmount = pendingAmount.add(cryptoOrderMapper.sumSettlingAmount(userId));
 
                 AssetChangeEvent event = new AssetChangeEvent(
                         userId,

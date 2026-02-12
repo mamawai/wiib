@@ -1,10 +1,13 @@
 package com.mawai.wiibservice.config;
 
+import com.mawai.wiibcommon.enums.ErrorCode;
+import com.mawai.wiibcommon.exception.BizException;
 import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Configuration;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.time.LocalTime;
@@ -23,6 +26,9 @@ public class TradingConfig {
 
     /** 最低手续费（默认5元） */
     private BigDecimal minCommission = new BigDecimal("5.00");
+
+    /** crypto手续费率（默认0.1%） */
+    private BigDecimal cryptoCommissionRate = new BigDecimal("0.001");
 
     /** 市价单滑点保护（默认±2%） */
     private BigDecimal slippageLimit = new BigDecimal("0.02");
@@ -105,6 +111,10 @@ public class TradingConfig {
         return commission.compareTo(minCommission) < 0 ? minCommission : commission;
     }
 
+    public BigDecimal calculateCryptoCommission(BigDecimal amount) {
+        return amount.multiply(cryptoCommissionRate).setScale(2, java.math.RoundingMode.HALF_UP);
+    }
+
     /**
      * 检查价格是否在滑点保护范围内
      * 
@@ -116,5 +126,15 @@ public class TradingConfig {
         BigDecimal diff = actualPrice.subtract(expectedPrice).abs();
         BigDecimal maxDiff = expectedPrice.multiply(slippageLimit);
         return diff.compareTo(maxDiff) <= 0;
+    }
+
+    public void validateLimitPrice(BigDecimal limitPrice, BigDecimal marketPrice) {
+        if (limitPrice == null || limitPrice.compareTo(BigDecimal.ZERO) <= 0) {
+            throw new BizException(ErrorCode.LIMIT_PRICE_INVALID);
+        }
+        BigDecimal ratio = limitPrice.divide(marketPrice, 4, RoundingMode.HALF_UP);
+        if (ratio.compareTo(new BigDecimal("0.5")) < 0 || ratio.compareTo(new BigDecimal("1.5")) > 0) {
+            throw new BizException(ErrorCode.LIMIT_PRICE_INVALID);
+        }
     }
 }

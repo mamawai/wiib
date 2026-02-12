@@ -60,7 +60,11 @@ public enum ErrorCode {
     BJ_ACTION_NOT_ALLOWED(1505, "当前不可执行此操作"),
     BJ_CONVERT_LIMIT(1506, "超出每日转出上限"),
     BJ_CONVERT_INSUFFICIENT(1507, "可转出积分不足"),
-    BJ_POOL_EXHAUSTED(1508, "今日积分池已耗尽");
+    BJ_POOL_EXHAUSTED(1508, "今日积分池已耗尽"),
+
+    // Crypto错误码 1600+
+    CRYPTO_PRICE_UNAVAILABLE(1601, "无法获取实时价格"),
+    CRYPTO_SYMBOL_INVALID(1602, "交易对无效");
 
     private final int code;
     private final String msg;

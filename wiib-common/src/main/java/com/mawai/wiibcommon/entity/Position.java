@@ -32,6 +32,9 @@ public class Position {
     /** 持仓成本（加权平均） */
     private BigDecimal avgCost;
 
+    /** 累计折扣节省金额 */
+    private BigDecimal totalDiscount;
+
     /** 创建时间 */
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdAt;

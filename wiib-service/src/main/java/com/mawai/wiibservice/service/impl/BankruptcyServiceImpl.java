@@ -1,6 +1,7 @@
 package com.mawai.wiibservice.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.mawai.wiibcommon.entity.CryptoPosition;
 import com.mawai.wiibcommon.entity.Settlement;
 import com.mawai.wiibcommon.entity.User;
 import com.mawai.wiibcommon.enums.ErrorCode;
@@ -8,11 +9,13 @@ import com.mawai.wiibcommon.event.AssetChangeEvent;
 import com.mawai.wiibcommon.exception.BizException;
 import com.mawai.wiibcommon.util.SpringUtils;
 import com.mawai.wiibservice.config.TradingConfig;
+import com.mawai.wiibservice.mapper.CryptoOrderMapper;
 import com.mawai.wiibservice.mapper.OrderMapper;
 import com.mawai.wiibservice.mapper.PositionMapper;
 import com.mawai.wiibservice.mapper.SettlementMapper;
 import com.mawai.wiibservice.mapper.UserMapper;
 import com.mawai.wiibservice.service.BankruptcyService;
+import com.mawai.wiibservice.service.CryptoPositionService;
 import com.mawai.wiibservice.service.EventPublisher;
 import com.mawai.wiibservice.service.PositionService;
 import com.mawai.wiibservice.service.SettlementService;
@@ -20,6 +23,7 @@ import com.mawai.wiibservice.service.UserService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -39,9 +43,12 @@ public class BankruptcyServiceImpl implements BankruptcyService {
     private final PositionMapper positionMapper;
     private final SettlementMapper settlementMapper;
     private final PositionService positionService;
+    private final CryptoPositionService cryptoPositionService;
     private final SettlementService settlementService;
     private final EventPublisher eventPublisher;
     private final TradingConfig tradingConfig;
+    private final CryptoOrderMapper cryptoOrderMapper;
+    private final StringRedisTemplate stringRedisTemplate;
 
     @Value("${trading.initial-balance:100000}")
     private BigDecimal initialBalance;
@@ -110,9 +117,20 @@ public class BankruptcyServiceImpl implements BankruptcyService {
         BigDecimal interest = user.getMarginInterestAccrued() != null ? user.getMarginInterestAccrued() : BigDecimal.ZERO;
 
         BigDecimal marketValue = positionService.calculateTotalMarketValue(userId);
+
+        // crypto持仓市值
+        String btcPriceStr = stringRedisTemplate.opsForValue().get("market:price:BTCUSDT");
+        if (btcPriceStr != null) {
+            BigDecimal btcPrice = new BigDecimal(btcPriceStr);
+            for (CryptoPosition cp : cryptoPositionService.getUserPositions(userId)) {
+                marketValue = marketValue.add(btcPrice.multiply(cp.getTotalQuantity()));
+            }
+        }
+
         BigDecimal pendingSettlement = settlementService.getPendingSettlements(userId).stream()
                 .map(Settlement::getAmount)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
+        pendingSettlement = pendingSettlement.add(cryptoOrderMapper.sumSettlingAmount(userId));
 
         BigDecimal netAssets = balance
                 .add(frozen)

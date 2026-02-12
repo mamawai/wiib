@@ -12,6 +12,8 @@ import org.springframework.web.bind.annotation.*;
 
 import com.baomidou.mybatisplus.core.metadata.IPage;
 
+import java.util.List;
+
 /**
  * 订单Controller
  */
@@ -52,5 +54,11 @@ public class OrderController {
             @RequestParam(defaultValue = "10") int pageSize) {
         Long userId = StpUtil.getLoginIdAsLong();
         return Result.ok(orderService.getUserOrders(userId, status, pageNum, pageSize));
+    }
+
+    @GetMapping("/live")
+    @Operation(summary = "查询用户实时订单列表最新的20个-匿名展示")
+    public Result<List<OrderResponse>> live() {
+        return Result.ok(orderService.getLatestOrders());
     }
 }

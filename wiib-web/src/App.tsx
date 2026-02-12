@@ -7,7 +7,7 @@ import { StockDetail } from './pages/StockDetail';
 import { StockKline } from './pages/StockKline';
 import { Portfolio } from './pages/Portfolio';
 import { Options } from './pages/Options';
-import { Gold } from './pages/Gold';
+import { Coin } from './pages/Coin';
 import { Ranking } from './pages/Ranking';
 import { Login } from './pages/Login';
 import { Admin } from './pages/Admin';
@@ -42,7 +42,7 @@ function App() {
                 <Route path="/stock/:id/kline" element={<StockKline />} />
                 <Route path="/portfolio" element={<Portfolio />} />
                 <Route path="/options" element={<Options />} />
-                <Route path="/gold" element={<Gold />} />
+                <Route path="/coin" element={<Coin />} />
                 <Route path="/ranking" element={<Ranking />} />
                 <Route path="/admin" element={<Admin />} />
                 <Route path="/blackjack" element={<Blackjack />} />

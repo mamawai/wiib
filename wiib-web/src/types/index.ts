@@ -172,7 +172,7 @@ export interface OrderStatusEvent {
   quantity: number;
   price: number;
   oldStatus: string;
-  newStatus: 'PENDING' | 'TRIGGERED' | 'FILLED' | 'CANCELLED' | 'EXPIRED';
+  newStatus: 'PENDING' | 'TRIGGERED' | 'SETTLING' | 'FILLED' | 'CANCELLED' | 'EXPIRED';
   executePrice?: number;
   timestamp: number;
 }
@@ -315,4 +315,57 @@ export interface ConvertResult {
   chips: number;
   balance: number;
   todayConverted: number;
+}
+
+// ========== 加密货币行情类型 ==========
+export interface CryptoKline {
+  openTime: number;
+  open: string;
+  high: string;
+  low: string;
+  close: string;
+  volume: string;
+  closeTime: number;
+}
+
+export interface CryptoPrice {
+  price: string;
+  ts: string;
+}
+
+// ========== 加密货币交易类型 ==========
+export interface CryptoOrderRequest {
+  symbol: string;
+  quantity: number;
+  orderType: 'MARKET' | 'LIMIT';
+  limitPrice?: number;
+  leverageMultiple?: number;
+  useBuffId?: number;
+}
+
+export interface CryptoPosition {
+  id: number;
+  symbol: string;
+  quantity: number;
+  frozenQuantity: number;
+  avgCost: number;
+  totalDiscount: number;
+}
+
+export interface CryptoOrder {
+  orderId: number;
+  symbol: string;
+  orderSide: string;
+  orderType: string;
+  quantity: number;
+  leverage: number;
+  limitPrice?: number;
+  filledPrice?: number;
+  filledAmount?: number;
+  commission?: number;
+  triggerPrice?: number;
+  triggeredAt?: string;
+  status: string;
+  expireAt?: string;
+  createdAt: string;
 }

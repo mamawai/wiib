@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { Stock, User, Position, OrderRequest, Order, DayTick, Kline, Settlement, PageResult, News, RankingItem, OptionChainItem, OptionQuote, OptionPosition, OptionOrder, OptionOrderRequest, OptionOrderResult, BuffStatus, UserBuff, BlackjackStatus, GameState, ConvertResult } from '../types';
+import type { Stock, User, Position, OrderRequest, Order, DayTick, Kline, Settlement, PageResult, News, RankingItem, OptionChainItem, OptionQuote, OptionPosition, OptionOrder, OptionOrderRequest, OptionOrderResult, BuffStatus, UserBuff, BlackjackStatus, GameState, ConvertResult, CryptoPrice, CryptoOrderRequest, CryptoOrder, CryptoPosition } from '../types';
 
 const api = axios.create({
   baseURL: '/api',
@@ -80,6 +80,7 @@ export const orderApi = {
   // 查询订单列表（分页）
   list: (status?: string, pageNum = 1, pageSize = 10) =>
     api.get<unknown, PageResult<Order>>('/order/list', { params: { status, pageNum, pageSize } }),
+  live: () => api.get<unknown, Order[]>('/order/live'),
 };
 
 // ========== 用户接口 ==========
@@ -185,4 +186,37 @@ export const blackjackApi = {
   insurance: () => api.post<unknown, GameState>('/blackjack/insurance'),
   forfeit: () => api.post<unknown, GameState>('/blackjack/forfeit'),
   convert: (amount: number) => api.post<unknown, ConvertResult>('/blackjack/convert', { amount }),
+};
+
+// ========== 加密货币行情接口 ==========
+const getToken = (): string | undefined => {
+  const stored = localStorage.getItem('wiib-user');
+  if (!stored) return undefined;
+  try { return JSON.parse(stored).state?.token; } catch { return undefined; }
+};
+
+export const cryptoApi = {
+  // K线数据（直接返回Binance原始数组，不走拦截器解包）
+  klines: (symbol = 'BTCUSDT', interval = '1m', limit = 500, endTime?: number) => {
+    const token = getToken();
+    return axios.get<number[][]>(`/api/crypto/klines`, {
+      params: { symbol, interval, limit, ...(endTime ? { endTime } : {}) },
+      ...(token ? { headers: { satoken: token } } : {}),
+    }).then(res => res.data);
+  },
+  // 最新价格
+  price: (symbol = 'BTCUSDT') => api.get<unknown, CryptoPrice>('/crypto/price', { params: { symbol } }),
+  // WS连接状态
+  status: () => api.get<unknown, { wsConnected: boolean }>('/crypto/status'),
+};
+
+// ========== 加密货币交易接口 ==========
+export const cryptoOrderApi = {
+  buy: (data: CryptoOrderRequest) => api.post<unknown, CryptoOrder>('/crypto/order/buy', data),
+  sell: (data: CryptoOrderRequest) => api.post<unknown, CryptoOrder>('/crypto/order/sell', data),
+  cancel: (orderId: number) => api.post<unknown, CryptoOrder>(`/crypto/order/cancel/${orderId}`),
+  list: (status?: string, pageNum = 1, pageSize = 10) =>
+    api.get<unknown, PageResult<CryptoOrder>>('/crypto/order/list', { params: { status, pageNum, pageSize } }),
+  position: (symbol = 'BTCUSDT') => api.get<unknown, CryptoPosition | null>('/crypto/order/position', { params: { symbol } }),
+  live: () => api.get<unknown, CryptoOrder[]>('/crypto/order/live'),
 };
