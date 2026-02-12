@@ -10,6 +10,7 @@ import { Input } from '../components/ui/input';
 import { Badge } from '../components/ui/badge';
 import { Skeleton } from '../components/ui/skeleton';
 import { Bitcoin, TrendingUp, TrendingDown, Wifi, WifiOff, ChevronLeft, ChevronRight, Loader2, X, RefreshCw, Sparkles, Wallet, Warehouse, Scale } from 'lucide-react';
+import TradingViewWidget from '../components/TradingViewWidget';
 import type { CryptoOrder, CryptoPosition, PageResult, UserBuff } from '../types';
 
 const SYMBOL = 'BTCUSDT';
@@ -140,10 +141,11 @@ export function Coin() {
     }
   }, []);
 
-  useEffect(() => { fetchKlines(activeTab); }, [activeTab, fetchKlines]);
+  useEffect(() => { if (activeTab < TABS.length) fetchKlines(activeTab); }, [activeTab, fetchKlines]);
 
   // 切tab后 resize 当前图表（display:none → block 后尺寸需刷新）
   useEffect(() => {
+    if (activeTab >= TABS.length) return;
     const inst = activeTab === 0 ? chartInst1D.current : chartInst7D.current;
     inst?.resize();
   }, [activeTab]);
@@ -374,13 +376,15 @@ export function Coin() {
               {TABS.map((tab, i) => (
                 <Button key={tab.label} variant={activeTab === i ? 'default' : 'ghost'} size="sm" className="h-7 px-2.5 text-xs" onClick={() => setActiveTab(i)}>{tab.label}</Button>
               ))}
+              <Button variant={activeTab === 2 ? 'default' : 'ghost'} size="sm" className="h-7 px-2.5 text-xs" onClick={() => setActiveTab(2)}>高级</Button>
             </div>
           </div>
         </CardHeader>
         <CardContent className="p-2 relative">
-          {loading && points.length === 0 && <Skeleton className="absolute inset-0 z-10 m-2" style={{ height: 300 }} />}
+          {loading && activeTab < TABS.length && points.length === 0 && <Skeleton className="absolute inset-0 z-10 m-2" style={{ height: 300 }} />}
           <div ref={chartRef1D} className="w-full" style={{ height: 300, display: activeTab === 0 ? 'block' : 'none' }} />
           <div ref={chartRef7D} className="w-full" style={{ height: 300, display: activeTab === 1 ? 'block' : 'none' }} />
+          {activeTab === 2 && <div style={{ height: 500 }}><TradingViewWidget /></div>}
         </CardContent>
       </Card>
 
