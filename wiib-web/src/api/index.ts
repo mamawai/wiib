@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { Stock, User, Position, OrderRequest, Order, DayTick, Kline, Settlement, PageResult, News, RankingItem, OptionChainItem, OptionQuote, OptionPosition, OptionOrder, OptionOrderRequest, OptionOrderResult, BuffStatus, UserBuff, BlackjackStatus, GameState, ConvertResult, CryptoPrice, CryptoOrderRequest, CryptoOrder, CryptoPosition } from '../types';
+import type { Stock, User, Position, OrderRequest, Order, DayTick, Kline, Settlement, PageResult, News, RankingItem, OptionChainItem, OptionQuote, OptionPosition, OptionOrder, OptionOrderRequest, OptionOrderResult, BuffStatus, UserBuff, BlackjackStatus, GameState, ConvertResult, MinesStatus, MinesGameState, CryptoPrice, CryptoOrderRequest, CryptoOrder, CryptoPosition, CardRoom, Card414GameState } from '../types';
 
 const api = axios.create({
   baseURL: '/api',
@@ -188,6 +188,14 @@ export const blackjackApi = {
   convert: (amount: number) => api.post<unknown, ConvertResult>('/blackjack/convert', { amount }),
 };
 
+// ========== 矿工游戏接口 ==========
+export const minesApi = {
+  status: () => api.get<unknown, MinesStatus>('/mines/status'),
+  bet: (amount: number) => api.post<unknown, MinesGameState>('/mines/bet', { amount }),
+  reveal: (cell: number) => api.post<unknown, MinesGameState>('/mines/reveal', { cell }),
+  cashout: () => api.post<unknown, MinesGameState>('/mines/cashout'),
+};
+
 // ========== 加密货币行情接口 ==========
 const getToken = (): string | undefined => {
   const stored = localStorage.getItem('wiib-user');
@@ -219,4 +227,24 @@ export const cryptoOrderApi = {
     api.get<unknown, PageResult<CryptoOrder>>('/crypto/order/list', { params: { status, pageNum, pageSize } }),
   position: (symbol = 'BTCUSDT') => api.get<unknown, CryptoPosition | null>('/crypto/order/position', { params: { symbol } }),
   live: () => api.get<unknown, CryptoOrder[]>('/crypto/order/live'),
+};
+
+// ========== 414扑克接口 ==========
+export const card414Api = {
+  createRoom: (uuid: string, nickname: string) =>
+    api.post<unknown, CardRoom>('/414/room/create', { uuid, nickname }),
+  joinRoom: (uuid: string, nickname: string, roomCode: string) =>
+    api.post<unknown, CardRoom>('/414/room/join', { uuid, nickname, roomCode }),
+  getRoom: (code: string) =>
+    api.get<unknown, CardRoom>(`/414/room/${code}`),
+  listRooms: () =>
+    api.get<unknown, CardRoom[]>('/414/rooms'),
+  leaveRoom: (uuid: string, roomCode: string) =>
+    api.post<unknown, void>('/414/room/leave', { uuid, roomCode }),
+  forceQuit: (uuid: string, roomCode: string) =>
+    api.post<unknown, void>('/414/force-quit', { uuid, roomCode }),
+  getHand: (roomCode: string, uuid: string) =>
+    api.get<unknown, string[]>('/414/hand', { params: { roomCode, uuid } }),
+  getGameState: (code: string, uuid: string) =>
+    api.get<unknown, Card414GameState>(`/414/game/${code}`, { params: { uuid } }),
 };

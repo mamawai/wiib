@@ -10,7 +10,7 @@ import { Button } from '../components/ui/button';
 import { Skeleton } from '../components/ui/skeleton';
 import { Dialog, DialogHeader, DialogContent, DialogFooter } from '../components/ui/dialog';
 import { useToast } from '../components/ui/use-toast';
-import { TrendingUp, TrendingDown, LineChart, RefreshCcw, Bell, Gift, Settings, Spade } from 'lucide-react';
+import { TrendingUp, TrendingDown, LineChart, RefreshCcw, Bell, Gift, Settings, Gamepad2 } from 'lucide-react';
 import type { Stock, BuffStatus } from '../types';
 import { useDedupedEffect } from '../hooks/useDedupedEffect';
 import { useUserStore } from '../stores/userStore';
@@ -199,8 +199,8 @@ export function Home() {
                     <Gift className="w-4 h-4" />
                     {buffStatus?.canDraw ? '每日抽奖' : '今日已抽'}
                   </Button>
-                  <Button size="sm" variant="outline" onClick={() => navigate('/blackjack')}>
-                    <Spade className="w-4 h-4" />
+                  <Button size="sm" variant="outline" onClick={() => navigate('/games')}>
+                    <Gamepad2 className="w-4 h-4" />
                     小游戏
                   </Button>
                 </>

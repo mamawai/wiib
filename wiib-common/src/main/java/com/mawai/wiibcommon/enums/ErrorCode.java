@@ -64,7 +64,32 @@ public enum ErrorCode {
 
     // Crypto错误码 1600+
     CRYPTO_PRICE_UNAVAILABLE(1601, "无法获取实时价格"),
-    CRYPTO_SYMBOL_INVALID(1602, "交易对无效");
+    CRYPTO_SYMBOL_INVALID(1602, "交易对无效"),
+
+    // Mines错误码 1700+
+    MINES_GAME_IN_PROGRESS(1701, "有未完成的矿工游戏"),
+    MINES_NO_ACTIVE_GAME(1702, "没有进行中的矿工游戏"),
+    MINES_BALANCE_NOT_ENOUGH(1703, "余额不足"),
+    MINES_INVALID_BET(1704, "下注金额无效"),
+    MINES_INVALID_CELL(1705, "格子编号无效"),
+    MINES_CELL_ALREADY_REVEALED(1706, "该格子已翻开"),
+    MINES_MUST_REVEAL_FIRST(1707, "至少翻开一个格子才能提现"),
+
+    // 414扑克错误码 1800+
+    CARD_ROOM_NOT_FOUND(1800, "房间不存在"),
+    CARD_ROOM_FULL(1801, "房间已满"),
+    CARD_NOT_HOST(1802, "非房主"),
+    CARD_NOT_ALL_READY(1803, "未全部准备"),
+    CARD_NOT_YOUR_TURN(1804, "不是你的回合"),
+    CARD_INVALID_PLAY(1805, "出牌不合法"),
+    CARD_CANNOT_BEAT(1806, "牌型压不过"),
+    CARD_CHA_INVALID(1807, "无法叉"),
+    CARD_GOU_INVALID(1808, "无法勾"),
+    CARD_ALREADY_IN_ROOM(1809, "已在房间中"),
+    CARD_GAME_IN_PROGRESS(1810, "游戏进行中"),
+    CARD_NICKNAME_REQUIRED(1811, "需要昵称"),
+    CARD_PLAYER_NOT_IN_ROOM(1812, "不在房间中"),
+    CARD_INVALID_STATE(1813, "当前状态不允许此操作");
 
     private final int code;
     private final String msg;

@@ -1,0 +1,268 @@
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { v4 as uuidv4 } from 'uuid';
+import { Client } from '@stomp/stompjs';
+import SockJS from 'sockjs-client';
+import { card414Api } from '../api';
+import { useToast } from '../components/ui/use-toast';
+import { Card414Lobby } from '../components/card414/Card414Lobby';
+import { Card414Room } from '../components/card414/Card414Room';
+import { Card414Game } from '../components/card414/Card414Game';
+import type { CardRoom, Card414GameState, Card414WsMessage } from '../types';
+
+const STORAGE_KEY = '414-player';
+
+function getPlayer(): { uuid: string; nickname: string } {
+  const stored = localStorage.getItem(STORAGE_KEY);
+  if (stored) {
+    try { return JSON.parse(stored); } catch { /* */ }
+  }
+  const p = { uuid: uuidv4(), nickname: '' };
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(p));
+  return p;
+}
+
+function savePlayer(p: { uuid: string; nickname: string }) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(p));
+}
+
+export function Card414() {
+  const { toast } = useToast();
+  const [player, setPlayer] = useState(getPlayer);
+  const [phase, setPhase] = useState<'lobby' | 'room' | 'game'>('lobby');
+  const [room, setRoom] = useState<CardRoom | null>(null);
+  const [gameState, setGameState] = useState<Card414GameState | null>(null);
+  const [gameOverInfo, setGameOverInfo] = useState<{ winner: string; winnerPlayers: string[] } | null>(null);
+  const clientRef = useRef<Client | null>(null);
+  const roomCodeRef = useRef<string>('');
+
+  const updateNickname = useCallback((n: string) => {
+    const p = { ...player, nickname: n };
+    setPlayer(p);
+    savePlayer(p);
+  }, [player]);
+
+  // WS 连接
+  const connectWs = useCallback((roomCode: string) => {
+    if (clientRef.current?.connected) return;
+    roomCodeRef.current = roomCode;
+
+    const client = new Client({
+      webSocketFactory: () => new SockJS('/ws/414') as WebSocket,
+      reconnectDelay: 3000,
+      onConnect: () => {
+        client.subscribe(`/topic/414/room/${roomCode}`, (msg) => {
+          const payload: Card414WsMessage = JSON.parse(msg.body);
+          handleWsMessage(payload);
+        });
+        client.subscribe(`/topic/414/game/${roomCode}`, (msg) => {
+          const payload: Card414WsMessage = JSON.parse(msg.body);
+          handleWsMessage(payload);
+        });
+      },
+      onDisconnect: () => {},
+    });
+    client.activate();
+    clientRef.current = client;
+  }, []);
+
+  const disconnectWs = useCallback(() => {
+    if (clientRef.current) {
+      clientRef.current.deactivate();
+      clientRef.current = null;
+    }
+  }, []);
+
+  const sendWs = useCallback((dest: string, body: Record<string, unknown>) => {
+    if (clientRef.current?.connected) {
+      clientRef.current.publish({
+        destination: dest,
+        body: JSON.stringify(body),
+      });
+    }
+  }, []);
+
+  // WS 消息处理
+  const handleWsMessage = useCallback((msg: Card414WsMessage) => {
+    const d = msg.data;
+    switch (msg.type) {
+      case 'PLAYER_JOIN':
+      case 'PLAYER_LEAVE':
+      case 'READY':
+      case 'SEAT_SWAP':
+        // 重新拉取房间状态
+        if (roomCodeRef.current) {
+          card414Api.getRoom(roomCodeRef.current).then(setRoom).catch(() => {});
+        }
+        break;
+
+      case 'GAME_START':
+        setPhase('game');
+        // 拉取完整游戏状态+手牌
+        if (roomCodeRef.current) {
+          card414Api.getGameState(roomCodeRef.current, getPlayer().uuid).then(setGameState).catch(() => {});
+        }
+        break;
+
+      case 'PLAY':
+      case 'PASS':
+      case 'CHA':
+      case 'GOU':
+      case 'CHA_WAIT':
+      case 'GOU_WAIT':
+      case 'CHA_TIMEOUT':
+      case 'GOU_TIMEOUT':
+      case 'TURN':
+      case 'LIGHT':
+        // 重拉游戏状态
+        if (roomCodeRef.current) {
+          card414Api.getGameState(roomCodeRef.current, getPlayer().uuid).then(setGameState).catch(() => {});
+        }
+        break;
+
+      case 'ROUND_OVER':
+        if (roomCodeRef.current) {
+          card414Api.getGameState(roomCodeRef.current, getPlayer().uuid).then(setGameState).catch(() => {});
+        }
+        break;
+
+      case 'GAME_OVER': {
+        const data = d as Record<string, unknown>;
+        if (data.reason === 'player_quit') {
+          toast('有玩家退出，牌局已销毁', 'error');
+          setTimeout(() => {
+            disconnectWs();
+            setRoom(null);
+            setGameState(null);
+            setGameOverInfo(null);
+            setPhase('lobby');
+            roomCodeRef.current = '';
+            localStorage.removeItem('414-room');
+          }, 1500);
+        } else {
+          setGameOverInfo({
+            winner: String(data.winner),
+            winnerPlayers: (data.winnerPlayers as string[]) || [],
+          });
+        }
+        break;
+      }
+
+      case 'ERROR': {
+        const errData = d as Record<string, unknown>;
+        if (!errData.uuid || errData.uuid === getPlayer().uuid) {
+          toast(String(errData.msg || '操作失败'), 'error');
+        }
+        break;
+      }
+    }
+  }, [toast]);
+
+  // 进入房间
+  const enterRoom = useCallback((r: CardRoom) => {
+    setRoom(r);
+    setPhase('room');
+    roomCodeRef.current = r.roomCode;
+    connectWs(r.roomCode);
+  }, [connectWs]);
+
+  // 离开房间
+  const leaveRoom = useCallback(async () => {
+    if (roomCodeRef.current) {
+      try {
+        await card414Api.leaveRoom(player.uuid, roomCodeRef.current);
+      } catch { /* */ }
+    }
+    disconnectWs();
+    setRoom(null);
+    setPhase('lobby');
+    roomCodeRef.current = '';
+    localStorage.removeItem('414-room');
+  }, [player.uuid, disconnectWs]);
+
+  // 强制退出(销毁牌局)
+  const forceQuit = useCallback(async () => {
+    if (roomCodeRef.current) {
+      try {
+        await card414Api.forceQuit(player.uuid, roomCodeRef.current);
+      } catch { /* */ }
+    }
+    disconnectWs();
+    setRoom(null);
+    setGameState(null);
+    setPhase('lobby');
+    roomCodeRef.current = '';
+    localStorage.removeItem('414-room');
+  }, [player.uuid, disconnectWs]);
+
+  // 游戏结束后返回大厅
+  const backToLobby = useCallback(() => {
+    disconnectWs();
+    setRoom(null);
+    setGameState(null);
+    setGameOverInfo(null);
+    setPhase('lobby');
+    roomCodeRef.current = '';
+    localStorage.removeItem('414-room');
+  }, [disconnectWs]);
+
+  // 页面加载恢复
+  useEffect(() => {
+    const stored = localStorage.getItem('414-room');
+    if (stored) {
+      card414Api.getRoom(stored).then((r) => {
+        if (r.status !== 'FINISHED') {
+          enterRoom(r);
+          if (r.status === 'PLAYING') {
+            setPhase('game');
+            card414Api.getGameState(stored, getPlayer().uuid).then(setGameState).catch(() => {});
+          }
+        } else {
+          localStorage.removeItem('414-room');
+        }
+      }).catch(() => {
+        localStorage.removeItem('414-room');
+      });
+    }
+  }, [enterRoom]);
+
+  // 保存房间码
+  useEffect(() => {
+    if (room?.roomCode) {
+      localStorage.setItem('414-room', room.roomCode);
+    }
+  }, [room?.roomCode]);
+
+  // 卸载清理
+  useEffect(() => () => disconnectWs(), [disconnectWs]);
+
+  return (
+    <div className="min-h-screen bg-background text-foreground">
+      {phase === 'lobby' && (
+        <Card414Lobby
+          player={player}
+          onNicknameChange={updateNickname}
+          onEnterRoom={enterRoom}
+        />
+      )}
+      {phase === 'room' && room && (
+        <Card414Room
+          room={room}
+          player={player}
+          sendWs={sendWs}
+          onLeave={leaveRoom}
+        />
+      )}
+      {phase === 'game' && gameState && room && (
+        <Card414Game
+          gameState={gameState}
+          room={room}
+          player={player}
+          sendWs={sendWs}
+          onForceQuit={forceQuit}
+          gameOverInfo={gameOverInfo}
+          onBackToLobby={backToLobby}
+        />
+      )}
+    </div>
+  );
+}

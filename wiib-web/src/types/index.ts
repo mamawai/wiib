@@ -317,6 +317,26 @@ export interface ConvertResult {
   todayConverted: number;
 }
 
+// ========== 矿工游戏类型 ==========
+export interface MinesGameState {
+  gameId: number;
+  betAmount: number;
+  revealed: number[];
+  minePositions: number[] | null;
+  result: 'SAFE' | 'MINE' | 'CASHED_OUT' | null;
+  currentMultiplier: number;
+  nextMultiplier: number | null;
+  potentialPayout: number;
+  payout: number | null;
+  phase: 'PLAYING' | 'SETTLED';
+  balance: number;
+}
+
+export interface MinesStatus {
+  balance: number;
+  activeGame: MinesGameState | null;
+}
+
 // ========== 加密货币行情类型 ==========
 export interface CryptoKline {
   openTime: number;
@@ -368,4 +388,54 @@ export interface CryptoOrder {
   status: string;
   expireAt?: string;
   createdAt: string;
+}
+
+// ========== 414扑克类型 ==========
+export interface CardSeat {
+  seat: number;
+  uuid: string;
+  nickname: string;
+  ready: boolean;
+  team: 'A' | 'B';
+}
+
+export interface CardRoom {
+  roomCode: string;
+  host: string;
+  status: 'WAITING' | 'PLAYING' | 'FINISHED';
+  seats: CardSeat[];
+  hunA?: string;
+  hunB?: string;
+  hunTeam?: string;
+}
+
+export interface Card414PlayInfo {
+  seat: number;
+  cards: string[];
+  type: string;
+}
+
+export interface Card414GameState {
+  round: number;
+  hunA: string;
+  hunB: string;
+  hunTeam: string;
+  hunRank: string;
+  turn: number;
+  hand: string[];
+  handCounts: number[];
+  lastPlay: Card414PlayInfo | null;
+  passCount: number;
+  finishOrder: number[];
+  state: string;
+  mySeat: number;
+  lightSeat: number;
+  chaRank?: string;
+  timeoutRemaining?: number;
+}
+
+export interface Card414WsMessage {
+  type: string;
+  data: Record<string, unknown>;
+  timestamp: number;
 }

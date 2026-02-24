@@ -12,6 +12,9 @@ import { Ranking } from './pages/Ranking';
 import { Login } from './pages/Login';
 import { Admin } from './pages/Admin';
 import { Blackjack } from './pages/Blackjack';
+import { Mines } from './pages/Mines';
+import { Games } from './pages/Games';
+import { Card414 } from './pages/Card414';
 import { useUserStore } from './stores/userStore';
 import { useDedupedEffect } from './hooks/useDedupedEffect';
 
@@ -31,6 +34,7 @@ function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/login" element={<Login />} />
+        <Route path="/414" element={<Card414 />} />
         <Route
           path="/*"
           element={
@@ -45,7 +49,9 @@ function App() {
                 <Route path="/coin" element={<Coin />} />
                 <Route path="/ranking" element={<Ranking />} />
                 <Route path="/admin" element={<Admin />} />
+                <Route path="/games" element={<Games />} />
                 <Route path="/blackjack" element={<Blackjack />} />
+                <Route path="/mines" element={<Mines />} />
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Routes>
             </Layout>
