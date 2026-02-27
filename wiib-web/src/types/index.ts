@@ -431,7 +431,9 @@ export interface Card414GameState {
   mySeat: number;
   lightSeat: number;
   chaRank?: string;
-  timeoutRemaining?: number;
+  chaWaiters?: number[];
+  gouWaiters?: number[];
+  chaSeat?: number;
 }
 
 export interface Card414WsMessage {

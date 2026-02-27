@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import { Button } from '../ui/button';
 import { Card414PlayingCard } from './Card414PlayingCard';
+import { WsIndicator } from './WsIndicator';
 import { cn } from '../../lib/utils';
 import type { CardRoom, Card414GameState } from '../../types';
 
@@ -12,15 +13,16 @@ interface Props {
   onForceQuit: () => void;
   gameOverInfo: { winner: string; winnerPlayers: string[] } | null;
   onBackToLobby: () => void;
+  chaGouFlash: { type: string; seat: number } | null;
+  wsConnected: boolean;
 }
 
 function relativePositions(mySeat: number) {
   return [0, 1, 2, 3].map(i => (mySeat + i) % 4);
 }
 
-export function Card414Game({ gameState, room, player, sendWs, onForceQuit, gameOverInfo, onBackToLobby }: Props) {
+export function Card414Game({ gameState, room, player, sendWs, onForceQuit, gameOverInfo, onBackToLobby, chaGouFlash, wsConnected }: Props) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [chaCountdown, setChaCountdown] = useState(0);
   const [roundCountdown, setRoundCountdown] = useState(0);
 
   const handleForceQuit = useCallback(() => {
@@ -30,24 +32,10 @@ export function Card414Game({ gameState, room, player, sendWs, onForceQuit, game
   }, [onForceQuit]);
 
   const gs = gameState;
-  const mySeat = gs.mySeat;
+  const mySeat = gs.mySeat ?? 0;
   const positions = relativePositions(mySeat);
   const isMyTurn = gs.turn === mySeat && gs.state === 'PLAY';
   const isFree = gs.lastPlay === null || gs.lightSeat === mySeat;
-
-  useEffect(() => {
-    if ((gs.state === 'CHA_WAIT' || gs.state === 'GOU_WAIT') && gs.timeoutRemaining) {
-      setChaCountdown(Math.ceil(gs.timeoutRemaining / 1000));
-      const iv = setInterval(() => {
-        setChaCountdown(prev => {
-          if (prev <= 1) { clearInterval(iv); return 0; }
-          return prev - 1;
-        });
-      }, 1000);
-      return () => clearInterval(iv);
-    }
-    setChaCountdown(0);
-  }, [gs.state, gs.timeoutRemaining]);
 
   useEffect(() => {
     if (gs.state === 'ROUND_OVER') {
@@ -95,18 +83,29 @@ export function Card414Game({ gameState, room, player, sendWs, onForceQuit, game
     sendWs('/app/414/gou', { roomCode: room.roomCode, uuid: player.uuid });
   }, [sendWs, room.roomCode, player.uuid]);
 
+  const doPassCha = useCallback(() => {
+    sendWs('/app/414/pass-cha', { roomCode: room.roomCode, uuid: player.uuid });
+  }, [sendWs, room.roomCode, player.uuid]);
+
+  const doPassGou = useCallback(() => {
+    sendWs('/app/414/pass-gou', { roomCode: room.roomCode, uuid: player.uuid });
+  }, [sendWs, room.roomCode, player.uuid]);
+
   const seatNickname = (seat: number) => room.seats[seat]?.nickname || `P${seat + 1}`;
   const seatTeam = (seat: number) => (seat === 0 || seat === 2) ? 'A' : 'B';
   const isFinished = (seat: number) => gs.finishOrder.includes(seat);
 
-  const canCha = gs.state === 'CHA_WAIT' && gs.chaRank && mySeat !== -1
-    && !gs.finishOrder.includes(mySeat)
-    && gs.hand.filter(c => cardRank(c) === gs.chaRank).length >= 2;
-  const canGou = gs.state === 'GOU_WAIT' && gs.chaRank && mySeat !== -1
-    && !gs.finishOrder.includes(mySeat)
-    && gs.hand.some(c => cardRank(c) === gs.chaRank);
+  const canCha = gs.state === 'CHA_WAIT' && gs.chaWaiters?.includes(mySeat);
+  const canGou = gs.state === 'GOU_WAIT' && gs.gouWaiters?.includes(mySeat);
 
   const hunRank = gs.hunRank;
+
+  const chaWaiterCount = gs.state === 'CHA_WAIT' ? (gs.chaWaiters?.length ?? 0) : 0;
+  const gouWaiterCount = gs.state === 'GOU_WAIT' ? (gs.gouWaiters?.length ?? 0) : 0;
+
+  if (!gs.handCounts || !gs.hand) {
+    return <div className="min-h-screen flex items-center justify-center text-muted-foreground">加载中...</div>;
+  }
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center px-2 py-3 sm:px-6 sm:py-4">
@@ -129,12 +128,15 @@ export function Card414Game({ gameState, room, player, sendWs, onForceQuit, game
             B队混: {gs.hunB}
           </span>
         </div>
-        <button
+        <div className="flex items-center gap-3">
+          <WsIndicator connected={wsConnected} />
+          <button
           onClick={handleForceQuit}
           className="text-xs text-red-400/70 hover:text-red-400 border border-red-400/20 hover:border-red-400/50 rounded-md px-3 py-1 transition-colors"
         >
           退出
-        </button>
+          </button>
+        </div>
       </div>
 
       {/* 牌桌 */}
@@ -162,30 +164,12 @@ export function Card414Game({ gameState, room, player, sendWs, onForceQuit, game
           />
 
           {/* 中央出牌区 */}
-          <div className="flex-1 flex flex-col items-center justify-center min-h-[120px] sm:min-h-[140px]">
+          <div className="flex-1 flex flex-col items-center justify-center min-h-[80px] sm:min-h-[100px]">
             {gs.lastPlay ? (
-              <div className="space-y-1.5 text-center">
-                <div className="text-xs text-muted-foreground">
-                  {seatNickname(gs.lastPlay.seat)}
-                </div>
-                <div className="flex gap-1 justify-center flex-wrap">
-                  {gs.lastPlay.cards.map((c, i) => (
-                    <Card414PlayingCard key={i} card={c} size="sm" isHun={cardRank(c) === hunRank} />
-                  ))}
-                </div>
-                <div className="text-[10px] text-muted-foreground/60">{gs.lastPlay.type}</div>
-              </div>
+              <div className="text-xs text-muted-foreground">{seatNickname(gs.lastPlay.seat)} · {gs.lastPlay.type}</div>
             ) : (
               <div className="text-sm text-muted-foreground/60">
                 {gs.state === 'ROUND_OVER' ? '本轮结束' : '自由出牌'}
-              </div>
-            )}
-
-            {(gs.state === 'CHA_WAIT' || gs.state === 'GOU_WAIT') && (
-              <div className="mt-3 px-4 py-1.5 rounded-full bg-amber-500/10 border border-amber-500/30">
-                <span className="text-sm font-bold text-amber-400 animate-pulse">
-                  {gs.state === 'CHA_WAIT' ? '等待叉' : '等待勾'} {chaCountdown}s
-                </span>
               </div>
             )}
 
@@ -205,6 +189,52 @@ export function Card414Game({ gameState, room, player, sendWs, onForceQuit, game
           />
         </div>
 
+        {/* 出牌展示 + 叉/勾提示 */}
+        <div className="flex flex-col items-center gap-1.5 min-h-[28px]">
+          {gs.lastPlay && (
+            <div className="flex justify-center">
+              {gs.lastPlay.cards.map((c, i) => (
+                <div key={i} className={cn('relative', i > 0 && '-ml-4')} style={{ zIndex: i }}>
+                  <Card414PlayingCard card={c} size="sm" isHun={cardRank(c) === hunRank} />
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="flex items-center justify-center gap-2 flex-wrap">
+            {gs.state === 'CHA_WAIT' && (
+            <div className="px-3 py-1 rounded-full bg-amber-500/10 border border-amber-500/30">
+              <span className="text-xs font-bold text-amber-400 animate-pulse">
+                等待叉 · {gs.chaRank} · {chaWaiterCount}人待响应
+              </span>
+            </div>
+          )}
+
+          {gs.state === 'GOU_WAIT' && (
+            <div className="px-3 py-1 rounded-full bg-amber-500/10 border border-amber-500/30">
+              <span className="text-xs font-bold text-amber-400 animate-pulse">
+                {gs.chaSeat != null && gs.chaSeat >= 0 ? `${seatNickname(gs.chaSeat)} 叉了 · ` : ''}等待勾 · {gouWaiterCount}人待响应
+              </span>
+            </div>
+          )}
+
+          {chaGouFlash && (
+            <div className={cn(
+              'px-3 py-1 rounded-full border animate-pulse',
+              chaGouFlash.type === 'CHA'
+                ? 'bg-red-500/15 border-red-500/40'
+                : 'bg-amber-500/15 border-amber-500/40'
+            )}>
+              <span className={cn(
+                'text-xs font-bold',
+                chaGouFlash.type === 'CHA' ? 'text-red-400' : 'text-amber-400'
+              )}>
+                {seatNickname(chaGouFlash.seat)} {chaGouFlash.type === 'CHA' ? '叉了！' : '勾了！'}
+              </span>
+            </div>
+          )}
+          </div>
+        </div>
+
         {/* 我的手牌(下) */}
         <div className="pt-3 border-t border-white/5">
           <div className="flex items-center justify-center gap-2 mb-3">
@@ -221,15 +251,20 @@ export function Card414Game({ gameState, room, player, sendWs, onForceQuit, game
               {isFinished(mySeat) && <span className="ml-1 text-green-400">(已出完)</span>}
             </span>
           </div>
-          <div className="flex justify-center flex-wrap gap-1">
+          <div className="flex justify-center">
             {[...gs.hand].reverse().map((card, i) => (
-              <Card414PlayingCard
+              <div
                 key={card + i}
-                card={card}
-                selected={selected.has(card)}
-                isHun={cardRank(card) === hunRank}
-                onClick={isMyTurn || canCha || canGou ? () => toggleCard(card) : undefined}
-              />
+                className={cn('relative', i > 0 && '-ml-8 sm:-ml-7')}
+                style={{ zIndex: i }}
+              >
+                <Card414PlayingCard
+                  card={card}
+                  selected={selected.has(card)}
+                  isHun={cardRank(card) === hunRank}
+                  onClick={isMyTurn || canCha || canGou ? () => toggleCard(card) : undefined}
+                />
+              </div>
             ))}
           </div>
         </div>
@@ -250,14 +285,24 @@ export function Card414Game({ gameState, room, player, sendWs, onForceQuit, game
           </>
         )}
         {canCha && (
-          <Button onClick={doCha} className="px-6 bg-red-600 hover:bg-red-700 text-white">
-            叉！({chaCountdown}s)
-          </Button>
+          <>
+            <Button onClick={doCha} className="px-6 bg-red-600 hover:bg-red-700 text-white">
+              叉！
+            </Button>
+            <Button onClick={doPassCha} variant="secondary" className="px-6">
+              不叉
+            </Button>
+          </>
         )}
         {canGou && (
-          <Button onClick={doGou} className="px-6 bg-amber-600 hover:bg-amber-700 text-white">
-            勾！({chaCountdown}s)
-          </Button>
+          <>
+            <Button onClick={doGou} className="px-6 bg-amber-600 hover:bg-amber-700 text-white">
+              勾！
+            </Button>
+            <Button onClick={doPassGou} variant="secondary" className="px-6">
+              不勾
+            </Button>
+          </>
         )}
         {gs.state === 'ROUND_OVER' && (
           <div className="text-center space-y-1.5 py-2">
@@ -337,11 +382,11 @@ function PlayerPanel({ nickname, team, handCount, isCurrentTurn, isFinished }: {
       {isFinished ? (
         <div className="text-xs text-green-400 font-medium">已出完</div>
       ) : (
-        <div className="flex gap-0.5">
-          {Array.from({ length: Math.min(handCount, 8) }).map((_, i) => (
-            <div key={i} className="w-3.5 h-5 rounded-sm bg-gradient-to-b from-blue-800/80 to-blue-900/80 border border-blue-600/40" />
+        <div className="flex">
+          {Array.from({ length: Math.min(handCount, 6) }).map((_, i) => (
+            <div key={i} className={cn('w-3.5 h-5 rounded-sm bg-gradient-to-b from-blue-800/80 to-blue-900/80 border border-blue-600/40', i > 0 && '-ml-1.5')} />
           ))}
-          {handCount > 8 && <span className="text-[10px] text-muted-foreground ml-0.5">+{handCount - 8}</span>}
+          {handCount > 6 && <span className="text-[10px] text-muted-foreground ml-1">+{handCount - 6}</span>}
         </div>
       )}
       <div className="text-[10px] text-muted-foreground">{handCount}张</div>

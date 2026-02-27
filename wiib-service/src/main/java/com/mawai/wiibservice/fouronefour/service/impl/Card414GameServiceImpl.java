@@ -34,11 +34,8 @@ public class Card414GameServiceImpl implements Card414GameService {
     private static final long GAME_TTL_HOURS = 2;
     private static final long LOCK_TIMEOUT = 10;
     private static final long LOCK_WAIT = 3000;
-    private static final long CHA_GOU_TIMEOUT_MS = 5000;
-
     private final ScheduledExecutorService scheduler =
             Executors.newSingleThreadScheduledExecutor(Thread.ofVirtual().name("414-timer-", 0).factory());
-    private final ConcurrentHashMap<String, ScheduledFuture<?>> timeoutTasks = new ConcurrentHashMap<>();
 
     /** 游戏会话，一局游戏的完整状态，序列化存Redis */
     @Data
@@ -60,7 +57,8 @@ public class Card414GameServiceImpl implements Card414GameService {
         private int chaSingleSeat = -1;// 出单张的座位
         private int chaSeat = -1;      // 叉者座位
         private int lightSeat = -1;    // 获得光的座位
-        private long stateExpireAt;
+        private List<Integer> chaWaiters = new ArrayList<>();
+        private List<Integer> gouWaiters = new ArrayList<>();
     }
 
     /** 一次出牌记录 */
@@ -229,36 +227,26 @@ public class Card414GameServiceImpl implements Card414GameService {
             roomService.broadcastGame(roomCode, "PLAY", playData);
 
             // 检查本轮是否结束：同队两人都出完 或 仅剩1人
-            if (finished) {
-                int partnerSeat = Card414Engine.partnerSeat(seat);
-                boolean teamDone = session.getFinishOrder().contains(partnerSeat);
-                if (teamDone || countActivePlayers(session) <= 1) {
-                    processRoundOver(roomCode, session);
-                    saveSession(roomCode, session);
-                    return null;
-                }
-            }
+            if (checkFinished(roomCode, session, seat, finished)) return null;
 
             // 单张触发叉窗口
             if (play.getType() == Card414Engine.PlayType.SINGLE) {
                 String playedRank = Card414Engine.cardRank(cards.getFirst());
-                boolean anyCanCha = false;
+                List<Integer> waiters = new ArrayList<>();
                 for (int i = 0; i < 4; i++) {
                     if (i == seat || session.getFinishOrder().contains(i)) continue;
                     if (Card414Engine.canCha(playedRank, session.getHands().get(i))) {
-                        anyCanCha = true;
-                        break;
+                        waiters.add(i);
                     }
                 }
-                if (anyCanCha) {
+                if (!waiters.isEmpty()) {
                     session.setState("CHA_WAIT");
                     session.setChaRank(playedRank);
                     session.setChaSingleSeat(seat);
-                    session.setStateExpireAt(System.currentTimeMillis() + CHA_GOU_TIMEOUT_MS);
+                    session.setChaWaiters(waiters);
                     saveSession(roomCode, session);
-                    scheduleChaTimeout(roomCode);
                     roomService.broadcastGame(roomCode, "CHA_WAIT",
-                            Map.of("rank", playedRank, "timeout", CHA_GOU_TIMEOUT_MS));
+                            Map.of("rank", playedRank, "waiters", waiters));
                     return null;
                 }
             }
@@ -354,8 +342,7 @@ public class Card414GameServiceImpl implements Card414GameService {
             List<String> hand = session.getHands().get(seat);
             if (!Card414Engine.canCha(rank, hand)) throw new BizException(ErrorCode.CARD_CHA_INVALID);
 
-            // 取消超时
-            cancelTimeout("cha:" + roomCode);
+            session.getChaWaiters().clear();
 
             // 从手牌移除叉的对子
             List<String> chaCards = Card414Engine.getChaCards(rank, hand);
@@ -376,39 +363,45 @@ public class Card414GameServiceImpl implements Card414GameService {
                             "handCounts", handCounts, "finished", chaFinished));
 
             // 叉完出完 → 检查本轮是否结束
-            if (chaFinished) {
-                int partnerSeat = Card414Engine.partnerSeat(seat);
-                boolean teamDone = session.getFinishOrder().contains(partnerSeat);
-                if (teamDone || countActivePlayers(session) <= 1) {
-                    processRoundOver(roomCode, session);
-                    saveSession(roomCode, session);
-                    return null;
-                }
-            }
+            if (checkFinished(roomCode, session, seat, chaFinished)) return null;
 
             // 检查是否有人可勾
-            boolean anyCanGou = false;
+            List<Integer> gouWaiters = new ArrayList<>();
             for (int i = 0; i < 4; i++) {
                 if (i == seat || session.getFinishOrder().contains(i)) continue;
                 if (Card414Engine.canGou(rank, session.getHands().get(i))) {
-                    anyCanGou = true;
-                    break;
+                    gouWaiters.add(i);
                 }
             }
 
-            if (anyCanGou) {
+            if (!gouWaiters.isEmpty()) {
                 session.setState("GOU_WAIT");
-                session.setStateExpireAt(System.currentTimeMillis() + CHA_GOU_TIMEOUT_MS);
+                session.setGouWaiters(gouWaiters);
                 saveSession(roomCode, session);
-                scheduleGouTimeout(roomCode);
                 roomService.broadcastGame(roomCode, "GOU_WAIT",
-                        Map.of("rank", rank, "timeout", CHA_GOU_TIMEOUT_MS));
+                        Map.of("rank", rank, "waiters", gouWaiters));
             } else {
                 assignFreeTurn(roomCode, session, seat);
                 saveSession(roomCode, session);
             }
             return null;
         });
+    }
+
+    /**
+     * 检查是否结束
+     */
+    private boolean checkFinished(String roomCode, GameSession session, int seat, boolean isFinished) {
+        if (isFinished) {
+            int partnerSeat = Card414Engine.partnerSeat(seat);
+            boolean teamDone = session.getFinishOrder().contains(partnerSeat);
+            if (teamDone || countActivePlayers(session) <= 1) {
+                processRoundOver(roomCode, session);
+                saveSession(roomCode, session);
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -431,7 +424,7 @@ public class Card414GameServiceImpl implements Card414GameService {
             List<String> hand = session.getHands().get(seat);
             if (!Card414Engine.canGou(rank, hand)) throw new BizException(ErrorCode.CARD_GOU_INVALID);
 
-            cancelTimeout("gou:" + roomCode);
+            session.getGouWaiters().clear();
 
             String gouCard = Card414Engine.getGouCard(rank, hand);
             hand.remove(gouCard);
@@ -449,18 +442,62 @@ public class Card414GameServiceImpl implements Card414GameService {
                             "handCounts", handCounts, "finished", gouFinished));
 
             // 勾完出完 → 检查本轮是否结束
-            if (gouFinished) {
-                int partnerSeat = Card414Engine.partnerSeat(seat);
-                boolean teamDone = session.getFinishOrder().contains(partnerSeat);
-                if (teamDone || countActivePlayers(session) <= 1) {
-                    processRoundOver(roomCode, session);
-                    saveSession(roomCode, session);
-                    return null;
-                }
-            }
+            if (checkFinished(roomCode, session, seat, gouFinished)) return null;
 
             // 勾者上手（assignFreeTurn内部处理出完→队友光）
             assignFreeTurn(roomCode, session, seat);
+            saveSession(roomCode, session);
+            return null;
+        });
+    }
+
+    // ===== passCha =====
+    @Override
+    public void passCha(String roomCode, String uuid) {
+        withGameLock(roomCode, () -> {
+            GameSession session = loadSessionRequired(roomCode);
+            if (!"CHA_WAIT".equals(session.getState())) throw new BizException(ErrorCode.CARD_INVALID_STATE);
+
+            int seat = roomService.findSeatByUuid(roomCode, uuid);
+            if (seat == -1) throw new BizException(ErrorCode.CARD_PLAYER_NOT_IN_ROOM);
+            if (!session.getChaWaiters().contains(seat)) throw new BizException(ErrorCode.CARD_CHA_INVALID);
+
+            session.getChaWaiters().remove(Integer.valueOf(seat));
+
+            roomService.broadcastGame(roomCode, "PASS_CHA", Map.of("seat", seat));
+
+            if (session.getChaWaiters().isEmpty()) {
+                // 全部放弃叉，恢复正常流转
+                session.setState("PLAY");
+                session.setChaRank(null);
+                session.setChaSingleSeat(-1);
+                advanceTurn(roomCode, session);
+            }
+            saveSession(roomCode, session);
+            return null;
+        });
+    }
+
+    // ===== passGou =====
+    @Override
+    public void passGou(String roomCode, String uuid) {
+        withGameLock(roomCode, () -> {
+            GameSession session = loadSessionRequired(roomCode);
+            if (!"GOU_WAIT".equals(session.getState())) throw new BizException(ErrorCode.CARD_INVALID_STATE);
+
+            int seat = roomService.findSeatByUuid(roomCode, uuid);
+            if (seat == -1) throw new BizException(ErrorCode.CARD_PLAYER_NOT_IN_ROOM);
+            if (!session.getGouWaiters().contains(seat)) throw new BizException(ErrorCode.CARD_GOU_INVALID);
+
+            session.getGouWaiters().remove(Integer.valueOf(seat));
+
+            roomService.broadcastGame(roomCode, "PASS_GOU", Map.of("seat", seat));
+
+            if (session.getGouWaiters().isEmpty()) {
+                // 全部放弃勾，叉者上手
+                int chaSeat = session.getChaSeat();
+                assignFreeTurn(roomCode, session, chaSeat);
+            }
             saveSession(roomCode, session);
             return null;
         });
@@ -506,8 +543,9 @@ public class Card414GameServiceImpl implements Card414GameService {
 
         if ("CHA_WAIT".equals(session.getState()) || "GOU_WAIT".equals(session.getState())) {
             state.put("chaRank", session.getChaRank());
-            long remaining = session.getStateExpireAt() - System.currentTimeMillis();
-            state.put("timeoutRemaining", Math.max(0, remaining));
+            state.put("chaWaiters", session.getChaWaiters());
+            state.put("gouWaiters", session.getGouWaiters());
+            state.put("chaSeat", session.getChaSeat());
         }
 
         return state;
@@ -833,76 +871,6 @@ public class Card414GameServiceImpl implements Card414GameService {
         log.info("自动发牌: room={}, round={}", roomCode, session.getRound());
     }
 
-    /**
-     * 注册叉超时定时任务，5秒后无人叉则恢复正常流转
-     *
-     * @param roomCode 房间号
-     */
-    // ===== 超时处理 =====
-    private void scheduleChaTimeout(String roomCode) {
-        ScheduledFuture<?> future = scheduler.schedule(() -> {
-            try {
-                withGameLock(roomCode, () -> {
-                    GameSession session = loadSession(roomCode);
-                    if (session != null && "CHA_WAIT".equals(session.getState())) {
-                        session.setState("PLAY");
-                        session.setChaRank(null);
-                        session.setChaSingleSeat(-1);
-                        advanceTurn(roomCode, session);
-                        saveSession(roomCode, session);
-                        roomService.broadcastGame(roomCode, "CHA_TIMEOUT", Map.of());
-                    }
-                    return null;
-                });
-            } catch (Exception e) {
-                log.error("叉超时处理失败: room={}", roomCode, e);
-            }
-        }, CHA_GOU_TIMEOUT_MS, TimeUnit.MILLISECONDS);
-        timeoutTasks.put("cha:" + roomCode, future);
-    }
-
-    /**
-     * 注册勾超时定时任务，5秒后无人勾则叉者上手
-     *
-     * @param roomCode 房间号
-     */
-    private void scheduleGouTimeout(String roomCode) {
-        ScheduledFuture<?> future = scheduler.schedule(() -> {
-            try {
-                withGameLock(roomCode, () -> {
-                    GameSession session = loadSession(roomCode);
-                    if (session != null && "GOU_WAIT".equals(session.getState())) {
-                        int chaSeat = session.getChaSeat();
-                        assignFreeTurn(roomCode, session, chaSeat);
-                        saveSession(roomCode, session);
-                        roomService.broadcastGame(roomCode, "GOU_TIMEOUT",
-                                Map.of("chaSeat", chaSeat));
-                    }
-                    return null;
-                });
-            } catch (Exception e) {
-                log.error("勾超时处理失败: room={}", roomCode, e);
-            }
-        }, CHA_GOU_TIMEOUT_MS, TimeUnit.MILLISECONDS);
-        timeoutTasks.put("gou:" + roomCode, future);
-    }
-
-    /**
-     * 取消指定超时任务
-     *
-     * @param key 超时任务key，格式为"cha:{roomCode}"或"gou:{roomCode}"
-     */
-    private void cancelTimeout(String key) {
-        ScheduledFuture<?> f = timeoutTasks.remove(key);
-        if (f != null) f.cancel(false);
-    }
-
-    /**
-     * 从Redis加载游戏会话，不存在返回null
-     *
-     * @param roomCode 房间号
-     * @return 游戏会话，可能为null
-     */
     // ===== Redis =====
     private GameSession loadSession(String roomCode) {
         return cacheService.getObject(GAME_PREFIX + roomCode);

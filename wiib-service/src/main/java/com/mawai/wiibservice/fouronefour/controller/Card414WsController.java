@@ -90,6 +90,28 @@ public class Card414WsController {
         }
     }
 
+    @MessageMapping("/414/pass-cha")
+    public void passCha(Map<String, String> msg) {
+        String roomCode = msg.get("roomCode");
+        String uuid = msg.get("uuid");
+        try {
+            gameService.passCha(roomCode, uuid);
+        } catch (BizException e) {
+            sendError(roomCode, uuid, e.getMessage());
+        }
+    }
+
+    @MessageMapping("/414/pass-gou")
+    public void passGou(Map<String, String> msg) {
+        String roomCode = msg.get("roomCode");
+        String uuid = msg.get("uuid");
+        try {
+            gameService.passGou(roomCode, uuid);
+        } catch (BizException e) {
+            sendError(roomCode, uuid, e.getMessage());
+        }
+    }
+
     @MessageMapping("/414/swap-seat")
     public void swapSeat(Map<String, Object> msg) {
         String roomCode = (String) msg.get("roomCode");

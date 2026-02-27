@@ -31,7 +31,7 @@ public interface Card414GameService {
     void pass(String roomCode, String uuid);
 
     /**
-     * 叉：用对子截断单张，需在CHA_WAIT状态下5秒内操作
+     * 叉：用对子截断单张，需在CHA_WAIT状态下操作
      *
      * @param roomCode 房间号
      * @param uuid     叉者标识
@@ -39,12 +39,28 @@ public interface Card414GameService {
     void cha(String roomCode, String uuid);
 
     /**
-     * 勾：用第4张同面值牌截断叉，需在GOU_WAIT状态下5秒内操作
+     * 勾：用第4张同面值牌截断叉，需在GOU_WAIT状态下操作
      *
      * @param roomCode 房间号
      * @param uuid     勾者标识
      */
     void gou(String roomCode, String uuid);
+
+    /**
+     * 放弃叉
+     *
+     * @param roomCode 房间号
+     * @param uuid     玩家标识
+     */
+    void passCha(String roomCode, String uuid);
+
+    /**
+     * 放弃勾
+     *
+     * @param roomCode 房间号
+     * @param uuid     玩家标识
+     */
+    void passGou(String roomCode, String uuid);
 
     /**
      * 获取玩家当前手牌

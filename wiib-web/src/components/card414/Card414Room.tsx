@@ -1,6 +1,7 @@
 import { useCallback } from 'react';
 import { Button } from '../ui/button';
 import { useToast } from '../ui/use-toast';
+import { WsIndicator } from './WsIndicator';
 import { cn } from '../../lib/utils';
 import type { CardRoom } from '../../types';
 
@@ -9,6 +10,7 @@ interface Props {
   player: { uuid: string; nickname: string };
   sendWs: (dest: string, body: Record<string, unknown>) => void;
   onLeave: () => void;
+  wsConnected: boolean;
 }
 
 const TEAM_COLORS: Record<string, string> = {
@@ -26,7 +28,7 @@ const SEAT_LAYOUT = [
   { idx: 0, pos: 'col-start-2 row-start-3', label: '我' },
 ];
 
-export function Card414Room({ room, player, sendWs, onLeave }: Props) {
+export function Card414Room({ room, player, sendWs, onLeave, wsConnected }: Props) {
   const { toast } = useToast();
   const mySeat = room.seats.find(s => s.uuid === player.uuid);
 
@@ -61,6 +63,7 @@ export function Card414Room({ room, player, sendWs, onLeave }: Props) {
           ← 退出房间
         </button>
         <div className="flex items-center gap-2">
+          <WsIndicator connected={wsConnected} />
           <span className="font-mono text-lg font-bold tracking-widest">{room.roomCode}</span>
           <button onClick={copyCode} className="text-xs text-muted-foreground hover:text-foreground">
             复制
