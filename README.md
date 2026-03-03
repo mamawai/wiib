@@ -13,14 +13,17 @@
 - T+1 资金结算，0.05% 手续费
 - 杠杆交易（借款买入、计息、爆仓清算）
 - CALL/PUT 期权交易，Black-Scholes 定价，自动到期结算
+- 加密货币模拟交易（BTC/USDT、PAXG/USDT），接入 Binance 实时行情，支持市价/限价单
 
 **行情系统**
 - AI 每日生成 20 只股票的分时行情（1440 个价格点）
 - WebSocket(STOMP) 每 10 秒实时推送行情、资产变动、订单状态
+- Binance WebSocket 接入加密货币实时行情（~1次/秒），3 秒节流推送前端
+- TradingView 嵌入式 K 线图
 
 **游戏与社交**
 - 每日 Buff 抽奖（4 种稀有度：交易折扣 / 现金红包 / 赠送股票）
-- 小游戏（积分可转为交易资金）
+- 小游戏（21 点、翻翻爆金币，积分可转为交易资金）
 - 总资产排行榜
 
 ## 技术栈
@@ -76,6 +79,10 @@ AI(LLM) → { openPrice, mu, sigma }  →  带跳跃的几何布朗运动  →  
 | `bj:pool:{date}` | String | 每日积分池余额（200万），TTL 24h |
 | `limiter:{type}:{userId}` | Hash | 令牌桶限流状态 |
 | `order:execute:{orderId}` | String（分布式锁） | 订单操作互斥，TTL 30s |
+| `market:price:{symbol}` | String | 加密货币最新价缓存（如 BTCUSDT） |
+| `crypto:limit:{buy\|sell}:{symbol}` | ZSet（score=limitPrice） | 加密货币限价单索引 |
+| `mines:session:{userId}` | String（序列化对象） | Mines 牌局快照，TTL 2h |
+| `mines:lock:{userId}` | String（分布式锁） | Mines 操作互斥，TTL 20s |
 
 分时数据选用 Hash 而非 List，因为实时行情需按 index O(1) 单点查价。
 
@@ -91,9 +98,9 @@ AI(LLM) → { openPrice, mu, sigma }  →  带跳跃的几何布朗运动  →  
 - **用户事件频道** `event:{type}:{userId}`：资产变动/持仓变化/订单状态，精准推送
 - 虚拟线程并发 + Semaphore(5) 限流，时间对齐到 10 秒整点
 
-### BTC 实时行情推送链路
+### 加密货币实时行情推送链路
 
-独立于AI模拟行情，接入 Binance 真实 BTC/USDT 市场数据：
+独立于AI模拟行情，接入 Binance 真实市场数据（当前支持 BTCUSDT、PAXGUSDT）：
 
 ```
 Binance WSS (miniTicker ~1次/秒)
@@ -216,12 +223,19 @@ PUT  = K·e^(-rT)·N(-d2) - S·N(-d1)
 
 ### 小游戏
 
-纸牌游戏：Hit / Stand / Double / Split / Insurance / Forfeit。
+**21 点**：Hit / Stand / Double / Split / Insurance / Forfeit。
 
 - DB 管资金统计，Redis 管牌局过程态（序列化整个 Session 对象，TTL 4h）
 - 每日积分池 200 万：用户赢则池减少，用户输则池回血，池空则不能开新局
 - 积分可 1:1 转出为交易资金（仅超出初始值的部分，每日上限 10 万）
 - Redis 分布式锁串行化同一用户所有操作
+
+**翻翻爆金币（Mines）**：5×5 格子藏 5 颗雷，翻得越多倍率越高，随时可提现。
+
+- 倍率公式：`0.99 / P(k)`，P(k) = C(20,k) / C(25,k)，翻 3 格约 2×，翻 10 格约 17.5×，全翻约 52598×
+- 下注范围 100~50,000，SecureRandom 生成雷位置
+- 同 21 点架构：DB 存账目（mines_game），Redis 存游戏过程态（TTL 2h）
+- Redis 分布式锁 `mines:lock:{userId}` 串行化操作
 
 ## 前端页面
 
@@ -233,8 +247,12 @@ PUT  = K·e^(-rT)·N(-d2) - S·N(-d1)
 | `/stock/:id/kline` | 日K线 |
 | `/portfolio` | 持仓与资产概览 |
 | `/options` | 期权交易 |
+| `/coin` | 加密货币选择（BTC / PAXG） |
+| `/coin/:symbol` | 加密货币详情（实时价格 + TradingView K线 + 交易面板） |
 | `/ranking` | 排行榜 |
+| `/games` | 小游戏大厅 |
 | `/blackjack` | 21点小游戏 |
+| `/mines` | 翻翻爆金币 |
 | `/admin` | 管理后台 |
 
 ## 本地开发
@@ -333,6 +351,9 @@ docker compose up -d --build
 | option_settlement | 期权结算记录 |
 | user_buff | 每日 Buff |
 | blackjack_account | 21 点积分账户 |
+| crypto_order | 加密货币订单（市价/限价，BUY/SELL） |
+| crypto_position | 加密货币持仓（用户-币种唯一约束） |
+| mines_game | 翻翻爆金币游戏记录（下注/倍率/雷位/结算） |
 
 ## License
 
