@@ -17,7 +17,7 @@ public interface CryptoOrderService extends IService<CryptoOrder> {
 
     CryptoOrderResponse cancel(Long userId, Long orderId);
 
-    IPage<CryptoOrderResponse> getUserOrders(Long userId, String status, int pageNum, int pageSize);
+    IPage<CryptoOrderResponse> getUserOrders(Long userId, String status, int pageNum, int pageSize, String symbol);
 
     /** 执行已触发的限价单 */
     void  executeTriggeredOrders();

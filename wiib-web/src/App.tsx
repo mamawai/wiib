@@ -7,7 +7,8 @@ import { StockDetail } from './pages/StockDetail';
 import { StockKline } from './pages/StockKline';
 import { Portfolio } from './pages/Portfolio';
 import { Options } from './pages/Options';
-import { Coin } from './pages/Coin';
+import { CoinRoute } from './pages/Coin';
+import { CoinSelect } from './pages/CoinSelect';
 import { Ranking } from './pages/Ranking';
 import { Login } from './pages/Login';
 import { Admin } from './pages/Admin';
@@ -46,7 +47,8 @@ function App() {
                 <Route path="/stock/:id/kline" element={<StockKline />} />
                 <Route path="/portfolio" element={<Portfolio />} />
                 <Route path="/options" element={<Options />} />
-                <Route path="/coin" element={<Coin />} />
+                <Route path="/coin" element={<CoinSelect />} />
+                <Route path="/coin/:symbol" element={<CoinRoute />} />
                 <Route path="/ranking" element={<Ranking />} />
                 <Route path="/admin" element={<Admin />} />
                 <Route path="/games" element={<Games />} />

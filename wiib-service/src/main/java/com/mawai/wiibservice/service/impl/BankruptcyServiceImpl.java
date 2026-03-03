@@ -1,7 +1,6 @@
 package com.mawai.wiibservice.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.mawai.wiibcommon.entity.CryptoPosition;
 import com.mawai.wiibcommon.entity.Settlement;
 import com.mawai.wiibcommon.entity.User;
 import com.mawai.wiibcommon.enums.ErrorCode;
@@ -119,13 +118,7 @@ public class BankruptcyServiceImpl implements BankruptcyService {
         BigDecimal marketValue = positionService.calculateTotalMarketValue(userId);
 
         // crypto持仓市值
-        String btcPriceStr = stringRedisTemplate.opsForValue().get("market:price:BTCUSDT");
-        if (btcPriceStr != null) {
-            BigDecimal btcPrice = new BigDecimal(btcPriceStr);
-            for (CryptoPosition cp : cryptoPositionService.getUserPositions(userId)) {
-                marketValue = marketValue.add(btcPrice.multiply(cp.getTotalQuantity()));
-            }
-        }
+        marketValue = marketValue.add(cryptoPositionService.calculateCryptoMarketValue(userId));
 
         BigDecimal pendingSettlement = settlementService.getPendingSettlements(userId).stream()
                 .map(Settlement::getAmount)

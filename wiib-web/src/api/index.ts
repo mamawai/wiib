@@ -223,9 +223,10 @@ export const cryptoOrderApi = {
   buy: (data: CryptoOrderRequest) => api.post<unknown, CryptoOrder>('/crypto/order/buy', data),
   sell: (data: CryptoOrderRequest) => api.post<unknown, CryptoOrder>('/crypto/order/sell', data),
   cancel: (orderId: number) => api.post<unknown, CryptoOrder>(`/crypto/order/cancel/${orderId}`),
-  list: (status?: string, pageNum = 1, pageSize = 10) =>
-    api.get<unknown, PageResult<CryptoOrder>>('/crypto/order/list', { params: { status, pageNum, pageSize } }),
+  list: (status?: string, pageNum = 1, pageSize = 10, symbol = 'BTCUSDT') =>
+    api.get<unknown, PageResult<CryptoOrder>>('/crypto/order/list', { params: { status, pageNum, pageSize, symbol } }),
   position: (symbol = 'BTCUSDT') => api.get<unknown, CryptoPosition | null>('/crypto/order/position', { params: { symbol } }),
+  positions: () => api.get<unknown, CryptoPosition[]>('/crypto/order/positions'),
   live: () => api.get<unknown, CryptoOrder[]>('/crypto/order/live'),
 };
 

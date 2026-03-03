@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { useParams } from 'react-router-dom';
 import * as echarts from 'echarts';
 import { cryptoApi, cryptoOrderApi, buffApi } from '../api';
 import { useUserStore } from '../stores/userStore';
@@ -9,12 +10,26 @@ import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Badge } from '../components/ui/badge';
 import { Skeleton } from '../components/ui/skeleton';
-import { Bitcoin, TrendingUp, TrendingDown, Wifi, WifiOff, ChevronLeft, ChevronRight, Loader2, X, RefreshCw, Sparkles, Wallet, Warehouse, Scale } from 'lucide-react';
+import { Bitcoin, Coins, TrendingUp, TrendingDown, Wifi, WifiOff, ChevronLeft, ChevronRight, Loader2, X, RefreshCw, Sparkles, Wallet, Warehouse, Scale } from 'lucide-react';
 import TradingViewWidget from '../components/TradingViewWidget';
 import type { CryptoOrder, CryptoPosition, PageResult, UserBuff } from '../types';
 
-const SYMBOL = 'BTCUSDT';
-const MIN_QTY = 0.00001;
+interface SymbolCfg {
+  name: string;
+  pair: string;
+  tvSymbol: string;
+  minQty: number;
+  icon: typeof Bitcoin;
+  colorClass: string;
+  bgClass: string;
+  gradientClass: string;
+}
+
+const SYMBOL_CFG: Record<string, SymbolCfg> = {
+  BTCUSDT: { name: 'BTC', pair: 'BTC / USDT', tvSymbol: 'BINANCE:BTCUSD', minQty: 0.00001, icon: Bitcoin, colorClass: 'text-orange-500', bgClass: 'bg-orange-500/10', gradientClass: 'from-orange-500/5' },
+  PAXGUSDT: { name: 'PAXG', pair: 'PAXG / USDT', tvSymbol: 'BINANCE:PAXGUSD', minQty: 0.001, icon: Coins, colorClass: 'text-yellow-500', bgClass: 'bg-yellow-500/10', gradientClass: 'from-yellow-500/5' },
+};
+
 const COMMISSION_RATE = 0.001;
 const POSITION_PCTS = [0.25, 0.5, 0.75, 1];
 
@@ -82,7 +97,16 @@ const STATUS_MAP: Record<string, { label: string; variant: 'default' | 'secondar
   EXPIRED: { label: '已过期', variant: 'secondary' },
 };
 
-export function Coin() {
+export function CoinRoute() {
+  const { symbol } = useParams<{ symbol: string }>();
+  const s = symbol && SYMBOL_CFG[symbol] ? symbol : 'BTCUSDT';
+  return <Coin key={s} symbol={s} />;
+}
+
+export function Coin({ symbol = 'BTCUSDT' }: { symbol?: string }) {
+  const cfg = SYMBOL_CFG[symbol] ?? SYMBOL_CFG['BTCUSDT'];
+  const Icon = cfg.icon;
+  const MIN_QTY = cfg.minQty;
   const { toast } = useToast();
   const user = useUserStore(s => s.user);
   const fetchUser = useUserStore(s => s.fetchUser);
@@ -95,7 +119,7 @@ export function Coin() {
   const chartInst1D = useRef<echarts.ECharts | null>(null);
   const chartInst7D = useRef<echarts.ECharts | null>(null);
 
-  const tick = useCryptoStream(SYMBOL);
+  const tick = useCryptoStream(symbol);
 
   // 交易面板状态
   const [side, setSide] = useState<'BUY' | 'SELL'>('BUY');
@@ -123,7 +147,7 @@ export function Coin() {
   // 持仓
   const [position, setPosition] = useState<CryptoPosition | null>(null);
   const fetchPosition = useCallback(() => {
-    cryptoOrderApi.position(SYMBOL).then(setPosition).catch(() => setPosition(null));
+    cryptoOrderApi.position(symbol).then(setPosition).catch(() => setPosition(null));
   }, []);
 
   // 拉取K线
@@ -131,7 +155,7 @@ export function Coin() {
     setLoading(true);
     try {
       const tab = TABS[tabIdx];
-      const data = parseKlines(await cryptoApi.klines(SYMBOL, tab.interval, tab.limit));
+      const data = parseKlines(await cryptoApi.klines(symbol, tab.interval, tab.limit));
       if (tabIdx === 0) setPoints1D(data); else setPoints7D(data);
     } catch (e) {
       console.error('拉取K线失败', e);
@@ -246,13 +270,13 @@ export function Coin() {
   const fetchOrders = useCallback(async (status: string, page: number) => {
     setOrdersLoading(true);
     try {
-      const res = await cryptoOrderApi.list(status || undefined, page, 10) as unknown as PageResult<CryptoOrder>;
+      const res = await cryptoOrderApi.list(status || undefined, page, 10, symbol) as unknown as PageResult<CryptoOrder>;
       setOrders(res.records);
       setOrderTotal(res.total);
       setOrderPages(res.pages);
     } catch { setOrders([]); }
     finally { setOrdersLoading(false); }
-  }, []);
+  }, [symbol]);
 
   useEffect(() => { fetchOrders(orderFilter, orderPage); }, [orderFilter, orderPage, fetchOrders]);
 
@@ -278,7 +302,7 @@ export function Coin() {
     try {
       const actualQty = side === 'BUY' && orderType === 'MARKET' && leverage > 1 ? qty * leverage : qty;
       const req = {
-        symbol: SYMBOL,
+        symbol: symbol,
         quantity: actualQty,
         orderType,
         ...(orderType === 'LIMIT' ? { limitPrice: parseFloat(limitPrice) } : {}),
@@ -340,15 +364,18 @@ export function Coin() {
         <CardContent className="p-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className="p-2.5 rounded-xl bg-orange-500/10">
-                <Bitcoin className="w-6 h-6 text-orange-500" />
+              <div className={`p-2.5 rounded-xl ${cfg.bgClass}`}>
+                <Icon className={`w-6 h-6 ${cfg.colorClass}`} />
               </div>
               <div>
                 <div className="flex items-center gap-2">
-                  <span className="text-lg font-bold">BTC / USDT</span>
+                  <span className="text-lg font-bold">{cfg.pair}</span>
                   {tick ? (<Wifi className="w-3.5 h-3.5 text-green-500" />) : (<WifiOff className="w-3.5 h-3.5 text-muted-foreground" />)}
                 </div>
                 <span className="text-xs text-muted-foreground">Binance</span>
+                {symbol === 'PAXGUSDT' && (
+                  <span className="text-[11px] text-yellow-500/70">1枚=1盎司黄金（31.1035克）</span>
+                )}
               </div>
             </div>
             <div className="text-right">
@@ -384,7 +411,7 @@ export function Coin() {
           {loading && activeTab < TABS.length && points.length === 0 && <Skeleton className="absolute inset-0 z-10 m-2" style={{ height: 300 }} />}
           <div ref={chartRef1D} className="w-full" style={{ height: 300, display: activeTab === 0 ? 'block' : 'none' }} />
           <div ref={chartRef7D} className="w-full" style={{ height: 300, display: activeTab === 1 ? 'block' : 'none' }} />
-          {activeTab === 2 && <div style={{ height: 500 }}><TradingViewWidget /></div>}
+          {activeTab === 2 && <div style={{ height: 500 }}><TradingViewWidget symbol={cfg.tvSymbol} /></div>}
         </CardContent>
       </Card>
 
@@ -399,15 +426,18 @@ export function Coin() {
           const isPnlUp = pnlPct >= 0;
           return (
             <div className="px-4 pt-4">
-              <div className="rounded-xl border border-border/60 bg-gradient-to-r from-orange-500/5 to-transparent p-3 space-y-2">
+              <div className={`rounded-xl border border-border/60 bg-gradient-to-r ${cfg.gradientClass} to-transparent p-3 space-y-2`}>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <div className="p-1.5 rounded-lg bg-orange-500/10">
-                      <Bitcoin className="w-4 h-4 text-orange-500" />
+                    <div className={`p-1.5 rounded-lg ${cfg.bgClass}`}>
+                      <Icon className={`w-4 h-4 ${cfg.colorClass}`} />
                     </div>
                     <div>
-                      <span className="text-sm font-semibold">BTC</span>
+                      <span className="text-sm font-semibold">{cfg.name}</span>
                       <span className="text-xs text-muted-foreground ml-1.5">{position.quantity} 个</span>
+                      {symbol === 'PAXGUSDT' && (
+                        <span className="text-[11px] text-yellow-500/60 ml-1">约合 {(position.quantity * 31.1035).toFixed(1)} 克</span>
+                      )}
                     </div>
                   </div>
                   <div className="text-right">
@@ -458,13 +488,13 @@ export function Coin() {
           {/* 数量 + 余额 */}
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
-              <label className="text-xs text-muted-foreground">数量 (BTC)</label>
+              <label className="text-xs text-muted-foreground">数量 ({cfg.name})</label>
               {user && (
                 <span className="text-xs text-muted-foreground flex items-center gap-1">
                   <Wallet className="w-3 h-3" />
                   {side === 'BUY'
                     ? <>{formatPrice(user.balance)} USDT</>
-                    : <>{position?.quantity ?? 0} BTC</>
+                    : <>{position?.quantity ?? 0} {cfg.name}</>
                   }
                 </span>
               )}
@@ -581,7 +611,7 @@ export function Coin() {
               </div>
             )}
             <Button onClick={handleSubmit} disabled={submitting || currentPrice <= 0} className="w-full h-11 font-medium text-sm rounded-lg bg-primary hover:bg-primary/90 text-primary-foreground">
-              {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : (side === 'BUY' ? '买入 BTC' : '卖出 BTC')}
+              {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : (side === 'BUY' ? `买入 ${cfg.name}` : `卖出 ${cfg.name}`)}
             </Button>
           </div>
         </CardContent>

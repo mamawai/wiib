@@ -50,9 +50,10 @@ public class CryptoOrderController {
     public Result<IPage<CryptoOrderResponse>> list(
             @RequestParam(required = false) String status,
             @RequestParam(defaultValue = "1") int pageNum,
-            @RequestParam(defaultValue = "10") int pageSize) {
+            @RequestParam(defaultValue = "10") int pageSize,
+            @RequestParam String symbol) {
         Long userId = StpUtil.getLoginIdAsLong();
-        return Result.ok(cryptoOrderService.getUserOrders(userId, status, pageNum, pageSize));
+        return Result.ok(cryptoOrderService.getUserOrders(userId, status, pageNum, pageSize, symbol));
     }
 
     @GetMapping("/position")
@@ -60,6 +61,13 @@ public class CryptoOrderController {
     public Result<CryptoPosition> position(@RequestParam(defaultValue = "BTCUSDT") String symbol) {
         Long userId = StpUtil.getLoginIdAsLong();
         return Result.ok(cryptoPositionService.findByUserAndSymbol(userId, symbol));
+    }
+
+    @GetMapping("/positions")
+    @Operation(summary = "查询所有币种持仓")
+    public Result<List<CryptoPosition>> positions() {
+        Long userId = StpUtil.getLoginIdAsLong();
+        return Result.ok(cryptoPositionService.getUserPositions(userId));
     }
 
     @GetMapping("/live")

@@ -3,7 +3,6 @@ package com.mawai.wiibservice.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.mawai.wiibcommon.dto.UserDTO;
-import com.mawai.wiibcommon.entity.CryptoPosition;
 import com.mawai.wiibcommon.entity.Settlement;
 import com.mawai.wiibcommon.entity.User;
 import com.mawai.wiibcommon.enums.ErrorCode;
@@ -58,7 +57,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         BigDecimal marketValue = positionService.calculateTotalMarketValue(userId);
 
         // crypto持仓市值（取查询时刻的BTC实时价格）
-        BigDecimal cryptoMarketValue = calculateCryptoMarketValue(userId);
+        BigDecimal cryptoMarketValue = cryptoPositionService.calculateCryptoMarketValue(userId);
         marketValue = marketValue.add(cryptoMarketValue);
 
         BigDecimal frozenBalance = user.getFrozenBalance() != null ? user.getFrozenBalance() : BigDecimal.ZERO;
@@ -164,13 +163,4 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         log.info("用户{}扣除冻结余额: {}", userId, amount);
     }
 
-    private BigDecimal calculateCryptoMarketValue(Long userId) {
-        String priceStr = stringRedisTemplate.opsForValue().get("market:price:BTCUSDT");
-        if (priceStr == null) return BigDecimal.ZERO;
-        BigDecimal btcPrice = new BigDecimal(priceStr);
-        return cryptoPositionService.getUserPositions(userId).stream()
-                .map(cp -> btcPrice.multiply(cp.getTotalQuantity()))
-                .reduce(BigDecimal.ZERO, BigDecimal::add)
-                .setScale(2, RoundingMode.HALF_UP);
-    }
 }

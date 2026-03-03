@@ -58,13 +58,11 @@ public class RankingService {
         List<Position> allPositions = positionService.list();
         List<Settlement> pendingSettlements = settlementService.getAllPendingSettlements();
 
-        // crypto持仓 + BTC实时价格
+        // crypto持仓 + 实时价格
         List<CryptoPosition> allCryptoPositions = cryptoPositionService.list();
         Map<Long, List<CryptoPosition>> cryptoPositionMap = allCryptoPositions.stream()
                 .collect(Collectors.groupingBy(CryptoPosition::getUserId));
-        BigDecimal btcPrice = BigDecimal.ZERO;
-        String btcPriceStr = stringRedisTemplate.opsForValue().get("market:price:BTCUSDT");
-        if (btcPriceStr != null) btcPrice = new BigDecimal(btcPriceStr);
+        Map<String, BigDecimal> cryptoPriceMap = cryptoPositionService.fetchCryptoPriceMap();
 
         // crypto待结算（SETTLING状态）
         Map<Long, BigDecimal> cryptoSettlingMap = cryptoOrderMapper.sumAllSettlingAmounts().stream()
@@ -128,9 +126,10 @@ public class RankingService {
             // crypto持仓市值
             BigDecimal cryptoMarketValue = BigDecimal.ZERO;
             List<CryptoPosition> cryptoPositions = cryptoPositionMap.get(user.getId());
-            if (cryptoPositions != null && btcPrice.compareTo(BigDecimal.ZERO) > 0) {
+            if (cryptoPositions != null) {
                 for (CryptoPosition cp : cryptoPositions) {
-                    cryptoMarketValue = cryptoMarketValue.add(btcPrice.multiply(cp.getTotalQuantity()));
+                    BigDecimal price = cryptoPriceMap.getOrDefault(cp.getSymbol(), BigDecimal.ZERO);
+                    cryptoMarketValue = cryptoMarketValue.add(price.multiply(cp.getTotalQuantity()));
                 }
             }
 

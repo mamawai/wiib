@@ -3,7 +3,7 @@ import { useUserStore } from '../stores/userStore';
 import { useTheme } from '../hooks/useTheme';
 import { Button } from './ui/button';
 import { cn } from '../lib/utils';
-import { Home, List, Briefcase, LogOut, LogIn, TrendingUp, Sun, Moon, Trophy, LineChart, Coins } from 'lucide-react';
+import { Home, List, Briefcase, LogOut, LogIn, TrendingUp, Sun, Moon, Trophy, LineChart, DollarSign } from 'lucide-react';
 
 interface Props {
   children: React.ReactNode;
@@ -40,8 +40,8 @@ export function Layout({ children }: Props) {
           {/* Desktop Navigation */}
           <nav className="hidden md:flex items-center gap-1">
             <HeaderNavItem to="/" icon={<Home className="w-4 h-4" />} label="行情" />
+            <HeaderNavItem to="/coin" icon={<DollarSign className="w-4 h-4" />} label="钱币" />
             <HeaderNavItem to="/stocks" icon={<List className="w-4 h-4" />} label="股票" />
-            <HeaderNavItem to="/coin" icon={<Coins className="w-4 h-4" />} label="钱币" />
             <HeaderNavItem to="/options" icon={<LineChart className="w-4 h-4" />} label="期权" />
             <HeaderNavItem to="/portfolio" icon={<Briefcase className="w-4 h-4" />} label="持仓" />
             <HeaderNavItem to="/ranking" icon={<Trophy className="w-4 h-4" />} label="排行" />
@@ -101,8 +101,8 @@ export function Layout({ children }: Props) {
       <nav className="fixed bottom-0 left-0 right-0 bg-card/95 backdrop-blur-md border-t md:hidden z-50">
         <div className="flex">
           <BottomNavItem to="/" icon={<Home className="w-5 h-5" />} label="行情" />
+          <BottomNavItem to="/coin" icon={<DollarSign className="w-5 h-5" />} label="钱币" />
           <BottomNavItem to="/stocks" icon={<List className="w-5 h-5" />} label="股票" />
-          <BottomNavItem to="/coin" icon={<Coins className="w-5 h-5" />} label="钱币" />
           <BottomNavItem to="/options" icon={<LineChart className="w-5 h-5" />} label="期权" />
           <BottomNavItem to="/portfolio" icon={<Briefcase className="w-5 h-5" />} label="持仓" />
           <BottomNavItem to="/ranking" icon={<Trophy className="w-5 h-5" />} label="排行" />

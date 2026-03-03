@@ -120,6 +120,10 @@ public class CacheService {
         return stringRedisTemplate.opsForValue().get(key);
     }
 
+    public List<String> multiGet(Collection<String> keys) {
+        return stringRedisTemplate.opsForValue().multiGet(keys);
+    }
+
     public void delete(String key) {
         stringRedisTemplate.unlink(key);
     }

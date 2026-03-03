@@ -5,18 +5,30 @@ import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.mawai.wiibcommon.entity.CryptoPosition;
 import com.mawai.wiibcommon.enums.ErrorCode;
 import com.mawai.wiibcommon.exception.BizException;
+import com.mawai.wiibservice.config.BinanceProperties;
 import com.mawai.wiibservice.mapper.CryptoPositionMapper;
+import com.mawai.wiibservice.service.CacheService;
 import com.mawai.wiibservice.service.CryptoPositionService;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 @Slf4j
 @Service
+@RequiredArgsConstructor
 public class CryptoPositionServiceImpl extends ServiceImpl<CryptoPositionMapper, CryptoPosition> implements CryptoPositionService {
+
+    private final CacheService cacheService;
+    private final BinanceProperties binanceProperties;
+
+    private static final String REDIS_KEY_PREFIX = "market:price:";
 
     @Override
     public CryptoPosition findByUserAndSymbol(Long userId, String symbol) {
@@ -73,5 +85,36 @@ public class CryptoPositionServiceImpl extends ServiceImpl<CryptoPositionMapper,
             throw new BizException(ErrorCode.FROZEN_POSITION_NOT_ENOUGH);
         }
         baseMapper.deleteEmptyPosition(userId, symbol);
+    }
+
+    @Override
+    public BigDecimal calculateCryptoMarketValue(Long userId) {
+        List<CryptoPosition> positions = getUserPositions(userId);
+        if (positions.isEmpty()) return BigDecimal.ZERO;
+        Map<String, BigDecimal> priceMap = fetchCryptoPriceMap();
+        BigDecimal total = BigDecimal.ZERO;
+        for (CryptoPosition cp : positions) {
+            BigDecimal price = priceMap.get(cp.getSymbol());
+            if (price != null) {
+                total = total.add(price.multiply(cp.getTotalQuantity()));
+            }
+        }
+        return total.setScale(2, RoundingMode.HALF_UP);
+    }
+
+    @Override
+    public Map<String, BigDecimal> fetchCryptoPriceMap() {
+        List<String> symbols = binanceProperties.getSymbols();
+        if (symbols == null || symbols.isEmpty()) return Collections.emptyMap();
+        List<String> keys = symbols.stream().map(s -> REDIS_KEY_PREFIX + s).toList();
+        List<String> values = cacheService.multiGet(keys);
+        Map<String, BigDecimal> map = new HashMap<>(symbols.size());
+        for (int i = 0; i < symbols.size(); i++) {
+            String v = values != null ? values.get(i) : null;
+            if (v != null) {
+                map.put(symbols.get(i), new BigDecimal(v));
+            }
+        }
+        return map;
     }
 }

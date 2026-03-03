@@ -206,12 +206,13 @@ public class CryptoOrderServiceImpl extends ServiceImpl<CryptoOrderMapper, Crypt
     // ==================== 查询 ====================
 
     @Override
-    public IPage<CryptoOrderResponse> getUserOrders(Long userId, String status, int pageNum, int pageSize) {
+    public IPage<CryptoOrderResponse> getUserOrders(Long userId, String status, int pageNum, int pageSize, String symbol) {
         Page<CryptoOrder> page = new Page<>(pageNum, pageSize);
         LambdaQueryWrapper<CryptoOrder> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(CryptoOrder::getUserId, userId);
         if (status != null && !status.isEmpty()) wrapper.eq(CryptoOrder::getStatus, status);
         wrapper.orderByDesc(CryptoOrder::getCreatedAt);
+        wrapper.eq(CryptoOrder::getSymbol, symbol);
         baseMapper.selectPage(page, wrapper);
         return page.convert(this::buildResponse);
     }

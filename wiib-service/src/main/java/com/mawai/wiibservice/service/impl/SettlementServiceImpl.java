@@ -3,7 +3,6 @@ package com.mawai.wiibservice.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
-import com.mawai.wiibcommon.entity.CryptoPosition;
 import com.mawai.wiibcommon.entity.Settlement;
 import com.mawai.wiibcommon.entity.User;
 import com.mawai.wiibcommon.event.AssetChangeEvent;
@@ -114,13 +113,7 @@ public class SettlementServiceImpl extends ServiceImpl<SettlementMapper, Settlem
                 BigDecimal marketValue = positionService.calculateTotalMarketValue(userId);
 
                 // crypto持仓市值
-                String btcPriceStr = stringRedisTemplate.opsForValue().get("market:price:BTCUSDT");
-                if (btcPriceStr != null) {
-                    BigDecimal btcPrice = new BigDecimal(btcPriceStr);
-                    for (CryptoPosition cp : cryptoPositionService.getUserPositions(userId)) {
-                        marketValue = marketValue.add(btcPrice.multiply(cp.getTotalQuantity()));
-                    }
-                }
+                marketValue = marketValue.add(cryptoPositionService.calculateCryptoMarketValue(userId));
 
                 BigDecimal pendingAmount = getPendingSettlements(userId).stream()
                         .map(Settlement::getAmount)

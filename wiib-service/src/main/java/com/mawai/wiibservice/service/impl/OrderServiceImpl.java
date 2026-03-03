@@ -8,7 +8,6 @@ import com.mawai.wiibcommon.annotation.RateLimiter;
 import com.mawai.wiibcommon.constant.RateLimiterType;
 import com.mawai.wiibcommon.dto.OrderResponse;
 import com.mawai.wiibcommon.dto.OrderRequest;
-import com.mawai.wiibcommon.entity.CryptoPosition;
 import com.mawai.wiibcommon.entity.Order;
 import com.mawai.wiibcommon.entity.Position;
 import com.mawai.wiibcommon.entity.Settlement;
@@ -40,7 +39,6 @@ import com.mawai.wiibservice.service.BuffService;
 import com.mawai.wiibservice.util.RedisLockUtil;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -85,7 +83,6 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
     private final BuffService buffService;
     private final CryptoPositionService cryptoPositionService;
     private final CryptoOrderMapper cryptoOrderMapper;
-    private final StringRedisTemplate stringRedisTemplate;
 
     private static final int TRIGGERED_ORDER_BATCH_SIZE = 200;
 
@@ -925,13 +922,7 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
             BigDecimal positionMarketValue = positionService.calculateTotalMarketValue(userId);
 
             // crypto持仓市值
-            String btcPriceStr = stringRedisTemplate.opsForValue().get("market:price:BTCUSDT");
-            if (btcPriceStr != null) {
-                BigDecimal btcPrice = new BigDecimal(btcPriceStr);
-                for (CryptoPosition cp : cryptoPositionService.getUserPositions(userId)) {
-                    positionMarketValue = positionMarketValue.add(btcPrice.multiply(cp.getTotalQuantity()));
-                }
-            }
+            positionMarketValue = positionMarketValue.add(cryptoPositionService.calculateCryptoMarketValue(userId));
 
             BigDecimal pendingSettlement = settlementService.getPendingSettlements(userId).stream()
                     .map(Settlement::getAmount)

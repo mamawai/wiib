@@ -1,6 +1,6 @@
 import { useEffect, useRef, memo } from 'react';
 
-function TradingViewWidget() {
+function TradingViewWidget({ symbol = 'BINANCE:BTCUSD' }: { symbol?: string }) {
   const container = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -23,7 +23,7 @@ function TradingViewWidget() {
       locale: 'en',
       save_image: true,
       style: '1',
-      symbol: 'BINANCE:BTCUSD',
+      symbol,
       theme: 'dark',
       timezone: 'Etc/UTC',
       backgroundColor: '#0F0F0F',
@@ -38,7 +38,7 @@ function TradingViewWidget() {
     return () => {
       el.innerHTML = '';
     };
-  }, []);
+  }, [symbol]);
 
   return (
     <div className="tradingview-widget-container" ref={container} style={{ height: '100%', width: '100%' }}>
