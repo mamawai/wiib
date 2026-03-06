@@ -15,7 +15,9 @@ import com.mawai.wiibservice.service.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -36,6 +38,7 @@ public class OptionOrderServiceImpl extends ServiceImpl<OptionOrderMapper, Optio
     private final StockCacheService stockCacheService;
     private final TradingConfig tradingConfig;
     private final OptionSettlementMapper settlementMapper;
+    private final PlatformTransactionManager txManager;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -159,20 +162,25 @@ public class OptionOrderServiceImpl extends ServiceImpl<OptionOrderMapper, Optio
     }
 
     @Override
-    @Transactional(rollbackFor = Exception.class)
     public void processExpirySettlement() {
         List<OptionContract> expiredContracts = contractService.getExpiredContracts();
         if (expiredContracts.isEmpty()) return;
 
         log.info("开始处理{}个到期合约结算", expiredContracts.size());
+        TransactionTemplate txTemplate = new TransactionTemplate(txManager);
+        int success = 0, fail = 0;
 
         for (OptionContract contract : expiredContracts) {
             try {
-                settleContract(contract);
+                txTemplate.executeWithoutResult(status -> settleContract(contract));
+                success++;
             } catch (Exception e) {
+                fail++;
                 log.error("结算合约失败 contractId={}", contract.getId(), e);
             }
         }
+
+        log.info("到期合约结算完成 total={} success={} fail={}", expiredContracts.size(), success, fail);
     }
 
     private void settleContract(OptionContract contract) {
