@@ -9,6 +9,7 @@ import com.mawai.wiibcommon.exception.BizException;
 import com.mawai.wiibcommon.util.SpringUtils;
 import com.mawai.wiibservice.config.TradingConfig;
 import com.mawai.wiibservice.mapper.CryptoOrderMapper;
+import com.mawai.wiibservice.mapper.FuturesPositionMapper;
 import com.mawai.wiibservice.mapper.OrderMapper;
 import com.mawai.wiibservice.mapper.PositionMapper;
 import com.mawai.wiibservice.mapper.SettlementMapper;
@@ -22,7 +23,6 @@ import com.mawai.wiibservice.service.UserService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -47,7 +47,7 @@ public class BankruptcyServiceImpl implements BankruptcyService {
     private final EventPublisher eventPublisher;
     private final TradingConfig tradingConfig;
     private final CryptoOrderMapper cryptoOrderMapper;
-    private final StringRedisTemplate stringRedisTemplate;
+    private final FuturesPositionMapper futuresPositionMapper;
 
     @Value("${trading.initial-balance:100000}")
     private BigDecimal initialBalance;
@@ -119,6 +119,10 @@ public class BankruptcyServiceImpl implements BankruptcyService {
 
         // crypto持仓市值
         marketValue = marketValue.add(cryptoPositionService.calculateCryptoMarketValue(userId));
+
+        // futures保证金
+        BigDecimal futuresMargin = futuresPositionMapper.sumOpenMargin(userId);
+        marketValue = marketValue.add(futuresMargin);
 
         BigDecimal pendingSettlement = settlementService.getPendingSettlements(userId).stream()
                 .map(Settlement::getAmount)

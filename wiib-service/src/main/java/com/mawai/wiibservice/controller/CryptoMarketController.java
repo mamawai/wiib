@@ -2,7 +2,6 @@ package com.mawai.wiibservice.controller;
 
 import com.mawai.wiibcommon.util.Result;
 import com.mawai.wiibservice.config.BinanceRestClient;
-import com.mawai.wiibservice.config.BinanceWsClient;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
@@ -18,7 +17,6 @@ import java.util.Map;
 public class CryptoMarketController {
 
     private final BinanceRestClient binanceRestClient;
-    private final BinanceWsClient binanceWsClient;
     private final StringRedisTemplate redisTemplate;
 
     @GetMapping("/klines")
@@ -41,11 +39,5 @@ public class CryptoMarketController {
             return Result.ok(Map.of("raw", json));
         }
         return Result.ok(Map.of("price", price));
-    }
-
-    @GetMapping("/status")
-    @Operation(summary = "WS连接状态")
-    public Result<Map<String, Object>> status() {
-        return Result.ok(Map.of("wsConnected", binanceWsClient.isConnected()));
     }
 }

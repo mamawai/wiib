@@ -75,6 +75,15 @@ public enum ErrorCode {
     MINES_CELL_ALREADY_REVEALED(1706, "该格子已翻开"),
     MINES_MUST_REVEAL_FIRST(1707, "至少翻开一个格子才能提现"),
 
+    // Futures错误码 1750+
+    FUTURES_POSITION_NOT_FOUND(1750, "仓位不存在"),
+    FUTURES_INSUFFICIENT_BALANCE(1751, "余额不足"),
+    FUTURES_INVALID_LEVERAGE(1752, "杠杆倍数无效"),
+    FUTURES_INVALID_QUANTITY(1753, "数量无效"),
+    FUTURES_INVALID_STOP_LOSS(1754, "止损价无效"),
+    FUTURES_POSITION_CLOSED(1755, "仓位已关闭"),
+    FUTURES_LIQUIDATED(1756, "仓位已强平"),
+
     // 414扑克错误码 1800+
     CARD_ROOM_NOT_FOUND(1800, "房间不存在"),
     CARD_ROOM_FULL(1801, "房间已满"),

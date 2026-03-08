@@ -11,7 +11,9 @@ import java.util.List;
 @ConfigurationProperties(prefix = "binance")
 public class BinanceProperties {
     private String wsUrl;
+    private String futuresWsUrl;
     private String restBaseUrl;
+    private String futuresRestBaseUrl;
     private List<String> symbols;
     private long fallbackPollInterval;
 }

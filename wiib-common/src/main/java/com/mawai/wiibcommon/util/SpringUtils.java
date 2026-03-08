@@ -1,5 +1,7 @@
 package com.mawai.wiibcommon.util;
 
+import lombok.Getter;
+import lombok.NonNull;
 import org.springframework.beans.BeansException;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.ApplicationContextAware;
@@ -11,18 +13,16 @@ import org.springframework.stereotype.Component;
 @Component
 public class SpringUtils implements ApplicationContextAware {
 
+    /**
+     * -- GETTER --
+     *  获取Spring上下文
+     */
+    @Getter
     private static ApplicationContext applicationContext;
 
     @Override
-    public void setApplicationContext(ApplicationContext context) throws BeansException {
+    public void setApplicationContext(@NonNull ApplicationContext context) throws BeansException {
         applicationContext = context;
-    }
-
-    /**
-     * 获取Spring上下文
-     */
-    public static ApplicationContext getApplicationContext() {
-        return applicationContext;
     }
 
     /**

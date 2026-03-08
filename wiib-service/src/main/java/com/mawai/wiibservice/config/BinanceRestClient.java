@@ -1,5 +1,6 @@
 package com.mawai.wiibservice.config;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
@@ -61,19 +62,54 @@ public class BinanceRestClient extends BaseRestTemplateConfig {
     public BigDecimal[] getRecentHighLow(String symbol) {
         try {
             String json = getKlines(symbol, "1s", 60, null);
-            if (json == null || json.isBlank()) return null;
-            JsonNode root = MAPPER.readTree(json);
-            BigDecimal high = null, low = null;
-            for (JsonNode kline : root) {
-                BigDecimal h = new BigDecimal(kline.get(2).asText());
-                BigDecimal l = new BigDecimal(kline.get(3).asText());
-                if (high == null || h.compareTo(high) > 0) high = h;
-                if (low == null || l.compareTo(low) < 0) low = l;
-            }
-            return high != null ? new BigDecimal[]{low, high} : null;
+            return getHighLow(json);
         } catch (Exception e) {
             log.error("解析klines高低价失败 symbol={}", symbol, e);
             return null;
         }
+    }
+
+    public String getMarkPrice(String symbol) {
+        String baseUrl = props.getFuturesRestBaseUrl();
+        if (baseUrl == null || baseUrl.isBlank()) return null;
+        URI uri = UriComponentsBuilder
+                .fromUriString(baseUrl + "/fapi/v1/premiumIndex")
+                .queryParam("symbol", symbol)
+                .build().toUri();
+        return restTemplate.getForObject(uri, String.class);
+    }
+
+    /**
+     * 拉取最近2分钟Mark Price K线，返回 [periodLow, periodHigh]
+     */
+    public BigDecimal[] getRecentMarkPriceHighLow(String symbol) {
+        try {
+            String baseUrl = props.getFuturesRestBaseUrl();
+            if (baseUrl == null || baseUrl.isBlank()) return null;
+            URI uri = UriComponentsBuilder
+                    .fromUriString(baseUrl + "/fapi/v1/markPriceKlines")
+                    .queryParam("symbol", symbol)
+                    .queryParam("interval", "1m")
+                    .queryParam("limit", 2)
+                    .build().toUri();
+            String json = restTemplate.getForObject(uri, String.class);
+            return getHighLow(json);
+        } catch (Exception e) {
+            log.error("获取Mark Price高低价失败 symbol={}", symbol, e);
+            return null;
+        }
+    }
+
+    private BigDecimal[] getHighLow(String json) throws JsonProcessingException {
+        if (json == null || json.isBlank()) return null;
+        JsonNode root = MAPPER.readTree(json);
+        BigDecimal high = null, low = null;
+        for (JsonNode kline : root) {
+            BigDecimal h = new BigDecimal(kline.get(2).asText());
+            BigDecimal l = new BigDecimal(kline.get(3).asText());
+            if (high == null || h.compareTo(high) > 0) high = h;
+            if (low == null || l.compareTo(low) < 0) low = l;
+        }
+        return high != null ? new BigDecimal[]{low, high} : null;
     }
 }

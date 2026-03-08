@@ -49,6 +49,19 @@ public class TradingConfig {
         private BigDecimal dailyInterestRate = new BigDecimal("0.0005");
     }
 
+    /** 永续合约配置 */
+    private Futures futures = new Futures();
+
+    @Data
+    public static class Futures {
+        /** 维持保证金率（默认0.5%） */
+        private BigDecimal maintenanceMarginRate = new BigDecimal("0.005");
+        /** 资金费率（默认0.01%/8h） */
+        private BigDecimal fundingRate = new BigDecimal("0.0001");
+        /** 最大杠杆倍数 */
+        private int maxLeverage = 100;
+    }
+
     /** 乐观锁最大重试次数 */
     private int optimisticLockMaxRetries = 3;
 

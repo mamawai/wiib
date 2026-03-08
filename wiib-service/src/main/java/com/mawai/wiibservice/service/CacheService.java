@@ -2,10 +2,7 @@ package com.mawai.wiibservice.service;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.data.redis.core.Cursor;
-import org.springframework.data.redis.core.RedisTemplate;
-import org.springframework.data.redis.core.ScanOptions;
-import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.*;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -256,6 +253,28 @@ public class CacheService {
      */
     public Set<String> sDifference(String key, String otherKey) {
         return stringRedisTemplate.opsForSet().difference(key, otherKey);
+    }
+
+    // ==================== ZSet操作 ====================
+
+    public Boolean zAdd(String key, String value, double score) {
+        return stringRedisTemplate.opsForZSet().add(key, value, score);
+    }
+
+    public Long zRemove(String key, Object... values) {
+        return stringRedisTemplate.opsForZSet().remove(key, values);
+    }
+
+    public Double zScore(String key, String value) {
+        return stringRedisTemplate.opsForZSet().score(key, value);
+    }
+
+    public Set<String> zRangeByScore(String key, double min, double max) {
+        return stringRedisTemplate.opsForZSet().rangeByScore(key, min, max);
+    }
+
+    public Set<ZSetOperations.TypedTuple<String>> zRangeByScoreWithScores(String key, double min, double max) {
+        return stringRedisTemplate.opsForZSet().rangeByScoreWithScores(key, min, max);
     }
 
     // ==================== 通用Key操作 ====================
