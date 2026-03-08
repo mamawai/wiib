@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
 import * as echarts from 'echarts';
-import { cryptoApi, cryptoOrderApi, buffApi } from '../api';
+import { cryptoApi, cryptoOrderApi, buffApi, futuresApi } from '../api';
 import { useUserStore } from '../stores/userStore';
 import { useCryptoStream } from '../hooks/useCryptoStream';
 import { useToast } from '../components/ui/use-toast';
@@ -10,9 +10,9 @@ import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Badge } from '../components/ui/badge';
 import { Skeleton } from '../components/ui/skeleton';
-import { Bitcoin, Coins, TrendingUp, TrendingDown, Wifi, WifiOff, ChevronLeft, ChevronRight, Loader2, X, RefreshCw, Sparkles, Wallet, Warehouse, Scale } from 'lucide-react';
+import { Bitcoin, Coins, TrendingUp, TrendingDown, ChevronLeft, ChevronRight, Loader2, X, RefreshCw, Sparkles, Wallet, Warehouse, Scale } from 'lucide-react';
 import TradingViewWidget from '../components/TradingViewWidget';
-import type { CryptoOrder, CryptoPosition, PageResult, UserBuff } from '../types';
+import type { CryptoOrder, CryptoPosition, PageResult, UserBuff, FuturesPosition, FuturesOrder } from '../types';
 
 interface SymbolCfg {
   name: string;
@@ -32,6 +32,7 @@ const SYMBOL_CFG: Record<string, SymbolCfg> = {
 
 const COMMISSION_RATE = 0.001;
 const POSITION_PCTS = [0.25, 0.5, 0.75, 1];
+const MMR = 0.005;
 
 interface TabConfig {
   label: string;
@@ -74,6 +75,58 @@ function formatPrice(n: number): string {
   return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+function roundHalfUp2(n: number): number {
+  return Math.round((n + Number.EPSILON) * 100) / 100;
+}
+
+function roundCeil2(n: number): number {
+  return Math.ceil((n - 1e-9) * 100) / 100;
+}
+
+function getStepPrecision(step: number): number {
+  const s = String(step);
+  const i = s.indexOf('.');
+  return i >= 0 ? s.length - i - 1 : 0;
+}
+
+function formatStepValue(value: number, step: number): string {
+  return value.toFixed(getStepPrecision(step)).replace(/0+$/, '').replace(/\.$/, '');
+}
+
+function calcFuturesOpenEstimate(marginQty: number, price: number, leverage: number) {
+  const orderQty = marginQty * leverage;
+  const positionValue = roundHalfUp2(price * orderQty);
+  const margin = roundCeil2(positionValue / leverage);
+  const commission = roundHalfUp2(positionValue * COMMISSION_RATE);
+  const fundingFee = roundHalfUp2(positionValue * 0.0001);
+  const totalCost = roundHalfUp2(margin + commission);
+  return { orderQty, positionValue, margin, commission, fundingFee, totalCost };
+}
+
+function calcMaxAffordableMarginQty(balance: number, pct: number, price: number, leverage: number, step: number): number {
+  const budget = balance * pct;
+  if (budget <= 0 || price <= 0 || leverage <= 0 || step <= 0) return 0;
+
+  const precision = getStepPrecision(step);
+  let left = 0;
+  let right = Math.floor((budget / price) / step);
+  let best = 0;
+
+  while (left <= right) {
+    const mid = Math.floor((left + right) / 2);
+    const qty = Number((mid * step).toFixed(precision));
+    const estimate = calcFuturesOpenEstimate(qty, price, leverage);
+    if (estimate.totalCost <= budget + 1e-9) {
+      best = qty;
+      left = mid + 1;
+    } else {
+      right = mid - 1;
+    }
+  }
+
+  return best;
+}
+
 function formatDateTime(s: string): string {
   const d = new Date(s);
   return `${(d.getMonth() + 1).toString().padStart(2, '0')}-${d.getDate().toString().padStart(2, '0')} ${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
@@ -87,6 +140,20 @@ const ORDER_STATUS_FILTERS = [
   { label: '已成交', value: 'FILLED' },
   { label: '已取消', value: 'CANCELLED' },
 ];
+
+const FUTURES_ORDER_FILTERS = [
+  { label: '全部', value: '' },
+  { label: '待成交', value: 'PENDING' },
+  { label: '已成交', value: 'FILLED' },
+  { label: '已取消', value: 'CANCELLED' },
+];
+
+const FUTURES_SIDE_MAP: Record<string, { label: string; color: string }> = {
+  OPEN_LONG: { label: '开多', color: 'text-red-500' },
+  OPEN_SHORT: { label: '开空', color: 'text-green-500' },
+  CLOSE_LONG: { label: '平多', color: 'text-green-500' },
+  CLOSE_SHORT: { label: '平空', color: 'text-red-500' },
+};
 
 const STATUS_MAP: Record<string, { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline' | 'success' | 'warning' }> = {
   PENDING: { label: '待成交', variant: 'warning' },
@@ -133,7 +200,7 @@ export function Coin({ symbol = 'BTCUSDT' }: { symbol?: string }) {
 
   // 交易面板状态
   const [side, setSide] = useState<'BUY' | 'SELL'>('BUY');
-  const [orderType, setOrderType] = useState<'MARKET' | 'LIMIT'>('MARKET');
+  const [orderType, setOrderType] = useState<'MARKET' | 'LIMIT' | 'FUTURES'>('MARKET');
   const [qtyMap, setQtyMap] = useState<Record<string, string>>({});
   const qtyKey = `${side}_${orderType}`;
   const quantity = qtyMap[qtyKey] ?? '';
@@ -141,6 +208,22 @@ export function Coin({ symbol = 'BTCUSDT' }: { symbol?: string }) {
   const [limitPrice, setLimitPrice] = useState('');
   const [leverage, setLeverage] = useState(1);
   const [submitting, setSubmitting] = useState(false);
+
+  // 合约专用状态
+  const [futuresSide, setFuturesSide] = useState<'LONG' | 'SHORT'>('LONG');
+  const [futuresLeverage, setFuturesLeverage] = useState(10);
+  const [futuresOrderType, setFuturesOrderType] = useState<'MARKET' | 'LIMIT'>('MARKET');
+  const [futuresPositions, setFuturesPositions] = useState<FuturesPosition[]>([]);
+  const [futuresOrders, setFuturesOrders] = useState<FuturesOrder[]>([]);
+  const [futuresOrderPage, setFuturesOrderPage] = useState(1);
+  const [futuresOrderTotal, setFuturesOrderTotal] = useState(0);
+  const [futuresOrderPages, setFuturesOrderPages] = useState(0);
+  const [futuresOrderFilter, setFuturesOrderFilter] = useState('');
+  const [futuresOrdersLoading, setFuturesOrdersLoading] = useState(false);
+  const [futuresStopLoss, setFuturesStopLoss] = useState(false);
+  const [futuresStopLossPct, setFuturesStopLossPct] = useState('');
+  const [posAction, setPosAction] = useState<{ id: number; type: 'close' | 'margin' | 'stoploss' } | null>(null);
+  const [posActionInput, setPosActionInput] = useState('');
 
   // 订单列表状态
   const [orderFilter, setOrderFilter] = useState('');
@@ -290,7 +373,7 @@ export function Coin({ symbol = 'BTCUSDT' }: { symbol?: string }) {
 
   useEffect(() => { fetchOrders(orderFilter, orderPage); }, [orderFilter, orderPage, fetchOrders]);
 
-  // 加载折扣券 + 持仓
+  // 加载折扣券 + 持仓 + 合约仓位
   useEffect(() => {
     buffApi.status().then(s => {
       const b = s.todayBuff;
@@ -298,12 +381,93 @@ export function Coin({ symbol = 'BTCUSDT' }: { symbol?: string }) {
       else setDiscountBuff(null);
     }).catch(() => {});
     fetchPosition();
-  }, [fetchPosition]);
+    if (orderType === 'FUTURES') fetchFuturesPositions();
+  }, [fetchPosition, orderType]);
+
+  // 合约仓位查询
+  const fetchFuturesPositions = useCallback(async () => {
+    try {
+      const positions = await futuresApi.positions(symbol);
+      setFuturesPositions(positions);
+    } catch (e) {
+      console.error('查询合约仓位失败', e);
+      setFuturesPositions([]);
+    }
+  }, [symbol]);
+
+  // 用 WS 推送的 markPrice 实时更新合约仓位盈亏
+  useEffect(() => {
+    if (!tick?.mp || futuresPositions.length === 0) return;
+    const mp = tick.mp;
+    setFuturesPositions(prev => prev.map(pos => {
+      const posValue = mp * pos.quantity;
+      const unrealizedPnl = pos.side === 'LONG'
+        ? (mp - pos.entryPrice) * pos.quantity
+        : (pos.entryPrice - mp) * pos.quantity;
+      const effectiveMargin = pos.margin + unrealizedPnl;
+      const unrealizedPnlPct = pos.margin > 0 ? (unrealizedPnl / pos.margin) * 100 : 0;
+      return { ...pos, markPrice: mp, currentPrice: mp, positionValue: posValue, unrealizedPnl, unrealizedPnlPct, effectiveMargin };
+    }));
+  }, [tick?.mp]);
+
+  // 合约订单查询
+  const fetchFuturesOrders = useCallback(async (status: string, page: number) => {
+    setFuturesOrdersLoading(true);
+    try {
+      const res = await futuresApi.orders(status || undefined, page, 10, symbol) as unknown as PageResult<FuturesOrder>;
+      setFuturesOrders(res.records);
+      setFuturesOrderTotal(res.total);
+      setFuturesOrderPages(res.pages);
+    } catch (e) {
+      console.error('查询合约订单失败', e);
+      setFuturesOrders([]);
+    } finally {
+      setFuturesOrdersLoading(false);
+    }
+  }, [symbol]);
+
+  // 合约订单：filter/page/tab 变化时拉取
+  useEffect(() => {
+    if (orderType === 'FUTURES') fetchFuturesOrders(futuresOrderFilter, futuresOrderPage);
+  }, [futuresOrderFilter, futuresOrderPage, orderType, fetchFuturesOrders]);
 
   // 下单
   const handleSubmit = async () => {
     const qty = parseFloat(quantity);
     if (!qty || qty < MIN_QTY) { toast(`最小数量 ${MIN_QTY}`, 'error'); return; }
+
+    // 合约下单
+    if (orderType === 'FUTURES') {
+      if (futuresOrderType === 'LIMIT') {
+        const lp = parseFloat(limitPrice);
+        if (!lp || lp <= 0) { toast('请输入有效限价', 'error'); return; }
+      }
+      setSubmitting(true);
+      try {
+        await futuresApi.open({
+          symbol,
+          side: futuresSide,
+          quantity: qty * futuresLeverage,
+          leverage: futuresLeverage,
+          orderType: futuresOrderType,
+          ...(futuresOrderType === 'LIMIT' ? { limitPrice: parseFloat(limitPrice) } : {}),
+          ...(futuresStopLoss && futuresStopLossPct ? { stopLossPercent: parseFloat(futuresStopLossPct) } : {}),
+        });
+        toast(`${futuresSide === 'LONG' ? '做多' : '做空'}开仓成功`, 'success');
+        setQuantity(String(MIN_QTY));
+        setLimitPrice('');
+        setFuturesStopLoss(false);
+        setFuturesStopLossPct('');
+        fetchFuturesPositions();
+        fetchFuturesOrders('', 1);
+        fetchUser();
+      } catch (e: unknown) {
+        toast((e as Error).message || '开仓失败', 'error');
+      } finally { setSubmitting(false); }
+      return;
+    }
+
+    // 现货下单
     if (orderType === 'LIMIT') {
       const lp = parseFloat(limitPrice);
       if (!lp || lp <= 0) { toast('请输入有效限价', 'error'); return; }
@@ -350,6 +514,75 @@ export function Coin({ symbol = 'BTCUSDT' }: { symbol?: string }) {
     }
   };
 
+  // 合约平仓
+  const handleFuturesClose = async (positionId: number) => {
+    const qty = parseFloat(posActionInput);
+    if (!qty || qty <= 0) { toast('请输入平仓数量', 'error'); return; }
+    setSubmitting(true);
+    try {
+      await futuresApi.close({ positionId, quantity: qty, orderType: 'MARKET' });
+      toast('平仓成功', 'success');
+      setPosAction(null);
+      fetchFuturesPositions();
+      fetchFuturesOrders('', futuresOrderPage);
+      fetchUser();
+    } catch (e: unknown) {
+      toast((e as Error).message || '平仓失败', 'error');
+    } finally { setSubmitting(false); }
+  };
+
+  // 合约追加保证金
+  const handleAddMargin = async (positionId: number) => {
+    const amt = parseFloat(posActionInput);
+    if (!amt || amt <= 0) { toast('请输入有效金额', 'error'); return; }
+    setSubmitting(true);
+    try {
+      await futuresApi.addMargin({ positionId, amount: amt });
+      toast('追加保证金成功', 'success');
+      setPosAction(null);
+      fetchFuturesPositions();
+      fetchUser();
+    } catch (e: unknown) {
+      toast((e as Error).message || '追加保证金失败', 'error');
+    } finally { setSubmitting(false); }
+  };
+
+  // 合约设置止损
+  const handleSetStopLoss = async (positionId: number) => {
+    const pct = parseFloat(posActionInput);
+    if (!pct || pct <= 0) { toast('请输入止损比例', 'error'); return; }
+    setSubmitting(true);
+    try {
+      await futuresApi.setStopLoss({ positionId, stopLossPercent: pct });
+      toast('设置止损成功', 'success');
+      setPosAction(null);
+      fetchFuturesPositions();
+    } catch (e: unknown) {
+      toast((e as Error).message || '设置止损失败', 'error');
+    } finally { setSubmitting(false); }
+  };
+
+  // 仓位操作切换
+  const togglePosAction = (posId: number, type: 'close' | 'margin' | 'stoploss', pos?: FuturesPosition) => {
+    if (posAction?.id === posId && posAction.type === type) {
+      setPosAction(null);
+    } else {
+      setPosAction({ id: posId, type });
+      setPosActionInput(type === 'stoploss' && pos?.stopLossPercent ? String(pos.stopLossPercent) : '');
+    }
+  };
+
+  // 合约取消订单
+  const handleFuturesCancel = async (orderId: number) => {
+    try {
+      await futuresApi.cancel(orderId);
+      toast('已取消', 'success');
+      fetchFuturesOrders('', futuresOrderPage);
+    } catch (e: unknown) {
+      toast((e as Error).message || '取消失败', 'error');
+    }
+  };
+
   // 计算涨跌
   const points = activeTab === 0 ? points1D : points7D;
   const currentPrice = tick?.price ?? (points.length > 0 ? points[points.length - 1].close : 0);
@@ -361,6 +594,7 @@ export function Coin({ symbol = 'BTCUSDT' }: { symbol?: string }) {
   // 预估金额
   const qtyNum = parseFloat(quantity) || 0;
   const priceForCalc = orderType === 'LIMIT' ? (parseFloat(limitPrice) || 0) : currentPrice;
+  const futuresPriceForCalc = futuresOrderType === 'LIMIT' ? (parseFloat(limitPrice) || 0) : currentPrice;
   const discountRate = useBuff && discountBuff && orderType === 'MARKET' ? Number(discountBuff.buffType.match(/DISCOUNT_(\d+)/)?.[1] ?? 100) / 100 : 1;
   const leveragedQty = side === 'BUY' && orderType === 'MARKET' && leverage > 1 ? qtyNum * leverage : qtyNum;
   const estimatedAmount = leveragedQty * priceForCalc;
@@ -380,7 +614,16 @@ export function Coin({ symbol = 'BTCUSDT' }: { symbol?: string }) {
               <div>
                 <div className="flex items-center gap-2">
                   <span className="text-lg font-bold">{cfg.pair}</span>
-                  {tick ? (<Wifi className="w-3.5 h-3.5 text-green-500" />) : (<WifiOff className="w-3.5 h-3.5 text-muted-foreground" />)}
+                  <span className="flex items-center gap-1.5 text-[10px]">
+                    <span className="flex items-center gap-0.5">
+                      <span className={`inline-block w-1.5 h-1.5 rounded-full ${tick?.ws ? 'bg-green-500' : 'bg-red-400 animate-pulse'}`} />
+                      <span className="text-muted-foreground">行情</span>
+                    </span>
+                    <span className="flex items-center gap-0.5">
+                      <span className={`inline-block w-1.5 h-1.5 rounded-full ${tick?.fws ? 'bg-green-500' : 'bg-red-400 animate-pulse'}`} />
+                      <span className="text-muted-foreground">合约</span>
+                    </span>
+                  </span>
                 </div>
                 <span className="text-xs text-muted-foreground">Binance</span>
                 {symbol === 'PAXGUSDT' && (
@@ -476,22 +719,299 @@ export function Coin({ symbol = 'BTCUSDT' }: { symbol?: string }) {
           );
         })()}
 
-        {/* 买卖 + 市价限价 合并行 */}
+        {/* 买卖/做多做空 + 市价限价合约 */}
         <div className="px-4 pt-4 flex items-center gap-3">
           <div className="grid grid-cols-2 gap-0 flex-1 rounded-lg border border-border overflow-hidden">
-            <button onClick={() => setSide('BUY')} className={`py-2.5 text-sm font-medium transition-all ${side === 'BUY' ? 'bg-primary text-primary-foreground' : 'bg-card text-muted-foreground hover:text-foreground hover:bg-accent/50'}`}>买入</button>
-            <button onClick={() => setSide('SELL')} className={`py-2.5 text-sm font-medium transition-all border-l border-border ${side === 'SELL' ? 'bg-primary text-primary-foreground' : 'bg-card text-muted-foreground hover:text-foreground hover:bg-accent/50'}`}>卖出</button>
+            {orderType === 'FUTURES' ? (
+              <>
+                <button onClick={() => setFuturesSide('LONG')} className={`py-2.5 text-sm font-medium transition-all ${futuresSide === 'LONG' ? 'bg-red-500 text-white' : 'bg-card text-muted-foreground hover:text-foreground hover:bg-accent/50'}`}>做多</button>
+                <button onClick={() => setFuturesSide('SHORT')} className={`py-2.5 text-sm font-medium transition-all border-l border-border ${futuresSide === 'SHORT' ? 'bg-green-500 text-white' : 'bg-card text-muted-foreground hover:text-foreground hover:bg-accent/50'}`}>做空</button>
+              </>
+            ) : (
+              <>
+                <button onClick={() => setSide('BUY')} className={`py-2.5 text-sm font-medium transition-all ${side === 'BUY' ? 'bg-primary text-primary-foreground' : 'bg-card text-muted-foreground hover:text-foreground hover:bg-accent/50'}`}>买入</button>
+                <button onClick={() => setSide('SELL')} className={`py-2.5 text-sm font-medium transition-all border-l border-border ${side === 'SELL' ? 'bg-primary text-primary-foreground' : 'bg-card text-muted-foreground hover:text-foreground hover:bg-accent/50'}`}>卖出</button>
+              </>
+            )}
           </div>
           <div className="flex rounded-lg border border-border overflow-hidden">
-            {(['MARKET', 'LIMIT'] as const).map((t, i) => (
+            {(['MARKET', 'LIMIT', 'FUTURES'] as const).map((t, i) => (
               <button key={t} onClick={() => setOrderType(t)} className={`px-3.5 py-2.5 text-xs font-medium transition-all ${i > 0 ? 'border-l border-border' : ''} ${orderType === t ? 'bg-primary text-primary-foreground' : 'bg-card text-muted-foreground hover:text-foreground hover:bg-accent/50'}`}>
-                {t === 'MARKET' ? '市价' : '限价'}
+                {t === 'MARKET' ? '市价' : t === 'LIMIT' ? '限价' : '合约'}
               </button>
             ))}
           </div>
         </div>
 
         <CardContent className="p-4 space-y-3">
+          {/* 合约面板 */}
+          {orderType === 'FUTURES' && (
+            <>
+              {/* 执行方式 */}
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-muted-foreground shrink-0">执行方式</span>
+                <div className="flex rounded-md border border-border overflow-hidden">
+                  <button onClick={() => setFuturesOrderType('MARKET')} className={`px-3 py-1.5 text-xs font-medium transition-all ${futuresOrderType === 'MARKET' ? 'bg-primary text-primary-foreground' : 'bg-card text-muted-foreground hover:text-foreground'}`}>市价</button>
+                  <button onClick={() => setFuturesOrderType('LIMIT')} className={`px-3 py-1.5 text-xs font-medium transition-all border-l border-border ${futuresOrderType === 'LIMIT' ? 'bg-primary text-primary-foreground' : 'bg-card text-muted-foreground hover:text-foreground'}`}>限价</button>
+                </div>
+              </div>
+
+              {/* 限价输入 */}
+              {futuresOrderType === 'LIMIT' && (
+                <div className="space-y-1.5">
+                  <label className="text-xs text-muted-foreground">限价 (USDT)</label>
+                  <Input type="number" placeholder="输入限价" value={limitPrice} onChange={e => setLimitPrice(e.target.value)} step="0.01" min="0" />
+                </div>
+              )}
+
+              {/* 杠杆选择 */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs text-muted-foreground flex items-center gap-1">
+                    <Scale className="w-3 h-3" /> 杠杆
+                  </label>
+                  <span className="text-sm font-bold tabular-nums">{futuresLeverage}x</span>
+                </div>
+                <div className="flex gap-1">
+                  {[1, 5, 10, 25, 50, 75, 100].map(lv => (
+                    <button key={lv} onClick={() => setFuturesLeverage(lv)} className={`flex-1 py-1 text-[11px] font-medium rounded transition-all ${futuresLeverage === lv ? 'bg-primary text-primary-foreground' : 'bg-card border border-border text-muted-foreground hover:text-foreground'}`}>
+                      {lv}x
+                    </button>
+                  ))}
+                </div>
+                <input
+                  type="range" min={1} max={100}
+                  value={futuresLeverage}
+                  onChange={e => setFuturesLeverage(Number(e.target.value))}
+                  className="w-full cursor-pointer"
+                  style={{ accentColor: 'hsl(var(--primary))' }}
+                />
+              </div>
+
+              {/* 数量输入 */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs text-muted-foreground">保证金数量 ({cfg.name})</label>
+                  {user && (
+                    <span className="text-xs text-muted-foreground flex items-center gap-1">
+                      <Wallet className="w-3 h-3" />
+                      {formatPrice(user.balance)} USDT
+                    </span>
+                  )}
+                </div>
+                <Input type="number" placeholder={String(MIN_QTY)} value={quantity} onChange={e => setQuantity(e.target.value)} step={String(MIN_QTY)} min={MIN_QTY} />
+                {futuresPriceForCalc > 0 && (
+                  <div className="flex gap-1.5">
+                    {POSITION_PCTS.map(pct => {
+                      const handlePct = () => {
+                        const balance = user?.balance ?? 0;
+                        const qty = calcMaxAffordableMarginQty(balance, pct, futuresPriceForCalc, futuresLeverage, MIN_QTY);
+                        setQuantity(qty > 0 ? formatStepValue(qty, MIN_QTY) : '');
+                      };
+                      return (
+                        <button key={pct} onClick={handlePct} className="flex-1 py-1.5 rounded-md text-xs font-medium border border-border bg-card text-muted-foreground hover:text-foreground hover:bg-accent transition-all">
+                          {pct * 100}%
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* 预估信息 */}
+              {parseFloat(quantity) > 0 && futuresPriceForCalc > 0 && (() => {
+                const qty = parseFloat(quantity);
+                const { positionValue, margin, commission, fundingFee, totalCost } = calcFuturesOpenEstimate(qty, futuresPriceForCalc, futuresLeverage);
+                return (
+                  <div className="space-y-1.5 p-3 rounded-lg bg-accent/30 border border-border/50">
+                    <div className="flex justify-between text-xs">
+                      <span className="text-muted-foreground">仓位价值</span>
+                      <span className="font-mono">${formatPrice(positionValue)}</span>
+                    </div>
+                    <div className="flex justify-between text-xs">
+                      <span className="text-muted-foreground">保证金</span>
+                      <span className="font-mono">${formatPrice(margin)}</span>
+                    </div>
+                    <div className="flex justify-between text-xs">
+                      <span className="text-muted-foreground">手续费 (0.1%)</span>
+                      <span className="font-mono">${formatPrice(commission)}</span>
+                    </div>
+                    <div className="flex justify-between text-xs">
+                      <span className="text-muted-foreground">资金费率 (0.01%/8h)</span>
+                      <span className="font-mono">${formatPrice(fundingFee)}</span>
+                    </div>
+                    <div className="flex justify-between text-xs font-medium pt-1.5 border-t border-border/50">
+                      <span className="text-muted-foreground">合计需要</span>
+                      <span>${formatPrice(totalCost)}</span>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* 开仓止损 (可选) */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs text-muted-foreground">开仓止损</label>
+                  <button
+                    type="button"
+                    onClick={() => { setFuturesStopLoss(!futuresStopLoss); setFuturesStopLossPct(''); }}
+                    className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${futuresStopLoss ? 'bg-primary' : 'bg-muted-foreground/30'}`}
+                  >
+                    <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-background transition-transform shadow-sm ${futuresStopLoss ? 'translate-x-[18px]' : 'translate-x-[3px]'}`} />
+                  </button>
+                </div>
+                {futuresStopLoss && (() => {
+                  const minPct = MMR * (futuresLeverage - 1) / (1 - MMR) * 100;
+                  const pctVal = parseFloat(futuresStopLossPct) || 0;
+                  let estPrice = 0;
+                  if (pctVal > minPct && currentPrice > 0) {
+                    const priceMove = currentPrice * (1 - pctVal / 100) / futuresLeverage;
+                    estPrice = futuresSide === 'LONG' ? currentPrice - priceMove : currentPrice + priceMove;
+                  }
+                  return (
+                    <div className="space-y-1.5 p-2.5 rounded-lg bg-accent/30 border border-border/50">
+                      <div className="flex items-center gap-2">
+                        <Input
+                          type="number" placeholder={`最低 ${minPct.toFixed(2)}`}
+                          value={futuresStopLossPct} onChange={e => setFuturesStopLossPct(e.target.value)}
+                          step="0.1" min={minPct} max={99} className="flex-1"
+                        />
+                        <span className="text-xs text-muted-foreground shrink-0">% 保留</span>
+                      </div>
+                      <div className="text-[11px] text-muted-foreground">
+                        保留保证金比例，越高止损越早 · 最低 {minPct.toFixed(2)}%
+                      </div>
+                      {estPrice > 0 && (
+                        <div className="text-xs">
+                          预估止损价 <span className="text-yellow-500 font-mono">${formatPrice(estPrice)}</span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+              </div>
+
+              {/* 开仓按钮 */}
+              <Button onClick={handleSubmit} disabled={submitting || currentPrice <= 0} className={`w-full h-11 font-medium text-sm rounded-lg ${futuresSide === 'LONG' ? 'bg-red-500 hover:bg-red-600' : 'bg-green-500 hover:bg-green-600'} text-white`}>
+                {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : `${futuresSide === 'LONG' ? '做多' : '做空'} ${futuresLeverage}x`}
+              </Button>
+
+              {/* 合约持仓列表 */}
+              {futuresPositions.length > 0 && (
+                <div className="pt-3 border-t border-border/30 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="text-sm font-medium">持仓</div>
+                    <span className="text-[11px] text-muted-foreground">{futuresPositions.length} 个</span>
+                  </div>
+                  {futuresPositions.map(pos => {
+                    const isPnlUp = pos.unrealizedPnl >= 0;
+                    const isLong = pos.side === 'LONG';
+                    const isActive = posAction?.id === pos.id;
+                    return (
+                      <div key={pos.id} className={`p-3 rounded-lg border space-y-2 ${isLong ? 'border-red-500/20 bg-red-500/[0.03]' : 'border-green-500/20 bg-green-500/[0.03]'}`}>
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <Badge className={`text-[10px] px-1.5 ${isLong ? 'bg-red-500' : 'bg-green-500'}`}>{isLong ? '多' : '空'}</Badge>
+                            <span className="text-sm font-bold">{pos.leverage}x</span>
+                            <span className="text-xs text-muted-foreground">{pos.quantity} {cfg.name}</span>
+                          </div>
+                          <div className="text-right">
+                            <div className={`text-sm font-bold ${isPnlUp ? 'text-red-500' : 'text-green-500'}`}>
+                              {isPnlUp ? '+' : ''}{pos.unrealizedPnlPct.toFixed(2)}%
+                            </div>
+                            <div className={`text-xs ${isPnlUp ? 'text-red-500/70' : 'text-green-500/70'}`}>
+                              {isPnlUp ? '+' : ''}${formatPrice(pos.unrealizedPnl)}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-3 gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+                          <div>开仓 <span className="text-foreground font-mono">${formatPrice(pos.entryPrice)}</span></div>
+                          <div>标记 <span className="text-foreground font-mono">${formatPrice(pos.markPrice)}</span></div>
+                          <div>现价 <span className="text-foreground font-mono">${formatPrice(currentPrice)}</span></div>
+                          <div>保证金 <span className="text-foreground font-mono">${formatPrice(pos.margin)}</span></div>
+                          <div>强平 <span className="text-yellow-500 font-mono">${formatPrice(pos.liquidationPrice)}</span></div>
+                          <div>止损 <span className="font-mono">{pos.stopLossPrice ? `$${formatPrice(pos.stopLossPrice)}` : '-'}</span></div>
+                        </div>
+                        {/* 操作按钮 */}
+                        <div className="grid grid-cols-3 gap-2 pt-1">
+                          <Button size="sm" variant={isActive && posAction.type === 'close' ? 'default' : 'outline'} className="h-7 text-[11px]" onClick={() => togglePosAction(pos.id, 'close')}>平仓</Button>
+                          <Button size="sm" variant={isActive && posAction.type === 'margin' ? 'default' : 'outline'} className="h-7 text-[11px]" onClick={() => togglePosAction(pos.id, 'margin')}>+保证金</Button>
+                          <Button size="sm" variant={isActive && posAction.type === 'stoploss' ? 'default' : 'outline'} className="h-7 text-[11px]" onClick={() => togglePosAction(pos.id, 'stoploss', pos)}>止损</Button>
+                        </div>
+                        {/* 内联操作面板 */}
+                        {isActive && (
+                          <div className="pt-2 mt-1 border-t border-border/30 space-y-2">
+                            {posAction.type === 'close' && (
+                              <>
+                                <div className="flex items-center gap-2">
+                                  <Input type="number" placeholder="平仓数量" value={posActionInput} onChange={e => setPosActionInput(e.target.value)} step={String(MIN_QTY)} min={MIN_QTY} max={pos.quantity} className="flex-1 h-8 text-xs" />
+                                  <span className="text-[11px] text-muted-foreground shrink-0">/ {pos.quantity}</span>
+                                </div>
+                                <div className="flex gap-1">
+                                  {POSITION_PCTS.map(pct => (
+                                    <button key={pct} onClick={() => {
+                                      const raw = pos.quantity * pct;
+                                      setPosActionInput(pct === 1 ? String(pos.quantity) : (Math.round(raw / MIN_QTY) * MIN_QTY).toFixed(8).replace(/0+$/, '').replace(/\.$/, ''));
+                                    }} className="flex-1 py-1 rounded text-[11px] font-medium border border-border bg-card text-muted-foreground hover:text-foreground hover:bg-accent transition-all">
+                                      {pct * 100}%
+                                    </button>
+                                  ))}
+                                </div>
+                                <Button size="sm" className="w-full h-8 text-xs" onClick={() => handleFuturesClose(pos.id)} disabled={submitting}>
+                                  {submitting ? <Loader2 className="w-3 h-3 animate-spin" /> : '确认平仓'}
+                                </Button>
+                              </>
+                            )}
+                            {posAction.type === 'margin' && (
+                              <>
+                                <Input type="number" placeholder="追加金额 (USDT)" value={posActionInput} onChange={e => setPosActionInput(e.target.value)} step="0.01" min="0" className="h-8 text-xs" />
+                                {user && <div className="text-[11px] text-muted-foreground">可用余额 {formatPrice(user.balance)} USDT</div>}
+                                <Button size="sm" className="w-full h-8 text-xs" onClick={() => handleAddMargin(pos.id)} disabled={submitting}>
+                                  {submitting ? <Loader2 className="w-3 h-3 animate-spin" /> : '确认追加'}
+                                </Button>
+                              </>
+                            )}
+                            {posAction.type === 'stoploss' && (() => {
+                              const minPct = MMR * (pos.leverage - 1) / (1 - MMR) * 100;
+                              const pctVal = parseFloat(posActionInput) || 0;
+                              let estPrice = 0;
+                              if (pctVal > minPct && pos.entryPrice > 0) {
+                                const maxLoss = pos.margin * (1 - pctVal / 100);
+                                const priceMove = maxLoss / pos.quantity;
+                                estPrice = isLong ? pos.entryPrice - priceMove : pos.entryPrice + priceMove;
+                              }
+                              return (
+                                <>
+                                  <div className="flex items-center gap-2">
+                                    <Input type="number" placeholder={`最低 ${minPct.toFixed(2)}`} value={posActionInput} onChange={e => setPosActionInput(e.target.value)} step="0.1" min={minPct} max={99} className="flex-1 h-8 text-xs" />
+                                    <span className="text-[11px] text-muted-foreground shrink-0">% 保留</span>
+                                  </div>
+                                  {pos.stopLossPercent != null && (
+                                    <div className="text-[11px] text-muted-foreground">当前: {pos.stopLossPercent}% → ${pos.stopLossPrice ? formatPrice(pos.stopLossPrice) : '-'}</div>
+                                  )}
+                                  <div className="text-[11px] text-muted-foreground">最低 {minPct.toFixed(2)}%，越高止损越早</div>
+                                  {estPrice > 0 && (
+                                    <div className="text-xs">新止损价 <span className="text-yellow-500 font-mono">${formatPrice(estPrice)}</span></div>
+                                  )}
+                                  <Button size="sm" className="w-full h-8 text-xs" onClick={() => handleSetStopLoss(pos.id)} disabled={submitting}>
+                                    {submitting ? <Loader2 className="w-3 h-3 animate-spin" /> : '确认设置'}
+                                  </Button>
+                                </>
+                              );
+                            })()}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </>
+          )}
+
+          {/* 现货面板（原有逻辑） */}
+          {orderType !== 'FUTURES' && (
+            <>
           {/* 限价输入 */}
           {orderType === 'LIMIT' && (
             <div className="space-y-1.5">
@@ -531,7 +1051,7 @@ export function Coin({ symbol = 'BTCUSDT' }: { symbol?: string }) {
                     } else {
                       raw = (position?.quantity ?? 0) * pct;
                     }
-                    const qty = Math.max(MIN_QTY, Math.floor(raw / MIN_QTY) * MIN_QTY);
+                    const qty = Math.max(MIN_QTY, Math.round(raw / MIN_QTY) * MIN_QTY);
                     setQuantity(qty <= MIN_QTY && raw < MIN_QTY ? String(MIN_QTY) : qty.toFixed(5));
                   };
                   return (
@@ -629,6 +1149,8 @@ export function Coin({ symbol = 'BTCUSDT' }: { symbol?: string }) {
               {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : (side === 'BUY' ? `买入 ${cfg.name}` : `卖出 ${cfg.name}`)}
             </Button>
           </div>
+            </>
+          )}
         </CardContent>
       </Card>
 
@@ -637,83 +1159,162 @@ export function Coin({ symbol = 'BTCUSDT' }: { symbol?: string }) {
         <CardHeader className="pb-2">
           <div className="flex items-center justify-between">
             <CardTitle className="text-base flex items-center gap-2">
-              订单
-              <button onClick={() => fetchOrders(orderFilter, orderPage)} className="text-muted-foreground hover:text-foreground transition-colors" title="刷新">
-                <RefreshCw className={`w-3.5 h-3.5 ${ordersLoading ? 'animate-spin' : ''}`} />
+              {orderType === 'FUTURES' ? '合约订单' : '订单'}
+              <button onClick={() => orderType === 'FUTURES' ? fetchFuturesOrders(futuresOrderFilter, futuresOrderPage) : fetchOrders(orderFilter, orderPage)} className="text-muted-foreground hover:text-foreground transition-colors" title="刷新">
+                <RefreshCw className={`w-3.5 h-3.5 ${(orderType === 'FUTURES' ? futuresOrdersLoading : ordersLoading) ? 'animate-spin' : ''}`} />
               </button>
             </CardTitle>
             <div className="flex gap-1">
-              {ORDER_STATUS_FILTERS.map(f => (
-                <Button key={f.value} variant={orderFilter === f.value ? 'default' : 'ghost'} size="sm" className="h-7 px-2.5 text-xs" onClick={() => { setOrderFilter(f.value); setOrderPage(1); }}>
-                  {f.label}
-                </Button>
-              ))}
+              {orderType === 'FUTURES' ? (
+                FUTURES_ORDER_FILTERS.map(f => (
+                  <Button key={f.value} variant={futuresOrderFilter === f.value ? 'default' : 'ghost'} size="sm" className="h-7 px-2.5 text-xs" onClick={() => { setFuturesOrderFilter(f.value); setFuturesOrderPage(1); }}>
+                    {f.label}
+                  </Button>
+                ))
+              ) : (
+                ORDER_STATUS_FILTERS.map(f => (
+                  <Button key={f.value} variant={orderFilter === f.value ? 'default' : 'ghost'} size="sm" className="h-7 px-2.5 text-xs" onClick={() => { setOrderFilter(f.value); setOrderPage(1); }}>
+                    {f.label}
+                  </Button>
+                ))
+              )}
             </div>
           </div>
         </CardHeader>
         <CardContent className="p-0">
-          {ordersLoading && orders.length === 0 ? (
-            <div className="p-4"><Skeleton className="w-full h-32" /></div>
-          ) : orders.length === 0 ? (
-            <div className="p-8 text-center text-sm text-muted-foreground">暂无订单</div>
-          ) : (
-            <>
-              <div className="overflow-x-auto">
-                <table className="w-full text-xs">
-                  <thead>
-                    <tr className="border-b border-border/50 text-muted-foreground">
-                      <th className="text-left px-4 py-2.5 font-medium">时间</th>
-                      <th className="text-left px-2 py-2.5 font-medium">方向</th>
-                      <th className="text-left px-2 py-2.5 font-medium">类型</th>
-                      <th className="text-right px-2 py-2.5 font-medium">数量</th>
-                      <th className="text-right px-2 py-2.5 font-medium">挂单价</th>
-                      <th className="text-right px-2 py-2.5 font-medium">触发价</th>
-                      <th className="text-right px-2 py-2.5 font-medium">金额</th>
-                      <th className="text-center px-2 py-2.5 font-medium">状态</th>
-                      <th className="text-center px-4 py-2.5 font-medium">操作</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {orders.map(o => {
-                      const isBuy = o.orderSide === 'BUY';
-                      const st = STATUS_MAP[o.status] || { label: o.status, variant: 'outline' as const };
-                      return (
-                        <tr key={o.orderId} className="border-b border-border/30 hover:bg-accent/30 transition-colors">
-                          <td className="px-4 py-2.5 text-muted-foreground whitespace-nowrap">{formatDateTime(o.createdAt)}</td>
-                          <td className={`px-2 py-2.5 font-medium ${isBuy ? 'text-red-500' : 'text-green-500'}`}>{isBuy ? '买入' : '卖出'}</td>
-                          <td className="px-2 py-2.5">{o.orderType === 'MARKET' ? '市价' : '限价'}{o.leverage > 1 ? ` ${o.leverage}x` : ''}</td>
-                          <td className="px-2 py-2.5 text-right font-mono">{o.quantity}</td>
-                          <td className="px-2 py-2.5 text-right font-mono">{o.limitPrice != null ? formatPrice(o.limitPrice) : '-'}</td>
-                          <td className="px-2 py-2.5 text-right font-mono">{o.triggerPrice != null ? formatPrice(o.triggerPrice) : '-'}</td>
-                          <td className="px-2 py-2.5 text-right font-mono">{o.filledAmount != null ? formatPrice(o.filledAmount) : '-'}</td>
-                          <td className="px-2 py-2.5 text-center"><Badge variant={st.variant}>{st.label}</Badge></td>
-                          <td className="px-4 py-2.5 text-center">
-                            {o.status === 'PENDING' ? (
-                              <button onClick={() => handleCancel(o.orderId)} className="text-muted-foreground hover:text-red-500 transition-colors" title="取消"><X className="w-3.5 h-3.5 inline" /></button>
-                            ) : <span className="text-muted-foreground/30">-</span>}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-              {/* 分页 */}
-              {orderPages > 1 && (
-                <div className="flex items-center justify-between px-4 py-3 border-t border-border/30">
-                  <span className="text-xs text-muted-foreground">共 {orderTotal} 条</span>
-                  <div className="flex items-center gap-1">
-                    <Button variant="ghost" size="sm" className="h-7 w-7 p-0" disabled={orderPage <= 1} onClick={() => setOrderPage(p => p - 1)}>
-                      <ChevronLeft className="w-3.5 h-3.5" />
-                    </Button>
-                    <span className="text-xs px-2">{orderPage} / {orderPages}</span>
-                    <Button variant="ghost" size="sm" className="h-7 w-7 p-0" disabled={orderPage >= orderPages} onClick={() => setOrderPage(p => p + 1)}>
-                      <ChevronRight className="w-3.5 h-3.5" />
-                    </Button>
-                  </div>
+          {orderType === 'FUTURES' ? (
+            /* 合约订单表 */
+            futuresOrdersLoading && futuresOrders.length === 0 ? (
+              <div className="p-4"><Skeleton className="w-full h-32" /></div>
+            ) : futuresOrders.length === 0 ? (
+              <div className="p-8 text-center text-sm text-muted-foreground">暂无合约订单</div>
+            ) : (
+              <>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="border-b border-border/50 text-muted-foreground">
+                        <th className="text-left px-4 py-2.5 font-medium">时间</th>
+                        <th className="text-left px-2 py-2.5 font-medium">方向</th>
+                        <th className="text-left px-2 py-2.5 font-medium">类型</th>
+                        <th className="text-right px-2 py-2.5 font-medium">数量</th>
+                        <th className="text-right px-2 py-2.5 font-medium">杠杆</th>
+                        <th className="text-right px-2 py-2.5 font-medium">限价</th>
+                        <th className="text-right px-2 py-2.5 font-medium">成交价</th>
+                        <th className="text-right px-2 py-2.5 font-medium">盈亏</th>
+                        <th className="text-center px-2 py-2.5 font-medium">状态</th>
+                        <th className="text-center px-4 py-2.5 font-medium">操作</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {futuresOrders.map(o => {
+                        const sm = FUTURES_SIDE_MAP[o.orderSide] || { label: o.orderSide, color: 'text-foreground' };
+                        const st = STATUS_MAP[o.status] || { label: o.status, variant: 'outline' as const };
+                        const hasPnl = o.realizedPnl != null && o.realizedPnl !== 0;
+                        return (
+                          <tr key={o.orderId} className="border-b border-border/30 hover:bg-accent/30 transition-colors">
+                            <td className="px-4 py-2.5 text-muted-foreground whitespace-nowrap">{formatDateTime(o.createdAt)}</td>
+                            <td className={`px-2 py-2.5 font-medium ${sm.color}`}>{sm.label}</td>
+                            <td className="px-2 py-2.5">{o.orderType === 'MARKET' ? '市价' : '限价'}</td>
+                            <td className="px-2 py-2.5 text-right font-mono">{o.quantity}</td>
+                            <td className="px-2 py-2.5 text-right font-mono">{o.leverage}x</td>
+                            <td className="px-2 py-2.5 text-right font-mono">{o.limitPrice != null ? formatPrice(o.limitPrice) : '-'}</td>
+                            <td className="px-2 py-2.5 text-right font-mono">{o.filledPrice != null ? formatPrice(o.filledPrice) : '-'}</td>
+                            <td className={`px-2 py-2.5 text-right font-mono ${hasPnl ? (o.realizedPnl! > 0 ? 'text-red-500' : 'text-green-500') : ''}`}>
+                              {hasPnl ? `${o.realizedPnl! > 0 ? '+' : ''}${formatPrice(o.realizedPnl!)}` : '-'}
+                            </td>
+                            <td className="px-2 py-2.5 text-center"><Badge variant={st.variant}>{st.label}</Badge></td>
+                            <td className="px-4 py-2.5 text-center">
+                              {o.status === 'PENDING' ? (
+                                <button onClick={() => handleFuturesCancel(o.orderId)} className="text-muted-foreground hover:text-red-500 transition-colors" title="取消"><X className="w-3.5 h-3.5 inline" /></button>
+                              ) : <span className="text-muted-foreground/30">-</span>}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
                 </div>
-              )}
-            </>
+                {futuresOrderPages > 1 && (
+                  <div className="flex items-center justify-between px-4 py-3 border-t border-border/30">
+                    <span className="text-xs text-muted-foreground">共 {futuresOrderTotal} 条</span>
+                    <div className="flex items-center gap-1">
+                      <Button variant="ghost" size="sm" className="h-7 w-7 p-0" disabled={futuresOrderPage <= 1} onClick={() => setFuturesOrderPage(p => p - 1)}>
+                        <ChevronLeft className="w-3.5 h-3.5" />
+                      </Button>
+                      <span className="text-xs px-2">{futuresOrderPage} / {futuresOrderPages}</span>
+                      <Button variant="ghost" size="sm" className="h-7 w-7 p-0" disabled={futuresOrderPage >= futuresOrderPages} onClick={() => setFuturesOrderPage(p => p + 1)}>
+                        <ChevronRight className="w-3.5 h-3.5" />
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </>
+            )
+          ) : (
+            /* 现货订单表 */
+            ordersLoading && orders.length === 0 ? (
+              <div className="p-4"><Skeleton className="w-full h-32" /></div>
+            ) : orders.length === 0 ? (
+              <div className="p-8 text-center text-sm text-muted-foreground">暂无订单</div>
+            ) : (
+              <>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="border-b border-border/50 text-muted-foreground">
+                        <th className="text-left px-4 py-2.5 font-medium">时间</th>
+                        <th className="text-left px-2 py-2.5 font-medium">方向</th>
+                        <th className="text-left px-2 py-2.5 font-medium">类型</th>
+                        <th className="text-right px-2 py-2.5 font-medium">数量</th>
+                        <th className="text-right px-2 py-2.5 font-medium">挂单价</th>
+                        <th className="text-right px-2 py-2.5 font-medium">触发价</th>
+                        <th className="text-right px-2 py-2.5 font-medium">金额</th>
+                        <th className="text-center px-2 py-2.5 font-medium">状态</th>
+                        <th className="text-center px-4 py-2.5 font-medium">操作</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {orders.map(o => {
+                        const isBuy = o.orderSide === 'BUY';
+                        const st = STATUS_MAP[o.status] || { label: o.status, variant: 'outline' as const };
+                        return (
+                          <tr key={o.orderId} className="border-b border-border/30 hover:bg-accent/30 transition-colors">
+                            <td className="px-4 py-2.5 text-muted-foreground whitespace-nowrap">{formatDateTime(o.createdAt)}</td>
+                            <td className={`px-2 py-2.5 font-medium ${isBuy ? 'text-red-500' : 'text-green-500'}`}>{isBuy ? '买入' : '卖出'}</td>
+                            <td className="px-2 py-2.5">{o.orderType === 'MARKET' ? '市价' : '限价'}{o.leverage > 1 ? ` ${o.leverage}x` : ''}</td>
+                            <td className="px-2 py-2.5 text-right font-mono">{o.quantity}</td>
+                            <td className="px-2 py-2.5 text-right font-mono">{o.limitPrice != null ? formatPrice(o.limitPrice) : '-'}</td>
+                            <td className="px-2 py-2.5 text-right font-mono">{o.triggerPrice != null ? formatPrice(o.triggerPrice) : '-'}</td>
+                            <td className="px-2 py-2.5 text-right font-mono">{o.filledAmount != null ? formatPrice(o.filledAmount) : '-'}</td>
+                            <td className="px-2 py-2.5 text-center"><Badge variant={st.variant}>{st.label}</Badge></td>
+                            <td className="px-4 py-2.5 text-center">
+                              {o.status === 'PENDING' ? (
+                                <button onClick={() => handleCancel(o.orderId)} className="text-muted-foreground hover:text-red-500 transition-colors" title="取消"><X className="w-3.5 h-3.5 inline" /></button>
+                              ) : <span className="text-muted-foreground/30">-</span>}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                {orderPages > 1 && (
+                  <div className="flex items-center justify-between px-4 py-3 border-t border-border/30">
+                    <span className="text-xs text-muted-foreground">共 {orderTotal} 条</span>
+                    <div className="flex items-center gap-1">
+                      <Button variant="ghost" size="sm" className="h-7 w-7 p-0" disabled={orderPage <= 1} onClick={() => setOrderPage(p => p - 1)}>
+                        <ChevronLeft className="w-3.5 h-3.5" />
+                      </Button>
+                      <span className="text-xs px-2">{orderPage} / {orderPages}</span>
+                      <Button variant="ghost" size="sm" className="h-7 w-7 p-0" disabled={orderPage >= orderPages} onClick={() => setOrderPage(p => p + 1)}>
+                        <ChevronRight className="w-3.5 h-3.5" />
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </>
+            )
           )}
         </CardContent>
       </Card>

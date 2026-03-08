@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { stockApi, buffApi, orderApi, cryptoOrderApi } from '../api';
+import { stockApi, buffApi, orderApi, cryptoOrderApi, futuresApi } from '../api';
 import { StockCard } from '../components/StockCard';
 import { DailyBuffCard } from '../components/DailyBuffCard';
 import { LatestTradesCard } from '../components/LatestTradesCard';
@@ -16,6 +16,13 @@ import { useDedupedEffect } from '../hooks/useDedupedEffect';
 import { useUserStore } from '../stores/userStore';
 
 const HIDE_NOTICE_KEY = 'wiib-notice-hide-date';
+
+const FUTURES_SIDE_MAP: Record<string, { label: string; tone: 'buy' | 'sell' }> = {
+  OPEN_LONG: { label: '开多', tone: 'buy' },
+  OPEN_SHORT: { label: '开空', tone: 'sell' },
+  CLOSE_LONG: { label: '平多', tone: 'sell' },
+  CLOSE_SHORT: { label: '平空', tone: 'buy' },
+};
 
 function shouldShowNotice(): boolean {
   const hideDate = localStorage.getItem(HIDE_NOTICE_KEY);
@@ -74,16 +81,18 @@ export function Home() {
     }
   }, [isLoggedIn, refreshNonce]);
 
-  // 加载最新成交（股票+crypto合并）
+  // 加载最新成交（股票+crypto+合约合并）
   useEffect(() => {
     setTradesLoading(true);
     Promise.all([
       orderApi.live().catch(() => []),
       cryptoOrderApi.live().catch(() => []),
-    ]).then(([stockOrders, cryptoOrders]) => {
+      futuresApi.live().catch(() => []),
+    ]).then(([stockOrders, cryptoOrders, futuresOrders]) => {
       const stockItems: TradeItem[] = stockOrders.map(o => ({
         id: `s-${o.orderId}`,
         orderSide: o.orderSide,
+        sideTone: o.orderSide === 'BUY' ? 'buy' : 'sell',
         name: o.stockName,
         quantity: o.quantity,
         unit: '股',
@@ -93,13 +102,29 @@ export function Home() {
       const cryptoItems: TradeItem[] = cryptoOrders.map(o => ({
         id: `c-${o.orderId}`,
         orderSide: o.orderSide,
+        sideTone: o.orderSide === 'BUY' ? 'buy' : 'sell',
         name: o.symbol.replace('USDT', ''),
         quantity: o.quantity,
         unit: o.symbol.replace('USDT', ''),
         filledAmount: o.filledAmount,
         createdAt: o.createdAt,
       }));
-      const merged = [...stockItems, ...cryptoItems]
+      const futuresItems: TradeItem[] = futuresOrders.map(o => {
+        const side = FUTURES_SIDE_MAP[o.orderSide] ?? { label: o.orderSide, tone: 'buy' as const };
+        const base = o.symbol.replace('USDT', '');
+        return {
+          id: `f-${o.orderId}`,
+          orderSide: o.orderSide,
+          sideLabel: side.label,
+          sideTone: side.tone,
+          name: `${base} 合约`,
+          quantity: o.quantity,
+          unit: base,
+          filledAmount: o.filledAmount,
+          createdAt: o.createdAt,
+        };
+      });
+      const merged = [...stockItems, ...cryptoItems, ...futuresItems]
         .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
         .slice(0, 20);
       setLatestTrades(merged);

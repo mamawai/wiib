@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useUserStore } from '../stores/userStore';
-import { userApi, orderApi, settlementApi, cryptoOrderApi, cryptoApi } from '../api';
+import { userApi, orderApi, settlementApi, cryptoOrderApi, cryptoApi, futuresApi } from '../api';
 import { Card, CardContent } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
@@ -26,8 +26,9 @@ import {
   Bitcoin,
   Coins,
   CircleDollarSign,
+  Scale,
 } from 'lucide-react';
-import type { Position, Order, Settlement, AssetChangeEvent, PositionChangeEvent, OrderStatusEvent, CryptoPosition } from '../types';
+import type { Position, Order, Settlement, AssetChangeEvent, PositionChangeEvent, OrderStatusEvent, CryptoPosition, FuturesPosition } from '../types';
 import { useDedupedEffect } from '../hooks/useDedupedEffect';
 
 const CRYPTO_META: Record<string, { name: string; icon: typeof Bitcoin; color: string; bg: string }> = {
@@ -52,6 +53,7 @@ export function Portfolio() {
   const { toast } = useToast();
   const [positions, setPositions] = useState<Position[]>([]);
   const [cryptoRows, setCryptoRows] = useState<CryptoRow[]>([]);
+  const [futuresPositions, setFuturesPositions] = useState<FuturesPosition[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [orderTotal, setOrderTotal] = useState(0);
   const [orderPage, setOrderPage] = useState(1);
@@ -216,6 +218,7 @@ export function Portfolio() {
           setOrderTotal(o.total);
           setSettlements(s);
           loadCryptoPositions();
+          futuresApi.positions().then(setFuturesPositions).catch(() => setFuturesPositions([]));
         })
         .catch(() => {
           if (cancelled) return;
@@ -225,6 +228,7 @@ export function Portfolio() {
           setOrderTotal(0);
           setSettlements([]);
           setCryptoRows([]);
+          setFuturesPositions([]);
           toast('获取账户数据失败', 'error', { description: '请稍后重试' });
         })
         .finally(() => {
@@ -260,9 +264,13 @@ export function Portfolio() {
   const cryptoTotal = cryptoRows.reduce((s, c) => s + c.marketValue, 0);
   const stockProfit = positions.reduce((s, p) => s + (p.profit || 0), 0);
   const cryptoProfit = cryptoRows.reduce((s, c) => s + c.profit, 0);
+  const futuresMargin = futuresPositions.reduce((s, f) => s + f.margin, 0);
+  const futuresProfit = futuresPositions.reduce((s, f) => s + f.unrealizedPnl, 0);
+  const futuresTotal = futuresMargin + futuresProfit;
   const hasStock = positions.length > 0;
   const hasCrypto = cryptoRows.length > 0;
-  const hasPositions = hasStock || hasCrypto;
+  const hasFutures = futuresPositions.length > 0;
+  const hasPositions = hasStock || hasCrypto || hasFutures;
 
   return (
     <div className="max-w-4xl mx-auto p-4 space-y-4">
@@ -348,7 +356,7 @@ export function Portfolio() {
                 <span className="text-[11px] text-muted-foreground uppercase tracking-widest">总资产</span>
                 <div className="flex items-baseline gap-2 mt-0.5">
                   <span className="text-3xl font-bold tabular-nums tracking-tight">{fmt(user.totalAssets)}</span>
-                  <span className="text-xs text-muted-foreground font-normal">CNY</span>
+                  <span className="text-xs text-muted-foreground font-normal">USDT</span>
                 </div>
               </div>
 
@@ -392,6 +400,22 @@ export function Portfolio() {
                     user.marginInterestAccrued > 0 ? "text-destructive/80" : "text-muted-foreground"
                   )}>{fmt(user.marginInterestAccrued)}</span>
                 </div>
+
+                {hasFutures && (
+                  <>
+                    <div className="flex items-center justify-between py-2">
+                      <span className="text-[12px] text-muted-foreground">合约保证金</span>
+                      <span className="text-[13px] font-semibold tabular-nums">{fmt(futuresMargin)}</span>
+                    </div>
+                    <div className="flex items-center justify-between py-2">
+                      <span className="text-[12px] text-muted-foreground">合约浮盈</span>
+                      <span className={cn(
+                        "text-[13px] font-semibold tabular-nums",
+                        futuresProfit >= 0 ? "text-red-400" : "text-green-400"
+                      )}>{futuresProfit >= 0 ? '+' : ''}{fmt(futuresProfit)}</span>
+                    </div>
+                  </>
+                )}
               </div>
             </div>
           </div>
@@ -588,10 +612,82 @@ export function Portfolio() {
                 </Card>
               )}
 
+              {/* 合约持仓 */}
+              {hasFutures && (
+                <Card className="overflow-hidden">
+                  <div className="px-4 py-3 flex items-center justify-between border-b border-border/40 bg-gradient-to-r from-purple-500/[0.06] to-transparent">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-8 h-8 rounded-lg bg-purple-500/10 flex items-center justify-center ring-1 ring-purple-500/20">
+                        <Scale className="w-4 h-4 text-purple-400" />
+                      </div>
+                      <div>
+                        <span className="text-sm font-semibold tracking-tight">合约持仓</span>
+                        <span className="text-[11px] text-muted-foreground ml-1.5">{futuresPositions.length}个</span>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-[11px] text-muted-foreground">保证金 <span className="text-foreground font-bold tabular-nums">{fmt(futuresMargin)}</span></div>
+                      <div className={cn("text-[11px] tabular-nums font-medium", futuresProfit >= 0 ? "text-red-400" : "text-green-400")}>
+                        浮盈 {futuresProfit >= 0 ? '+' : ''}{fmt(futuresProfit)}
+                      </div>
+                    </div>
+                  </div>
+                  <CardContent className="p-0 divide-y divide-border/30">
+                    {futuresPositions.map((f) => {
+                      const up = f.unrealizedPnl >= 0;
+                      const isLong = f.side === 'LONG';
+                      const meta = CRYPTO_META[f.symbol];
+                      const Icon = meta?.icon ?? Coins;
+                      return (
+                        <button
+                          type="button"
+                          key={f.id}
+                          onClick={() => navigate(`/coin/${f.symbol}`)}
+                          className="w-full text-left px-4 py-3.5 cursor-pointer hover:bg-accent/40 active:bg-accent/60 transition-colors group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+                        >
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                              <div className={cn("w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ring-1", meta?.bg ?? 'bg-muted', meta ? `ring-current/20 ${meta.color}` : 'ring-border')}>
+                                <Icon className={cn("w-4 h-4", meta?.color ?? 'text-muted-foreground')} />
+                              </div>
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-1.5 mb-1">
+                                  <span className="font-semibold text-[13px] group-hover:text-primary transition-colors">{meta?.name ?? f.symbol}</span>
+                                  <Badge className={cn("text-[9px] px-1 py-0", isLong ? "bg-red-500" : "bg-green-500")}>{isLong ? '多' : '空'}</Badge>
+                                  <span className="text-[11px] text-muted-foreground">{f.leverage}x</span>
+                                </div>
+                                <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+                                  <span>数量 {f.quantity}</span>
+                                  <span className="text-border">·</span>
+                                  <span>开仓 {fmt(f.entryPrice)}</span>
+                                  <span className="text-border">·</span>
+                                  <span>保证金 {fmt(f.margin)}</span>
+                                </div>
+                              </div>
+                            </div>
+                            <div className="text-right shrink-0 flex items-center gap-2">
+                              <div>
+                                <div className={cn("text-[13px] font-bold tabular-nums", up ? "text-red-400" : "text-green-400")}>
+                                  {up ? '+' : ''}{fmt(f.unrealizedPnl)}
+                                </div>
+                                <div className={cn("text-[11px] tabular-nums font-medium", up ? "text-red-400/70" : "text-green-400/70")}>
+                                  {up ? '+' : ''}{f.unrealizedPnlPct.toFixed(2)}%
+                                </div>
+                              </div>
+                              <ChevronRight className="w-3.5 h-3.5 text-muted-foreground/40 group-hover:text-primary/60 transition-colors" />
+                            </div>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </CardContent>
+                </Card>
+              )}
+
               {/* 合计汇总 */}
-              {hasStock && hasCrypto && (() => {
-                const allProfit = stockProfit + cryptoProfit;
-                const allTotal = stockTotal + cryptoTotal;
+              {[hasStock, hasCrypto, hasFutures].filter(Boolean).length > 1 && (() => {
+                const allProfit = stockProfit + cryptoProfit + futuresProfit;
+                const allTotal = stockTotal + cryptoTotal + futuresTotal;
                 const up = allProfit >= 0;
                 return (
                   <div className="rounded-xl border border-dashed border-border/60 bg-card/50 backdrop-blur-sm px-4 py-3 flex items-center justify-between">

@@ -5,6 +5,8 @@ import { Skeleton } from './ui/skeleton';
 export interface TradeItem {
   id: string;
   orderSide: string;
+  sideLabel?: string;
+  sideTone?: 'buy' | 'sell';
   name: string;
   quantity: number | string;
   unit: string;
@@ -50,21 +52,25 @@ export function LatestTradesCard({ trades, loading }: Props) {
           </div>
         ) : trades.length > 0 ? (
           <div className="max-h-80 overflow-y-auto">
-            {trades.map((t) => (
-              <div key={t.id} className="flex items-center justify-between px-4 py-2.5 border-b border-border last:border-b-0 text-sm">
-                <div className="flex items-center gap-2 min-w-0">
-                  <span className={`text-xs font-medium px-1.5 py-0.5 rounded ${t.orderSide === 'BUY' ? 'bg-red-500/10 text-red-500' : 'bg-green-500/10 text-green-500'}`}>
-                    {t.orderSide === 'BUY' ? '买' : '卖'}
-                  </span>
-                  <span className="font-medium truncate">{t.name}</span>
-                  <span className="text-muted-foreground text-xs">{t.quantity}{t.unit}</span>
+            {trades.map((t) => {
+              const tone = t.sideTone ?? (t.orderSide === 'BUY' ? 'buy' : 'sell');
+              const sideLabel = t.sideLabel ?? (tone === 'buy' ? '买' : '卖');
+              return (
+                <div key={t.id} className="flex items-center justify-between px-4 py-2.5 border-b border-border last:border-b-0 text-sm">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className={`text-xs font-medium px-1.5 py-0.5 rounded ${tone === 'buy' ? 'bg-red-500/10 text-red-500' : 'bg-green-500/10 text-green-500'}`}>
+                      {sideLabel}
+                    </span>
+                    <span className="font-medium truncate">{t.name}</span>
+                    <span className="text-muted-foreground text-xs">{t.quantity}{t.unit}</span>
+                  </div>
+                  <div className="flex items-center gap-3 shrink-0">
+                    <span className="text-muted-foreground text-xs">{formatAmount(t.filledAmount)}</span>
+                    <span className="text-muted-foreground text-xs w-14 text-right">{formatTime(t.createdAt)}</span>
+                  </div>
                 </div>
-                <div className="flex items-center gap-3 shrink-0">
-                  <span className="text-muted-foreground text-xs">{formatAmount(t.filledAmount)}</span>
-                  <span className="text-muted-foreground text-xs w-14 text-right">{formatTime(t.createdAt)}</span>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         ) : (
           <div className="p-8 text-center text-muted-foreground">暂无成交</div>

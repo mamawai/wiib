@@ -5,6 +5,9 @@ import { useEffect, useRef, useState } from 'react';
 export interface CryptoTick {
   price: number;
   ts: number;
+  ws: boolean;
+  fws: boolean;
+  mp?: number;
 }
 
 const THROTTLE_MS = 3000;
@@ -31,7 +34,7 @@ export function useCryptoStream(symbol: string | undefined): CryptoTick | null {
         client.subscribe(`/topic/crypto/${symbol}`, (msg) => {
           try {
             const data = JSON.parse(msg.body);
-            const t: CryptoTick = { price: parseFloat(data.price), ts: data.ts };
+            const t: CryptoTick = { price: parseFloat(data.price), ts: data.ts, ws: !!data.ws, fws: !!data.fws, ...(data.mp ? { mp: parseFloat(data.mp) } : {}) };
             const elapsed = Date.now() - lastUpdateRef.current;
             if (elapsed >= THROTTLE_MS) {
               flush(t);

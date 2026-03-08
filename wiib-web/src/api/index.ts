@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { Stock, User, Position, OrderRequest, Order, DayTick, Kline, Settlement, PageResult, News, RankingItem, OptionChainItem, OptionQuote, OptionPosition, OptionOrder, OptionOrderRequest, OptionOrderResult, BuffStatus, UserBuff, BlackjackStatus, GameState, ConvertResult, MinesStatus, MinesGameState, CryptoPrice, CryptoOrderRequest, CryptoOrder, CryptoPosition, CardRoom, Card414GameState } from '../types';
+import type { Stock, User, Position, OrderRequest, Order, DayTick, Kline, Settlement, PageResult, News, RankingItem, OptionChainItem, OptionQuote, OptionPosition, OptionOrder, OptionOrderRequest, OptionOrderResult, BuffStatus, UserBuff, BlackjackStatus, GameState, ConvertResult, MinesStatus, MinesGameState, CryptoPrice, CryptoOrderRequest, CryptoOrder, CryptoPosition, CardRoom, Card414GameState, FuturesOpenRequest, FuturesCloseRequest, FuturesAddMarginRequest, FuturesStopLossRequest, FuturesPosition, FuturesOrder } from '../types';
 
 const api = axios.create({
   baseURL: '/api',
@@ -214,8 +214,6 @@ export const cryptoApi = {
   },
   // 最新价格
   price: (symbol = 'BTCUSDT') => api.get<unknown, CryptoPrice>('/crypto/price', { params: { symbol } }),
-  // WS连接状态
-  status: () => api.get<unknown, { wsConnected: boolean }>('/crypto/status'),
 };
 
 // ========== 加密货币交易接口 ==========
@@ -248,4 +246,17 @@ export const card414Api = {
     api.get<unknown, string[]>('/414/hand', { params: { roomCode, uuid } }),
   getGameState: (code: string, uuid: string) =>
     api.get<unknown, Card414GameState>(`/414/game/${code}`, { params: { uuid } }),
+};
+
+// ========== 永续合约接口 ==========
+export const futuresApi = {
+  open: (data: FuturesOpenRequest) => api.post<unknown, FuturesOrder>('/futures/open', data),
+  close: (data: FuturesCloseRequest) => api.post<unknown, FuturesOrder>('/futures/close', data),
+  cancel: (orderId: number) => api.post<unknown, FuturesOrder>(`/futures/cancel/${orderId}`),
+  addMargin: (data: FuturesAddMarginRequest) => api.post<unknown, void>('/futures/margin', data),
+  setStopLoss: (data: FuturesStopLossRequest) => api.post<unknown, void>('/futures/stop-loss', data),
+  positions: (symbol?: string) => api.get<unknown, FuturesPosition[]>('/futures/positions', { params: { symbol } }),
+  orders: (status?: string, pageNum = 1, pageSize = 10, symbol?: string) =>
+    api.get<unknown, PageResult<FuturesOrder>>('/futures/orders', { params: { status, pageNum, pageSize, symbol } }),
+  live: () => api.get<unknown, FuturesOrder[]>('/futures/live'),
 };

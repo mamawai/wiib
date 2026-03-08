@@ -441,3 +441,80 @@ export interface Card414WsMessage {
   data: Record<string, unknown>;
   timestamp: number;
 }
+
+// ========== 永续合约类型 ==========
+export interface FuturesOpenRequest {
+  symbol: string;
+  side: 'LONG' | 'SHORT';
+  quantity: number;
+  leverage: number;
+  orderType: 'MARKET' | 'LIMIT';
+  limitPrice?: number;
+  stopLossPercent?: number;
+}
+
+export interface FuturesCloseRequest {
+  positionId: number;
+  quantity: number;
+  orderType: 'MARKET' | 'LIMIT';
+  limitPrice?: number;
+}
+
+export interface FuturesAddMarginRequest {
+  positionId: number;
+  amount: number;
+}
+
+export interface FuturesStopLossRequest {
+  positionId: number;
+  stopLossPercent: number;
+}
+
+export interface FuturesPosition {
+  id: number;
+  userId: number;
+  symbol: string;
+  side: 'LONG' | 'SHORT';
+  leverage: number;
+  quantity: number;
+  entryPrice: number;
+  margin: number;
+  fundingFeeTotal: number;
+  stopLossPercent?: number;
+  stopLossPrice?: number;
+  status: string;
+  closedPrice?: number;
+  closedPnl?: number;
+  createdAt: string;
+  updatedAt: string;
+  currentPrice: number;
+  markPrice: number;
+  positionValue: number;
+  unrealizedPnl: number;
+  unrealizedPnlPct: number;
+  effectiveMargin: number;
+  maintenanceMargin: number;
+  liquidationPrice: number;
+  fundingFeePerCycle: number;
+}
+
+export interface FuturesOrder {
+  orderId: number;
+  userId: number;
+  positionId?: number;
+  symbol: string;
+  orderSide: string;
+  orderType: string;
+  quantity: number;
+  leverage: number;
+  limitPrice?: number;
+  frozenAmount?: number;
+  filledPrice?: number;
+  filledAmount?: number;
+  marginAmount?: number;
+  commission?: number;
+  realizedPnl?: number;
+  status: string;
+  expireAt?: string;
+  createdAt: string;
+}
