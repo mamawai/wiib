@@ -39,9 +39,9 @@ export function Layout({ children }: Props) {
         <div className="max-w-5xl mx-auto">
           <div
             className={cn(
-              "flex h-14 items-center justify-center md:justify-between rounded-full border-[3px] border-edge bg-card px-5 shadow-[4px_4px_0_0_var(--color-edge)]",
+              "flex h-14 items-center justify-center rounded-full border-[3px] border-edge bg-card px-5 shadow-[4px_4px_0_0_var(--color-edge)]",
               "mx-auto transition-[max-width] max-w-[17rem] overflow-hidden",
-              expanded && "md:max-w-full md:overflow-visible"
+              expanded && "md:max-w-full md:overflow-visible md:justify-between"
             )}
             style={{ transitionDuration: '600ms', transitionTimingFunction: 'cubic-bezier(0.34, 1.56, 0.64, 1)' }}
             onMouseEnter={() => setHeaderHover(true)}
@@ -50,7 +50,10 @@ export function Layout({ children }: Props) {
             {/* Logo */}
             <button
               type="button"
-              className="flex items-center gap-2.5 cursor-pointer group focus-visible:outline-none shrink-0"
+              className={cn(
+                "flex items-center gap-2.5 cursor-pointer group focus-visible:outline-none shrink-0 transition-all",
+                !expanded && "md:-ml-2"
+              )}
               onClick={() => navigate('/')}
               aria-label="返回首页"
             >
@@ -62,8 +65,8 @@ export function Layout({ children }: Props) {
 
             {/* Desktop Nav */}
             <nav className={cn(
-              "hidden md:flex items-center gap-1 overflow-hidden whitespace-nowrap transition-all",
-              expanded ? "opacity-100 max-w-[40rem]" : "opacity-0 max-w-0"
+              "hidden md:flex items-center gap-1 whitespace-nowrap transition-all",
+              expanded ? "opacity-100 max-w-[40rem] overflow-visible" : "opacity-0 max-w-0 overflow-hidden"
             )} style={{ transitionDuration: '400ms', transitionTimingFunction: 'cubic-bezier(0.34, 1.56, 0.64, 1)' }}>
               <HeaderNavItem to="/" label="首页" />
               <MarketDropdown isActive={isMarketActive} />
@@ -179,7 +182,7 @@ function MarketDropdown({ isActive }: { isActive: boolean }) {
       </button>
 
       {open && (
-        <div className="absolute top-full left-0 mt-2 w-44 rounded-2xl border-[3px] border-edge bg-card shadow-[4px_4px_0_0_var(--color-edge)] py-1.5 animate-in fade-in zoom-in-95">
+        <div className="absolute top-full left-0 mt-2 w-44 rounded-2xl border-[3px] border-edge bg-card shadow-[4px_4px_0_0_var(--color-edge)] py-1.5 opacity-100 scale-100 transition-all duration-200">
           {[
             { to: '/stocks', icon: <List className="w-4 h-4" />, label: '股票' },
             { to: '/coin', icon: <DollarSign className="w-4 h-4" />, label: '币种' },

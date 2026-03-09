@@ -33,7 +33,9 @@ export function CoinSelect() {
             key={c.key}
             onClick={() => navigate(`/coin/${c.key}`)}
             className={cn(
-              'flex flex-col items-center gap-3 rounded-xl border p-6 transition-all cursor-pointer active:scale-[0.97]',
+              'flex flex-col items-center gap-3 rounded-2xl border-[3px] border-edge p-6 transition-all cursor-pointer',
+              'shadow-[4px_4px_0_0_var(--color-edge)] hover:shadow-[2px_2px_0_0_var(--color-edge)] hover:translate-x-[2px] hover:translate-y-[2px]',
+              'active:shadow-[0px_0px_0_0_var(--color-edge)] active:translate-x-[4px] active:translate-y-[4px]',
               c.bg,
             )}
           >

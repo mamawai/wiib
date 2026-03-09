@@ -75,89 +75,88 @@ export function Login() {
 
   return (
     <div className="min-h-screen flex items-center justify-center p-4 relative overflow-hidden">
-      {/* Static Background */}
-      <div className="absolute inset-0 bg-[#0a0a0f]">
-        {/* Grid pattern */}
-        <div
-          className="absolute inset-0 opacity-20"
-          style={{
-            backgroundImage: `linear-gradient(rgba(59, 130, 246, 0.4) 1px, transparent 1px), linear-gradient(90deg, rgba(59, 130, 246, 0.4) 1px, transparent 1px)`,
-            backgroundSize: '40px 40px',
-          }}
-        />
-        {/* Gradient overlay */}
-        <div className="absolute inset-0 bg-gradient-to-br from-primary/10 via-transparent to-purple-500/10" />
+      {/* Vertical stripe gradient background */}
+      <div className="absolute inset-0 bg-background">
+        <div className="absolute inset-0 flex">
+          {Array.from({ length: 26 }).map((_, i) => (
+            <div
+              key={i}
+              className="flex-1"
+              style={{
+                background: `linear-gradient(to bottom,
+                  rgba(249, 115, 22, 0) 0%,
+                  rgba(253, 186, 116, ${Math.sin((i / 26) * Math.PI) * 0.35 + 0.25}) 50%,
+                  rgba(249, 115, 22, 0) 100%)`,
+              }}
+            />
+          ))}
+        </div>
       </div>
 
-      <Card className="w-full max-w-md relative z-10 border-white/10 bg-black/40 backdrop-blur-xl shadow-2xl">
-        <CardContent className="p-8">
+      {/* Main Card */}
+      <div className="w-full max-w-md relative z-10">
+        <div className="rounded-3xl border-[3px] border-edge bg-card shadow-[8px_8px_0_0_var(--color-edge)] p-8 md:p-10">
           {/* Logo */}
           <div className="flex justify-center mb-8">
-            <div className="relative">
-              <div className="absolute inset-0 bg-primary/50 blur-xl rounded-full" />
-              <div className="relative w-20 h-20 rounded-2xl bg-gradient-to-br from-primary via-blue-500 to-purple-600 flex items-center justify-center shadow-lg">
-                <TrendingUp className="w-10 h-10 text-white" />
-              </div>
+            <div className="w-20 h-20 rounded-2xl bg-primary/15 border-[3px] border-edge flex items-center justify-center shadow-[4px_4px_0_0_var(--color-edge)]">
+              <TrendingUp className="w-10 h-10 text-primary" />
             </div>
           </div>
 
           {/* Title with Typewriter */}
-          <div className="text-center mb-8">
-            <h1 className="text-3xl font-bold bg-gradient-to-r from-white via-blue-100 to-white bg-clip-text text-transparent mb-4">
+          <div className="text-center mb-10">
+            <h1 className="text-3xl md:text-4xl font-extrabold text-foreground mb-4 tracking-tight">
               What If I Bought
             </h1>
-            <p className="text-muted-foreground h-12">
+            <div className="text-muted-foreground text-sm md:text-base h-12 flex items-center justify-center">
               <Typewriter text="模拟股票交易，看看如果当初买了会怎样" speed={100} />
-            </p>
+            </div>
           </div>
 
           {/* Features */}
-          <div className="grid grid-cols-3 gap-4 mb-8">
-            <div className="text-center p-3 rounded-xl bg-white/5 border border-white/10">
+          <div className="grid grid-cols-3 gap-3 mb-8">
+            <div className="text-center p-4 rounded-xl border-[3px] border-edge bg-surface shadow-[2px_2px_0_0_var(--color-edge)]">
               <BarChart3 className="w-6 h-6 mx-auto mb-2 text-primary" />
-              <span className="text-xs text-muted-foreground">实时行情</span>
+              <span className="text-xs font-bold text-foreground">实时行情</span>
             </div>
-            <div className="text-center p-3 rounded-xl bg-white/5 border border-white/10">
-              <Wallet className="w-6 h-6 mx-auto mb-2 text-green-500" />
-              <span className="text-xs text-muted-foreground">模拟交易</span>
+            <div className="text-center p-4 rounded-xl border-[3px] border-edge bg-surface shadow-[2px_2px_0_0_var(--color-edge)]">
+              <Wallet className="w-6 h-6 mx-auto mb-2 text-success" />
+              <span className="text-xs font-bold text-foreground">模拟交易</span>
             </div>
-            <div className="text-center p-3 rounded-xl bg-white/5 border border-white/10">
-              <LineChart className="w-6 h-6 mx-auto mb-2 text-purple-500" />
-              <span className="text-xs text-muted-foreground">收益追踪</span>
+            <div className="text-center p-4 rounded-xl border-[3px] border-edge bg-surface shadow-[2px_2px_0_0_var(--color-edge)]">
+              <LineChart className="w-6 h-6 mx-auto mb-2 text-primary" />
+              <span className="text-xs font-bold text-foreground">收益追踪</span>
             </div>
           </div>
 
           {/* Error */}
           {error && (
-            <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm text-center mb-4 animate-in fade-in slide-in-from-top-2">
+            <div className="p-4 rounded-xl border-[3px] border-destructive bg-destructive/10 text-destructive text-sm font-bold text-center mb-6 shadow-[2px_2px_0_0_var(--color-destructive)]">
               {error}
             </div>
           )}
 
           {/* Login Button */}
           {loading ? (
-            <div className="flex flex-col items-center gap-4 py-6">
-              <div className="relative">
-                <div className="absolute inset-0 bg-primary/30 blur-xl rounded-full animate-pulse" />
-                <Loader2 className="w-10 h-10 text-primary animate-spin relative" />
-              </div>
-              <p className="text-sm text-muted-foreground">正在登录...</p>
+            <div className="flex flex-col items-center gap-4 py-8">
+              <Loader2 className="w-12 h-12 text-primary animate-spin" />
+              <p className="text-sm font-bold text-muted-foreground">正在登录...</p>
             </div>
           ) : (
-            <Button
+            <button
               onClick={handleLinuxDoLogin}
-              className="w-full h-14 text-base font-medium bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 hover:from-amber-400 hover:via-orange-400 hover:to-amber-500 text-white shadow-lg shadow-orange-500/30 transition-all duration-300 hover:shadow-orange-500/50 hover:-translate-y-1 hover:scale-[1.02] border-0"
+              className="w-full h-14 rounded-xl border-[3px] border-edge bg-primary text-primary-foreground font-bold text-base shadow-[4px_4px_0_0_var(--color-edge)] hover:shadow-[2px_2px_0_0_var(--color-edge)] hover:translate-x-[2px] hover:translate-y-[2px] active:shadow-[0px_0px_0_0_var(--color-edge)] active:translate-x-[4px] active:translate-y-[4px] transition-all flex items-center justify-center gap-2"
             >
-              <Globe className="w-5 h-5 mr-2" />
+              <Globe className="w-5 h-5" />
               使用 LinuxDo 登录
-            </Button>
+            </button>
           )}
 
-          <p className="text-xs text-center text-muted-foreground/60 mt-6">
+          <p className="text-xs text-center text-muted-foreground mt-6">
             登录即表示同意我们的服务条款
           </p>
-        </CardContent>
-      </Card>
+        </div>
+      </div>
     </div>
   );
 }
