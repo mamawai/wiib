@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { authApi } from '../api';
 import { useUserStore } from '../stores/userStore';
 import { Typewriter } from '../components/ui/typewriter';
-import { TrendingUp, Loader2, Globe, BarChart3, Wallet, LineChart } from 'lucide-react';
+import { Loader2, Globe, BarChart3, Wallet, LineChart } from 'lucide-react';
 
 const LINUXDO_CONFIG = {
   clientId: 'toCFytIO9bCHpbUbFKM1mTgvy1ax8tG2',
@@ -15,6 +15,31 @@ const LINUXDO_CONFIG = {
 //   authorizeUrl: 'https://connect.linux.do/oauth2/authorize',
 //   redirectUri: 'http://localhost:3000/login',
 // };
+
+// 定制化新粗野主义商标组件：时光机+涨幅趋势
+function ProjectLogo({ className, ...props }: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" className={className} {...props}>
+      {/* 底部偏移阴影（时钟的背影） */}
+      <circle cx="50" cy="58" r="32" fill="currentColor" opacity="0.15" />
+      {/* 时钟表盘 */}
+      <circle cx="46" cy="54" r="32" fill="#FFFFFF" stroke="currentColor" strokeWidth="7" />
+      
+      {/* 时钟刻度 */}
+      <line x1="46" y1="30" x2="46" y2="36" stroke="currentColor" strokeWidth="5" strokeLinecap="round" />
+      <line x1="70" y1="54" x2="64" y2="54" stroke="currentColor" strokeWidth="5" strokeLinecap="round" />
+      <line x1="46" y1="78" x2="46" y2="72" stroke="currentColor" strokeWidth="5" strokeLinecap="round" />
+      <line x1="22" y1="54" x2="28" y2="54" stroke="currentColor" strokeWidth="5" strokeLinecap="round" />
+      
+      {/* 时钟中心点 */}
+      <circle cx="46" cy="54" r="6" fill="currentColor" />
+      
+      {/* 突破时间限制的增长箭头 */}
+      <polyline points="32,68 46,54 74,26" fill="none" stroke="currentColor" strokeWidth="7" strokeLinecap="square" strokeLinejoin="miter" />
+      <polygon points="61,23 81,19 77,39" fill="currentColor" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
+    </svg>
+  );
+}
 
 export function Login() {
   const navigate = useNavigate();
@@ -72,9 +97,9 @@ export function Login() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4 relative overflow-hidden">
-      {/* Vertical stripe gradient background */}
-      <div className="absolute inset-0 bg-background">
+    <div className="min-h-screen flex items-center justify-center p-4 relative overflow-hidden bg-background">
+      {/* 恢复原版的渐变垂直条纹背景 */}
+      <div className="absolute inset-0 z-0 pointer-events-none">
         <div className="absolute inset-0 flex">
           {Array.from({ length: 26 }).map((_, i) => (
             <div
@@ -91,67 +116,83 @@ export function Login() {
         </div>
       </div>
 
-      {/* Main Card */}
+      {/* 主卡片 */}
       <div className="w-full max-w-md relative z-10">
-        <div className="rounded-3xl border-[3px] border-edge bg-card shadow-[8px_8px_0_0_var(--color-edge)] p-8 md:p-10">
-          {/* Logo */}
-          <div className="flex justify-center mb-8">
-            <div className="w-20 h-20 rounded-2xl bg-primary/15 border-[3px] border-edge flex items-center justify-center shadow-[4px_4px_0_0_var(--color-edge)]">
-              <TrendingUp className="w-10 h-10 text-primary" />
+        {/* 卡片后置阴影块（纯物理错位感） */}
+        <div className="absolute inset-0 bg-edge rounded-[2rem] translate-x-3 translate-y-3" />
+        
+        <div className="relative rounded-[2rem] border-[3.5px] border-edge bg-card p-8 md:p-10 flex flex-col items-center">
+          
+          {/* Logo - 倾斜重叠设计 + 专属商标 */}
+          <div className="mb-8 relative group cursor-pointer">
+            <div className="absolute inset-0 bg-warning rounded-2xl border-[3.5px] border-edge rotate-6 transition-transform duration-300 group-hover:rotate-12" />
+            <div className="relative w-24 h-24 rounded-2xl bg-primary border-[3.5px] border-edge flex items-center justify-center shadow-[4px_4px_0_0_var(--color-edge)] -rotate-6 transition-transform duration-300 group-hover:rotate-0">
+              <ProjectLogo className="w-16 h-16 text-edge" />
             </div>
           </div>
 
-          {/* Title with Typewriter */}
-          <div className="text-center mb-10">
-            <h1 className="text-3xl md:text-4xl font-extrabold text-foreground mb-4 tracking-tight">
-              What If I Bought
+          {/* 标题 */}
+          <div className="text-center mb-10 w-full flex flex-col items-center">
+            <h1 className="text-3xl sm:text-4xl md:text-[2.5rem] font-black text-edge mb-6 tracking-tighter uppercase flex flex-wrap items-center justify-center gap-x-3 gap-y-4">
+              <span className="relative inline-block z-10" style={{ textShadow: '4px 4px 0 var(--color-warning)' }}>
+                What If
+              </span>
+              <span className="px-4 py-1 bg-primary text-primary-foreground border-[3.5px] border-edge shadow-[5px_5px_0_0_var(--color-edge)] -rotate-2 inline-block relative z-20 hover:rotate-0 hover:translate-y-1 transition-all">
+                I Bought
+              </span>
             </h1>
-            <div className="text-muted-foreground text-sm md:text-base h-12 flex items-center justify-center">
-              <Typewriter text="模拟股票交易，看看如果当初买了会怎样" speed={100} />
+            <div className="inline-flex items-center justify-center px-4 py-2.5 rounded-xl border-[2.5px] border-edge bg-surface shadow-[3px_3px_0_0_var(--color-edge)]">
+              <span className="text-sm font-bold text-foreground">
+                <Typewriter text="模拟股票交易，看看如果当初买了会怎样" speed={80} />
+              </span>
             </div>
           </div>
 
-          {/* Features */}
-          <div className="grid grid-cols-3 gap-3 mb-8">
-            <div className="text-center p-4 rounded-xl border-[3px] border-edge bg-surface shadow-[2px_2px_0_0_var(--color-edge)]">
-              <BarChart3 className="w-6 h-6 mx-auto mb-2 text-primary" />
-              <span className="text-xs font-bold text-foreground">实时行情</span>
+          {/* 功能点矩阵 */}
+          <div className="grid grid-cols-3 gap-3 w-full mb-10">
+            <div className="text-center p-4 rounded-xl border-[3px] border-edge bg-[#FEF08A] shadow-[3px_3px_0_0_var(--color-edge)] hover:-translate-y-1 hover:translate-x-[-1px] hover:shadow-[5px_5px_0_0_var(--color-edge)] transition-all">
+              <BarChart3 className="w-7 h-7 mx-auto mb-2 text-edge" strokeWidth={2.5} />
+              <span className="text-xs font-black text-edge">真实行情</span>
             </div>
-            <div className="text-center p-4 rounded-xl border-[3px] border-edge bg-surface shadow-[2px_2px_0_0_var(--color-edge)]">
-              <Wallet className="w-6 h-6 mx-auto mb-2 text-success" />
-              <span className="text-xs font-bold text-foreground">模拟交易</span>
+            <div className="text-center p-4 rounded-xl border-[3px] border-edge bg-[#86EFAC] shadow-[3px_3px_0_0_var(--color-edge)] hover:-translate-y-1 hover:translate-x-[-1px] hover:shadow-[5px_5px_0_0_var(--color-edge)] transition-all">
+              <Wallet className="w-7 h-7 mx-auto mb-2 text-edge" strokeWidth={2.5} />
+              <span className="text-xs font-black text-edge">无损模拟</span>
             </div>
-            <div className="text-center p-4 rounded-xl border-[3px] border-edge bg-surface shadow-[2px_2px_0_0_var(--color-edge)]">
-              <LineChart className="w-6 h-6 mx-auto mb-2 text-primary" />
-              <span className="text-xs font-bold text-foreground">收益追踪</span>
+            <div className="text-center p-4 rounded-xl border-[3px] border-edge bg-[#93C5FD] shadow-[3px_3px_0_0_var(--color-edge)] hover:-translate-y-1 hover:translate-x-[-1px] hover:shadow-[5px_5px_0_0_var(--color-edge)] transition-all">
+              <LineChart className="w-7 h-7 mx-auto mb-2 text-edge" strokeWidth={2.5} />
+              <span className="text-xs font-black text-edge">收益复盘</span>
             </div>
           </div>
 
-          {/* Error */}
+          {/* 错误提示 */}
           {error && (
-            <div className="p-4 rounded-xl border-[3px] border-destructive bg-destructive/10 text-destructive text-sm font-bold text-center mb-6 shadow-[2px_2px_0_0_var(--color-destructive)]">
+            <div className="w-full p-4 rounded-xl border-[3px] border-edge bg-destructive text-white text-sm font-black text-center mb-8 shadow-[4px_4px_0_0_var(--color-edge)] animate-in slide-in-from-top-2">
               {error}
             </div>
           )}
 
-          {/* Login Button */}
-          {loading ? (
-            <div className="flex flex-col items-center gap-4 py-8">
-              <Loader2 className="w-12 h-12 text-primary animate-spin" />
-              <p className="text-sm font-bold text-muted-foreground">正在登录...</p>
-            </div>
-          ) : (
-            <button
-              onClick={handleLinuxDoLogin}
-              className="w-full h-14 rounded-xl border-[3px] border-edge bg-primary text-primary-foreground font-bold text-base shadow-[4px_4px_0_0_var(--color-edge)] hover:shadow-[2px_2px_0_0_var(--color-edge)] hover:translate-x-[2px] hover:translate-y-[2px] active:shadow-[0px_0px_0_0_var(--color-edge)] active:translate-x-[4px] active:translate-y-[4px] transition-all flex items-center justify-center gap-2"
-            >
-              <Globe className="w-5 h-5" />
-              使用 LinuxDo 登录
-            </button>
-          )}
+          {/* 登录按钮 */}
+          <div className="w-full">
+            {loading ? (
+              <div className="flex flex-col items-center justify-center h-16 rounded-2xl border-[3.5px] border-edge bg-surface shadow-[4px_4px_0_0_var(--color-edge)] gap-2">
+                <Loader2 className="w-6 h-6 text-edge animate-spin" strokeWidth={3} />
+                <p className="text-sm font-black text-edge">登录中...</p>
+              </div>
+            ) : (
+              <button
+                onClick={handleLinuxDoLogin}
+                className="group relative w-full h-16 rounded-2xl border-[3.5px] border-edge bg-primary text-primary-foreground font-black text-lg shadow-[6px_6px_0_0_var(--color-edge)] hover:-translate-y-1 hover:translate-x-[-1px] hover:shadow-[8px_8px_0_0_var(--color-edge)] active:translate-y-[6px] active:translate-x-[6px] active:shadow-[0px_0px_0_0_var(--color-edge)] transition-all flex items-center justify-center gap-3 overflow-hidden"
+              >
+                {/* 按钮内扫光效果 */}
+                <div className="absolute inset-0 w-full h-full bg-white/20 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-700" />
+                <Globe className="w-6 h-6 relative z-10" strokeWidth={2.5} />
+                <span className="relative z-10 tracking-wide">使用 LinuxDo 登录</span>
+              </button>
+            )}
+          </div>
 
-          <p className="text-xs text-center text-muted-foreground mt-6">
-            登录即表示同意我们的服务条款
+          <p className="text-[11px] font-black text-center text-muted-foreground mt-8 uppercase tracking-[0.2em]">
+            Welcome To The Playground
           </p>
         </div>
       </div>

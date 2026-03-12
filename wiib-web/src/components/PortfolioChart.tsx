@@ -24,7 +24,8 @@ export function PortfolioChart({ positions, cryptoPositions = [], balance, pendi
 
   useEffect(() => {
     if (!chartRef.current) return;
-    const chart = echarts.init(chartRef.current, 'dark');
+    const isDark = document.documentElement.classList.contains('dark');
+    const chart = echarts.init(chartRef.current, isDark ? 'dark' : 'light');
 
     const sortedPositions = [...positions].sort((a, b) => (b.marketValue || 0) - (a.marketValue || 0));
     const topPositions = sortedPositions.slice(0, 5);
@@ -48,33 +49,40 @@ export function PortfolioChart({ positions, cryptoPositions = [], balance, pendi
       ...(pendingSettlement > 0 ? [{ name: '待结算', value: pendingSettlement, itemStyle: { color: '#a855f7' } }] : [])
     ];
 
+    const textColor = isDark ? '#94A3B8' : '#78716C'; // Tailwind slate-400 / stone-500
+    const borderColor = isDark ? '#1E293B' : '#FFFFFF'; // Card background
+
     chart.setOption({
       backgroundColor: 'transparent',
       tooltip: {
         trigger: 'item',
+        backgroundColor: isDark ? '#1E293B' : '#FFFFFF',
+        borderColor: isDark ? '#334155' : '#E7E0D8',
+        textStyle: { color: isDark ? '#F8FAFC' : '#1C1917' },
         formatter: (params: any) => {
            return `${params.marker}${params.name}<br/>
-                   <span style="font-weight:bold">${params.value.toFixed(2)}</span> (${params.percent}%)`;
+                   <span style="font-weight:bold; font-size:1.1em">${params.value.toFixed(2)}</span> (${params.percent}%)`;
         }
       },
       legend: {
         bottom: '0%',
         left: 'center',
-        textStyle: { color: '#888', fontSize: 10 },
-        itemWidth: 8,
-        itemHeight: 8,
-        itemGap: 6
+        textStyle: { color: textColor, fontSize: 11, fontFamily: 'Plus Jakarta Sans, sans-serif' },
+        itemWidth: 10,
+        itemHeight: 10,
+        itemGap: 12,
+        icon: 'circle'
       },
       series: [
         {
           name: '资产分布',
           type: 'pie',
-          radius: ['40%', '70%'],
-          center: ['50%', '45%'],
+          radius: ['45%', '70%'],
+          center: ['50%', '42%'],
           avoidLabelOverlap: false,
           itemStyle: {
-            borderRadius: 5,
-            borderColor: '#1a1a1a',
+            borderRadius: 6,
+            borderColor: borderColor,
             borderWidth: 2
           },
           label: {
@@ -86,7 +94,13 @@ export function PortfolioChart({ positions, cryptoPositions = [], balance, pendi
               show: true,
               fontSize: 14,
               fontWeight: 'bold',
-              color: '#fff'
+              color: isDark ? '#F8FAFC' : '#1C1917',
+              fontFamily: 'Plus Jakarta Sans, sans-serif'
+            },
+            itemStyle: {
+              shadowBlur: 10,
+              shadowOffsetX: 0,
+              shadowColor: 'rgba(0, 0, 0, 0.5)'
             }
           },
           labelLine: {
@@ -105,5 +119,5 @@ export function PortfolioChart({ positions, cryptoPositions = [], balance, pendi
     };
   }, [positions, cryptoPositions, balance, pendingSettlement]);
 
-  return <div ref={chartRef} className="w-full h-48 sm:h-56" />;
+  return <div ref={chartRef} className="w-full h-56 sm:h-64 transition-colors duration-300" />;
 }

@@ -88,11 +88,6 @@ function getStepPrecision(step: number): number {
   const i = s.indexOf('.');
   return i >= 0 ? s.length - i - 1 : 0;
 }
-
-function formatStepValue(value: number, step: number): string {
-  return value.toFixed(getStepPrecision(step)).replace(/0+$/, '').replace(/\.$/, '');
-}
-
 function calcMaxIncreaseQty(balance: number, price: number, leverage: number, step: number): number {
   if (balance <= 0 || price <= 0 || leverage <= 0 || step <= 0) return 0;
   const precision = getStepPrecision(step);
@@ -216,6 +211,7 @@ export function Coin({ symbol = 'BTCUSDT' }: { symbol?: string }) {
   const [loading, setLoading] = useState(true);
   const chartRef1D = useRef<HTMLDivElement>(null);
   const chartRef7D = useRef<HTMLDivElement>(null);
+  const qtyAnimRef = useRef(0);
   const chartInst1D = useRef<echarts.ECharts | null>(null);
   const chartInst7D = useRef<echarts.ECharts | null>(null);
 
@@ -238,6 +234,22 @@ export function Coin({ symbol = 'BTCUSDT' }: { symbol?: string }) {
   const qtyKey = `${side}_${orderType}`;
   const quantity = qtyMap[qtyKey] ?? '';
   const setQuantity = (v: string) => setQtyMap(m => ({ ...m, [qtyKey]: v }));
+  const animateQuantity = useCallback((target: number, step: number) => {
+    cancelAnimationFrame(qtyAnimRef.current);
+    const from = parseFloat(quantity) || 0;
+    const duration = 350;
+    const start = performance.now();
+    const precision = getStepPrecision(step);
+    const tick = (now: number) => {
+      const t = Math.min((now - start) / duration, 1);
+      const ease = 1 - (1 - t) ** 3;
+      const v = from + (target - from) * ease;
+      const s = v.toFixed(precision).replace(/0+$/, '').replace(/\.$/, '');
+      setQtyMap(m => ({ ...m, [qtyKey]: s }));
+      if (t < 1) qtyAnimRef.current = requestAnimationFrame(tick);
+    };
+    qtyAnimRef.current = requestAnimationFrame(tick);
+  }, [quantity, qtyKey]);
   const [limitPrice, setLimitPrice] = useState('');
   const [leverage, setLeverage] = useState(1);
   const [submitting, setSubmitting] = useState(false);
@@ -247,6 +259,7 @@ export function Coin({ symbol = 'BTCUSDT' }: { symbol?: string }) {
   const [futuresLeverage, setFuturesLeverage] = useState(10);
   const [futuresOrderType, setFuturesOrderType] = useState<'MARKET' | 'LIMIT'>('MARKET');
   const [futuresPositions, setFuturesPositions] = useState<FuturesPosition[]>([]);
+  const [positionsLoading, setPositionsLoading] = useState(false);
   const [futuresOrders, setFuturesOrders] = useState<FuturesOrder[]>([]);
   const [futuresOrderPage, setFuturesOrderPage] = useState(1);
   const [futuresOrderTotal, setFuturesOrderTotal] = useState(0);
@@ -429,12 +442,15 @@ export function Coin({ symbol = 'BTCUSDT' }: { symbol?: string }) {
 
   // 合约仓位查询
   const fetchFuturesPositions = useCallback(async () => {
+    setPositionsLoading(true);
     try {
       const positions = await futuresApi.positions(symbol);
       setFuturesPositions(positions);
     } catch (e) {
       console.error('查询合约仓位失败', e);
       setFuturesPositions([]);
+    } finally {
+      setPositionsLoading(false);
     }
   }, [symbol]);
 
@@ -709,66 +725,86 @@ export function Coin({ symbol = 'BTCUSDT' }: { symbol?: string }) {
   const estimatedCommission = estimatedAmount * COMMISSION_RATE;
 
   return (
-    <div className="max-w-4xl mx-auto p-4 space-y-4">
+    <div className="max-w-5xl mx-auto p-4 md:p-6 space-y-8">
       {/* 顶部价格 */}
-      <Card>
-        <CardContent className="p-4">
+      <Card className="relative overflow-hidden mb-6">
+        <div className={`absolute top-0 right-0 p-32 rounded-full blur-3xl -z-10 transform translate-x-1/3 -translate-y-1/2 opacity-20 bg-gradient-to-br ${cfg.gradientClass}`} />
+        <CardContent className="p-5 md:p-6">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className={`p-2.5 rounded-xl ${cfg.bgClass}`}>
-                <Icon className={`w-6 h-6 ${cfg.colorClass}`} />
+            <div className="flex items-center gap-4">
+              <div className="p-3 rounded-2xl bg-card border-[2.5px] border-edge shadow-[3px_3px_0_0_var(--color-edge)]">
+                <Icon className={`w-7 h-7 ${cfg.colorClass}`} />
               </div>
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="text-lg font-bold">{cfg.pair}</span>
-                  <span className="flex items-center gap-1.5 text-[10px]">
-                    <span className="flex items-center gap-0.5">
-                      <span className={`inline-block w-1.5 h-1.5 rounded-full ${tick?.ws ? 'bg-green-500' : 'bg-red-400 animate-pulse'}`} />
-                      <span className="text-muted-foreground">行情</span>
+              <div className="space-y-1.5">
+                <div className="flex items-center gap-2.5">
+                  <span className="text-xl font-black tracking-tight">{cfg.pair}</span>
+                  <div className="flex items-center gap-2 px-2.5 py-1 rounded-full bg-card border-[2px] border-edge shadow-[2px_2px_0_0_var(--color-edge)] text-[10px]">
+                    <span className="flex items-center gap-1.5" title="现货行情">
+                      <span className={`inline-block w-2 h-2 border border-edge rounded-full ${tick?.ws ? 'bg-success' : 'bg-destructive animate-pulse'}`} />
+                      <span className="text-foreground font-bold">现货</span>
                     </span>
-                    <span className="flex items-center gap-0.5">
-                      <span className={`inline-block w-1.5 h-1.5 rounded-full ${tick?.fws ? 'bg-green-500' : 'bg-red-400 animate-pulse'}`} />
-                      <span className="text-muted-foreground">合约</span>
+                    <span className="w-[2px] h-2.5 bg-edge" />
+                    <span className="flex items-center gap-1.5" title="合约行情">
+                      <span className={`inline-block w-2 h-2 border border-edge rounded-full ${tick?.fws ? 'bg-success' : 'bg-destructive animate-pulse'}`} />
+                      <span className="text-foreground font-bold">合约</span>
                     </span>
-                  </span>
+                  </div>
                 </div>
-                <span className="text-xs text-muted-foreground">Binance</span>
-                {symbol === 'PAXGUSDT' && (
-                  <span className="text-[11px] text-yellow-500/70">1枚=1盎司黄金（31.1035克）</span>
-                )}
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold text-muted-foreground">Binance</span>
+                  {symbol === 'PAXGUSDT' && (
+                    <>
+                      <span className="w-1.5 h-1.5 rounded-full bg-edge" />
+                      <span className="text-[11px] text-warning font-bold">1枚 = 1盎司黄金（31.1035克）</span>
+                    </>
+                  )}
+                </div>
               </div>
             </div>
             <div className="text-right">
               {currentPrice > 0 ? (
-                <>
-                  <div className="text-2xl font-bold tracking-tight">${formatPrice(currentPrice)}</div>
+                <div className="flex flex-col items-end">
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-3xl font-black tracking-tight font-mono" style={{ textShadow: '2px 2px 0 var(--color-edge)', color: 'var(--color-foreground)' }}>
+                      ${formatPrice(currentPrice)}
+                    </span>
+                  </div>
                   {symbol === 'PAXGUSDT' && usdCny > 0 && currentPrice > 0 && (
-                    <div className="text-sm text-yellow-500/80 font-mono">
+                    <div className="text-sm text-warning font-mono font-bold mt-1">
                       ¥{(currentPrice * usdCny / 31.1035).toFixed(2)}/克
                     </div>
                   )}
-                  <div className={`flex items-center justify-end gap-1 text-sm ${isUp ? 'text-red-500' : 'text-green-500'}`}>
-                    {isUp ? <TrendingUp className="w-3.5 h-3.5" /> : <TrendingDown className="w-3.5 h-3.5" />}
+                  <div className={`flex items-center justify-end gap-1.5 text-sm font-bold mt-2 px-2.5 py-1 rounded-lg border-[2px] border-edge shadow-[2px_2px_0_0_var(--color-edge)] ${isUp ? 'bg-gain/10 text-gain' : 'bg-loss/10 text-loss'}`}>
+                    {isUp ? <TrendingUp className="w-4 h-4 stroke-[3px]" /> : <TrendingDown className="w-4 h-4 stroke-[3px]" />}
                     <span>{isUp ? '+' : ''}{formatPrice(change)}</span>
                     <span>({isUp ? '+' : ''}{changePct.toFixed(2)}%)</span>
                   </div>
-                </>
-              ) : (<Skeleton className="h-8 w-32" />)}
+                </div>
+              ) : (
+                <div className="space-y-2 flex flex-col items-end">
+                  <Skeleton className="h-10 w-40 border-[2px] border-edge" />
+                  <Skeleton className="h-6 w-24 border-[2px] border-edge" />
+                </div>
+              )}
             </div>
           </div>
         </CardContent>
       </Card>
 
       {/* 图表 */}
-      <Card>
-        <CardHeader className="pb-2">
+      <Card className="mb-6">
+        <CardHeader className="pb-2 pt-5 px-5">
           <div className="flex items-center justify-between">
-            <CardTitle className="text-base">走势</CardTitle>
-            <div className="flex gap-1">
+            <CardTitle className="text-base font-black">走势</CardTitle>
+            <div className="flex rounded-xl border-[2.5px] border-edge bg-card shadow-[3px_3px_0_0_var(--color-edge)] overflow-hidden">
               {TABS.map((tab, i) => (
-                <Button key={tab.label} variant={activeTab === i ? 'default' : 'ghost'} size="sm" className="h-7 px-2.5 text-xs" onClick={() => setActiveTab(i)}>{tab.label}</Button>
+                <button key={tab.label} onClick={() => setActiveTab(i)} className={`px-4 py-1.5 text-xs font-bold border-r-[2.5px] border-edge transition-colors ${activeTab === i ? 'bg-primary text-primary-foreground' : 'bg-card text-muted-foreground hover:bg-surface-hover hover:text-foreground'}`}>
+                  {tab.label}
+                </button>
               ))}
-              <Button variant={activeTab === 2 ? 'default' : 'ghost'} size="sm" className="h-7 px-2.5 text-xs" onClick={() => setActiveTab(2)}>高级</Button>
+              <button onClick={() => setActiveTab(2)} className={`px-4 py-1.5 text-xs font-bold transition-colors ${activeTab === 2 ? 'bg-primary text-primary-foreground' : 'bg-card text-muted-foreground hover:bg-surface-hover hover:text-foreground'}`}>
+                高级
+              </button>
             </div>
           </div>
         </CardHeader>
@@ -781,7 +817,7 @@ export function Coin({ symbol = 'BTCUSDT' }: { symbol?: string }) {
       </Card>
 
       {/* 交易面板 */}
-      <Card>
+      <Card className="mb-6">
         {/* 持仓信息 */}
         {position && (position.quantity > 0 || position.frozenQuantity > 0) && (() => {
           const pnlPct = position.avgCost > 0 && currentPrice > 0
@@ -790,36 +826,36 @@ export function Coin({ symbol = 'BTCUSDT' }: { symbol?: string }) {
             ? (currentPrice - position.avgCost) * position.quantity : 0;
           const isPnlUp = pnlPct >= 0;
           return (
-            <div className="px-4 pt-4">
-              <div className={`rounded-xl border border-border/60 bg-gradient-to-r ${cfg.gradientClass} to-transparent p-3 space-y-2`}>
+            <div className="px-5 pt-5">
+              <div className={`rounded-2xl border-[2.5px] border-edge bg-card p-4 space-y-3 shadow-[4px_4px_0_0_var(--color-edge)]`}>
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <div className={`p-1.5 rounded-lg ${cfg.bgClass}`}>
-                      <Icon className={`w-4 h-4 ${cfg.colorClass}`} />
+                  <div className="flex items-center gap-3">
+                    <div className={`p-2 rounded-xl border-[2px] border-edge bg-card shadow-[2px_2px_0_0_var(--color-edge)]`}>
+                      <Icon className={`w-5 h-5 ${cfg.colorClass}`} />
                     </div>
                     <div>
-                      <span className="text-sm font-semibold">{cfg.name}</span>
-                      <span className="text-xs text-muted-foreground ml-1.5">{position.quantity} 个</span>
+                      <span className="text-base font-black">{cfg.name}</span>
+                      <span className="text-sm font-bold text-muted-foreground ml-2">{position.quantity} 个</span>
                       {symbol === 'PAXGUSDT' && (
-                        <span className="text-[11px] text-yellow-500/60 ml-1">约合 {(position.quantity * 31.1035).toFixed(1)} 克</span>
+                        <span className="text-xs font-bold text-warning ml-1.5">约合 {(position.quantity * 31.1035).toFixed(1)} 克</span>
                       )}
                     </div>
                   </div>
                   <div className="text-right">
-                    <div className={`text-sm font-bold ${isPnlUp ? 'text-red-500' : 'text-green-500'}`}>
+                    <div className={`text-base font-black tracking-tight ${isPnlUp ? 'text-gain' : 'text-loss'}`}>
                       {isPnlUp ? '+' : ''}{pnlPct.toFixed(2)}%
                     </div>
-                    <div className={`text-xs ${isPnlUp ? 'text-red-500/70' : 'text-green-500/70'}`}>
+                    <div className={`text-xs font-bold mt-0.5 ${isPnlUp ? 'text-gain' : 'text-loss'}`}>
                       {isPnlUp ? '+' : ''}${formatPrice(pnlAmount)}
                     </div>
                   </div>
                 </div>
-                <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                <div className="flex items-center gap-5 text-xs font-bold text-muted-foreground pt-1">
                   <span>均价 <span className="text-foreground font-mono">${formatPrice(position.avgCost)}</span></span>
                   <span>现价 <span className="text-foreground font-mono">${formatPrice(currentPrice)}</span></span>
                   <span>市值 <span className="text-foreground font-mono">${formatPrice(currentPrice * position.quantity)}</span></span>
-                  {position.frozenQuantity > 0 && <span>冻结 <span className="text-yellow-500 font-mono">{position.frozenQuantity}</span></span>}
-                  {position.totalDiscount > 0 && <span>已省 <span className="text-yellow-500 font-mono">${formatPrice(position.totalDiscount)}</span></span>}
+                  {position.frozenQuantity > 0 && <span>冻结 <span className="text-warning font-mono">{position.frozenQuantity}</span></span>}
+                  {position.totalDiscount > 0 && <span>已省 <span className="text-warning font-mono">${formatPrice(position.totalDiscount)}</span></span>}
                 </div>
               </div>
             </div>
@@ -827,38 +863,38 @@ export function Coin({ symbol = 'BTCUSDT' }: { symbol?: string }) {
         })()}
 
         {/* 买卖/做多做空 + 市价限价合约 */}
-        <div className="px-4 pt-4 flex items-center gap-3">
-          <div className="grid grid-cols-2 gap-0 flex-1 rounded-lg border border-border overflow-hidden">
+        <div className="px-5 pt-5 flex items-center gap-4">
+          <div className="flex flex-1 rounded-xl border-[3px] border-edge bg-card overflow-hidden shadow-[4px_4px_0_0_var(--color-edge)]">
             {orderType === 'FUTURES' ? (
               <>
-                <button onClick={() => setFuturesSide('LONG')} className={`py-2.5 text-sm font-medium transition-all ${futuresSide === 'LONG' ? 'bg-red-500 text-white' : 'bg-card text-muted-foreground hover:text-foreground hover:bg-accent/50'}`}>做多</button>
-                <button onClick={() => setFuturesSide('SHORT')} className={`py-2.5 text-sm font-medium transition-all border-l border-border ${futuresSide === 'SHORT' ? 'bg-green-500 text-white' : 'bg-card text-muted-foreground hover:text-foreground hover:bg-accent/50'}`}>做空</button>
+                <button onClick={() => setFuturesSide('LONG')} className={`flex-1 py-2.5 text-sm font-black border-r-[3px] border-edge transition-colors ${futuresSide === 'LONG' ? 'bg-gain text-white' : 'bg-card text-foreground hover:bg-surface-hover'}`}>做多</button>
+                <button onClick={() => setFuturesSide('SHORT')} className={`flex-1 py-2.5 text-sm font-black transition-colors ${futuresSide === 'SHORT' ? 'bg-loss text-white' : 'bg-card text-foreground hover:bg-surface-hover'}`}>做空</button>
               </>
             ) : (
               <>
-                <button onClick={() => setSide('BUY')} className={`py-2.5 text-sm font-medium transition-all ${side === 'BUY' ? 'bg-primary text-primary-foreground' : 'bg-card text-muted-foreground hover:text-foreground hover:bg-accent/50'}`}>买入</button>
-                <button onClick={() => setSide('SELL')} className={`py-2.5 text-sm font-medium transition-all border-l border-border ${side === 'SELL' ? 'bg-primary text-primary-foreground' : 'bg-card text-muted-foreground hover:text-foreground hover:bg-accent/50'}`}>卖出</button>
+                <button onClick={() => setSide('BUY')} className={`flex-1 py-2.5 text-sm font-black border-r-[3px] border-edge transition-colors ${side === 'BUY' ? 'bg-primary text-primary-foreground' : 'bg-card text-foreground hover:bg-surface-hover'}`}>买入</button>
+                <button onClick={() => setSide('SELL')} className={`flex-1 py-2.5 text-sm font-black transition-colors ${side === 'SELL' ? 'bg-primary text-primary-foreground' : 'bg-card text-foreground hover:bg-surface-hover'}`}>卖出</button>
               </>
             )}
           </div>
-          <div className="flex rounded-lg border border-border overflow-hidden">
-            {(['FUTURES', 'MARKET', 'LIMIT'] as const).map((t, i) => (
-              <button key={t} onClick={() => setOrderType(t)} className={`px-3.5 py-2.5 text-xs font-medium transition-all ${i > 0 ? 'border-l border-border' : ''} ${orderType === t ? 'bg-primary text-primary-foreground' : 'bg-card text-muted-foreground hover:text-foreground hover:bg-accent/50'}`}>
+          <div className="flex rounded-xl border-[3px] border-edge bg-card overflow-hidden shadow-[4px_4px_0_0_var(--color-edge)]">
+            {(['FUTURES', 'MARKET', 'LIMIT'] as const).map((t, idx) => (
+              <button key={t} onClick={() => setOrderType(t)} className={`px-4 py-2.5 text-xs font-bold transition-colors ${idx !== 2 ? 'border-r-[3px] border-edge' : ''} ${orderType === t ? 'bg-foreground text-background' : 'bg-card text-foreground hover:bg-surface-hover'}`}>
                 {t === 'MARKET' ? '市价' : t === 'LIMIT' ? '限价' : '合约'}
               </button>
             ))}
           </div>
         </div>
 
-        <CardContent className="p-4 space-y-3">
+        <CardContent className="p-5 space-y-6 mt-2">
           {/* 合约面板 */}
           {orderType === 'FUTURES' && (
             <>
               {/* 执行方式 */}
               <div className="flex items-center gap-2">
-                <div className="flex rounded-md border border-border overflow-hidden">
-                  <button onClick={() => setFuturesOrderType('MARKET')} className={`px-3 py-1.5 text-xs font-medium transition-all ${futuresOrderType === 'MARKET' ? 'bg-primary text-primary-foreground' : 'bg-card text-muted-foreground hover:text-foreground'}`}>市价</button>
-                  <button onClick={() => setFuturesOrderType('LIMIT')} className={`px-3 py-1.5 text-xs font-medium transition-all border-l border-border ${futuresOrderType === 'LIMIT' ? 'bg-primary text-primary-foreground' : 'bg-card text-muted-foreground hover:text-foreground'}`}>限价</button>
+                <div className="flex rounded-lg border-[2.5px] border-edge overflow-hidden shadow-[2px_2px_0_0_var(--color-edge)]">
+                  <button onClick={() => setFuturesOrderType('MARKET')} className={`px-4 py-1.5 text-xs font-bold transition-colors ${futuresOrderType === 'MARKET' ? 'bg-primary text-primary-foreground' : 'bg-card text-foreground hover:bg-surface-hover'}`}>市价</button>
+                  <button onClick={() => setFuturesOrderType('LIMIT')} className={`px-4 py-1.5 text-xs font-bold border-l-[2.5px] border-edge transition-colors ${futuresOrderType === 'LIMIT' ? 'bg-primary text-primary-foreground' : 'bg-card text-foreground hover:bg-surface-hover'}`}>限价</button>
                 </div>
               </div>
 
@@ -877,41 +913,44 @@ export function Coin({ symbol = 'BTCUSDT' }: { symbol?: string }) {
               )}
 
               {/* 杠杆选择 */}
-              <div className="space-y-2">
+              <div className="space-y-3">
                 <div className="flex items-center justify-between">
-                  <label className="text-xs text-muted-foreground flex items-center gap-1">
-                    <Scale className="w-3 h-3" /> 杠杆
+                  <label className="text-xs text-muted-foreground flex items-center gap-1.5 font-medium">
+                    <Scale className="w-3.5 h-3.5" /> 杠杆
                   </label>
-                  <span className="text-sm font-bold tabular-nums">{futuresLeverage}x</span>
+                  <div className="px-2 py-0.5 rounded bg-primary/10 text-primary text-xs font-bold tabular-nums">{futuresLeverage}x</div>
                 </div>
-                <div className="flex gap-1">
+                <div className="flex gap-1.5">
                   {[1, 10, 25, 50, 100].map(lv => (
-                    <button key={lv} onClick={() => setFuturesLeverage(lv)} className={`flex-1 py-1 text-[11px] font-medium rounded transition-all ${futuresLeverage === lv ? 'bg-primary text-primary-foreground' : 'bg-card border border-border text-muted-foreground hover:text-foreground'}`}>
+                    <button key={lv} onClick={() => setFuturesLeverage(lv)} className={`flex-1 py-1.5 text-xs font-medium rounded-md transition-all border ${futuresLeverage === lv ? 'bg-primary border-primary text-primary-foreground shadow-sm' : 'bg-transparent border-border/60 text-muted-foreground hover:text-foreground hover:border-border'}`}>
                       {lv}x
                     </button>
                   ))}
                 </div>
-                <input
-                  type="range" min={1} max={100}
-                  value={futuresLeverage}
-                  onChange={e => setFuturesLeverage(Number(e.target.value))}
-                  className="w-full cursor-pointer"
-                  style={{ accentColor: 'hsl(var(--primary))' }}
-                />
+                <div className="pt-1">
+                  <input
+                    type="range" min={1} max={100}
+                    value={futuresLeverage}
+                    onChange={e => setFuturesLeverage(Number(e.target.value))}
+                    className="w-full h-1.5 bg-muted rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:bg-primary [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:shadow-md transition-all"
+                  />
+                </div>
               </div>
 
               {/* 数量输入 */}
-              <div className="flex gap-3">
-                {/* 左半边：标签和输入框 */}
-                <div className="flex-1 space-y-1.5">
-                  <label className="text-xs text-muted-foreground">保证金数量 ({cfg.name})</label>
-                  <Input type="number" placeholder={String(MIN_QTY)} value={quantity} onChange={e => setQuantity(e.target.value)} step={String(MIN_QTY)} min={MIN_QTY} />
+              <div className="flex gap-3 items-end">
+                {/* 左半边：保证金输入框 */}
+                <div className="flex-1">
+                  <div className="relative">
+                    <Input type="number" placeholder={String(MIN_QTY)} value={quantity} onChange={e => setQuantity(e.target.value)} step={String(MIN_QTY)} min={MIN_QTY} className="pr-24" />
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground pointer-events-none">保证金 {cfg.name}</span>
+                  </div>
                 </div>
 
                 {/* 右半边：余额和百分比按钮 */}
                 <div className="flex-1 space-y-1.5">
                   {user && (
-                    <div className="flex items-center justify-end gap-1 text-xs text-muted-foreground h-[20px]">
+                    <div className="flex items-center justify-end gap-1 text-xs text-muted-foreground">
                       <Wallet className="w-3 h-3" />
                       {formatPrice(user.balance)} USDT
                     </div>
@@ -922,7 +961,7 @@ export function Coin({ symbol = 'BTCUSDT' }: { symbol?: string }) {
                         const handlePct = () => {
                           const balance = user?.balance ?? 0;
                           const qty = calcMaxAffordableMarginQty(balance, pct, futuresPriceForCalc, futuresLeverage, MIN_QTY);
-                          setQuantity(qty > 0 ? formatStepValue(qty, MIN_QTY) : '');
+                          if (qty > 0) animateQuantity(qty, MIN_QTY); else setQuantity('');
                         };
                         return (
                           <Button key={pct} size="sm" variant="outline" className="h-7 text-[11px] flex-1 min-w-[60px]" onClick={handlePct}>
@@ -993,8 +1032,8 @@ export function Coin({ symbol = 'BTCUSDT' }: { symbol?: string }) {
               </div>
 
               {/* 开仓按钮 */}
-              <Button onClick={handleSubmit} disabled={submitting || currentPrice <= 0} className={`w-full h-11 font-medium text-sm rounded-lg ${futuresSide === 'LONG' ? 'bg-red-500 hover:bg-red-600' : 'bg-green-500 hover:bg-green-600'} text-white`}>
-                {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : `${futuresSide === 'LONG' ? '做多' : '做空'} ${futuresLeverage}x`}
+              <Button onClick={handleSubmit} disabled={submitting || currentPrice <= 0} variant={futuresSide === 'LONG' ? 'destructive' : 'success'} className="w-full h-14 text-base mt-2">
+                {submitting ? <Loader2 className="w-5 h-5 animate-spin" /> : `${futuresSide === 'LONG' ? '做多' : '做空'} ${futuresLeverage}x`}
               </Button>
             </>
           )}
@@ -1005,7 +1044,7 @@ export function Coin({ symbol = 'BTCUSDT' }: { symbol?: string }) {
           {/* 限价输入 */}
           {orderType === 'LIMIT' && (
             <div className="space-y-1.5">
-              <label className="text-xs text-muted-foreground">限价 (USDT)</label>
+              <label className="text-xs font-bold text-muted-foreground">限价 (USDT)</label>
               <Input type="number" placeholder="输入限价" value={limitPrice} onChange={e => setLimitPrice(e.target.value)} step="0.01" min="0" />
             </div>
           )}
@@ -1013,10 +1052,10 @@ export function Coin({ symbol = 'BTCUSDT' }: { symbol?: string }) {
           {/* 数量 + 余额 */}
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
-              <label className="text-xs text-muted-foreground">数量 ({cfg.name})</label>
+              <label className="text-xs font-bold text-muted-foreground">数量 ({cfg.name})</label>
               {user && (
-                <span className="text-xs text-muted-foreground flex items-center gap-1">
-                  <Wallet className="w-3 h-3" />
+                <span className="text-xs font-bold text-muted-foreground flex items-center gap-1">
+                  <Wallet className="w-3.5 h-3.5" />
                   {side === 'BUY'
                     ? <>{formatPrice(user.balance)} USDT</>
                     : <>{position?.quantity ?? 0} {cfg.name}</>
@@ -1026,9 +1065,9 @@ export function Coin({ symbol = 'BTCUSDT' }: { symbol?: string }) {
             </div>
             <Input type="number" placeholder={String(MIN_QTY)} value={quantity} onChange={e => setQuantity(e.target.value)} step="0.001" min={MIN_QTY} />
             {currentPrice > 0 && (
-              <div className="space-y-1">
-                <label className="text-xs text-muted-foreground flex items-center gap-1">
-                  <Warehouse className="w-3 h-3" /> 仓位
+              <div className="space-y-1.5 pt-1">
+                <label className="text-xs font-bold text-muted-foreground flex items-center gap-1.5">
+                  <Warehouse className="w-3.5 h-3.5" /> 仓位
                 </label>
                 <div className="flex gap-1.5">
                   {POSITION_PCTS.map(pct => {
@@ -1042,12 +1081,13 @@ export function Coin({ symbol = 'BTCUSDT' }: { symbol?: string }) {
                       raw = (position?.quantity ?? 0) * pct;
                     }
                     const qty = Math.max(MIN_QTY, Math.round(raw / MIN_QTY) * MIN_QTY);
-                    setQuantity(qty <= MIN_QTY && raw < MIN_QTY ? String(MIN_QTY) : qty.toFixed(5));
+                    const target = qty <= MIN_QTY && raw < MIN_QTY ? MIN_QTY : qty;
+                    animateQuantity(target, MIN_QTY);
                   };
                   return (
-                    <button key={pct} onClick={handlePct} className="flex-1 py-1.5 rounded-md text-xs font-medium border border-border bg-card text-muted-foreground hover:text-foreground hover:bg-accent transition-all">
+                    <Button key={pct} onClick={handlePct} variant="outline" size="sm" className="h-11 text-[11px] font-black flex-1 min-w-[60px]">
                       {pct * 100}%
-                    </button>
+                    </Button>
                   );
                 })}
                 </div>
@@ -1058,15 +1098,15 @@ export function Coin({ symbol = 'BTCUSDT' }: { symbol?: string }) {
           {/* 杠杆 - 仅市价买入 */}
           {side === 'BUY' && orderType === 'MARKET' && (
             <div className="space-y-1.5">
-              <label className="text-xs text-muted-foreground flex items-center gap-1">
-                <Scale className="w-3 h-3" /> 杠杆{useBuff ? ' (使用折扣时不支持)' : ''}
+              <label className="text-xs font-bold text-muted-foreground flex items-center gap-1.5">
+                <Scale className="w-3.5 h-3.5" /> 杠杆{useBuff ? ' (使用折扣时不支持)' : ''}
               </label>
               <div className={useBuff ? 'opacity-40 pointer-events-none' : ''}>
                 <select
                   value={leverage}
                   onChange={e => setLeverage(Number(e.target.value))}
-                  className="w-full h-9 rounded-md border border-border bg-card px-3 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring appearance-none cursor-pointer"
-                  style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 10px center' }}
+                  className="w-full h-11 rounded-xl border-[2.5px] border-edge bg-card px-4 text-sm font-bold text-foreground focus:outline-none focus:ring-2 focus:ring-ring appearance-none cursor-pointer"
+                  style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2.5'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 12px center' }}
                 >
                   {LEVERAGE_OPTIONS.map(lv => (
                     <option key={lv} value={lv}>{lv}x{lv === 1 ? ' (无杠杆)' : ''}</option>
@@ -1080,53 +1120,53 @@ export function Coin({ symbol = 'BTCUSDT' }: { symbol?: string }) {
           {side === 'BUY' && orderType === 'MARKET' && discountBuff && (
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
-                <label className="text-xs text-muted-foreground flex items-center gap-1">
-                  <Sparkles className="w-3.5 h-3.5 text-yellow-500" />
+                <label className="text-xs font-bold text-muted-foreground flex items-center gap-1">
+                  <Sparkles className="w-3.5 h-3.5 text-warning" />
                   折扣券{leverage > 1 ? ' (使用杠杆时不支持)' : ''}
                 </label>
                 <button
                   type="button"
                   onClick={() => { if (leverage > 1) return; setUseBuff(v => !v); }}
                   disabled={leverage > 1}
-                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${useBuff ? 'bg-yellow-500' : 'bg-muted-foreground/30'} ${leverage > 1 ? 'opacity-40 cursor-not-allowed' : ''}`}
+                  className={`relative inline-flex h-6 w-11 border-[2.5px] border-edge items-center rounded-full transition-colors ${useBuff ? 'bg-warning' : 'bg-muted-foreground/30'} ${leverage > 1 ? 'opacity-40 cursor-not-allowed' : ''}`}
                 >
-                  <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-background transition-transform shadow-sm ${useBuff ? 'translate-x-[18px]' : 'translate-x-[3px]'}`} />
+                  <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-background border-[2px] border-edge transition-transform ${useBuff ? 'translate-x-[20px]' : 'translate-x-[4px]'}`} />
                 </button>
               </div>
               {useBuff && (
-                <div className="flex items-center gap-2 text-xs bg-yellow-500/10 border border-yellow-500/20 rounded-lg px-3 py-2">
-                  <Badge className="bg-yellow-100 text-yellow-700 text-[10px]">{discountBuff.buffName}</Badge>
-                  <span className="text-muted-foreground">本次买入整单折扣</span>
+                <div className="flex items-center gap-2 text-xs bg-warning/10 border-[2px] border-warning/50 rounded-xl px-3 py-2">
+                  <Badge variant="warning" className="text-[10px] px-2">{discountBuff.buffName}</Badge>
+                  <span className="text-muted-foreground font-bold">本次买入整单折扣</span>
                 </div>
               )}
             </div>
           )}
 
           {/* 预估 + 提交 */}
-          <div className="pt-2 border-t border-border/30 space-y-3">
+          <div className="pt-4 border-t-[2.5px] border-edge border-dashed space-y-4">
             {qtyNum > 0 && priceForCalc > 0 && (
-              <div className="space-y-1.5">
+              <div className="space-y-2">
                 {side === 'BUY' && leverage > 1 && (
-                  <div className="flex justify-between text-xs text-muted-foreground">
+                  <div className="flex justify-between text-xs font-bold text-muted-foreground">
                     <span>总仓位 ({leverage}x)</span>
                     <span className="font-mono text-foreground">${formatPrice(estimatedAmount)} USDT</span>
                   </div>
                 )}
-                <div className="flex justify-between text-xs text-muted-foreground">
+                <div className="flex justify-between text-xs font-bold text-muted-foreground">
                   <span>{side === 'BUY' && leverage > 1 ? '保证金' : `预估${side === 'BUY' ? '花费' : '收入'}`}</span>
-                  <span className="font-medium text-foreground">
+                  <span className="text-foreground">
                     {useBuff && discountRate < 1 && side === 'BUY' && (
-                      <span className="line-through text-muted-foreground mr-1">${formatPrice(marginAmount)}</span>
+                      <span className="line-through text-muted-foreground mr-1.5">${formatPrice(marginAmount)}</span>
                     )}
                     ${formatPrice(marginAmount * discountRate)} USDT
                   </span>
                 </div>
-                <div className="flex justify-between text-xs text-muted-foreground">
+                <div className="flex justify-between text-xs font-bold text-muted-foreground">
                   <span>手续费 (0.1%)</span>
                   <span className="font-mono">${formatPrice(estimatedCommission * discountRate)} USDT</span>
                 </div>
                 {side === 'BUY' && (
-                  <div className="flex justify-between text-xs font-medium">
+                  <div className="flex justify-between text-sm font-black pt-1">
                     <span className="text-muted-foreground">合计</span>
                     <span className="text-foreground">
                       ${formatPrice((marginAmount + estimatedCommission) * discountRate)} USDT
@@ -1135,8 +1175,8 @@ export function Coin({ symbol = 'BTCUSDT' }: { symbol?: string }) {
                 )}
               </div>
             )}
-            <Button onClick={handleSubmit} disabled={submitting || currentPrice <= 0} className="w-full h-11 font-medium text-sm rounded-lg bg-primary hover:bg-primary/90 text-primary-foreground">
-              {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : (side === 'BUY' ? `买入 ${cfg.name}` : `卖出 ${cfg.name}`)}
+            <Button onClick={handleSubmit} disabled={submitting || currentPrice <= 0} variant="default" className="w-full h-14 text-base">
+              {submitting ? <Loader2 className="w-5 h-5 animate-spin" /> : (side === 'BUY' ? `买入 ${cfg.name}` : `卖出 ${cfg.name}`)}
             </Button>
           </div>
             </>
@@ -1146,28 +1186,31 @@ export function Coin({ symbol = 'BTCUSDT' }: { symbol?: string }) {
 
       {/* 合约持仓（独立Card） */}
       {orderType === 'FUTURES' && futuresPositions.length > 0 && (
-        <Card>
-          <CardHeader className="pb-2">
+        <Card className="mb-6">
+          <CardHeader className="pb-4 pt-5 px-5">
             <div className="flex items-center justify-between">
-              <CardTitle className="text-base flex items-center gap-2">
-                持仓
+              <CardTitle className="text-base font-black flex items-center gap-2">
+                当前持仓
                 <HelpTip text="仅显示当前币种活跃仓位，盈亏基于标记价实时计算" />
               </CardTitle>
-              <span className="text-[11px] text-muted-foreground">{futuresPositions.length} 个</span>
+              <button onClick={fetchFuturesPositions} disabled={positionsLoading} className="p-1 rounded-md hover:bg-muted transition-colors disabled:opacity-50">
+                  <RefreshCw className={`w-3.5 h-3.5 ${positionsLoading ? 'animate-spin' : ''}`} />
+                </button>
             </div>
           </CardHeader>
-          <CardContent className="space-y-3 pt-0">
+          <CardContent className="space-y-5 px-5 pb-5 pt-0">
             {futuresPositions.map(pos => {
               const isPnlUp = pos.unrealizedPnl >= 0;
               const isLong = pos.side === 'LONG';
               const isActive = posAction?.id === pos.id;
               return (
-                <div key={pos.id} className={`p-3 rounded-lg border space-y-2 ${isLong ? 'border-red-500/20 bg-red-500/[0.03]' : 'border-green-500/20 bg-green-500/[0.03]'}`}>
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <Badge className={`text-[10px] px-1.5 ${isLong ? 'bg-red-500' : 'bg-green-500'}`}>{isLong ? '多' : '空'}</Badge>
-                      <span className="text-sm font-bold">{pos.leverage}x</span>
-                      <span className="text-xs text-muted-foreground">{pos.quantity} {cfg.name}</span>
+                <div key={pos.id} className={`p-4 rounded-2xl border-[2.5px] border-edge bg-card shadow-[4px_4px_0_0_var(--color-edge)] space-y-3 transition-all relative overflow-hidden`}>
+                  <div className={`absolute top-0 bottom-0 left-0 w-2.5 border-r-[2.5px] border-edge ${isLong ? 'bg-gain' : 'bg-loss'}`} />
+                  <div className="flex items-center justify-between pl-3">
+                    <div className="flex items-center gap-2.5">
+                      <Badge variant={isLong ? 'destructive' : 'success'} className="text-[10px] px-2 py-0.5">{isLong ? '做多' : '做空'}</Badge>
+                      <span className="text-base font-black">{pos.leverage}x</span>
+                      <span className="text-sm font-bold text-muted-foreground">{pos.quantity} {cfg.name}</span>
                     </div>
                     <div className="text-right">
                       <div className={`text-sm font-bold ${isPnlUp ? 'text-red-500' : 'text-green-500'}`}>
