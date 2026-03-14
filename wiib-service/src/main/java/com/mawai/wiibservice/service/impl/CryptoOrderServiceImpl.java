@@ -18,6 +18,7 @@ import com.mawai.wiibcommon.util.SpringUtils;
 import com.mawai.wiibservice.config.TradingConfig;
 import com.mawai.wiibservice.mapper.CryptoOrderMapper;
 import com.mawai.wiibservice.service.BuffService;
+import com.mawai.wiibservice.service.CacheService;
 import com.mawai.wiibservice.service.CryptoOrderService;
 import com.mawai.wiibservice.service.CryptoPositionService;
 import com.mawai.wiibservice.service.MarginAccountService;
@@ -58,6 +59,7 @@ public class CryptoOrderServiceImpl extends ServiceImpl<CryptoOrderMapper, Crypt
     private final MarginAccountService marginAccountService;
     private final BuffService buffService;
     private final StringRedisTemplate stringRedisTemplate;
+    private final CacheService cacheService;
 
     private static final String SETTLE_ZSET_KEY = "crypto:settle:pending";
     private static final long SETTLE_DELAY_MS = 5 * 60 * 1000L; // btc 到账时间 5 minutes
@@ -83,9 +85,9 @@ public class CryptoOrderServiceImpl extends ServiceImpl<CryptoOrderMapper, Crypt
     // ==================== 获取实时价格 ====================
 
     private BigDecimal getCryptoPrice(String symbol) {
-        String price = stringRedisTemplate.opsForValue().get("market:price:" + symbol);
+        BigDecimal price = cacheService.getCryptoPrice(symbol);
         if (price == null) throw new BizException(ErrorCode.CRYPTO_PRICE_UNAVAILABLE);
-        return new BigDecimal(price);
+        return price;
     }
 
     // ==================== 买入 ====================

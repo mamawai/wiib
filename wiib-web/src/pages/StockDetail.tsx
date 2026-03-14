@@ -477,7 +477,7 @@ export function StockDetail() {
 
       {/* Trade Card */}
       <Card className="overflow-hidden">
-        <CardHeader className="pb-4 bg-gradient-to-br from-primary/5 via-primary/3 to-transparent border-b">
+        <CardHeader className="pb-4 bg-linear-to-br from-primary/5 via-primary/3 to-transparent border-b">
           <CardTitle className="flex items-center justify-between text-base">
             <div className="flex items-center gap-2">
               <div className="p-2 rounded-lg bg-primary/10 ring-1 ring-primary/20">
@@ -494,7 +494,7 @@ export function StockDetail() {
         </CardHeader>
         <CardContent className="p-6">
           {!user ? (
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 p-6 rounded-xl bg-gradient-to-br from-muted/50 to-muted/30 border border-border/50">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 p-6 rounded-xl bg-linear-to-br from-muted/50 to-muted/30 border border-border/50">
               <div>
                 <div className="text-sm font-semibold mb-1">登录后可买卖该股票</div>
                 <div className="text-xs text-muted-foreground">下单、撤单与持仓管理需要登录</div>
@@ -508,7 +508,7 @@ export function StockDetail() {
             <div className="space-y-5">
               {/* Current Position */}
               {position && (
-                <div className="relative overflow-hidden rounded-xl bg-gradient-to-br from-primary/8 via-primary/5 to-transparent border border-primary/20 p-4 shadow-sm">
+                <div className="relative overflow-hidden rounded-xl bg-linear-to-br from-primary/8 via-primary/5 to-transparent border border-primary/20 p-4 shadow-sm">
                   <div className="absolute top-0 right-0 w-24 h-24 bg-primary/10 rounded-full blur-2xl -translate-y-1/2 translate-x-1/2" />
                   <div className="relative flex justify-between items-start">
                     <div>
@@ -727,7 +727,7 @@ export function StockDetail() {
 
                 {/* Calculation & Validation */}
                 {tradeCalc && (
-                  <div className="rounded-xl border border-border/50 overflow-hidden bg-gradient-to-br from-muted/30 to-muted/10">
+                  <div className="rounded-xl border border-border/50 overflow-hidden bg-linear-to-br from-muted/30 to-muted/10">
                     {/* 交易明细 */}
                     <div className="p-4 space-y-3">
                       <div className="flex justify-between items-center">
@@ -753,7 +753,7 @@ export function StockDetail() {
                       </div>
                       {tradeCalc.leverageEnabled && (
                         <>
-                          <div className="h-px bg-gradient-to-r from-transparent via-border to-transparent" />
+                          <div className="h-px bg-linear-to-r from-transparent via-border to-transparent" />
                           <div className="flex justify-between items-center">
                             <span className="text-xs text-muted-foreground">保证金</span>
                             <span className="text-sm font-medium tabular-nums">
@@ -858,7 +858,7 @@ export function StockDetail() {
                 <div className="grid grid-cols-2 gap-3 pt-2">
                   <Button
                     size="lg"
-                    className="h-14 text-base font-semibold bg-gradient-to-br from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white shadow-lg shadow-red-500/25 transition-all hover:shadow-xl hover:shadow-red-500/30"
+                    className="h-14 text-base font-semibold bg-linear-to-br from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white shadow-lg shadow-red-500/25 transition-all hover:shadow-xl hover:shadow-red-500/30"
                     onClick={() => handleOrder('buy')}
                     disabled={
                       submitting ||

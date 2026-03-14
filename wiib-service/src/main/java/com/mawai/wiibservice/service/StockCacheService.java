@@ -1,5 +1,7 @@
 package com.mawai.wiibservice.service;
 
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import com.mawai.wiibcommon.entity.Company;
 import com.mawai.wiibcommon.entity.Stock;
 import com.mawai.wiibservice.mapper.CompanyMapper;
@@ -14,6 +16,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Stock静态数据Redis缓存服务
@@ -34,6 +37,9 @@ public class StockCacheService {
     private final StockMapper stockMapper;
     private final CompanyMapper companyMapper;
     private final CacheService cacheService;
+
+    private final Cache<Long, Map<String, String>> stockStaticCache = Caffeine.newBuilder()
+            .maximumSize(500).expireAfterWrite(10, TimeUnit.MINUTES).build();
 
     /** Stock静态数据前缀 */
     private static final String STOCK_STATIC_PREFIX = "stock:static:";
@@ -89,20 +95,20 @@ public class StockCacheService {
      * @return Stock数据的Hash，不存在返回null
      */
     public Map<String, String> getStockStatic(Long stockId) {
-        String key = STOCK_STATIC_PREFIX + stockId;
-        Map<String, String> stockHash = cacheService.hGetAll(key);
+        return stockStaticCache.get(stockId, id -> {
+            String key = STOCK_STATIC_PREFIX + id;
+            Map<String, String> stockHash = cacheService.hGetAll(key);
 
-        if (stockHash.isEmpty()) {
-            log.warn("Redis中未找到stockId={}的静态数据，尝试从DB加载", stockId);
-            Stock stock = stockMapper.selectById(stockId);
-            if (stock != null) {
-                // 单独加载这一支股票
-                loadSingleStockToRedis(stock);
-                stockHash = cacheService.hGetAll(key);
+            if (stockHash.isEmpty()) {
+                log.warn("Redis中未找到stockId={}的静态数据，尝试从DB加载", id);
+                Stock stock = stockMapper.selectById(id);
+                if (stock != null) {
+                    loadSingleStockToRedis(stock);
+                    stockHash = cacheService.hGetAll(key);
+                }
             }
-        }
-
-        return stockHash.isEmpty() ? null : stockHash;
+            return stockHash.isEmpty() ? null : stockHash;
+        });
     }
 
     /**

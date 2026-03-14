@@ -1,5 +1,7 @@
 package com.mawai.wiibservice.service;
 
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.*;
@@ -27,6 +29,11 @@ public class CacheService {
     private final RedisTemplate<String, Object> redisTemplate;
     private final StringRedisTemplate stringRedisTemplate;
 
+    // L1: 股票日内行情（getCurrentPrice + getDailyQuote 共用）
+    private final Cache<Long, Map<String, String>> stockDailyCache = Caffeine.newBuilder().maximumSize(500).build();
+    // L1: 加密货币价格（spot/mark 用 key 前缀区分）
+    private final Cache<String, BigDecimal> cryptoPriceCache = Caffeine.newBuilder().maximumSize(50).build();
+
     // ==================== 实时行情 ====================
 
     /**
@@ -34,9 +41,9 @@ public class CacheService {
      * @return 当前价格，无数据返回null
      */
     public BigDecimal getCurrentPrice(Long stockId) {
-        LocalDate today = LocalDate.now();
-        String dailyKey = String.format("stock:daily:%s:%d", today, stockId);
-        String last = (String) stringRedisTemplate.opsForHash().get(dailyKey, "last");
+        Map<String, String> daily = getStockDaily(stockId);
+        if (daily == null) return null;
+        String last = daily.get("last");
         return last != null ? new BigDecimal(last) : null;
     }
 
@@ -45,32 +52,11 @@ public class CacheService {
      * @return stockId -> price，无数据的stockId不在map中
      */
     public Map<Long, BigDecimal> getCurrentPrices(List<Long> stockIds) {
-        if (stockIds == null || stockIds.isEmpty()) {
-            return Map.of();
-        }
-        LocalDate today = LocalDate.now();
-
-        // 构建所有key
-        List<String> keys = stockIds.stream()
-                .map(id -> String.format("stock:daily:%s:%d", today, id))
-                .toList();
-
-        // Pipeline批量获取
-        List<Object> results = stringRedisTemplate.executePipelined(
-                (org.springframework.data.redis.core.RedisCallback<Object>) connection -> {
-                    for (String key : keys) {
-                        connection.hashCommands().hGet(key.getBytes(), "last".getBytes());
-                    }
-                    return null;
-                }
-        );
-
+        if (stockIds == null || stockIds.isEmpty()) return Map.of();
         Map<Long, BigDecimal> priceMap = new HashMap<>();
-        for (int i = 0; i < stockIds.size(); i++) {
-            Object result = results.get(i);
-            if (result != null) {
-                priceMap.put(stockIds.get(i), new BigDecimal(result.toString()));
-            }
+        for (Long id : stockIds) {
+            BigDecimal price = getCurrentPrice(id);
+            if (price != null) priceMap.put(id, price);
         }
         return priceMap;
     }
@@ -80,15 +66,29 @@ public class CacheService {
      * @return {open, high, low, last, prevClose}
      */
     public Map<String, BigDecimal> getDailyQuote(Long stockId) {
-        LocalDate today = LocalDate.now();
-        String dailyKey = String.format("stock:daily:%s:%d", today, stockId);
-        Map<Object, Object> raw = stringRedisTemplate.opsForHash().entries(dailyKey);
-
-        if (raw.isEmpty()) return null;
+        Map<String, String> daily = getStockDaily(stockId);
+        if (daily == null) return null;
 
         Map<String, BigDecimal> result = new HashMap<>();
-        raw.forEach((k, v) -> result.put(k.toString(), new BigDecimal(v.toString())));
+        daily.forEach((k, v) -> result.put(k, new BigDecimal(v)));
         return result;
+    }
+
+    public void putStockDaily(Long stockId, Map<String, String> daily) {
+        stockDailyCache.put(stockId, daily);
+    }
+
+    private Map<String, String> getStockDaily(Long stockId) {
+        Map<String, String> daily = stockDailyCache.getIfPresent(stockId);
+        if (daily != null) return daily;
+        // fallback: 重启后caffeine为空，从redis加载
+        String dailyKey = String.format("stock:daily:%s:%d", LocalDate.now(), stockId);
+        Map<Object, Object> raw = stringRedisTemplate.opsForHash().entries(dailyKey);
+        if (raw.isEmpty()) return null;
+        Map<String, String> m = new HashMap<>(raw.size());
+        raw.forEach((k, v) -> m.put(k.toString(), v.toString()));
+        stockDailyCache.put(stockId, m);
+        return m;
     }
 
     public BigDecimal getPrevTradingDayLast(Long stockId) {
@@ -101,6 +101,48 @@ public class CacheService {
         String key = String.format("stock:daily:%s:%d", prevTradeDay, stockId);
         String last = (String) stringRedisTemplate.opsForHash().get(key, "last");
         return last != null ? new BigDecimal(last) : null;
+    }
+
+    // ==================== 加密货币价格 ====================
+
+    public BigDecimal getCryptoPrice(String symbol) {
+        BigDecimal cached = cryptoPriceCache.getIfPresent("spot:" + symbol);
+        if (cached != null) return cached;
+        String val = stringRedisTemplate.opsForValue().get("market:price:" + symbol);
+        if (val == null) return null;
+        BigDecimal price = new BigDecimal(val);
+        cryptoPriceCache.put("spot:" + symbol, price);
+        return price;
+    }
+
+    public Map<String, BigDecimal> getCryptoPrices(List<String> symbols) {
+        if (symbols == null || symbols.isEmpty()) return Map.of();
+        Map<String, BigDecimal> result = new HashMap<>();
+        for (String s : symbols) {
+            BigDecimal price = getCryptoPrice(s);
+            if (price != null) result.put(s, price);
+        }
+        return result;
+    }
+
+    public BigDecimal getMarkPrice(String symbol) {
+        BigDecimal cached = cryptoPriceCache.getIfPresent("mark:" + symbol);
+        if (cached != null) return cached;
+        String val = stringRedisTemplate.opsForValue().get("market:markprice:" + symbol);
+        if (val != null) {
+            BigDecimal price = new BigDecimal(val);
+            cryptoPriceCache.put("mark:" + symbol, price);
+            return price;
+        }
+        return getCryptoPrice(symbol);
+    }
+
+    public void putCryptoPrice(String symbol, BigDecimal price) {
+        cryptoPriceCache.put("spot:" + symbol, price);
+    }
+
+    public void putMarkPrice(String symbol, BigDecimal price) {
+        cryptoPriceCache.put("mark:" + symbol, price);
     }
 
     // ==================== 通用缓存 ====================

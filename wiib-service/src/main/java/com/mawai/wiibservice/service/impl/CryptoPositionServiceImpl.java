@@ -16,7 +16,6 @@ import org.springframework.stereotype.Service;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -27,8 +26,6 @@ public class CryptoPositionServiceImpl extends ServiceImpl<CryptoPositionMapper,
 
     private final CacheService cacheService;
     private final BinanceProperties binanceProperties;
-
-    private static final String REDIS_KEY_PREFIX = "market:price:";
 
     @Override
     public CryptoPosition findByUserAndSymbol(Long userId, String symbol) {
@@ -106,15 +103,6 @@ public class CryptoPositionServiceImpl extends ServiceImpl<CryptoPositionMapper,
     public Map<String, BigDecimal> fetchCryptoPriceMap() {
         List<String> symbols = binanceProperties.getSymbols();
         if (symbols == null || symbols.isEmpty()) return Collections.emptyMap();
-        List<String> keys = symbols.stream().map(s -> REDIS_KEY_PREFIX + s).toList();
-        List<String> values = cacheService.multiGet(keys);
-        Map<String, BigDecimal> map = new HashMap<>(symbols.size());
-        for (int i = 0; i < symbols.size(); i++) {
-            String v = values != null ? values.get(i) : null;
-            if (v != null) {
-                map.put(symbols.get(i), new BigDecimal(v));
-            }
-        }
-        return map;
+        return cacheService.getCryptoPrices(symbols);
     }
 }

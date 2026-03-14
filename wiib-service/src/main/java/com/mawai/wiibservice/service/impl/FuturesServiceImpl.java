@@ -54,8 +54,6 @@ public class FuturesServiceImpl implements FuturesService {
     private static final String LIMIT_OPEN_SHORT_PREFIX = "futures:limit:open_short:";
     private static final String LIMIT_CLOSE_LONG_PREFIX = "futures:limit:close_long:";
     private static final String LIMIT_CLOSE_SHORT_PREFIX = "futures:limit:close_short:";
-    private static final String REDIS_PRICE_KEY_PREFIX = "market:price:";
-    private static final String REDIS_MARK_PRICE_KEY_PREFIX = "market:markprice:";
 
     @PostConstruct
     void init() {
@@ -65,14 +63,14 @@ public class FuturesServiceImpl implements FuturesService {
     // ==================== 获取实时价格 ====================
 
     private BigDecimal getPrice(String symbol) {
-        String price = cacheService.get(REDIS_PRICE_KEY_PREFIX + symbol);
+        BigDecimal price = cacheService.getCryptoPrice(symbol);
         if (price == null) throw new BizException(ErrorCode.CRYPTO_PRICE_UNAVAILABLE);
-        return new BigDecimal(price);
+        return price;
     }
 
     private BigDecimal getMarkPrice(String symbol) {
-        String mp = cacheService.get(REDIS_MARK_PRICE_KEY_PREFIX + symbol);
-        if (mp != null) return new BigDecimal(mp);
+        BigDecimal mp = cacheService.getMarkPrice(symbol);
+        if (mp != null) return mp;
         return getPrice(symbol);
     }
 

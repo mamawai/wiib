@@ -23,18 +23,12 @@ import {
   ChevronRight,
   PieChart,
   BarChart3,
-  Bitcoin,
-  Coins,
   CircleDollarSign,
   Scale,
 } from 'lucide-react';
 import type { Position, Order, Settlement, AssetChangeEvent, PositionChangeEvent, OrderStatusEvent, CryptoPosition, FuturesPosition } from '../types';
 import { useDedupedEffect } from '../hooks/useDedupedEffect';
-
-const CRYPTO_META: Record<string, { name: string; icon: typeof Bitcoin; color: string; bg: string }> = {
-  BTCUSDT: { name: 'BTC', icon: Bitcoin, color: 'text-orange-500', bg: 'bg-orange-500/10' },
-  PAXGUSDT: { name: 'PAXG', icon: Coins, color: 'text-yellow-500', bg: 'bg-yellow-500/10' },
-};
+import { getCoin } from '../lib/coinConfig';
 
 interface CryptoRow extends CryptoPosition {
   currentPrice: number;
@@ -562,8 +556,8 @@ export function Portfolio() {
                   </div>
                   <CardContent className="p-0 divide-y divide-border/30">
                     {cryptoRows.map((c) => {
-                      const meta = CRYPTO_META[c.symbol];
-                      const Icon = meta?.icon ?? Coins;
+                      const coin = getCoin(c.symbol);
+                      const Icon = coin.icon;
                       const up = c.profit >= 0;
                       return (
                         <button
@@ -574,19 +568,19 @@ export function Portfolio() {
                         >
                           <div className="flex items-center justify-between gap-3">
                             <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                              <div className={cn("w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ring-1", meta?.bg ?? 'bg-muted', meta ? `ring-current/20 ${meta.color}` : 'ring-border')}>
-                                <Icon className={cn("w-4 h-4", meta?.color ?? 'text-muted-foreground')} />
+                              <div className={cn("w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ring-1", coin.bgClass, `ring-current/20 ${coin.colorClass}`)}>
+                                <Icon className={cn("w-4 h-4", coin.colorClass)} />
                               </div>
                               <div className="min-w-0">
                                 <div className="flex items-center gap-1.5 mb-1">
-                                  <span className="font-semibold text-[13px] group-hover:text-primary transition-colors">{meta?.name ?? c.symbol}</span>
+                                  <span className="font-semibold text-[13px] group-hover:text-primary transition-colors">{coin.name}</span>
                                   <span className="text-[11px] text-muted-foreground/60">/ USDT</span>
-                                  {c.symbol === 'PAXGUSDT' && (
-                                    <span className="text-[10px] text-yellow-500/60">1枚=1盎司（31.1g）</span>
+                                  {coin.unitLabel && (
+                                    <span className={`text-[10px] ${coin.colorClass}/60`}>1枚=1盎司（{coin.unitFactor}g）</span>
                                   )}
                                 </div>
                                 <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
-                                  <span>持有 {c.quantity}{c.symbol === 'PAXGUSDT' && <span className="text-yellow-500/60 ml-0.5">约合 {(c.quantity * 31.1035).toFixed(1)} 克</span>}</span>
+                                  <span>持有 {c.quantity}{coin.unitLabel && <span className={`${coin.colorClass}/60 ml-0.5`}>约合 {(c.quantity * coin.unitFactor!).toFixed(1)} {coin.unitLabel}</span>}</span>
                                   <span className="text-border">·</span>
                                   <span>均价 {fmt(c.avgCost)}</span>
                                   {c.currentPrice > 0 && (<><span className="text-border">·</span><span>现价 {fmt(c.currentPrice)}</span></>)}
@@ -636,8 +630,8 @@ export function Portfolio() {
                     {futuresPositions.map((f) => {
                       const up = f.unrealizedPnl >= 0;
                       const isLong = f.side === 'LONG';
-                      const meta = CRYPTO_META[f.symbol];
-                      const Icon = meta?.icon ?? Coins;
+                      const coin = getCoin(f.symbol);
+                      const Icon = coin.icon;
                       return (
                         <button
                           type="button"
@@ -647,12 +641,12 @@ export function Portfolio() {
                         >
                           <div className="flex items-center justify-between gap-3">
                             <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                              <div className={cn("w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ring-1", meta?.bg ?? 'bg-muted', meta ? `ring-current/20 ${meta.color}` : 'ring-border')}>
-                                <Icon className={cn("w-4 h-4", meta?.color ?? 'text-muted-foreground')} />
+                              <div className={cn("w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ring-1", coin.bgClass, `ring-current/20 ${coin.colorClass}`)}>
+                                <Icon className={cn("w-4 h-4", coin.colorClass)} />
                               </div>
                               <div className="min-w-0">
                                 <div className="flex items-center gap-1.5 mb-1">
-                                  <span className="font-semibold text-[13px] group-hover:text-primary transition-colors">{meta?.name ?? f.symbol}</span>
+                                  <span className="font-semibold text-[13px] group-hover:text-primary transition-colors">{coin.name}</span>
                                   <Badge className={cn("text-[9px] px-1 py-0", isLong ? "bg-red-500" : "bg-green-500")}>{isLong ? '多' : '空'}</Badge>
                                   <span className="text-[11px] text-muted-foreground">{f.leverage}x</span>
                                 </div>

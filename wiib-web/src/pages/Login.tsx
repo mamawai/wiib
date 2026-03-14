@@ -119,9 +119,9 @@ export function Login() {
       {/* 主卡片 */}
       <div className="w-full max-w-md relative z-10">
         {/* 卡片后置阴影块（纯物理错位感） */}
-        <div className="absolute inset-0 bg-edge rounded-[2rem] translate-x-3 translate-y-3" />
+        <div className="absolute inset-0 bg-edge rounded-4xl translate-x-3 translate-y-3" />
         
-        <div className="relative rounded-[2rem] border-[3.5px] border-edge bg-card p-8 md:p-10 flex flex-col items-center">
+        <div className="relative rounded-4xl border-[3.5px] border-edge bg-card p-8 md:p-10 flex flex-col items-center">
           
           {/* Logo - 倾斜重叠设计 + 专属商标 */}
           <div className="mb-8 relative group cursor-pointer">
@@ -150,15 +150,15 @@ export function Login() {
 
           {/* 功能点矩阵 */}
           <div className="grid grid-cols-3 gap-3 w-full mb-10">
-            <div className="text-center p-4 rounded-xl border-[3px] border-edge bg-[#FEF08A] shadow-[3px_3px_0_0_var(--color-edge)] hover:-translate-y-1 hover:translate-x-[-1px] hover:shadow-[5px_5px_0_0_var(--color-edge)] transition-all">
+            <div className="text-center p-4 rounded-xl border-[3px] border-edge bg-[#FEF08A] shadow-[3px_3px_0_0_var(--color-edge)] hover:-translate-y-1 hover:-translate-x-px hover:shadow-[5px_5px_0_0_var(--color-edge)] transition-all">
               <BarChart3 className="w-7 h-7 mx-auto mb-2 text-edge" strokeWidth={2.5} />
               <span className="text-xs font-black text-edge">真实行情</span>
             </div>
-            <div className="text-center p-4 rounded-xl border-[3px] border-edge bg-[#86EFAC] shadow-[3px_3px_0_0_var(--color-edge)] hover:-translate-y-1 hover:translate-x-[-1px] hover:shadow-[5px_5px_0_0_var(--color-edge)] transition-all">
+            <div className="text-center p-4 rounded-xl border-[3px] border-edge bg-[#86EFAC] shadow-[3px_3px_0_0_var(--color-edge)] hover:-translate-y-1 hover:-translate-x-px hover:shadow-[5px_5px_0_0_var(--color-edge)] transition-all">
               <Wallet className="w-7 h-7 mx-auto mb-2 text-edge" strokeWidth={2.5} />
               <span className="text-xs font-black text-edge">无损模拟</span>
             </div>
-            <div className="text-center p-4 rounded-xl border-[3px] border-edge bg-[#93C5FD] shadow-[3px_3px_0_0_var(--color-edge)] hover:-translate-y-1 hover:translate-x-[-1px] hover:shadow-[5px_5px_0_0_var(--color-edge)] transition-all">
+            <div className="text-center p-4 rounded-xl border-[3px] border-edge bg-[#93C5FD] shadow-[3px_3px_0_0_var(--color-edge)] hover:-translate-y-1 hover:-translate-x-px hover:shadow-[5px_5px_0_0_var(--color-edge)] transition-all">
               <LineChart className="w-7 h-7 mx-auto mb-2 text-edge" strokeWidth={2.5} />
               <span className="text-xs font-black text-edge">收益复盘</span>
             </div>
@@ -181,10 +181,10 @@ export function Login() {
             ) : (
               <button
                 onClick={handleLinuxDoLogin}
-                className="group relative w-full h-16 rounded-2xl border-[3.5px] border-edge bg-primary text-primary-foreground font-black text-lg shadow-[6px_6px_0_0_var(--color-edge)] hover:-translate-y-1 hover:translate-x-[-1px] hover:shadow-[8px_8px_0_0_var(--color-edge)] active:translate-y-[6px] active:translate-x-[6px] active:shadow-[0px_0px_0_0_var(--color-edge)] transition-all flex items-center justify-center gap-3 overflow-hidden"
+                className="group relative w-full h-16 rounded-2xl border-[3.5px] border-edge bg-primary text-primary-foreground font-black text-lg shadow-[6px_6px_0_0_var(--color-edge)] hover:-translate-y-1 hover:-translate-x-px hover:shadow-[8px_8px_0_0_var(--color-edge)] active:translate-y-1.5 active:translate-x-1.5 active:shadow-[0px_0px_0_0_var(--color-edge)] transition-all flex items-center justify-center gap-3 overflow-hidden"
               >
                 {/* 按钮内扫光效果 */}
-                <div className="absolute inset-0 w-full h-full bg-white/20 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-700" />
+                <div className="absolute inset-0 w-full h-full bg-white/20 -translate-x-full group-hover:translate-x-full transition-transform duration-700" />
                 <Globe className="w-6 h-6 relative z-10" strokeWidth={2.5} />
                 <span className="relative z-10 tracking-wide">使用 LinuxDo 登录</span>
               </button>

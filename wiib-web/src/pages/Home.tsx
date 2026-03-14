@@ -172,7 +172,7 @@ export function Home() {
           <button
             key={to}
             onClick={() => navigate(to)}
-            className="flex flex-col items-center gap-2.5 py-4 rounded-2xl border-[3px] border-edge bg-card shadow-[3px_3px_0_0_var(--color-edge)] hover:shadow-[1px_1px_0_0_var(--color-edge)] hover:translate-x-[2px] hover:translate-y-[2px] active:shadow-none active:translate-x-[3px] active:translate-y-[3px] transition-all cursor-pointer"
+            className="flex flex-col items-center gap-2.5 py-4 rounded-2xl border-[3px] border-edge bg-card shadow-[3px_3px_0_0_var(--color-edge)] hover:shadow-[1px_1px_0_0_var(--color-edge)] hover:translate-x-0.5 hover:translate-y-0.5 active:shadow-none active:translate-x-0.75 active:translate-y-0.75 transition-all cursor-pointer"
           >
             <div className={cn("w-11 h-11 rounded-xl flex items-center justify-center border-2 border-edge/15", bg)}>
               <Icon className={cn("w-5 h-5", ic)} />

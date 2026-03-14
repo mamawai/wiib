@@ -8,6 +8,9 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.util.UriComponentsBuilder;
 
+import com.alibaba.fastjson2.JSON;
+import com.alibaba.fastjson2.JSONArray;
+
 import java.math.BigDecimal;
 import java.net.URI;
 
@@ -43,6 +46,24 @@ public class BinanceRestClient extends BaseRestTemplateConfig {
         URI uri = builder.build().toUri();
         log.info("Binance REST klines: {}", uri);
         return restTemplate.getForObject(uri, String.class);
+    }
+
+    public String getKlinesLight(String symbol, String interval, int limit, Long endTime) {
+        String raw = getKlines(symbol, interval, limit, endTime);
+        try {
+            JSONArray root = JSON.parseArray(raw);
+            JSONArray result = new JSONArray(root.size());
+            for (int i = 0; i < root.size(); i++) {
+                JSONArray kline = root.getJSONArray(i);
+                JSONArray slim = new JSONArray(5);
+                for (int j = 0; j <= 4; j++) slim.add(kline.get(j));
+                result.add(slim);
+            }
+            return result.toJSONString();
+        } catch (Exception e) {
+            log.warn("klines精简失败，返回原始数据", e);
+            return raw;
+        }
     }
 
     /**

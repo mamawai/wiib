@@ -173,6 +173,14 @@ public class MarketDataServiceImpl implements MarketDataService {
         }
         cacheService.hSet(dailyKey, "last", price.toString());
 
+        // 写入L1 Caffeine
+        daily.put("open", open.toPlainString());
+        daily.put("high", high.toPlainString());
+        daily.put("low", low.toPlainString());
+        daily.put("last", price.toPlainString());
+        daily.put("prevClose", prevClose.toPlainString());
+        cacheService.putStockDaily(stockId, daily);
+
         Map<String, Object> result = new HashMap<>();
         result.put("stockId", stockId);
         result.put("price", price);

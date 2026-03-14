@@ -28,7 +28,7 @@ export function Me() {
         <CardContent className="pt-5">
           {user ? (
             <div className="flex items-center gap-4">
-              <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-primary/20 to-accent/10 flex items-center justify-center">
+              <div className="w-12 h-12 rounded-2xl bg-linear-to-br from-primary/20 to-accent/10 flex items-center justify-center">
                 <User className="w-6 h-6 text-primary" />
               </div>
               <div className="flex-1 min-w-0">

@@ -1,5 +1,6 @@
 package com.mawai.wiibservice.config;
 
+import com.mawai.wiibservice.service.CacheService;
 import com.mawai.wiibservice.service.CryptoOrderService;
 import com.mawai.wiibservice.service.FuturesLiquidationService;
 import com.mawai.wiibservice.service.FuturesService;
@@ -40,6 +41,7 @@ public class BinanceWsClient {
     private final CryptoOrderService cryptoOrderService;
     private final FuturesLiquidationService futuresLiquidationService;
     private final FuturesService futuresService;
+    private final CacheService cacheService;
 
     private HttpClient httpClient;
     private ScheduledExecutorService scheduler;
@@ -134,6 +136,8 @@ public class BinanceWsClient {
         }
 
         redisTemplate.opsForValue().set(REDIS_KEY_PREFIX + symbol, price);
+        BigDecimal bd = new BigDecimal(price);
+        cacheService.putCryptoPrice(symbol, bd);
         String markPrice = redisTemplate.opsForValue().get(REDIS_MARK_PRICE_KEY_PREFIX + symbol);
         String msg = "{\"price\":\"" + price + "\",\"ts\":" + ts
                 + ",\"ws\":" + isConnected() + ",\"fws\":" + isFuturesConnected()
@@ -141,7 +145,6 @@ public class BinanceWsClient {
         broadcastService.broadcastCryptoQuote(symbol, msg);
 
         // 虚拟线程跑业务逻辑，不阻塞WS接收线程
-        BigDecimal bd = new BigDecimal(price);
         Thread.startVirtualThread(() -> {
             try { cryptoOrderService.onPriceUpdate(symbol, bd); }
             catch (Exception e) { log.warn("crypto限价单检查异常 {}: {}", symbol, e.getMessage()); }
@@ -181,11 +184,13 @@ public class BinanceWsClient {
         String markPrice = extractQuoted(raw, pIdx + 5);
 
         redisTemplate.opsForValue().set(REDIS_MARK_PRICE_KEY_PREFIX + symbol, markPrice);
+        BigDecimal mp = new BigDecimal(markPrice);
+        cacheService.putMarkPrice(symbol, mp);
 
         String spotPrice = redisTemplate.opsForValue().get(REDIS_KEY_PREFIX + symbol);
-        BigDecimal cp = spotPrice != null ? new BigDecimal(spotPrice) : new BigDecimal(markPrice);
+        BigDecimal cp = spotPrice != null ? new BigDecimal(spotPrice) : mp;
         Thread.startVirtualThread(() -> {
-            try { futuresLiquidationService.checkOnPriceUpdate(symbol, new BigDecimal(markPrice), cp); }
+            try { futuresLiquidationService.checkOnPriceUpdate(symbol, mp, cp); }
             catch (Exception e) { log.warn("futures强平检查异常 {}: {}", symbol, e.getMessage()); }
         });
     }

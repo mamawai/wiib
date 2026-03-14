@@ -1,14 +1,14 @@
-import { useState, useEffect, useCallback } from 'react';
-import { blackjackApi } from '../api';
-import { useToast } from '../components/ui/use-toast';
-import { Button } from '../components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
-import { Dialog, DialogHeader, DialogContent, DialogFooter } from '../components/ui/dialog';
-import { PlayingCard } from '../components/blackjack/PlayingCard';
-import { Skeleton } from '../components/ui/skeleton';
-import { ArrowLeftRight, Spade, RotateCcw, Hand, Square, CopyPlus, Split, Shield } from 'lucide-react';
-import { cn } from '../lib/utils';
-import type { BlackjackStatus, GameState, HandResult } from '../types';
+import {useCallback, useEffect, useState} from 'react';
+import {blackjackApi} from '../api';
+import {useToast} from '../components/ui/use-toast';
+import {Button} from '../components/ui/button';
+import {Card, CardContent, CardHeader, CardTitle} from '../components/ui/card';
+import {Dialog, DialogContent, DialogFooter, DialogHeader} from '../components/ui/dialog';
+import {PlayingCard} from '../components/blackjack/PlayingCard';
+import {Skeleton} from '../components/ui/skeleton';
+import {ArrowLeftRight, CopyPlus, Hand, RotateCcw, Shield, Spade, Split, Square} from 'lucide-react';
+import {cn} from '../lib/utils';
+import type {BlackjackStatus, GameState, HandResult} from '../types';
 
 const BET_PRESETS = [100, 500, 1000, 5000, 10000, 50000];
 const CHIP_COLORS: Record<number, string> = {
@@ -67,8 +67,7 @@ export function Blackjack() {
   };
 
   const handleBet = () => act(async () => {
-    const state = await blackjackApi.bet(betAmount);
-    return state;
+    return await blackjackApi.bet(betAmount);
   });
 
   const handleNewGame = () => {
@@ -184,7 +183,7 @@ export function Blackjack() {
                 </span>
               )}
             </div>
-            <div className="flex gap-2 sm:gap-3 flex-wrap min-h-[6rem] sm:min-h-[7rem]">
+            <div className="flex gap-2 sm:gap-3 flex-wrap min-h-24 sm:min-h-28">
               {game.dealerCards.map((c, i) => (
                 <PlayingCard key={`d-${i}`} card={c} delay={i * 100} />
               ))}
@@ -235,7 +234,7 @@ export function Blackjack() {
                     本轮积分 {hand.bet.toLocaleString()}
                   </span>
                 </div>
-                <div className="flex gap-2 sm:gap-3 flex-wrap min-h-[6rem] sm:min-h-[7rem]">
+                <div className="flex gap-2 sm:gap-3 flex-wrap min-h-24 sm:min-h-28">
                   {hand.cards.map((c, ci) => (
                     <PlayingCard key={`p-${hi}-${ci}-${c}`} card={c} delay={ci * 100} />
                   ))}

@@ -10,27 +10,12 @@ import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Badge } from '../components/ui/badge';
 import { Skeleton } from '../components/ui/skeleton';
-import { Bitcoin, Coins, TrendingUp, TrendingDown, ChevronLeft, ChevronRight, Loader2, X, RefreshCw, Sparkles, Wallet, Warehouse, Scale, HelpCircle, Plus } from 'lucide-react';
+import { TrendingUp, TrendingDown, ChevronLeft, ChevronRight, Loader2, X, RefreshCw, Sparkles, Wallet, Warehouse, Scale, HelpCircle, Plus } from 'lucide-react';
 import TradingViewWidget from '../components/TradingViewWidget';
+import { COIN_MAP, getCoin, DEFAULT_SYMBOL } from '../lib/coinConfig';
 import type { CryptoOrder, CryptoPosition, PageResult, UserBuff, FuturesPosition, FuturesOrder, FuturesSLItem, FuturesTPItem } from '../types';
 
 interface SLTPRow { price: string; quantity: string }
-
-interface SymbolCfg {
-  name: string;
-  pair: string;
-  tvSymbol: string;
-  minQty: number;
-  icon: typeof Bitcoin;
-  colorClass: string;
-  bgClass: string;
-  gradientClass: string;
-}
-
-const SYMBOL_CFG: Record<string, SymbolCfg> = {
-  BTCUSDT: { name: 'BTC', pair: 'BTC / USDT', tvSymbol: 'BINANCE:BTCUSD', minQty: 0.00001, icon: Bitcoin, colorClass: 'text-orange-500', bgClass: 'bg-orange-500/10', gradientClass: 'from-orange-500/5' },
-  PAXGUSDT: { name: 'PAXG', pair: 'PAXG / USDT', tvSymbol: 'BINANCE:PAXGUSD', minQty: 0.001, icon: Coins, colorClass: 'text-yellow-500', bgClass: 'bg-yellow-500/10', gradientClass: 'from-yellow-500/5' },
-};
 
 const COMMISSION_RATE = 0.001;
 const POSITION_PCTS = [0.25, 0.5, 0.75, 1];
@@ -194,12 +179,12 @@ const STATUS_MAP: Record<string, { label: string; variant: 'default' | 'secondar
 
 export function CoinRoute() {
   const { symbol } = useParams<{ symbol: string }>();
-  const s = symbol && SYMBOL_CFG[symbol] ? symbol : 'BTCUSDT';
+  const s = symbol && COIN_MAP[symbol] ? symbol : DEFAULT_SYMBOL;
   return <Coin key={s} symbol={s} />;
 }
 
-export function Coin({ symbol = 'BTCUSDT' }: { symbol?: string }) {
-  const cfg = SYMBOL_CFG[symbol] ?? SYMBOL_CFG['BTCUSDT'];
+export function Coin({ symbol = DEFAULT_SYMBOL }: { symbol?: string }) {
+  const cfg = getCoin(symbol);
   const Icon = cfg.icon;
   const MIN_QTY = cfg.minQty;
   const { toast } = useToast();
@@ -217,15 +202,15 @@ export function Coin({ symbol = 'BTCUSDT' }: { symbol?: string }) {
 
   const tick = useCryptoStream(symbol);
 
-  // PAXG: USD/CNY 汇率 → 人民币/克
+  // 实物换算币种: USD/CNY 汇率
   const [usdCny, setUsdCny] = useState(0);
   useEffect(() => {
-    if (symbol !== 'PAXGUSDT') return;
+    if (!cfg.unitLabel) return;
     fetch('https://open.er-api.com/v6/latest/USD')
       .then(r => r.json())
       .then(d => { if (d.result === 'success') setUsdCny(d.rates.CNY); })
       .catch(() => {});
-  }, [symbol]);
+  }, [cfg.unitLabel]);
 
   // 交易面板状态
   const [side, setSide] = useState<'BUY' | 'SELL'>('BUY');
@@ -728,7 +713,7 @@ export function Coin({ symbol = 'BTCUSDT' }: { symbol?: string }) {
     <div className="max-w-5xl mx-auto p-4 md:p-6 space-y-8">
       {/* 顶部价格 */}
       <Card className="relative overflow-hidden mb-6">
-        <div className={`absolute top-0 right-0 p-32 rounded-full blur-3xl -z-10 transform translate-x-1/3 -translate-y-1/2 opacity-20 bg-gradient-to-br ${cfg.gradientClass}`} />
+        <div className={`absolute top-0 right-0 p-32 rounded-full blur-3xl -z-10 transform translate-x-1/3 -translate-y-1/2 opacity-20 bg-linear-to-br ${cfg.gradientClass}`} />
         <CardContent className="p-5 md:p-6">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
@@ -738,12 +723,12 @@ export function Coin({ symbol = 'BTCUSDT' }: { symbol?: string }) {
               <div className="space-y-1.5">
                 <div className="flex items-center gap-2.5">
                   <span className="text-xl font-black tracking-tight">{cfg.pair}</span>
-                  <div className="flex items-center gap-2 px-2.5 py-1 rounded-full bg-card border-[2px] border-edge shadow-[2px_2px_0_0_var(--color-edge)] text-[10px]">
+                  <div className="flex items-center gap-2 px-2.5 py-1 rounded-full bg-card border-2 border-edge shadow-[2px_2px_0_0_var(--color-edge)] text-[10px]">
                     <span className="flex items-center gap-1.5" title="现货行情">
                       <span className={`inline-block w-2 h-2 border border-edge rounded-full ${tick?.ws ? 'bg-success' : 'bg-destructive animate-pulse'}`} />
                       <span className="text-foreground font-bold">现货</span>
                     </span>
-                    <span className="w-[2px] h-2.5 bg-edge" />
+                    <span className="w-0.5 h-2.5 bg-edge" />
                     <span className="flex items-center gap-1.5" title="合约行情">
                       <span className={`inline-block w-2 h-2 border border-edge rounded-full ${tick?.fws ? 'bg-success' : 'bg-destructive animate-pulse'}`} />
                       <span className="text-foreground font-bold">合约</span>
@@ -752,10 +737,10 @@ export function Coin({ symbol = 'BTCUSDT' }: { symbol?: string }) {
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-xs font-bold text-muted-foreground">Binance</span>
-                  {symbol === 'PAXGUSDT' && (
+                  {cfg.unitLabel && (
                     <>
                       <span className="w-1.5 h-1.5 rounded-full bg-edge" />
-                      <span className="text-[11px] text-warning font-bold">1枚 = 1盎司黄金（31.1035克）</span>
+                      <span className="text-[11px] text-warning font-bold">1枚 = 1盎司黄金（{cfg.unitFactor}{cfg.unitLabel}）</span>
                     </>
                   )}
                 </div>
@@ -769,12 +754,12 @@ export function Coin({ symbol = 'BTCUSDT' }: { symbol?: string }) {
                       ${formatPrice(currentPrice)}
                     </span>
                   </div>
-                  {symbol === 'PAXGUSDT' && usdCny > 0 && currentPrice > 0 && (
+                  {cfg.unitLabel && usdCny > 0 && currentPrice > 0 && (
                     <div className="text-sm text-warning font-mono font-bold mt-1">
-                      ¥{(currentPrice * usdCny / 31.1035).toFixed(2)}/克
+                      ¥{(currentPrice * usdCny / cfg.unitFactor!).toFixed(2)}/{cfg.unitLabel}
                     </div>
                   )}
-                  <div className={`flex items-center justify-end gap-1.5 text-sm font-bold mt-2 px-2.5 py-1 rounded-lg border-[2px] border-edge shadow-[2px_2px_0_0_var(--color-edge)] ${isUp ? 'bg-gain/10 text-gain' : 'bg-loss/10 text-loss'}`}>
+                  <div className={`flex items-center justify-end gap-1.5 text-sm font-bold mt-2 px-2.5 py-1 rounded-lg border-2 border-edge shadow-[2px_2px_0_0_var(--color-edge)] ${isUp ? 'bg-gain/10 text-gain' : 'bg-loss/10 text-loss'}`}>
                     {isUp ? <TrendingUp className="w-4 h-4 stroke-[3px]" /> : <TrendingDown className="w-4 h-4 stroke-[3px]" />}
                     <span>{isUp ? '+' : ''}{formatPrice(change)}</span>
                     <span>({isUp ? '+' : ''}{changePct.toFixed(2)}%)</span>
@@ -782,8 +767,8 @@ export function Coin({ symbol = 'BTCUSDT' }: { symbol?: string }) {
                 </div>
               ) : (
                 <div className="space-y-2 flex flex-col items-end">
-                  <Skeleton className="h-10 w-40 border-[2px] border-edge" />
-                  <Skeleton className="h-6 w-24 border-[2px] border-edge" />
+                  <Skeleton className="h-10 w-40 border-2 border-edge" />
+                  <Skeleton className="h-6 w-24 border-2 border-edge" />
                 </div>
               )}
             </div>
@@ -812,7 +797,7 @@ export function Coin({ symbol = 'BTCUSDT' }: { symbol?: string }) {
           {loading && activeTab < TABS.length && points.length === 0 && <Skeleton className="absolute inset-0 z-10 m-2" style={{ height: 300 }} />}
           <div ref={chartRef1D} className="w-full" style={{ height: 300, display: activeTab === 0 ? 'block' : 'none' }} />
           <div ref={chartRef7D} className="w-full" style={{ height: 300, display: activeTab === 1 ? 'block' : 'none' }} />
-          {activeTab === 2 && <div style={{ height: 500 }}><TradingViewWidget symbol={cfg.tvSymbol} /></div>}
+          {activeTab === 2 && <div style={{ height: 500 }}><TradingViewWidget symbol={cfg.tvSymbol} label={cfg.name} /></div>}
         </CardContent>
       </Card>
 
@@ -830,14 +815,14 @@ export function Coin({ symbol = 'BTCUSDT' }: { symbol?: string }) {
               <div className={`rounded-2xl border-[2.5px] border-edge bg-card p-4 space-y-3 shadow-[4px_4px_0_0_var(--color-edge)]`}>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
-                    <div className={`p-2 rounded-xl border-[2px] border-edge bg-card shadow-[2px_2px_0_0_var(--color-edge)]`}>
+                    <div className={`p-2 rounded-xl border-2 border-edge bg-card shadow-[2px_2px_0_0_var(--color-edge)]`}>
                       <Icon className={`w-5 h-5 ${cfg.colorClass}`} />
                     </div>
                     <div>
                       <span className="text-base font-black">{cfg.name}</span>
                       <span className="text-sm font-bold text-muted-foreground ml-2">{position.quantity} 个</span>
-                      {symbol === 'PAXGUSDT' && (
-                        <span className="text-xs font-bold text-warning ml-1.5">约合 {(position.quantity * 31.1035).toFixed(1)} 克</span>
+                      {cfg.unitLabel && (
+                        <span className="text-xs font-bold text-warning ml-1.5">约合 {(position.quantity * cfg.unitFactor!).toFixed(1)} {cfg.unitLabel}</span>
                       )}
                     </div>
                   </div>
@@ -964,7 +949,7 @@ export function Coin({ symbol = 'BTCUSDT' }: { symbol?: string }) {
                           if (qty > 0) animateQuantity(qty, MIN_QTY); else setQuantity('');
                         };
                         return (
-                          <Button key={pct} size="sm" variant="outline" className="h-7 text-[11px] flex-1 min-w-[60px]" onClick={handlePct}>
+                          <Button key={pct} size="sm" variant="outline" className="h-7 text-[11px] flex-1 min-w-15" onClick={handlePct}>
                             {pct * 100}%
                           </Button>
                         );
@@ -1007,7 +992,7 @@ export function Coin({ symbol = 'BTCUSDT' }: { symbol?: string }) {
                     <label className="text-xs text-muted-foreground flex items-center gap-1">止损 <HelpTip text="标记价格触及止损价时自动平仓对应数量，可设多档分批止损" /></label>
                     <button type="button" onClick={() => { setOpenSlEnabled(!openSlEnabled); setOpenSlRows([{ price: '', quantity: '' }]); }}
                       className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${openSlEnabled ? 'bg-primary' : 'bg-muted-foreground/30'}`}>
-                      <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-background transition-transform shadow-sm ${openSlEnabled ? 'translate-x-[18px]' : 'translate-x-[3px]'}`} />
+                      <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-background transition-transform shadow-sm ${openSlEnabled ? 'translate-x-4.5' : 'translate-x-0.75'}`} />
                     </button>
                   </div>
                   {openSlEnabled && (
@@ -1021,7 +1006,7 @@ export function Coin({ symbol = 'BTCUSDT' }: { symbol?: string }) {
                     <label className="text-xs text-muted-foreground flex items-center gap-1">止盈 <HelpTip text="现价触及止盈价时自动平仓对应数量，可设多档分批止盈" /></label>
                     <button type="button" onClick={() => { setOpenTpEnabled(!openTpEnabled); setOpenTpRows([{ price: '', quantity: '' }]); }}
                       className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${openTpEnabled ? 'bg-primary' : 'bg-muted-foreground/30'}`}>
-                      <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-background transition-transform shadow-sm ${openTpEnabled ? 'translate-x-[18px]' : 'translate-x-[3px]'}`} />
+                      <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-background transition-transform shadow-sm ${openTpEnabled ? 'translate-x-4.5' : 'translate-x-0.75'}`} />
                     </button>
                   </div>
                   {openTpEnabled && (
@@ -1085,7 +1070,7 @@ export function Coin({ symbol = 'BTCUSDT' }: { symbol?: string }) {
                     animateQuantity(target, MIN_QTY);
                   };
                   return (
-                    <Button key={pct} onClick={handlePct} variant="outline" size="sm" className="h-11 text-[11px] font-black flex-1 min-w-[60px]">
+                    <Button key={pct} onClick={handlePct} variant="outline" size="sm" className="h-11 text-[11px] font-black flex-1 min-w-15">
                       {pct * 100}%
                     </Button>
                   );
@@ -1130,11 +1115,11 @@ export function Coin({ symbol = 'BTCUSDT' }: { symbol?: string }) {
                   disabled={leverage > 1}
                   className={`relative inline-flex h-6 w-11 border-[2.5px] border-edge items-center rounded-full transition-colors ${useBuff ? 'bg-warning' : 'bg-muted-foreground/30'} ${leverage > 1 ? 'opacity-40 cursor-not-allowed' : ''}`}
                 >
-                  <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-background border-[2px] border-edge transition-transform ${useBuff ? 'translate-x-[20px]' : 'translate-x-[4px]'}`} />
+                  <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-background border-2 border-edge transition-transform ${useBuff ? 'translate-x-5' : 'translate-x-1'}`} />
                 </button>
               </div>
               {useBuff && (
-                <div className="flex items-center gap-2 text-xs bg-warning/10 border-[2px] border-warning/50 rounded-xl px-3 py-2">
+                <div className="flex items-center gap-2 text-xs bg-warning/10 border-2 border-warning/50 rounded-xl px-3 py-2">
                   <Badge variant="warning" className="text-[10px] px-2">{discountBuff.buffName}</Badge>
                   <span className="text-muted-foreground font-bold">本次买入整单折扣</span>
                 </div>
@@ -1231,10 +1216,10 @@ export function Coin({ symbol = 'BTCUSDT' }: { symbol?: string }) {
                   </div>
                   {/* 操作按钮 */}
                   <div className="flex flex-wrap gap-1.5 pt-1">
-                    <Button size="sm" variant={isActive && posAction.type === 'close' ? 'default' : 'outline'} className="h-7 text-[11px] flex-1 min-w-[60px]" onClick={() => togglePosAction(pos.id, 'close', pos)}>平仓</Button>
-                    <Button size="sm" variant={isActive && posAction.type === 'increase' ? 'default' : 'outline'} className="h-7 text-[11px] flex-1 min-w-[60px]" onClick={() => togglePosAction(pos.id, 'increase', pos)}>加仓</Button>
-                    <Button size="sm" variant={isActive && posAction.type === 'margin' ? 'default' : 'outline'} className="h-7 text-[11px] flex-1 min-w-[60px]" onClick={() => togglePosAction(pos.id, 'margin', pos)}>+保证金</Button>
-                    <Button size="sm" variant={isActive && posAction.type === 'stoploss' ? 'default' : 'outline'} className="h-7 text-[11px] flex-1 min-w-[60px]" onClick={() => togglePosAction(pos.id, 'stoploss', pos)}>止损/盈</Button>
+                    <Button size="sm" variant={isActive && posAction.type === 'close' ? 'default' : 'outline'} className="h-7 text-[11px] flex-1 min-w-15" onClick={() => togglePosAction(pos.id, 'close', pos)}>平仓</Button>
+                    <Button size="sm" variant={isActive && posAction.type === 'increase' ? 'default' : 'outline'} className="h-7 text-[11px] flex-1 min-w-15" onClick={() => togglePosAction(pos.id, 'increase', pos)}>加仓</Button>
+                    <Button size="sm" variant={isActive && posAction.type === 'margin' ? 'default' : 'outline'} className="h-7 text-[11px] flex-1 min-w-15" onClick={() => togglePosAction(pos.id, 'margin', pos)}>+保证金</Button>
+                    <Button size="sm" variant={isActive && posAction.type === 'stoploss' ? 'default' : 'outline'} className="h-7 text-[11px] flex-1 min-w-15" onClick={() => togglePosAction(pos.id, 'stoploss', pos)}>止损/盈</Button>
                   </div>
                   {/* 内联操作面板 */}
                   {isActive && (
@@ -1700,11 +1685,11 @@ function PositionPriceBar({ pos, currentPrice }: { pos: FuturesPosition; current
   ].filter(r => r.price > 0);
 
   return (
-    <div className="mt-1.5 space-y-[3px]">
+    <div className="mt-1.5 space-y-0.75">
       {rows.map((r, i) => (
-        <div key={i} className="flex items-center gap-1.5 h-[18px]">
+        <div key={i} className="flex items-center gap-1.5 h-4.5">
           <span className="text-[10px] w-7 shrink-0 text-right font-medium" style={{ color: r.color }}>{r.label}</span>
-          <div className="flex-1 relative h-[6px] rounded-full bg-muted-foreground/10 overflow-hidden">
+          <div className="flex-1 relative h-1.5 rounded-full bg-muted-foreground/10 overflow-hidden">
             <div
               className="absolute left-0 top-0 h-full rounded-full"
               style={{

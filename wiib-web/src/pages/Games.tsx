@@ -37,8 +37,8 @@ export function Games() {
             onClick={() => navigate(g.path)}
             className={cn(
               'flex flex-col items-center gap-3 rounded-2xl border-[3px] border-edge p-6 transition-all cursor-pointer',
-              'shadow-[4px_4px_0_0_var(--color-edge)] hover:shadow-[2px_2px_0_0_var(--color-edge)] hover:translate-x-[2px] hover:translate-y-[2px]',
-              'active:shadow-[0px_0px_0_0_var(--color-edge)] active:translate-x-[4px] active:translate-y-[4px]',
+              'shadow-[4px_4px_0_0_var(--color-edge)] hover:shadow-[2px_2px_0_0_var(--color-edge)] hover:translate-x-0.5 hover:translate-y-0.5',
+              'active:shadow-[0px_0px_0_0_var(--color-edge)] active:translate-x-1 active:translate-y-1',
               g.bg,
             )}
           >

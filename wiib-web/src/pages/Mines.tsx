@@ -187,40 +187,40 @@ export function Mines() {
               key={i}
               disabled={state !== 'clickable' || acting}
               onClick={() => handleReveal(i)}
-              className="aspect-square [perspective:600px] cursor-pointer disabled:cursor-default"
+              className="aspect-square perspective-[600px] cursor-pointer disabled:cursor-default"
             >
               <div
                 className={cn(
-                  'relative w-full h-full [transform-style:preserve-3d]',
+                  'relative w-full h-full transform-3d',
                   shouldAnimate ? 'transition-transform duration-500' : '',
-                  isFlipped && '[transform:rotateY(180deg)]',
+                  isFlipped && 'transform-[rotateY(180deg)]',
                 )}
                 style={shouldAnimate ? { transitionDelay: mineDelay } : undefined}
               >
                 {/* 正面：牌背 */}
                 <div className={cn(
-                  'absolute inset-0 [backface-visibility:hidden] rounded-xl overflow-hidden',
+                  'absolute inset-0 backface-hidden rounded-xl overflow-hidden',
                   state === 'idle' && 'opacity-40',
                   state === 'clickable' && 'hover:scale-[1.06] active:scale-95 transition-transform',
                   state === 'hidden-done' && 'opacity-25',
                   acting && state === 'clickable' && 'opacity-50',
                 )}>
-                  <div className="w-full h-full bg-gradient-to-br from-amber-900/60 to-stone-800/90 border-2 border-amber-700/30 rounded-xl flex items-center justify-center">
+                  <div className="w-full h-full bg-linear-to-br from-amber-900/60 to-stone-800/90 border-2 border-amber-700/30 rounded-xl flex items-center justify-center">
                     <span className="text-2xl sm:text-3xl select-none">⛏️</span>
                   </div>
                 </div>
                 {/* 背面：翻开内容 */}
                 <div className={cn(
-                  'absolute inset-0 [backface-visibility:hidden] [transform:rotateY(180deg)] rounded-xl overflow-hidden',
+                  'absolute inset-0 backface-hidden transform-[rotateY(180deg)] rounded-xl overflow-hidden',
                 )}>
                   {state === 'safe' && (
-                    <div className="w-full h-full bg-gradient-to-br from-yellow-400/30 to-amber-600/40 border-2 border-yellow-400/40 rounded-xl flex items-center justify-center">
+                    <div className="w-full h-full bg-linear-to-br from-yellow-400/30 to-amber-600/40 border-2 border-yellow-400/40 rounded-xl flex items-center justify-center">
                       <span className="text-2xl sm:text-3xl drop-shadow-[0_0_8px_rgba(255,215,0,0.6)]">💰</span>
                     </div>
                   )}
                   {state === 'mine' && (
                     <div className={cn(
-                      'w-full h-full bg-gradient-to-br from-red-500/30 to-red-800/50 border-2 border-red-500/50 rounded-xl flex items-center justify-center',
+                      'w-full h-full bg-linear-to-br from-red-500/30 to-red-800/50 border-2 border-red-500/50 rounded-xl flex items-center justify-center',
                       game?.result === 'MINE' && 'animate-pulse',
                     )}>
                       <span className="text-2xl sm:text-3xl drop-shadow-[0_0_8px_rgba(255,60,60,0.6)]">💣</span>
@@ -315,7 +315,7 @@ export function Mines() {
           </div>
           <div className="h-2 bg-muted rounded-full overflow-hidden">
             <div
-              className="h-full bg-gradient-to-r from-emerald-500 to-amber-500 rounded-full transition-all duration-500"
+              className="h-full bg-linear-to-r from-emerald-500 to-amber-500 rounded-full transition-all duration-500"
               style={{ width: `${(game.revealed.length / 20) * 100}%` }}
             />
           </div>

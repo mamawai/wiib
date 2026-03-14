@@ -1,6 +1,6 @@
 import { useEffect, useRef, memo } from 'react';
 
-function TradingViewWidget({ symbol = 'BINANCE:BTCUSD' }: { symbol?: string }) {
+function TradingViewWidget({ symbol = 'BINANCE:BTCUSD', label = 'Bitcoin' }: { symbol?: string; label?: string }) {
   const container = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -44,8 +44,8 @@ function TradingViewWidget({ symbol = 'BINANCE:BTCUSD' }: { symbol?: string }) {
     <div className="tradingview-widget-container" ref={container} style={{ height: '100%', width: '100%' }}>
       <div className="tradingview-widget-container__widget" style={{ height: 'calc(100% - 32px)', width: '100%' }} />
       <div className="tradingview-widget-copyright">
-        <a href="https://www.tradingview.com/symbols/BTCUSD/?exchange=BINANCE" rel="noopener noreferrer" target="_blank">
-          <span className="blue-text">Bitcoin price</span>
+        <a href={`https://www.tradingview.com/symbols/${symbol.replace('BINANCE:', '')}/?exchange=BINANCE`} rel="noopener noreferrer" target="_blank">
+          <span className="blue-text">{label} price</span>
         </a>
         <span className="trademark"> by TradingView</span>
       </div>

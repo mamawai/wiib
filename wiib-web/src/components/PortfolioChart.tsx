@@ -1,16 +1,12 @@
 import * as echarts from 'echarts';
 import { useEffect, useRef } from 'react';
 import type { Position } from '../types';
+import { getCoin } from '../lib/coinConfig';
 
 interface CryptoRow {
   symbol: string;
   marketValue: number;
 }
-
-const CRYPTO_NAMES: Record<string, string> = {
-  BTCUSDT: 'BTC',
-  PAXGUSDT: 'PAXG',
-};
 
 interface Props {
   positions: Position[];
@@ -40,11 +36,14 @@ export function PortfolioChart({ positions, cryptoPositions = [], balance, pendi
       ...(otherValue > 0 ? [{ name: '其他股票', value: otherValue, itemStyle: { color: '#666' } }] : []),
       ...cryptoPositions
         .filter(c => c.marketValue > 0)
-        .map(c => ({
-          name: CRYPTO_NAMES[c.symbol] ?? c.symbol,
-          value: c.marketValue,
-          itemStyle: { color: c.symbol === 'BTCUSDT' ? '#f97316' : '#eab308' },
-        })),
+        .map(c => {
+          const coin = getCoin(c.symbol);
+          return {
+            name: coin.name,
+            value: c.marketValue,
+            itemStyle: { color: coin.chartColor },
+          };
+        }),
       { name: '现金余额', value: balance, itemStyle: { color: '#22c55e' } },
       ...(pendingSettlement > 0 ? [{ name: '待结算', value: pendingSettlement, itemStyle: { color: '#a855f7' } }] : [])
     ];
