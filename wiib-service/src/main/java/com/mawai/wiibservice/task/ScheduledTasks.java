@@ -3,7 +3,7 @@ package com.mawai.wiibservice.task;
 import com.mawai.wiibservice.service.OrderService;
 import com.mawai.wiibservice.service.OptionOrderService;
 import com.mawai.wiibservice.service.CryptoOrderService;
-import com.mawai.wiibservice.service.FuturesService;
+import com.mawai.wiibservice.service.FuturesSettlementService;
 import com.mawai.wiibservice.service.QuotePushService;
 import com.mawai.wiibservice.service.RankingService;
 import com.mawai.wiibservice.service.SettlementService;
@@ -59,7 +59,7 @@ public class ScheduledTasks {
     private final OrderService orderService;
     private final OptionOrderService optionOrderService;
     private final CryptoOrderService cryptoOrderService;
-    private final FuturesService futuresService;
+    private final FuturesSettlementService futuresSettlementService;
     private final SettlementService settlementService;
     private final RankingService rankingService;
     private final MarginAccountService marginAccountService;
@@ -94,7 +94,7 @@ public class ScheduledTasks {
             OrderService orderService,
             OptionOrderService optionOrderService,
             CryptoOrderService cryptoOrderService,
-            FuturesService futuresService,
+            FuturesSettlementService futuresSettlementService,
             SettlementService settlementService,
             RankingService rankingService,
             MarginAccountService marginAccountService,
@@ -105,7 +105,7 @@ public class ScheduledTasks {
         this.orderService = orderService;
         this.optionOrderService = optionOrderService;
         this.cryptoOrderService = cryptoOrderService;
-        this.futuresService = futuresService;
+        this.futuresSettlementService = futuresSettlementService;
         this.settlementService = settlementService;
         this.rankingService = rankingService;
         this.marginAccountService = marginAccountService;
@@ -209,7 +209,7 @@ public class ScheduledTasks {
     public void chargeFuturesFundingFee() {
         Thread.startVirtualThread(() -> {
             try {
-                futuresService.chargeFundingFeeAll();
+                futuresSettlementService.chargeFundingFeeAll();
             } catch (Exception e) {
                 log.error("futures资金费率扣除失败", e);
             }
@@ -223,8 +223,8 @@ public class ScheduledTasks {
     public void futuresHourlyMaintenance() {
         Thread.startVirtualThread(() -> {
             try {
-                futuresService.executeTriggeredOrders();
-                futuresService.expireLimitOrders();
+                futuresSettlementService.executeTriggeredOrders();
+                futuresSettlementService.expireLimitOrders();
             } catch (Exception e) {
                 log.error("futures小时维护失败", e);
             }

@@ -12,12 +12,12 @@ import type {BlackjackStatus, GameState, HandResult} from '../types';
 
 const BET_PRESETS = [100, 500, 1000, 5000, 10000, 50000];
 const CHIP_COLORS: Record<number, string> = {
-  100: 'bg-zinc-500',
-  500: 'bg-red-600',
-  1000: 'bg-blue-600',
-  5000: 'bg-green-600',
-  10000: 'bg-purple-600',
-  50000: 'bg-amber-500',
+  100: 'bj-chip-100',
+  500: 'bj-chip-500',
+  1000: 'bj-chip-1000',
+  5000: 'bj-chip-5000',
+  10000: 'bj-chip-10000',
+  50000: 'bj-chip-50000',
 };
 
 const RESULT_LABELS: Record<string, string> = {
@@ -123,18 +123,14 @@ export function Blackjack() {
 
   return (
     <div className="max-w-2xl mx-auto p-4 space-y-4">
-      <Card className="border-red-500/30 bg-red-500/10">
-        <CardHeader className="pb-2">
-          <CardTitle className="text-base text-red-400">郑重声明与风险提示</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <ul className="list-disc list-inside text-sm text-red-200/90 space-y-1 leading-relaxed">
-            <li>本小游戏不涉及任何赌博行为，不涉及任何现实资金下注或交易。</li>
-            <li>仅用于为用户提供一个每日资金获取途径的趣味化体验，所有结算均为站内机制。</li>
-            <li>赌博可能导致成瘾、债务风险、家庭关系破裂及心理健康问题，请远离任何现实赌博活动。</li>
-          </ul>
-        </CardContent>
-      </Card>
+      <div className="rounded-2xl bg-red-50 dark:bg-red-500/10 p-5 neu-raised">
+        <h3 className="text-base font-bold text-red-800 dark:text-red-400 mb-2">郑重声明与风险提示</h3>
+        <ul className="list-disc list-inside text-sm text-red-900 dark:text-red-200/90 space-y-1 leading-relaxed">
+          <li>本小游戏不涉及任何赌博行为，不涉及任何现实资金下注或交易。</li>
+          <li>仅用于为用户提供一个每日资金获取途径的趣味化体验，所有结算均为站内机制。</li>
+          <li>赌博可能导致成瘾、债务风险、家庭关系破裂及心理健康问题，请远离任何现实赌博活动。</li>
+        </ul>
+      </div>
 
       {/* 顶栏 */}
       <div className="flex items-center justify-between px-1">
@@ -172,7 +168,7 @@ export function Blackjack() {
 
       {/* 牌桌 */}
       {game ? (
-        <div className="bj-table rounded-2xl p-5 sm:p-6">
+        <div className="bj-table casino-felt rounded-2xl p-5 sm:p-6">
           {/* 庄家 */}
           <div className="space-y-3">
             <div className="flex items-center gap-2">
@@ -288,7 +284,7 @@ export function Blackjack() {
             {isSettled ? (
               <Button
                 onClick={handleNewGame}
-                className="w-full h-12 text-base bg-emerald-600 hover:bg-emerald-500 border-emerald-500/30"
+                className="w-full h-12 text-base bg-emerald-600 hover:bg-emerald-500"
               >
                 <RotateCcw className="w-4 h-4" />
                 继续
@@ -326,7 +322,7 @@ export function Blackjack() {
         </div>
       ) : (
         /* 下注面板 */
-        <div className="bj-table rounded-2xl p-6 sm:p-8">
+        <div className="bj-table casino-felt rounded-2xl p-6 sm:p-8">
           <div className="text-center space-y-4">
             <div>
               <div className="text-xs text-white/40 uppercase tracking-widest mb-1">本轮积分</div>
@@ -362,7 +358,7 @@ export function Blackjack() {
               <Button
                 className={cn(
                   'w-full max-w-xs mx-auto h-12 text-base font-bold',
-                  'bg-amber-500 hover:bg-amber-400 text-black border-amber-400/30',
+                  'bg-amber-500 hover:bg-amber-400 text-black',
                   betAmount <= chips && betAmount >= 100 && !acting && 'bj-pulse-glow'
                 )}
                 onClick={handleBet}
@@ -448,7 +444,7 @@ export function Blackjack() {
               value={convertAmount}
               onChange={e => setConvertAmount(e.target.value)}
               placeholder="输入转出金额"
-              className="w-full px-3 py-2 rounded-lg border bg-background text-sm"
+              className="w-full px-3 py-2 rounded-lg bg-background text-sm neu-inset"
               min={1}
               max={Math.min(status?.convertable ?? 0, (status?.todayConvertLimit ?? 100000) - (status?.todayConverted ?? 0))}
             />
@@ -479,11 +475,11 @@ export function Blackjack() {
 }
 
 const ACTION_COLORS: Record<string, string> = {
-  blue: 'bg-blue-600 hover:bg-blue-500 border-blue-500/30',
-  amber: 'bg-amber-600 hover:bg-amber-500 border-amber-500/30',
-  purple: 'bg-purple-600 hover:bg-purple-500 border-purple-500/30',
-  green: 'bg-green-600 hover:bg-green-500 border-green-500/30',
-  zinc: 'bg-zinc-600 hover:bg-zinc-500 border-zinc-500/30',
+  blue: 'text-blue-500',
+  amber: 'text-amber-500',
+  purple: 'text-purple-500',
+  green: 'text-green-500',
+  zinc: 'text-zinc-400',
 };
 
 function ActionBtn({ onClick, disabled, color, label, span, children }: {
@@ -500,9 +496,9 @@ function ActionBtn({ onClick, disabled, color, label, span, children }: {
       disabled={disabled}
       aria-label={label}
       className={cn(
-        'inline-flex items-center justify-center gap-1.5 rounded-lg font-bold text-white border transition-all',
-        'h-11 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60 focus-visible:ring-offset-1 focus-visible:ring-offset-transparent',
-        'disabled:opacity-40 disabled:cursor-not-allowed active:scale-95',
+        'inline-flex items-center justify-center gap-1.5 rounded-lg font-bold transition-all neu-btn-sm',
+        'h-11 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
+        'disabled:opacity-40 disabled:cursor-not-allowed',
         span && 'col-span-2 h-9 text-xs',
         ACTION_COLORS[color],
       )}

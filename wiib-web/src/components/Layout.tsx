@@ -39,7 +39,7 @@ export function Layout({ children }: Props) {
         <div className="max-w-5xl mx-auto">
           <div
             className={cn(
-              "flex h-14 items-center justify-center rounded-full border-[3px] border-edge bg-card px-5 shadow-[4px_4px_0_0_var(--color-edge)]",
+              "flex h-14 items-center justify-center rounded-full bg-card px-5 neu-raised",
               "mx-auto transition-[max-width] max-w-[17rem] overflow-hidden",
               expanded && "md:max-w-full md:overflow-visible md:justify-between"
             )}
@@ -57,10 +57,10 @@ export function Layout({ children }: Props) {
               onClick={() => navigate('/')}
               aria-label="返回首页"
             >
-              <div className="w-8 h-8 rounded-lg bg-primary/15 border-2 border-edge flex items-center justify-center">
+              <div className="w-8 h-8 rounded-lg bg-primary/15 neu-flat flex items-center justify-center">
                 <TrendingUp className="w-4.5 h-4.5 text-primary" />
               </div>
-              <span className="text-base font-extrabold tracking-tight">WhatIfIBought</span>
+              <span className="text-base font-extrabold tracking-tight neu-text">WhatIfIBought</span>
             </button>
 
             {/* Desktop Nav */}
@@ -127,7 +127,7 @@ export function Layout({ children }: Props) {
 
       {/* ===== Bottom Nav — Mobile floating pill ===== */}
       <nav className="fixed bottom-3 left-3 right-3 md:hidden z-50">
-        <div className="flex items-center rounded-full border-[3px] border-edge bg-card shadow-[4px_4px_0_0_var(--color-edge)] p-1.5 gap-1">
+        <div className="flex items-center rounded-full bg-card neu-raised p-1.5 gap-1">
           <BottomNavItem to="/" icon={<Home className="w-5 h-5" />} label="首页" />
           <BottomNavItem to="/stocks" icon={<BarChart3 className="w-5 h-5" />} label="市场" forceActive={isMarketActive} />
           <BottomNavItem to="/portfolio" icon={<Briefcase className="w-5 h-5" />} label="持仓" />
@@ -182,7 +182,7 @@ function MarketDropdown({ isActive }: { isActive: boolean }) {
       </button>
 
       {open && (
-        <div className="absolute top-full left-0 mt-2 w-44 rounded-2xl border-[3px] border-edge bg-card shadow-[4px_4px_0_0_var(--color-edge)] py-1.5 opacity-100 scale-100 transition-all duration-200">
+        <div className="absolute top-full left-0 mt-2 w-44 rounded-2xl bg-card neu-raised py-1.5 opacity-100 scale-100 transition-all duration-200">
           {[
             { to: '/stocks', icon: <List className="w-4 h-4" />, label: '股票' },
             { to: '/coin', icon: <DollarSign className="w-4 h-4" />, label: '币种' },

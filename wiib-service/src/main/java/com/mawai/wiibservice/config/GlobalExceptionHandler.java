@@ -5,8 +5,12 @@ import com.mawai.wiibcommon.enums.ErrorCode;
 import com.mawai.wiibcommon.exception.BizException;
 import com.mawai.wiibcommon.util.Result;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 @Slf4j
 @RestControllerAdvice
@@ -32,6 +36,33 @@ public class GlobalExceptionHandler {
         };
         log.warn("登录异常: type={}, message={}", e.getType(), message);
         return Result.fail(ErrorCode.UNAUTHORIZED.getCode(), message);
+    }
+
+    @ExceptionHandler(MethodArgumentNotValidException.class)
+    public Result<?> handleValidation(MethodArgumentNotValidException e) {
+        String field = e.getBindingResult().getFieldErrors().stream()
+                .map(fe -> fe.getField() + ": " + fe.getDefaultMessage())
+                .reduce((a, b) -> a + "; " + b).orElse("参数校验失败");
+        log.warn("参数校验异常: {}", field);
+        return Result.fail(ErrorCode.PARAM_ERROR.getCode(), field);
+    }
+
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public Result<?> handleNotReadable(HttpMessageNotReadableException e) {
+        log.warn("请求体解析失败: {}", e.getMessage());
+        return Result.fail(ErrorCode.PARAM_ERROR.getCode(), "请求体格式错误");
+    }
+
+    @ExceptionHandler(MissingServletRequestParameterException.class)
+    public Result<?> handleMissingParam(MissingServletRequestParameterException e) {
+        log.warn("缺少请求参数: {}", e.getParameterName());
+        return Result.fail(ErrorCode.PARAM_ERROR.getCode(), "缺少参数: " + e.getParameterName());
+    }
+
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    public Result<?> handleTypeMismatch(MethodArgumentTypeMismatchException e) {
+        log.warn("参数类型错误: {}={}", e.getName(), e.getValue());
+        return Result.fail(ErrorCode.PARAM_ERROR.getCode(), "参数类型错误: " + e.getName());
     }
 
     @ExceptionHandler(Exception.class)

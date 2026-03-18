@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom';
 import * as echarts from 'echarts';
 import { cryptoApi, cryptoOrderApi, buffApi, futuresApi } from '../api';
 import { useUserStore } from '../stores/userStore';
+import { useIsDark } from '../hooks/useIsDark';
 import { useCryptoStream } from '../hooks/useCryptoStream';
 import { useToast } from '../components/ui/use-toast';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
@@ -201,6 +202,7 @@ export function Coin({ symbol = DEFAULT_SYMBOL }: { symbol?: string }) {
   const chartInst7D = useRef<echarts.ECharts | null>(null);
 
   const tick = useCryptoStream(symbol);
+  const isDark = useIsDark();
 
   // 实物换算币种: USD/CNY 汇率
   const [usdCny, setUsdCny] = useState(0);
@@ -346,9 +348,9 @@ export function Coin({ symbol = DEFAULT_SYMBOL }: { symbol?: string }) {
     const first = closes[0];
     const last = closes[closes.length - 1];
     const isUp = last >= first;
-    const lineColor = isUp ? '#ef4444' : '#22c55e';
-    const areaStart = isUp ? 'rgba(239,68,68,0.25)' : 'rgba(34,197,94,0.25)';
-    const areaEnd = isUp ? 'rgba(239,68,68,0.02)' : 'rgba(34,197,94,0.02)';
+    const lineColor = isUp ? '#f23645' : '#089981';
+    const areaStart = isUp ? 'rgba(242,54,69,0.12)' : 'rgba(8,153,129,0.12)';
+    const areaEnd = isUp ? 'rgba(242,54,69,0.01)' : 'rgba(8,153,129,0.01)';
 
     if (!readyRef.current) {
       const now = Date.now();
@@ -357,10 +359,10 @@ export function Coin({ symbol = DEFAULT_SYMBOL }: { symbol?: string }) {
         backgroundColor: 'transparent',
         grid: { left: 8, right: 8, top: 16, bottom: 32, containLabel: true },
         xAxis: { type: 'time', min: isDay ? now - 12 * 3600_000 : undefined, max: isDay ? now + 12 * 3600_000 : undefined, axisLine: { lineStyle: { color: '#333' } }, axisTick: { show: false }, axisLabel: { fontSize: 10, color: '#888', hideOverlap: true, formatter: (val: number) => formatTime(val, tab.interval) }, splitLine: { show: false } },
-        yAxis: { type: 'value', scale: true, axisLine: { show: false }, axisTick: { show: false }, axisLabel: { fontSize: 10, color: '#888', formatter: (v: number) => formatPrice(v) }, splitLine: { lineStyle: { color: '#222', type: 'dashed' } } },
+        yAxis: { type: 'value', scale: true, axisLine: { show: false }, axisTick: { show: false }, axisLabel: { fontSize: 10, color: '#888', formatter: (v: number) => formatPrice(v) }, splitLine: { lineStyle: { color: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.12)', type: 'dashed' } } },
         series: [
           { type: 'line', data: seriesData, smooth: 0.2, showSymbol: false, lineStyle: { width: 1.5, color: lineColor }, areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: areaStart }, { offset: 1, color: areaEnd }]) } },
-          ...(withEffect && seriesData.length > 0 ? [{ type: 'effectScatter', data: [seriesData[seriesData.length - 1]], symbolSize: 8, rippleEffect: { brushType: 'fill', scale: 5, period: 4, number: 2 }, itemStyle: { color: lineColor, shadowBlur: 12, shadowColor: lineColor }, z: 10 }] : []),
+          ...(withEffect && seriesData.length > 0 ? [{ type: 'effectScatter', data: [seriesData[seriesData.length - 1]], symbolSize: 8, rippleEffect: { brushType: 'fill', scale: 5, period: 4, number: 2 }, itemStyle: { color: lineColor, shadowBlur: 6, shadowColor: lineColor }, z: 10 }] : []),
         ],
         tooltip: { trigger: 'axis', backgroundColor: 'rgba(20,20,20,0.9)', borderColor: '#333', textStyle: { color: '#fff', fontSize: 12 }, formatter: (params: unknown) => { const arr = params as { value: [number, number] }[]; const p = arr[0]; if (!p || p.value[1] == null) return ''; return `<div style="padding:4px 0"><div style="color:#888;margin-bottom:4px">${formatTime(p.value[0], tab.interval)}</div><div style="font-size:16px;font-weight:bold">$${formatPrice(p.value[1])}</div></div>`; } },
         dataZoom: [{ type: 'inside', start: 0, end: 100, minValueSpan: 20 }],
@@ -370,7 +372,7 @@ export function Coin({ symbol = DEFAULT_SYMBOL }: { symbol?: string }) {
       chart.setOption({
         series: [
           { data: seriesData, lineStyle: { color: lineColor }, areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: areaStart }, { offset: 1, color: areaEnd }]) } },
-          ...(withEffect && seriesData.length > 0 ? [{ data: [seriesData[seriesData.length - 1]], itemStyle: { color: lineColor, shadowBlur: 12, shadowColor: lineColor } }] : []),
+          ...(withEffect && seriesData.length > 0 ? [{ data: [seriesData[seriesData.length - 1]], itemStyle: { color: lineColor, shadowBlur: 6, shadowColor: lineColor } }] : []),
         ],
       });
     }
@@ -399,6 +401,13 @@ export function Coin({ symbol = DEFAULT_SYMBOL }: { symbol?: string }) {
       chartInst7D.current?.dispose(); chartInst7D.current = null; chart7DReady.current = false;
     };
   }, []);
+
+  useEffect(() => {
+    const gridColor = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.12)';
+    const opt = { yAxis: { splitLine: { lineStyle: { color: gridColor } } } };
+    if (chart1DReady.current) chartInst1D.current?.setOption(opt);
+    if (chart7DReady.current) chartInst7D.current?.setOption(opt);
+  }, [isDark]);
 
   // 订单列表
   const fetchOrders = useCallback(async (status: string, page: number) => {
@@ -717,20 +726,20 @@ export function Coin({ symbol = DEFAULT_SYMBOL }: { symbol?: string }) {
         <CardContent className="p-5 md:p-6">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
-              <div className="p-3 rounded-2xl bg-card border-[2.5px] border-edge shadow-[3px_3px_0_0_var(--color-edge)]">
+              <div className="p-3 rounded-2xl bg-card neu-raised-sm">
                 <Icon className={`w-7 h-7 ${cfg.colorClass}`} />
               </div>
               <div className="space-y-1.5">
                 <div className="flex items-center gap-2.5">
                   <span className="text-xl font-black tracking-tight">{cfg.pair}</span>
-                  <div className="flex items-center gap-2 px-2.5 py-1 rounded-full bg-card border-2 border-edge shadow-[2px_2px_0_0_var(--color-edge)] text-[10px]">
+                  <div className="flex items-center gap-2 px-2.5 py-1 rounded-full bg-card neu-flat text-[10px]">
                     <span className="flex items-center gap-1.5" title="现货行情">
-                      <span className={`inline-block w-2 h-2 border border-edge rounded-full ${tick?.ws ? 'bg-success' : 'bg-destructive animate-pulse'}`} />
+                      <span className={`inline-block w-2 h-2 rounded-full ${tick?.ws ? 'bg-success' : 'bg-destructive animate-pulse'}`} />
                       <span className="text-foreground font-bold">现货</span>
                     </span>
-                    <span className="w-0.5 h-2.5 bg-edge" />
+                    <span className="w-0.5 h-2.5 bg-border" />
                     <span className="flex items-center gap-1.5" title="合约行情">
-                      <span className={`inline-block w-2 h-2 border border-edge rounded-full ${tick?.fws ? 'bg-success' : 'bg-destructive animate-pulse'}`} />
+                      <span className={`inline-block w-2 h-2 rounded-full ${tick?.fws ? 'bg-success' : 'bg-destructive animate-pulse'}`} />
                       <span className="text-foreground font-bold">合约</span>
                     </span>
                   </div>
@@ -739,7 +748,7 @@ export function Coin({ symbol = DEFAULT_SYMBOL }: { symbol?: string }) {
                   <span className="text-xs font-bold text-muted-foreground">Binance</span>
                   {cfg.unitLabel && (
                     <>
-                      <span className="w-1.5 h-1.5 rounded-full bg-edge" />
+                      <span className="w-1.5 h-1.5 rounded-full bg-border" />
                       <span className="text-[11px] text-warning font-bold">1枚 = 1盎司黄金（{cfg.unitFactor}{cfg.unitLabel}）</span>
                     </>
                   )}
@@ -750,7 +759,7 @@ export function Coin({ symbol = DEFAULT_SYMBOL }: { symbol?: string }) {
               {currentPrice > 0 ? (
                 <div className="flex flex-col items-end">
                   <div className="flex items-baseline gap-2">
-                    <span className="text-3xl font-black tracking-tight font-mono" style={{ textShadow: '2px 2px 0 var(--color-edge)', color: 'var(--color-foreground)' }}>
+                    <span className="text-3xl font-black tracking-tight font-mono" style={{ color: 'var(--color-foreground)' }}>
                       ${formatPrice(currentPrice)}
                     </span>
                   </div>
@@ -759,7 +768,7 @@ export function Coin({ symbol = DEFAULT_SYMBOL }: { symbol?: string }) {
                       ¥{(currentPrice * usdCny / cfg.unitFactor!).toFixed(2)}/{cfg.unitLabel}
                     </div>
                   )}
-                  <div className={`flex items-center justify-end gap-1.5 text-sm font-bold mt-2 px-2.5 py-1 rounded-lg border-2 border-edge shadow-[2px_2px_0_0_var(--color-edge)] ${isUp ? 'bg-gain/10 text-gain' : 'bg-loss/10 text-loss'}`}>
+                  <div className={`flex items-center justify-end gap-1.5 text-sm font-bold mt-2 px-2.5 py-1 rounded-lg neu-flat ${isUp ? 'bg-gain/10 text-gain' : 'bg-loss/10 text-loss'}`}>
                     {isUp ? <TrendingUp className="w-4 h-4 stroke-[3px]" /> : <TrendingDown className="w-4 h-4 stroke-[3px]" />}
                     <span>{isUp ? '+' : ''}{formatPrice(change)}</span>
                     <span>({isUp ? '+' : ''}{changePct.toFixed(2)}%)</span>
@@ -767,8 +776,8 @@ export function Coin({ symbol = DEFAULT_SYMBOL }: { symbol?: string }) {
                 </div>
               ) : (
                 <div className="space-y-2 flex flex-col items-end">
-                  <Skeleton className="h-10 w-40 border-2 border-edge" />
-                  <Skeleton className="h-6 w-24 border-2 border-edge" />
+                  <Skeleton className="h-10 w-40" />
+                  <Skeleton className="h-6 w-24" />
                 </div>
               )}
             </div>
@@ -781,9 +790,9 @@ export function Coin({ symbol = DEFAULT_SYMBOL }: { symbol?: string }) {
         <CardHeader className="pb-2 pt-5 px-5">
           <div className="flex items-center justify-between">
             <CardTitle className="text-base font-black">走势</CardTitle>
-            <div className="flex rounded-xl border-[2.5px] border-edge bg-card shadow-[3px_3px_0_0_var(--color-edge)] overflow-hidden">
+            <div className="flex rounded-xl bg-card neu-raised-sm overflow-hidden">
               {TABS.map((tab, i) => (
-                <button key={tab.label} onClick={() => setActiveTab(i)} className={`px-4 py-1.5 text-xs font-bold border-r-[2.5px] border-edge transition-colors ${activeTab === i ? 'bg-primary text-primary-foreground' : 'bg-card text-muted-foreground hover:bg-surface-hover hover:text-foreground'}`}>
+                <button key={tab.label} onClick={() => setActiveTab(i)} className={`px-4 py-1.5 text-xs font-bold border-r border-border transition-colors ${activeTab === i ? 'bg-primary text-primary-foreground' : 'bg-card text-muted-foreground hover:bg-surface-hover hover:text-foreground'}`}>
                   {tab.label}
                 </button>
               ))}
@@ -812,10 +821,10 @@ export function Coin({ symbol = DEFAULT_SYMBOL }: { symbol?: string }) {
           const isPnlUp = pnlPct >= 0;
           return (
             <div className="px-5 pt-5">
-              <div className={`rounded-2xl border-[2.5px] border-edge bg-card p-4 space-y-3 shadow-[4px_4px_0_0_var(--color-edge)]`}>
+              <div className={`rounded-2xl bg-card p-4 space-y-3 neu-raised`}>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
-                    <div className={`p-2 rounded-xl border-2 border-edge bg-card shadow-[2px_2px_0_0_var(--color-edge)]`}>
+                    <div className={`p-2 rounded-xl bg-card neu-flat`}>
                       <Icon className={`w-5 h-5 ${cfg.colorClass}`} />
                     </div>
                     <div>
@@ -849,22 +858,22 @@ export function Coin({ symbol = DEFAULT_SYMBOL }: { symbol?: string }) {
 
         {/* 买卖/做多做空 + 市价限价合约 */}
         <div className="px-5 pt-5 flex items-center gap-4">
-          <div className="flex flex-1 rounded-xl border-[3px] border-edge bg-card overflow-hidden shadow-[4px_4px_0_0_var(--color-edge)]">
+          <div className="flex flex-1 rounded-xl bg-card overflow-hidden neu-raised">
             {orderType === 'FUTURES' ? (
               <>
-                <button onClick={() => setFuturesSide('LONG')} className={`flex-1 py-2.5 text-sm font-black border-r-[3px] border-edge transition-colors ${futuresSide === 'LONG' ? 'bg-gain text-white' : 'bg-card text-foreground hover:bg-surface-hover'}`}>做多</button>
+                <button onClick={() => setFuturesSide('LONG')} className={`flex-1 py-2.5 text-sm font-black border-r border-border transition-colors ${futuresSide === 'LONG' ? 'bg-gain text-white' : 'bg-card text-foreground hover:bg-surface-hover'}`}>做多</button>
                 <button onClick={() => setFuturesSide('SHORT')} className={`flex-1 py-2.5 text-sm font-black transition-colors ${futuresSide === 'SHORT' ? 'bg-loss text-white' : 'bg-card text-foreground hover:bg-surface-hover'}`}>做空</button>
               </>
             ) : (
               <>
-                <button onClick={() => setSide('BUY')} className={`flex-1 py-2.5 text-sm font-black border-r-[3px] border-edge transition-colors ${side === 'BUY' ? 'bg-primary text-primary-foreground' : 'bg-card text-foreground hover:bg-surface-hover'}`}>买入</button>
+                <button onClick={() => setSide('BUY')} className={`flex-1 py-2.5 text-sm font-black border-r border-border transition-colors ${side === 'BUY' ? 'bg-primary text-primary-foreground' : 'bg-card text-foreground hover:bg-surface-hover'}`}>买入</button>
                 <button onClick={() => setSide('SELL')} className={`flex-1 py-2.5 text-sm font-black transition-colors ${side === 'SELL' ? 'bg-primary text-primary-foreground' : 'bg-card text-foreground hover:bg-surface-hover'}`}>卖出</button>
               </>
             )}
           </div>
-          <div className="flex rounded-xl border-[3px] border-edge bg-card overflow-hidden shadow-[4px_4px_0_0_var(--color-edge)]">
+          <div className="flex rounded-xl bg-card overflow-hidden neu-raised">
             {(['FUTURES', 'MARKET', 'LIMIT'] as const).map((t, idx) => (
-              <button key={t} onClick={() => setOrderType(t)} className={`px-4 py-2.5 text-xs font-bold transition-colors ${idx !== 2 ? 'border-r-[3px] border-edge' : ''} ${orderType === t ? 'bg-foreground text-background' : 'bg-card text-foreground hover:bg-surface-hover'}`}>
+              <button key={t} onClick={() => setOrderType(t)} className={`px-4 py-2.5 text-xs font-bold transition-colors ${idx !== 2 ? 'border-r border-border' : ''} ${orderType === t ? 'bg-foreground text-background' : 'bg-card text-foreground hover:bg-surface-hover'}`}>
                 {t === 'MARKET' ? '市价' : t === 'LIMIT' ? '限价' : '合约'}
               </button>
             ))}
@@ -877,9 +886,9 @@ export function Coin({ symbol = DEFAULT_SYMBOL }: { symbol?: string }) {
             <>
               {/* 执行方式 */}
               <div className="flex items-center gap-2">
-                <div className="flex rounded-lg border-[2.5px] border-edge overflow-hidden shadow-[2px_2px_0_0_var(--color-edge)]">
+                <div className="flex rounded-lg overflow-hidden neu-raised-sm">
                   <button onClick={() => setFuturesOrderType('MARKET')} className={`px-4 py-1.5 text-xs font-bold transition-colors ${futuresOrderType === 'MARKET' ? 'bg-primary text-primary-foreground' : 'bg-card text-foreground hover:bg-surface-hover'}`}>市价</button>
-                  <button onClick={() => setFuturesOrderType('LIMIT')} className={`px-4 py-1.5 text-xs font-bold border-l-[2.5px] border-edge transition-colors ${futuresOrderType === 'LIMIT' ? 'bg-primary text-primary-foreground' : 'bg-card text-foreground hover:bg-surface-hover'}`}>限价</button>
+                  <button onClick={() => setFuturesOrderType('LIMIT')} className={`px-4 py-1.5 text-xs font-bold border-l border-border transition-colors ${futuresOrderType === 'LIMIT' ? 'bg-primary text-primary-foreground' : 'bg-card text-foreground hover:bg-surface-hover'}`}>限价</button>
                 </div>
               </div>
 
@@ -1090,7 +1099,7 @@ export function Coin({ symbol = DEFAULT_SYMBOL }: { symbol?: string }) {
                 <select
                   value={leverage}
                   onChange={e => setLeverage(Number(e.target.value))}
-                  className="w-full h-11 rounded-xl border-[2.5px] border-edge bg-card px-4 text-sm font-bold text-foreground focus:outline-none focus:ring-2 focus:ring-ring appearance-none cursor-pointer"
+                  className="w-full h-11 rounded-xl bg-background neu-inset px-4 text-sm font-bold text-foreground focus:outline-none focus:ring-2 focus:ring-ring appearance-none cursor-pointer"
                   style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2.5'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 12px center' }}
                 >
                   {LEVERAGE_OPTIONS.map(lv => (
@@ -1113,9 +1122,9 @@ export function Coin({ symbol = DEFAULT_SYMBOL }: { symbol?: string }) {
                   type="button"
                   onClick={() => { if (leverage > 1) return; setUseBuff(v => !v); }}
                   disabled={leverage > 1}
-                  className={`relative inline-flex h-6 w-11 border-[2.5px] border-edge items-center rounded-full transition-colors ${useBuff ? 'bg-warning' : 'bg-muted-foreground/30'} ${leverage > 1 ? 'opacity-40 cursor-not-allowed' : ''}`}
+                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${useBuff ? 'bg-warning' : 'bg-muted-foreground/30'} ${leverage > 1 ? 'opacity-40 cursor-not-allowed' : ''}`}
                 >
-                  <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-background border-2 border-edge transition-transform ${useBuff ? 'translate-x-5' : 'translate-x-1'}`} />
+                  <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-background transition-transform ${useBuff ? 'translate-x-5' : 'translate-x-1'}`} />
                 </button>
               </div>
               {useBuff && (
@@ -1128,7 +1137,7 @@ export function Coin({ symbol = DEFAULT_SYMBOL }: { symbol?: string }) {
           )}
 
           {/* 预估 + 提交 */}
-          <div className="pt-4 border-t-[2.5px] border-edge border-dashed space-y-4">
+          <div className="pt-4 border-t border-border border-dashed space-y-4">
             {qtyNum > 0 && priceForCalc > 0 && (
               <div className="space-y-2">
                 {side === 'BUY' && leverage > 1 && (
@@ -1189,8 +1198,8 @@ export function Coin({ symbol = DEFAULT_SYMBOL }: { symbol?: string }) {
               const isLong = pos.side === 'LONG';
               const isActive = posAction?.id === pos.id;
               return (
-                <div key={pos.id} className={`p-4 rounded-2xl border-[2.5px] border-edge bg-card shadow-[4px_4px_0_0_var(--color-edge)] space-y-3 transition-all relative overflow-hidden`}>
-                  <div className={`absolute top-0 bottom-0 left-0 w-2.5 border-r-[2.5px] border-edge ${isLong ? 'bg-gain' : 'bg-loss'}`} />
+                <div key={pos.id} className={`p-4 rounded-2xl bg-card neu-raised space-y-3 transition-all relative overflow-hidden`}>
+                  <div className={`absolute top-0 bottom-0 left-0 w-2.5 border-r border-border ${isLong ? 'bg-gain' : 'bg-loss'}`} />
                   <div className="flex items-center justify-between pl-3">
                     <div className="flex items-center gap-2.5">
                       <Badge variant={isLong ? 'destructive' : 'success'} className="text-[10px] px-2 py-0.5">{isLong ? '做多' : '做空'}</Badge>

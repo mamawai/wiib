@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useUserStore } from '../stores/userStore';
-import { userApi, orderApi, settlementApi, cryptoOrderApi, cryptoApi, futuresApi } from '../api';
+import { userApi, orderApi, settlementApi, cryptoOrderApi, cryptoApi, futuresApi, optionApi } from '../api';
 import { Card, CardContent } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
@@ -9,7 +9,6 @@ import { Skeleton } from '../components/ui/skeleton';
 import { Dialog, DialogContent, DialogFooter, DialogHeader } from '../components/ui/dialog';
 import { useToast } from '../components/ui/use-toast';
 import { PortfolioChart } from '../components/PortfolioChart';
-import { useUserEvents } from '../hooks/useUserEvents';
 import { cn } from '../lib/utils';
 import {
   Wallet,
@@ -25,8 +24,9 @@ import {
   BarChart3,
   CircleDollarSign,
   Scale,
+  Layers,
 } from 'lucide-react';
-import type { Position, Order, Settlement, AssetChangeEvent, PositionChangeEvent, OrderStatusEvent, CryptoPosition, FuturesPosition } from '../types';
+import type { Position, Order, Settlement, CryptoPosition, FuturesPosition, OptionPosition } from '../types';
 import { useDedupedEffect } from '../hooks/useDedupedEffect';
 import { getCoin } from '../lib/coinConfig';
 
@@ -41,6 +41,32 @@ function fmt(n: number) {
   return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+function AnimNum({ value, prefix = '', suffix = '', duration = 600 }: { value: number; prefix?: string; suffix?: string; duration?: number }) {
+  const ref = useRef<HTMLSpanElement>(null);
+  const prev = useRef(0);
+  useEffect(() => {
+    const from = prev.current;
+    const to = value;
+    prev.current = to;
+    if (from === to) {
+      if (ref.current) ref.current.textContent = prefix + fmt(to) + suffix;
+      return;
+    }
+    const start = performance.now();
+    let raf = 0;
+    const tick = (now: number) => {
+      const t = Math.min((now - start) / duration, 1);
+      const ease = 1 - (1 - t) ** 3;
+      const v = from + (to - from) * ease;
+      if (ref.current) ref.current.textContent = prefix + fmt(v) + suffix;
+      if (t < 1) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [value, prefix, suffix, duration]);
+  return <span ref={ref}>{prefix}{fmt(value)}{suffix}</span>;
+}
+
 export function Portfolio() {
   const navigate = useNavigate();
   const { user } = useUserStore();
@@ -48,6 +74,7 @@ export function Portfolio() {
   const [positions, setPositions] = useState<Position[]>([]);
   const [cryptoRows, setCryptoRows] = useState<CryptoRow[]>([]);
   const [futuresPositions, setFuturesPositions] = useState<FuturesPosition[]>([]);
+  const [optionPositions, setOptionPositions] = useState<OptionPosition[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [orderTotal, setOrderTotal] = useState(0);
   const [orderPage, setOrderPage] = useState(1);
@@ -61,101 +88,6 @@ export function Portfolio() {
   const [cancelSubmitting, setCancelSubmitting] = useState(false);
   const [showChart, setShowChart] = useState(true);
   const [chartReady, setChartReady] = useState(false);
-  const orderPageRef = useRef(orderPage);
-  const orderPageSizeRef = useRef(orderPageSize);
-
-  useEffect(() => {
-    orderPageRef.current = orderPage;
-  }, [orderPage]);
-
-  useEffect(() => {
-    orderPageSizeRef.current = orderPageSize;
-  }, [orderPageSize]);
-
-  // WS事件
-  useUserEvents(user?.id, {
-    onAssetChange: (event: AssetChangeEvent) => {
-      useUserStore.setState((state) => {
-        if (!state.user) return {};
-        return {
-          user: {
-            ...state.user,
-            balance: event.balance,
-            frozenBalance: event.frozenBalance,
-            positionMarketValue: event.positionMarketValue,
-            pendingSettlement: event.pendingSettlement,
-            marginLoanPrincipal: event.marginLoanPrincipal,
-            marginInterestAccrued: event.marginInterestAccrued,
-            bankrupt: event.bankrupt,
-            bankruptCount: event.bankruptCount,
-            bankruptResetDate: event.bankruptResetDate,
-            totalAssets: event.totalAssets,
-            profit: event.profit,
-            profitPct: event.profitPct,
-          },
-        };
-      });
-    },
-    onPositionChange: (event: PositionChangeEvent) => {
-      setPositions((prev) => {
-        const idx = prev.findIndex((p) => p.stockId === event.stockId);
-        if (event.quantity === 0 && event.frozenQuantity === 0) {
-          return prev.filter((p) => p.stockId !== event.stockId);
-        }
-        const updated: Position = {
-          id: idx >= 0 ? prev[idx].id : 0,
-          stockId: event.stockId,
-          stockCode: event.stockCode,
-          stockName: event.stockName,
-          quantity: event.quantity,
-          avgCost: event.avgCost,
-          currentPrice: event.currentPrice,
-          marketValue: event.marketValue,
-          profit: event.profit,
-          profitPct: event.profitPct,
-        };
-        if (idx >= 0) {
-          const next = [...prev];
-          next[idx] = updated;
-          return next;
-        }
-        return [...prev, updated];
-      });
-    },
-    onOrderStatus: (event: OrderStatusEvent) => {
-      setOrders((prev) => {
-        const idx = prev.findIndex((o) => o.orderId === event.orderId);
-        if (idx >= 0) {
-          const next = [...prev];
-          next[idx] = {
-            ...next[idx],
-            status: event.newStatus,
-            filledPrice: event.executePrice ?? next[idx].filledPrice,
-          };
-          return next;
-        }
-        if (orderPageRef.current === 1) {
-             const newOrder: Order = {
-              orderId: event.orderId,
-              stockCode: event.stockCode,
-              stockName: event.stockName,
-              orderSide: event.orderSide,
-              orderType: event.orderType,
-              status: event.newStatus,
-              quantity: event.quantity,
-              limitPrice: event.orderType === 'LIMIT' ? event.price : undefined,
-              filledPrice: event.executePrice,
-              createdAt: new Date(event.timestamp).toISOString(),
-            };
-            const next = [newOrder, ...prev];
-            if (next.length > orderPageSizeRef.current) next.pop();
-            setOrderTotal(t => t + 1);
-            return next;
-        }
-        return prev;
-      });
-    },
-  });
 
   useEffect(() => {
     if (!user) {
@@ -213,6 +145,7 @@ export function Portfolio() {
           setSettlements(s);
           loadCryptoPositions();
           futuresApi.positions().then(setFuturesPositions).catch(() => setFuturesPositions([]));
+          optionApi.positions().then(setOptionPositions).catch(() => setOptionPositions([]));
         })
         .catch(() => {
           if (cancelled) return;
@@ -223,6 +156,7 @@ export function Portfolio() {
           setSettlements([]);
           setCryptoRows([]);
           setFuturesPositions([]);
+          setOptionPositions([]);
           toast('获取账户数据失败', 'error', { description: '请稍后重试' });
         })
         .finally(() => {
@@ -261,10 +195,13 @@ export function Portfolio() {
   const futuresMargin = futuresPositions.reduce((s, f) => s + f.margin, 0);
   const futuresProfit = futuresPositions.reduce((s, f) => s + f.unrealizedPnl, 0);
   const futuresTotal = futuresMargin + futuresProfit;
+  const optionTotal = optionPositions.reduce((s, o) => s + o.marketValue, 0);
+  const optionProfit = optionPositions.reduce((s, o) => s + o.pnl, 0);
   const hasStock = positions.length > 0;
   const hasCrypto = cryptoRows.length > 0;
   const hasFutures = futuresPositions.length > 0;
-  const hasPositions = hasStock || hasCrypto || hasFutures;
+  const hasOptions = optionPositions.length > 0;
+  const hasPositions = hasStock || hasCrypto || hasFutures || hasOptions;
 
   return (
     <div className="max-w-4xl mx-auto p-4 space-y-4">
@@ -349,7 +286,7 @@ export function Portfolio() {
               <div className="mb-4">
                 <span className="text-[11px] text-muted-foreground uppercase tracking-widest">总资产</span>
                 <div className="flex items-baseline gap-2 mt-0.5">
-                  <span className="text-3xl font-bold tabular-nums tracking-tight">{fmt(user.totalAssets)}</span>
+                  <span className="text-3xl font-bold tabular-nums tracking-tight"><AnimNum value={user.totalAssets} /></span>
                   <span className="text-xs text-muted-foreground font-normal">USDT</span>
                 </div>
               </div>
@@ -361,7 +298,7 @@ export function Portfolio() {
               <div className="space-y-0 divide-y divide-border/20">
                 <div className="flex items-center justify-between py-2">
                   <span className="text-[12px] text-muted-foreground">可用余额</span>
-                  <span className="text-[13px] font-semibold tabular-nums">{fmt(user.balance)}</span>
+                  <span className="text-[13px] font-semibold tabular-nums"><AnimNum value={user.balance} /></span>
                 </div>
 
                 <div className="flex items-center justify-between py-2">
@@ -374,8 +311,8 @@ export function Portfolio() {
                       ? <TrendingUp className="w-3 h-3" />
                       : <TrendingDown className="w-3 h-3" />
                     }
-                    {isProfit ? '+' : ''}{user.profitPct.toFixed(2)}%
-                    <span className="opacity-60 font-normal ml-0.5">({isProfit ? '+' : ''}{fmt(user.profit)})</span>
+                    <AnimNum value={user.profitPct} prefix={isProfit ? '+' : ''} suffix="%" />
+                    <span className="opacity-60 font-normal ml-0.5">(<AnimNum value={user.profit} prefix={isProfit ? '+' : ''} />)</span>
                   </div>
                 </div>
 
@@ -384,7 +321,7 @@ export function Portfolio() {
                   <span className={cn(
                     "text-[13px] font-semibold tabular-nums",
                     user.marginLoanPrincipal > 0 ? "text-warning" : "text-muted-foreground"
-                  )}>{fmt(user.marginLoanPrincipal)}</span>
+                  )}><AnimNum value={user.marginLoanPrincipal} /></span>
                 </div>
 
                 <div className="flex items-center justify-between py-2">
@@ -392,23 +329,36 @@ export function Portfolio() {
                   <span className={cn(
                     "text-[13px] font-semibold tabular-nums",
                     user.marginInterestAccrued > 0 ? "text-destructive/80" : "text-muted-foreground"
-                  )}>{fmt(user.marginInterestAccrued)}</span>
+                  )}><AnimNum value={user.marginInterestAccrued} /></span>
                 </div>
 
                 {hasFutures && (
                   <>
                     <div className="flex items-center justify-between py-2">
                       <span className="text-[12px] text-muted-foreground">合约保证金</span>
-                      <span className="text-[13px] font-semibold tabular-nums">{fmt(futuresMargin)}</span>
+                      <span className="text-[13px] font-semibold tabular-nums"><AnimNum value={futuresMargin} /></span>
                     </div>
                     <div className="flex items-center justify-between py-2">
                       <span className="text-[12px] text-muted-foreground">合约浮盈</span>
                       <span className={cn(
                         "text-[13px] font-semibold tabular-nums",
                         futuresProfit >= 0 ? "text-red-400" : "text-green-400"
-                      )}>{futuresProfit >= 0 ? '+' : ''}{fmt(futuresProfit)}</span>
+                      )}><AnimNum value={futuresProfit} prefix={futuresProfit >= 0 ? '+' : ''} /></span>
                     </div>
                   </>
+                )}
+
+                {hasOptions && (
+                  <div className="flex items-center justify-between py-2">
+                    <span className="text-[12px] text-muted-foreground">期权持仓</span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[13px] font-semibold tabular-nums"><AnimNum value={optionTotal} /></span>
+                      <span className={cn(
+                        "text-[11px] font-medium tabular-nums",
+                        optionProfit >= 0 ? "text-red-400" : "text-green-400"
+                      )}>(<AnimNum value={optionProfit} prefix={optionProfit >= 0 ? '+' : ''} />)</span>
+                    </div>
+                  </div>
                 )}
               </div>
             </div>
@@ -421,7 +371,7 @@ export function Portfolio() {
 
       {/* Tabs */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <div className="flex gap-2 p-1 bg-card rounded-lg border">
+        <div className="flex gap-2 p-1.5 rounded-xl neu-inset">
           <TabButton active={tab === 'positions'} onClick={() => setTab('positions')} icon={<Briefcase className="w-4 h-4" />}>
             持仓
           </TabButton>
@@ -485,9 +435,9 @@ export function Portfolio() {
                       </div>
                     </div>
                     <div className="text-right">
-                      <div className="text-[13px] font-bold tabular-nums tracking-tight">{fmt(stockTotal)}</div>
+                      <div className="text-[13px] font-bold tabular-nums tracking-tight"><AnimNum value={stockTotal} /></div>
                       <div className={cn("text-[11px] tabular-nums font-medium", stockProfit >= 0 ? "text-red-400" : "text-green-400")}>
-                        {stockProfit >= 0 ? '+' : ''}{fmt(stockProfit)}
+                        <AnimNum value={stockProfit} prefix={stockProfit >= 0 ? '+' : ''} />
                       </div>
                     </div>
                   </div>
@@ -548,9 +498,9 @@ export function Portfolio() {
                       </div>
                     </div>
                     <div className="text-right">
-                      <div className="text-[13px] font-bold tabular-nums tracking-tight">{fmt(cryptoTotal)}</div>
+                      <div className="text-[13px] font-bold tabular-nums tracking-tight"><AnimNum value={cryptoTotal} /></div>
                       <div className={cn("text-[11px] tabular-nums font-medium", cryptoProfit >= 0 ? "text-red-400" : "text-green-400")}>
-                        {cryptoProfit >= 0 ? '+' : ''}{fmt(cryptoProfit)}
+                        <AnimNum value={cryptoProfit} prefix={cryptoProfit >= 0 ? '+' : ''} />
                       </div>
                     </div>
                   </div>
@@ -620,9 +570,9 @@ export function Portfolio() {
                       </div>
                     </div>
                     <div className="text-right">
-                      <div className="text-[11px] text-muted-foreground">保证金 <span className="text-foreground font-bold tabular-nums">{fmt(futuresMargin)}</span></div>
+                      <div className="text-[11px] text-muted-foreground">保证金 <span className="text-foreground font-bold tabular-nums"><AnimNum value={futuresMargin} /></span></div>
                       <div className={cn("text-[11px] tabular-nums font-medium", futuresProfit >= 0 ? "text-red-400" : "text-green-400")}>
-                        浮盈 {futuresProfit >= 0 ? '+' : ''}{fmt(futuresProfit)}
+                        浮盈 <AnimNum value={futuresProfit} prefix={futuresProfit >= 0 ? '+' : ''} />
                       </div>
                     </div>
                   </div>
@@ -678,10 +628,72 @@ export function Portfolio() {
                 </Card>
               )}
 
+              {/* 期权持仓 */}
+              {hasOptions && (
+                <Card className="overflow-hidden">
+                  <div className="px-4 py-3 flex items-center justify-between border-b border-border/40 bg-gradient-to-r from-teal-500/[0.06] to-transparent">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-8 h-8 rounded-lg bg-teal-500/10 flex items-center justify-center ring-1 ring-teal-500/20">
+                        <Layers className="w-4 h-4 text-teal-400" />
+                      </div>
+                      <div>
+                        <span className="text-sm font-semibold tracking-tight">期权持仓</span>
+                        <span className="text-[11px] text-muted-foreground ml-1.5">{optionPositions.length}个</span>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-[13px] font-bold tabular-nums tracking-tight"><AnimNum value={optionTotal} /></div>
+                      <div className={cn("text-[11px] tabular-nums font-medium", optionProfit >= 0 ? "text-red-400" : "text-green-400")}>
+                        <AnimNum value={optionProfit} prefix={optionProfit >= 0 ? '+' : ''} />
+                      </div>
+                    </div>
+                  </div>
+                  <CardContent className="p-0 divide-y divide-border/30">
+                    {optionPositions.map((o) => {
+                      const up = o.pnl >= 0;
+                      const isCall = o.optionType === 'CALL';
+                      return (
+                        <div
+                          key={o.positionId}
+                          className="w-full text-left px-4 py-3.5"
+                        >
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-1.5 mb-1">
+                                <span className="font-semibold text-[13px]">{o.stockName}</span>
+                                <Badge className={cn("text-[9px] px-1 py-0", isCall ? "bg-red-500" : "bg-green-500")}>{isCall ? 'CALL' : 'PUT'}</Badge>
+                                <span className="text-[11px] text-muted-foreground">@{o.strike}</span>
+                              </div>
+                              <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+                                <span>{o.quantity}张</span>
+                                <span className="text-border">·</span>
+                                <span>成本 {fmt(o.avgCost)}</span>
+                                <span className="text-border">·</span>
+                                <span>现价 {fmt(o.currentPremium)}</span>
+                                <span className="text-border">·</span>
+                                <span>到期 {o.expireAt.substring(0, 10)}</span>
+                              </div>
+                            </div>
+                            <div className="text-right shrink-0">
+                              <div className={cn("text-[13px] font-bold tabular-nums", up ? "text-red-400" : "text-green-400")}>
+                                {up ? '+' : ''}{fmt(o.pnl)}
+                              </div>
+                              <div className="text-[11px] tabular-nums text-muted-foreground">
+                                市值 {fmt(o.marketValue)}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </CardContent>
+                </Card>
+              )}
+
               {/* 合计汇总 */}
-              {[hasStock, hasCrypto, hasFutures].filter(Boolean).length > 1 && (() => {
-                const allProfit = stockProfit + cryptoProfit + futuresProfit;
-                const allTotal = stockTotal + cryptoTotal + futuresTotal;
+              {[hasStock, hasCrypto, hasFutures, hasOptions].filter(Boolean).length > 1 && (() => {
+                const allProfit = stockProfit + cryptoProfit + futuresProfit + optionProfit;
+                const allTotal = stockTotal + cryptoTotal + futuresTotal + optionTotal;
                 const up = allProfit >= 0;
                 return (
                   <div className="rounded-xl border border-dashed border-border/60 bg-card/50 backdrop-blur-sm px-4 py-3 flex items-center justify-between">
@@ -690,9 +702,9 @@ export function Portfolio() {
                       <span>持仓合计</span>
                     </div>
                     <div className="flex items-center gap-3">
-                      <span className="text-sm font-bold tabular-nums">{fmt(allTotal)}</span>
+                      <span className="text-sm font-bold tabular-nums"><AnimNum value={allTotal} /></span>
                       <span className={cn("text-xs font-semibold tabular-nums px-1.5 py-0.5 rounded", up ? "text-red-400 bg-red-500/10" : "text-green-400 bg-green-500/10")}>
-                        {up ? '+' : ''}{fmt(allProfit)}
+                        <AnimNum value={allProfit} prefix={up ? '+' : ''} />
                       </span>
                     </div>
                   </div>
@@ -911,10 +923,10 @@ function TabButton({ active, onClick, icon, children }: { active: boolean; onCli
     <button
       onClick={onClick}
       className={cn(
-        "flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-md text-sm font-medium transition-all whitespace-nowrap border border-transparent",
+        "flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-sm font-medium transition-all whitespace-nowrap",
         active
-          ? "bg-primary text-primary-foreground shadow-md border-primary/20"
-          : "text-muted-foreground hover:text-foreground hover:bg-accent/80 border-transparent"
+          ? "bg-primary text-primary-foreground neu-raised-sm"
+          : "text-muted-foreground hover:text-foreground"
       )}
     >
       {icon}

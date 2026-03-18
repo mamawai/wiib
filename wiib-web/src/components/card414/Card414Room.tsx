@@ -154,7 +154,7 @@ export function Card414Room({ room, player, sendWs, onLeave, wsConnected, voice 
 
       {/* 提示 */}
       <p className="text-xs text-muted-foreground text-center">
-        对座为队友（A队：座位1+3，B队：座位2+4）· 点击空位可换座
+        对座为队友（A队：上+下，B队：左+右）· 点击空位可换座
       </p>
     </div>
   );

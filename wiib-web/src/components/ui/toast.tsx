@@ -76,7 +76,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
             key={t.id}
             className={cn(
               "relative overflow-hidden pointer-events-auto",
-              "flex items-start gap-3 p-4 rounded-xl shadow-lg border bg-card text-card-foreground",
+              "flex items-start gap-3 p-4 rounded-xl bg-card text-card-foreground neu-raised",
               "animate-in slide-in-from-bottom-2 fade-in",
               t.type === 'success' && "border-green-500/25",
               t.type === 'error' && "border-red-500/25",

@@ -4,45 +4,24 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.mawai.wiibcommon.entity.Settlement;
-import com.mawai.wiibcommon.entity.User;
-import com.mawai.wiibcommon.event.AssetChangeEvent;
-import com.mawai.wiibservice.mapper.CryptoOrderMapper;
 import com.mawai.wiibservice.mapper.SettlementMapper;
-import com.mawai.wiibservice.service.CryptoPositionService;
-import com.mawai.wiibservice.service.EventPublisher;
 import com.mawai.wiibservice.service.MarginAccountService;
-import com.mawai.wiibservice.service.PositionService;
 import com.mawai.wiibservice.service.SettlementService;
-import com.mawai.wiibservice.service.UserService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.context.annotation.Lazy;
-import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Set;
 
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class SettlementServiceImpl extends ServiceImpl<SettlementMapper, Settlement> implements SettlementService {
 
-    // 循环依赖解决
-    @Lazy
-    @Autowired
-    private UserService userService;
-    private final EventPublisher eventPublisher;
-    private final PositionService positionService;
-    private final CryptoPositionService cryptoPositionService;
-    private final CryptoOrderMapper cryptoOrderMapper;
     private final MarginAccountService marginAccountService;
-    private final StringRedisTemplate stringRedisTemplate;
 
     @Override
     public void createSettlement(Long userId, Long orderId, BigDecimal amount) {
@@ -86,7 +65,6 @@ public class SettlementServiceImpl extends ServiceImpl<SettlementMapper, Settlem
                 .le(Settlement::getSettleTime, now);
 
         List<Settlement> pendingList = baseMapper.selectList(wrapper);
-        Set<Long> userIdsToNotify = new HashSet<>();
 
         for (Settlement s : pendingList) {
             LambdaUpdateWrapper<Settlement> updateWrapper = new LambdaUpdateWrapper<>();
@@ -100,43 +78,9 @@ public class SettlementServiceImpl extends ServiceImpl<SettlementMapper, Settlem
             }
 
             marginAccountService.applyCashInflow(s.getUserId(), s.getAmount(), "SETTLEMENT");
-            userIdsToNotify.add(s.getUserId());
 
             log.info("结算完成 settlementId={} userId={} amount={}",
                     s.getId(), s.getUserId(), s.getAmount());
-        }
-
-        // 通知受影响的用户
-        for (Long userId : userIdsToNotify) {
-            try {
-                User user = userService.getById(userId);
-                BigDecimal marketValue = positionService.calculateTotalMarketValue(userId);
-
-                // crypto持仓市值
-                marketValue = marketValue.add(cryptoPositionService.calculateCryptoMarketValue(userId));
-
-                BigDecimal pendingAmount = getPendingSettlements(userId).stream()
-                        .map(Settlement::getAmount)
-                        .reduce(BigDecimal.ZERO, BigDecimal::add);
-                pendingAmount = pendingAmount.add(cryptoOrderMapper.sumSettlingAmount(userId));
-
-                AssetChangeEvent event = new AssetChangeEvent(
-                        userId,
-                        user.getBalance(),
-                        user.getFrozenBalance(),
-                        marketValue,
-                        pendingAmount,
-                        user.getMarginLoanPrincipal(),
-                        user.getMarginInterestAccrued(),
-                        Boolean.TRUE.equals(user.getIsBankrupt()),
-                        user.getBankruptCount(),
-                        user.getBankruptResetDate(),
-                        "SETTLEMENT_COMPLETED"
-                );
-                eventPublisher.publishAssetChange(event);
-            } catch (Exception e) {
-                log.error("结算后发布资产变化事件失败 userId={}", userId, e);
-            }
         }
     }
 

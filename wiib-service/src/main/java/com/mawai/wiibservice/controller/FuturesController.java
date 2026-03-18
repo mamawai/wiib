@@ -4,7 +4,8 @@ import cn.dev33.satoken.stp.StpUtil;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.mawai.wiibcommon.dto.*;
 import com.mawai.wiibcommon.util.Result;
-import com.mawai.wiibservice.service.FuturesService;
+import com.mawai.wiibservice.service.FuturesRiskService;
+import com.mawai.wiibservice.service.FuturesTradingService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
@@ -15,34 +16,35 @@ import java.util.List;
 @RequiredArgsConstructor
 public class FuturesController {
 
-    private final FuturesService futuresService;
+    private final FuturesTradingService futuresTradingService;
+    private final FuturesRiskService futuresRiskService;
 
     /** 开仓 */
     @PostMapping("/open")
     public Result<FuturesOrderResponse> open(@RequestBody FuturesOpenRequest request) {
         Long userId = StpUtil.getLoginIdAsLong();
-        return Result.ok(futuresService.openPosition(userId, request));
+        return Result.ok(futuresTradingService.openPosition(userId, request));
     }
 
     /** 平仓 */
     @PostMapping("/close")
     public Result<FuturesOrderResponse> close(@RequestBody FuturesCloseRequest request) {
         Long userId = StpUtil.getLoginIdAsLong();
-        return Result.ok(futuresService.closePosition(userId, request));
+        return Result.ok(futuresTradingService.closePosition(userId, request));
     }
 
     /** 取消限价单 */
     @PostMapping("/cancel/{orderId}")
     public Result<FuturesOrderResponse> cancel(@PathVariable Long orderId) {
         Long userId = StpUtil.getLoginIdAsLong();
-        return Result.ok(futuresService.cancelOrder(userId, orderId));
+        return Result.ok(futuresTradingService.cancelOrder(userId, orderId));
     }
 
     /** 追加保证金 */
     @PostMapping("/margin")
     public Result<Void> addMargin(@RequestBody FuturesAddMarginRequest request) {
         Long userId = StpUtil.getLoginIdAsLong();
-        futuresService.addMargin(userId, request);
+        futuresTradingService.addMargin(userId, request);
         return Result.ok();
     }
 
@@ -50,21 +52,21 @@ public class FuturesController {
     @PostMapping("/increase")
     public Result<FuturesOrderResponse> increase(@RequestBody FuturesIncreaseRequest request) {
         Long userId = StpUtil.getLoginIdAsLong();
-        return Result.ok(futuresService.increasePosition(userId, request));
+        return Result.ok(futuresTradingService.increasePosition(userId, request));
     }
 
     /** 设置止损 */
     @PostMapping("/stop-loss")
     public Result<Void> setStopLoss(@RequestBody FuturesStopLossRequest request) {
         Long userId = StpUtil.getLoginIdAsLong();
-        futuresService.setStopLoss(userId, request);
+        futuresRiskService.setStopLoss(userId, request);
         return Result.ok();
     }
 
     @PostMapping("/take-profit")
     public Result<Void> setTakeProfit(@RequestBody FuturesTakeProfitRequest request) {
         Long userId = StpUtil.getLoginIdAsLong();
-        futuresService.setTakeProfit(userId, request);
+        futuresRiskService.setTakeProfit(userId, request);
         return Result.ok();
     }
 
@@ -72,7 +74,7 @@ public class FuturesController {
     @GetMapping("/positions")
     public Result<List<FuturesPositionDTO>> positions(@RequestParam(required = false) String symbol) {
         Long userId = StpUtil.getLoginIdAsLong();
-        return Result.ok(futuresService.getUserPositions(userId, symbol));
+        return Result.ok(futuresTradingService.getUserPositions(userId, symbol));
     }
 
     /** 查询订单列表 */
@@ -82,12 +84,12 @@ public class FuturesController {
                                                        @RequestParam(defaultValue = "10") int pageSize,
                                                        @RequestParam(required = false) String symbol) {
         Long userId = StpUtil.getLoginIdAsLong();
-        return Result.ok(futuresService.getUserOrders(userId, status, pageNum, pageSize, symbol));
+        return Result.ok(futuresTradingService.getUserOrders(userId, status, pageNum, pageSize, symbol));
     }
 
     /** 最新成交-匿名 */
     @GetMapping("/live")
     public Result<List<FuturesOrderResponse>> live() {
-        return Result.ok(futuresService.getLatestOrders());
+        return Result.ok(futuresTradingService.getLatestOrders());
     }
 }

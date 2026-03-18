@@ -1,6 +1,7 @@
 import * as echarts from 'echarts';
 import { useEffect, useRef, useState, useCallback } from 'react';
 import type { DayTick } from '../types';
+import { useIsDark } from '../hooks/useIsDark';
 
 interface Props {
   ticks: DayTick[];
@@ -42,6 +43,7 @@ export function TickChart({ ticks, prevClose }: Props) {
   const chartInstanceRef = useRef<echarts.ECharts | null>(null);
   const pricesRef = useRef<(number | null)[]>(new Array(fullTimeAxis.length).fill(null));
   const [isMobile, setIsMobile] = useState(window.innerWidth < 640);
+  const isDark = useIsDark();
 
   useEffect(() => {
     const handleResize = () => setIsMobile(window.innerWidth < 640);
@@ -53,7 +55,7 @@ export function TickChart({ ticks, prevClose }: Props) {
   useEffect(() => {
     if (!chartRef.current) return;
 
-    const chart = echarts.init(chartRef.current, 'dark');
+    const chart = echarts.init(chartRef.current, isDark ? 'dark' : undefined);
     chartInstanceRef.current = chart;
 
     const keyTimes = isMobile
@@ -94,7 +96,7 @@ export function TickChart({ ticks, prevClose }: Props) {
         axisLine: { show: false },
         axisTick: { show: false },
         axisLabel: { show: !isMobile, fontSize: 10, color: '#888', formatter: (v: number) => v.toFixed(2) },
-        splitLine: { lineStyle: { color: '#222', type: 'dashed' } },
+        splitLine: { lineStyle: { color: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.12)', type: 'dashed' } },
       },
       series: [
         {
@@ -104,11 +106,11 @@ export function TickChart({ ticks, prevClose }: Props) {
           smooth: 0.3,
           showSymbol: false,
           connectNulls: true,
-          lineStyle: { width: 1.5, color: '#ef4444' },
+          lineStyle: { width: 1.5, color: '#f23645' },
           areaStyle: {
             color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-              { offset: 0, color: 'rgba(239, 68, 68, 0.3)' },
-              { offset: 1, color: 'rgba(239, 68, 68, 0.05)' },
+              { offset: 0, color: 'rgba(242, 54, 69, 0.15)' },
+              { offset: 1, color: 'rgba(242, 54, 69, 0.02)' },
             ]),
           },
         },
@@ -125,7 +127,7 @@ export function TickChart({ ticks, prevClose }: Props) {
           const val = p.value;
           const base = prevClose ?? val;
           const change = base ? ((val - base) / base * 100).toFixed(2) : '--';
-          const changeColor = val >= base ? '#ef4444' : '#22c55e';
+          const changeColor = val >= base ? '#f23645' : '#089981';
           return `
             <div style="padding: 4px 0">
               <div style="color: #888; margin-bottom: 4px">${p.name.substring(0, 5)}</div>
@@ -147,7 +149,7 @@ export function TickChart({ ticks, prevClose }: Props) {
       chartInstanceRef.current = null;
       pricesRef.current = new Array(fullTimeAxis.length).fill(null);
     };
-  }, [isMobile]);
+  }, [isMobile, isDark]);
 
   // 更新数据（增量更新，不重建图表）
   const updateChart = useCallback(() => {
@@ -171,9 +173,9 @@ export function TickChart({ ticks, prevClose }: Props) {
     const basePrice = prevClose ?? validPrices[0];
     const lastPrice = validPrices[validPrices.length - 1];
     const isUp = lastPrice >= basePrice;
-    const lineColor = isUp ? '#ef4444' : '#22c55e';
-    const areaColorStart = isUp ? 'rgba(239, 68, 68, 0.3)' : 'rgba(34, 197, 94, 0.3)';
-    const areaColorEnd = isUp ? 'rgba(239, 68, 68, 0.05)' : 'rgba(34, 197, 94, 0.05)';
+    const lineColor = isUp ? '#f23645' : '#089981';
+    const areaColorStart = isUp ? 'rgba(242, 54, 69, 0.15)' : 'rgba(8, 153, 129, 0.15)';
+    const areaColorEnd = isUp ? 'rgba(242, 54, 69, 0.02)' : 'rgba(8, 153, 129, 0.02)';
 
     // 增量更新
     chart.setOption({
@@ -198,7 +200,7 @@ export function TickChart({ ticks, prevClose }: Props) {
               name: '昨收',
               type: 'line',
               data: fullTimeAxis.map(() => prevClose),
-              lineStyle: { type: 'dashed', color: '#666', width: 1 },
+              lineStyle: { type: 'dashed', color: isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.18)', width: 1 },
               showSymbol: false,
               silent: true,
             }]
@@ -210,6 +212,13 @@ export function TickChart({ ticks, prevClose }: Props) {
   useEffect(() => {
     updateChart();
   }, [updateChart]);
+
+  useEffect(() => {
+    const c = chartInstanceRef.current;
+    if (!c) return;
+    const gridColor = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.12)';
+    c.setOption({ yAxis: { splitLine: { lineStyle: { color: gridColor } } } });
+  }, [isDark]);
 
   return <div ref={chartRef} className="w-full" style={{ height: 280 }} />;
 }

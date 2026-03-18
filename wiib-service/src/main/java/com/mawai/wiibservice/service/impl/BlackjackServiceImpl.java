@@ -9,13 +9,12 @@ import com.mawai.wiibservice.mapper.BlackjackAccountMapper;
 import com.mawai.wiibservice.service.BlackjackService;
 import com.mawai.wiibservice.service.CacheService;
 import com.mawai.wiibservice.service.UserService;
-import com.mawai.wiibservice.util.RedisLockUtil;
+import com.mawai.wiibservice.util.GameLockExecutor;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.security.SecureRandom;
@@ -37,14 +36,10 @@ import java.util.concurrent.TimeUnit;
 @RequiredArgsConstructor
 public class BlackjackServiceImpl implements BlackjackService {
 
-    /** Blackjack 账户表访问层：负责积分账户读写与统计持久化。 */
     private final BlackjackAccountMapper accountMapper;
-    /** 缓存服务：用于读写 Redis 中的牌局过程态。 */
     private final CacheService cacheService;
-    /** 用户资产服务：用于积分转余额等跨域资金操作。 */
     private final UserService userService;
-    /** 分布式锁工具：保证同一用户请求串行执行。 */
-    private final RedisLockUtil redisLockUtil;
+    private final GameLockExecutor gameLock;
 
     /** 用户初始积分，同时也是每日保底重置目标值。 */
     private static final long INITIAL_CHIPS = 100_000L;
@@ -63,16 +58,9 @@ public class BlackjackServiceImpl implements BlackjackService {
     /** 积分池 Redis 键前缀。 */
     private static final String POOL_KEY_PREFIX = "bj:pool:";
 
-    /** Redis 牌局会话键前缀。 */
-    private static final String SESSION_KEY_PREFIX = "bj:session:";
-    /** Redis 用户锁键前缀。 */
-    private static final String USER_LOCK_KEY_PREFIX = "blackjack:user:";
-    /** 牌局会话在 Redis 中的过期时间（小时）。 */
+    private static final String SK = "bj:session:";
+    private static final String LK = "blackjack:user:";
     private static final long SESSION_TTL_HOURS = 4;
-    /** 用户锁持有超时时间（秒）。 */
-    private static final long USER_LOCK_TIMEOUT_SECONDS = 20;
-    /** 获取用户锁时的最大等待时间（毫秒）。 */
-    private static final long USER_LOCK_WAIT_MILLIS = 3_000;
 
     /** 牌面点数字符集合（T 表示 10）。 */
     private static final String[] RANKS = {"A", "2", "3", "4", "5", "6", "7", "8", "9", "T", "J", "Q", "K"};
@@ -156,7 +144,7 @@ public class BlackjackServiceImpl implements BlackjackService {
 
     @Override
     public BlackjackStatusDTO getStatus(Long userId) {
-        return withUserLock(userId, () -> {
+        return gameLock.executeInLock(LK, userId, () -> {
             BlackjackAccount account = getOrCreateAccount(userId);
 
             // 仅在无活动牌局时执行每日重置，避免跨天中途套利。
@@ -184,9 +172,8 @@ public class BlackjackServiceImpl implements BlackjackService {
     }
 
     @Override
-    @Transactional(rollbackFor = Exception.class)
     public GameStateDTO bet(Long userId, long amount) {
-        return withUserLock(userId, () -> {
+        return gameLock.executeInLockTx(LK, userId, () -> {
             validateBetAmount(amount);
 
             if (getSession(userId) != null) {
@@ -260,14 +247,23 @@ public class BlackjackServiceImpl implements BlackjackService {
                 session.setPhase(PHASE_SETTLED);
                 long payout = amount + amount * 3 / 2;
                 long net = amount * 3 / 2;
+
+                long granted = adjustPoolCapped(net);
+                if (granted < net) {
+                    long cut = net - granted;
+                    payout -= cut;
+                    net = granted;
+                }
+
                 account.setChips(account.getChips() + payout);
                 account.setTotalHands(account.getTotalHands() + 1);
-                account.setTotalWon(account.getTotalWon() + net);
-                account.setBiggestWin(Math.max(account.getBiggestWin(), net));
+                if (net > 0) {
+                    account.setTotalWon(account.getTotalWon() + net);
+                    account.setBiggestWin(Math.max(account.getBiggestWin(), net));
+                }
                 account.setUpdatedAt(LocalDateTime.now());
                 accountMapper.updateById(account);
 
-                adjustPool(net);
                 GameStateDTO state = buildSettledState(
                         session,
                         account.getChips(),
@@ -287,7 +283,7 @@ public class BlackjackServiceImpl implements BlackjackService {
                 account.setUpdatedAt(LocalDateTime.now());
                 accountMapper.updateById(account);
 
-                adjustPool(-bet);
+                adjustPoolLoss(-bet);
                 GameStateDTO state = buildSettledState(
                         session,
                         account.getChips(),
@@ -303,9 +299,8 @@ public class BlackjackServiceImpl implements BlackjackService {
     }
 
     @Override
-    @Transactional(rollbackFor = Exception.class)
     public GameStateDTO hit(Long userId) {
-        return withUserLock(userId, () -> {
+        return gameLock.executeInLockTx(LK, userId, () -> {
             BlackjackSession session = requireSession(userId);
             requirePhase(session);
 
@@ -332,9 +327,8 @@ public class BlackjackServiceImpl implements BlackjackService {
     }
 
     @Override
-    @Transactional(rollbackFor = Exception.class)
     public GameStateDTO stand(Long userId) {
-        return withUserLock(userId, () -> {
+        return gameLock.executeInLockTx(LK, userId, () -> {
             BlackjackSession session = requireSession(userId);
             requirePhase(session);
 
@@ -348,9 +342,8 @@ public class BlackjackServiceImpl implements BlackjackService {
     }
 
     @Override
-    @Transactional(rollbackFor = Exception.class)
     public GameStateDTO doubleDown(Long userId) {
-        return withUserLock(userId, () -> {
+        return gameLock.executeInLockTx(LK, userId, () -> {
             BlackjackSession session = requireSession(userId);
             requirePhase(session);
 
@@ -389,9 +382,8 @@ public class BlackjackServiceImpl implements BlackjackService {
     }
 
     @Override
-    @Transactional(rollbackFor = Exception.class)
     public GameStateDTO split(Long userId) {
-        return withUserLock(userId, () -> {
+        return gameLock.executeInLockTx(LK, userId, () -> {
             BlackjackSession session = requireSession(userId);
             requirePhase(session);
 
@@ -439,9 +431,8 @@ public class BlackjackServiceImpl implements BlackjackService {
     }
 
     @Override
-    @Transactional(rollbackFor = Exception.class)
     public GameStateDTO insurance(Long userId) {
-        return withUserLock(userId, () -> {
+        return gameLock.executeInLockTx(LK, userId, () -> {
             BlackjackSession session = requireSession(userId);
             requirePhase(session);
 
@@ -486,9 +477,8 @@ public class BlackjackServiceImpl implements BlackjackService {
     }
 
     @Override
-    @Transactional(rollbackFor = Exception.class)
     public GameStateDTO forfeit(Long userId) {
-        return withUserLock(userId, () -> {
+        return gameLock.executeInLockTx(LK, userId, () -> {
             BlackjackSession session = getSession(userId);
             if (session == null) {
                 throw new BizException(ErrorCode.BJ_NO_ACTIVE_GAME);
@@ -503,7 +493,7 @@ public class BlackjackServiceImpl implements BlackjackService {
             account.setUpdatedAt(LocalDateTime.now());
             accountMapper.updateById(account);
 
-            adjustPool(-totalBet);
+            adjustPoolLoss(-totalBet);
             deleteSession(userId);
 
             GameStateDTO state = new GameStateDTO();
@@ -521,9 +511,8 @@ public class BlackjackServiceImpl implements BlackjackService {
     }
 
     @Override
-    @Transactional(rollbackFor = Exception.class)
     public ConvertResultDTO convert(Long userId, long amount) {
-        return withUserLock(userId, () -> {
+        return gameLock.executeInLockTx(LK, userId, () -> {
             if (amount <= 0) {
                 throw new BizException(ErrorCode.PARAM_ERROR);
             }
@@ -661,6 +650,18 @@ public class BlackjackServiceImpl implements BlackjackService {
             }
         }
 
+        // 积分池封顶：用户赢时只赔池子剩余的部分
+        if (totalNet > 0) {
+            long granted = adjustPoolCapped(totalNet);
+            if (granted < totalNet) {
+                long cut = totalNet - granted;
+                totalPayout -= cut;
+                totalNet = granted;
+            }
+        } else {
+            adjustPoolLoss(totalNet);
+        }
+
         account.setChips(account.getChips() + totalPayout);
         account.setTotalHands(account.getTotalHands() + 1);
         if (totalNet > 0) {
@@ -672,7 +673,6 @@ public class BlackjackServiceImpl implements BlackjackService {
         account.setUpdatedAt(LocalDateTime.now());
         accountMapper.updateById(account);
 
-        adjustPool(totalNet);
         GameStateDTO state = buildSettledState(session, account.getChips(), results);
         deleteSession(userId);
         return state;
@@ -749,30 +749,22 @@ public class BlackjackServiceImpl implements BlackjackService {
         return cardValue(cards.get(0)) == cardValue(cards.get(1));
     }
 
-    // ==================== 会话管理 ====================
-
-    private String sessionKey(Long userId) {
-        return SESSION_KEY_PREFIX + userId;
-    }
+    // ==================== 会话管理（委托 GameLockExecutor） ====================
 
     private BlackjackSession getSession(Long userId) {
-        return cacheService.getObject(sessionKey(userId));
+        return gameLock.getSession(SK, userId);
     }
 
     private BlackjackSession requireSession(Long userId) {
-        BlackjackSession session = getSession(userId);
-        if (session == null) {
-            throw new BizException(ErrorCode.BJ_NO_ACTIVE_GAME);
-        }
-        return session;
+        return gameLock.requireSession(SK, userId, ErrorCode.BJ_NO_ACTIVE_GAME);
     }
 
     private void saveSession(Long userId, BlackjackSession session) {
-        cacheService.setObject(sessionKey(userId), session, SESSION_TTL_HOURS, TimeUnit.HOURS);
+        gameLock.saveSession(SK, userId, session, SESSION_TTL_HOURS);
     }
 
     private void deleteSession(Long userId) {
-        cacheService.delete(sessionKey(userId));
+        gameLock.deleteSession(SK, userId);
     }
 
     private void requirePhase(BlackjackSession session) {
@@ -1011,46 +1003,45 @@ public class BlackjackServiceImpl implements BlackjackService {
         }
     }
 
-    private String userLockKey(Long userId) {
-        return USER_LOCK_KEY_PREFIX + userId;
-    }
-
-    private <T> T withUserLock(Long userId, java.util.function.Supplier<T> supplier) {
-        try {
-            return redisLockUtil.executeWithLock(
-                    userLockKey(userId),
-                    USER_LOCK_TIMEOUT_SECONDS,
-                    USER_LOCK_WAIT_MILLIS,
-                    supplier
-            );
-        } catch (BizException ex) {
-            throw ex;
-        } catch (RuntimeException ex) {
-            if (ex.getMessage() != null && ex.getMessage().contains("获取锁失败")) {
-                throw new BizException(ErrorCode.CONCURRENT_UPDATE_FAILED);
-            }
-            throw ex;
-        }
-    }
-
     // ==================== 每日积分池 ====================
 
     private String dailyPoolKey() {
         return POOL_KEY_PREFIX + LocalDate.now();
     }
 
+    private void ensurePoolKey() {
+        cacheService.setIfAbsent(dailyPoolKey(), String.valueOf(DAILY_POOL), 24, TimeUnit.HOURS);
+    }
+
     private long getPoolRemaining() {
-        String key = dailyPoolKey();
-        cacheService.setIfAbsent(key, String.valueOf(DAILY_POOL), 24, TimeUnit.HOURS);
-        String val = cacheService.get(key);
+        ensurePoolKey();
+        String val = cacheService.get(dailyPoolKey());
         return Long.parseLong(val);
     }
 
-    /** 根据用户净收益调整积分池：用户赢则池减少，用户输则池增加。 */
-    private void adjustPool(long userNet) {
-        if (userNet == 0) return;
-        String key = dailyPoolKey();
-        cacheService.setIfAbsent(key, String.valueOf(DAILY_POOL), 24, TimeUnit.HOURS);
-        cacheService.increment(key, -userNet);
+    /**
+     * 原子扣减积分池，不允许低于0。
+     * @param userNet 用户净收益（正=用户赢，负=用户输）
+     * @return 实际从池中扣出的量（0 ~ userNet），用于封顶 payout
+     */
+    private long adjustPoolCapped(long userNet) {
+        if (userNet <= 0) {
+            // 用户输了，池子增加
+            if (userNet < 0) {
+                ensurePoolKey();
+                cacheService.increment(dailyPoolKey(), -userNet);
+            }
+            return 0;
+        }
+        // 用户赢了，原子扣减，不低于0
+        ensurePoolKey();
+        return cacheService.decrementWithFloor(dailyPoolKey(), userNet, 0);
+    }
+
+    /** 用户输钱时简单回填池子（无需封顶） */
+    private void adjustPoolLoss(long userNet) {
+        if (userNet >= 0) return;
+        ensurePoolKey();
+        cacheService.increment(dailyPoolKey(), -userNet);
     }
 }

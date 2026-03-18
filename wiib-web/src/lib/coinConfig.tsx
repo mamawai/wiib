@@ -10,6 +10,7 @@ export interface CoinCfg {
   icon: LucideIcon;
   colorClass: string;
   bgClass: string;
+  hoverBgClass: string;
   gradientClass: string;
   chartColor: string;
   desc: string;
@@ -30,20 +31,20 @@ export const COIN_MAP: Record<string, CoinCfg> = {
   BTCUSDT: {
     symbol: 'BTCUSDT', name: 'BTC', pair: 'BTC / USDT', tvSymbol: 'BINANCE:BTCUSD',
     minQty: 0.00001, icon: Bitcoin,
-    colorClass: 'text-orange-500', bgClass: 'bg-orange-500/10', gradientClass: 'from-orange-500/5',
+    colorClass: 'text-orange-500', bgClass: 'bg-orange-500/10', hoverBgClass: 'hover:bg-orange-500/20', gradientClass: 'from-orange-500/5',
     chartColor: '#f97316', desc: '比特币 / USDT 模拟交易',
   },
   PAXGUSDT: {
     symbol: 'PAXGUSDT', name: 'PAXG', pair: 'PAXG / USDT', tvSymbol: 'BINANCE:PAXGUSD',
     minQty: 0.001, icon: Coins,
-    colorClass: 'text-yellow-500', bgClass: 'bg-yellow-500/10', gradientClass: 'from-yellow-500/5',
+    colorClass: 'text-yellow-500', bgClass: 'bg-yellow-500/10', hoverBgClass: 'hover:bg-yellow-500/20', gradientClass: 'from-yellow-500/5',
     chartColor: '#eab308', desc: 'PAX Gold / USDT · 1枚=1盎司黄金（31.1035克）',
     unitLabel: '克', unitFactor: 31.1035,
   },
   ETHUSDT: {
     symbol: 'ETHUSDT', name: 'ETH', pair: 'ETH / USDT', tvSymbol: 'BINANCE:ETHUSD',
     minQty: 0.0001, icon: Eth,
-    colorClass: 'text-indigo-400', bgClass: 'bg-indigo-500/10', gradientClass: 'from-indigo-500/5',
+    colorClass: 'text-indigo-400', bgClass: 'bg-indigo-500/10', hoverBgClass: 'hover:bg-indigo-500/20', gradientClass: 'from-indigo-500/5',
     chartColor: '#818cf8', desc: '以太坊 / USDT 模拟交易',
   },
 };

@@ -1,7 +1,9 @@
 import { useEffect, useRef, memo } from 'react';
+import { useIsDark } from '../hooks/useIsDark';
 
 function TradingViewWidget({ symbol = 'BINANCE:BTCUSD', label = 'Bitcoin' }: { symbol?: string; label?: string }) {
   const container = useRef<HTMLDivElement>(null);
+  const isDark = useIsDark();
 
   useEffect(() => {
     const el = container.current;
@@ -24,10 +26,10 @@ function TradingViewWidget({ symbol = 'BINANCE:BTCUSD', label = 'Bitcoin' }: { s
       save_image: true,
       style: '1',
       symbol,
-      theme: 'dark',
+      theme: isDark ? 'dark' : 'light',
       timezone: 'Etc/UTC',
-      backgroundColor: '#0F0F0F',
-      gridColor: 'rgba(242, 242, 242, 0.06)',
+      backgroundColor: isDark ? '#0F0F0F' : '#FFFFFF',
+      gridColor: isDark ? 'rgba(242, 242, 242, 0.06)' : 'rgba(0, 0, 0, 0.06)',
       watchlist: [],
       withdateranges: false,
       compareSymbols: [],
@@ -38,7 +40,7 @@ function TradingViewWidget({ symbol = 'BINANCE:BTCUSD', label = 'Bitcoin' }: { s
     return () => {
       el.innerHTML = '';
     };
-  }, [symbol]);
+  }, [symbol, isDark]);
 
   return (
     <div className="tradingview-widget-container" ref={container} style={{ height: '100%', width: '100%' }}>

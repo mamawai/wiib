@@ -119,29 +119,29 @@ export function Login() {
       {/* 主卡片 */}
       <div className="w-full max-w-md relative z-10">
         {/* 卡片后置阴影块（纯物理错位感） */}
-        <div className="absolute inset-0 bg-edge rounded-4xl translate-x-3 translate-y-3" />
-        
-        <div className="relative rounded-4xl border-[3.5px] border-edge bg-card p-8 md:p-10 flex flex-col items-center">
+
+
+        <div className="relative rounded-4xl bg-card neu-raised-lg p-8 md:p-10 flex flex-col items-center">
           
           {/* Logo - 倾斜重叠设计 + 专属商标 */}
           <div className="mb-8 relative group cursor-pointer">
-            <div className="absolute inset-0 bg-warning rounded-2xl border-[3.5px] border-edge rotate-6 transition-transform duration-300 group-hover:rotate-12" />
-            <div className="relative w-24 h-24 rounded-2xl bg-primary border-[3.5px] border-edge flex items-center justify-center shadow-[4px_4px_0_0_var(--color-edge)] -rotate-6 transition-transform duration-300 group-hover:rotate-0">
-              <ProjectLogo className="w-16 h-16 text-edge" />
+            <div className="absolute inset-0 bg-warning rounded-2xl rotate-6 transition-transform duration-300 group-hover:rotate-12 neu-flat" />
+            <div className="relative w-24 h-24 rounded-2xl bg-primary flex items-center justify-center neu-raised-sm -rotate-6 transition-transform duration-300 group-hover:rotate-0">
+              <ProjectLogo className="w-16 h-16 text-foreground" />
             </div>
           </div>
 
           {/* 标题 */}
           <div className="text-center mb-10 w-full flex flex-col items-center">
-            <h1 className="text-3xl sm:text-4xl md:text-[2.5rem] font-black text-edge mb-6 tracking-tighter uppercase flex flex-wrap items-center justify-center gap-x-3 gap-y-4">
+            <h1 className="text-3xl sm:text-4xl md:text-[2.5rem] font-black text-foreground mb-6 tracking-tighter uppercase flex flex-wrap items-center justify-center gap-x-3 gap-y-4">
               <span className="relative inline-block z-10" style={{ textShadow: '4px 4px 0 var(--color-warning)' }}>
                 What If
               </span>
-              <span className="px-4 py-1 bg-primary text-primary-foreground border-[3.5px] border-edge shadow-[5px_5px_0_0_var(--color-edge)] -rotate-2 inline-block relative z-20 hover:rotate-0 hover:translate-y-1 transition-all">
+              <span className="px-4 py-1 bg-primary text-primary-foreground neu-raised-sm -rotate-2 inline-block relative z-20 hover:rotate-0 hover:translate-y-1 transition-all">
                 I Bought
               </span>
             </h1>
-            <div className="inline-flex items-center justify-center px-4 py-2.5 rounded-xl border-[2.5px] border-edge bg-surface shadow-[3px_3px_0_0_var(--color-edge)]">
+            <div className="inline-flex items-center justify-center px-4 py-2.5 rounded-xl bg-surface neu-flat">
               <span className="text-sm font-bold text-foreground">
                 <Typewriter text="模拟股票交易，看看如果当初买了会怎样" speed={80} />
               </span>
@@ -150,23 +150,23 @@ export function Login() {
 
           {/* 功能点矩阵 */}
           <div className="grid grid-cols-3 gap-3 w-full mb-10">
-            <div className="text-center p-4 rounded-xl border-[3px] border-edge bg-[#FEF08A] shadow-[3px_3px_0_0_var(--color-edge)] hover:-translate-y-1 hover:-translate-x-px hover:shadow-[5px_5px_0_0_var(--color-edge)] transition-all">
-              <BarChart3 className="w-7 h-7 mx-auto mb-2 text-edge" strokeWidth={2.5} />
-              <span className="text-xs font-black text-edge">真实行情</span>
+            <div className="text-center p-4 rounded-xl bg-[#FEF08A] neu-btn-sm transition-all">
+              <BarChart3 className="w-7 h-7 mx-auto mb-2 text-foreground" strokeWidth={2.5} />
+              <span className="text-xs font-black text-foreground">真实行情</span>
             </div>
-            <div className="text-center p-4 rounded-xl border-[3px] border-edge bg-[#86EFAC] shadow-[3px_3px_0_0_var(--color-edge)] hover:-translate-y-1 hover:-translate-x-px hover:shadow-[5px_5px_0_0_var(--color-edge)] transition-all">
-              <Wallet className="w-7 h-7 mx-auto mb-2 text-edge" strokeWidth={2.5} />
-              <span className="text-xs font-black text-edge">无损模拟</span>
+            <div className="text-center p-4 rounded-xl bg-[#86EFAC] neu-btn-sm transition-all">
+              <Wallet className="w-7 h-7 mx-auto mb-2 text-foreground" strokeWidth={2.5} />
+              <span className="text-xs font-black text-foreground">无损模拟</span>
             </div>
-            <div className="text-center p-4 rounded-xl border-[3px] border-edge bg-[#93C5FD] shadow-[3px_3px_0_0_var(--color-edge)] hover:-translate-y-1 hover:-translate-x-px hover:shadow-[5px_5px_0_0_var(--color-edge)] transition-all">
-              <LineChart className="w-7 h-7 mx-auto mb-2 text-edge" strokeWidth={2.5} />
-              <span className="text-xs font-black text-edge">收益复盘</span>
+            <div className="text-center p-4 rounded-xl bg-[#93C5FD] neu-btn-sm transition-all">
+              <LineChart className="w-7 h-7 mx-auto mb-2 text-foreground" strokeWidth={2.5} />
+              <span className="text-xs font-black text-foreground">收益复盘</span>
             </div>
           </div>
 
           {/* 错误提示 */}
           {error && (
-            <div className="w-full p-4 rounded-xl border-[3px] border-edge bg-destructive text-white text-sm font-black text-center mb-8 shadow-[4px_4px_0_0_var(--color-edge)] animate-in slide-in-from-top-2">
+            <div className="w-full p-4 rounded-xl bg-destructive text-white text-sm font-black text-center mb-8 neu-raised animate-in slide-in-from-top-2">
               {error}
             </div>
           )}
@@ -174,14 +174,14 @@ export function Login() {
           {/* 登录按钮 */}
           <div className="w-full">
             {loading ? (
-              <div className="flex flex-col items-center justify-center h-16 rounded-2xl border-[3.5px] border-edge bg-surface shadow-[4px_4px_0_0_var(--color-edge)] gap-2">
-                <Loader2 className="w-6 h-6 text-edge animate-spin" strokeWidth={3} />
-                <p className="text-sm font-black text-edge">登录中...</p>
+              <div className="flex flex-col items-center justify-center h-16 rounded-2xl bg-surface neu-raised gap-2">
+                <Loader2 className="w-6 h-6 text-foreground animate-spin" strokeWidth={3} />
+                <p className="text-sm font-black text-foreground">登录中...</p>
               </div>
             ) : (
               <button
                 onClick={handleLinuxDoLogin}
-                className="group relative w-full h-16 rounded-2xl border-[3.5px] border-edge bg-primary text-primary-foreground font-black text-lg shadow-[6px_6px_0_0_var(--color-edge)] hover:-translate-y-1 hover:-translate-x-px hover:shadow-[8px_8px_0_0_var(--color-edge)] active:translate-y-1.5 active:translate-x-1.5 active:shadow-[0px_0px_0_0_var(--color-edge)] transition-all flex items-center justify-center gap-3 overflow-hidden"
+                className="group relative w-full h-16 rounded-2xl bg-primary text-primary-foreground font-black text-lg neu-btn-sm transition-all flex items-center justify-center gap-3 overflow-hidden"
               >
                 {/* 按钮内扫光效果 */}
                 <div className="absolute inset-0 w-full h-full bg-white/20 -translate-x-full group-hover:translate-x-full transition-transform duration-700" />

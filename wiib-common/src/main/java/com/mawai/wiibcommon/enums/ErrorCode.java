@@ -100,7 +100,14 @@ public enum ErrorCode {
     CARD_GAME_IN_PROGRESS(1810, "游戏进行中"),
     CARD_NICKNAME_REQUIRED(1811, "需要昵称"),
     CARD_PLAYER_NOT_IN_ROOM(1812, "不在房间中"),
-    CARD_INVALID_STATE(1813, "当前状态不允许此操作");
+    CARD_INVALID_STATE(1813, "当前状态不允许此操作"),
+
+    // VideoPoker错误码 1851+
+    VP_GAME_IN_PROGRESS(1851, "有未完成的视频扑克"),
+    VP_NO_ACTIVE_GAME(1852, "没有进行中的视频扑克"),
+    VP_BALANCE_NOT_ENOUGH(1853, "余额不足"),
+    VP_INVALID_BET(1854, "下注金额无效"),
+    VP_INVALID_HOLD(1855, "HOLD位置无效");
 
     private final int code;
     private final String msg;

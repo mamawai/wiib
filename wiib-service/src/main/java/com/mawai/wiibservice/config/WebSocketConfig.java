@@ -29,6 +29,8 @@ import org.springframework.web.socket.server.HandshakeInterceptor;
 import org.springframework.context.event.EventListener;
 
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -51,6 +53,7 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
     private int heartbeatInterval;
 
     private static final AtomicInteger connectionCount = new AtomicInteger(0);
+    private static final Set<String> connectedSessions = ConcurrentHashMap.newKeySet();
 
     @Bean("wsHeartbeatTaskScheduler")
     @Primary
@@ -135,6 +138,7 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
                     switch (accessor.getCommand()) {
                         case CONNECT:
+                            connectedSessions.add(sessionId);
                             connectionCount.incrementAndGet();
                             log.info("WebSocket连接: sessionId={}, 连接数={}", sessionId, connectionCount.get());
                             String token = (String) accessor.getSessionAttributes().get("token");
@@ -166,7 +170,9 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
     @EventListener
     public void handleSessionDisconnect(SessionDisconnectEvent event) {
-        connectionCount.decrementAndGet();
+        if (connectedSessions.remove(event.getSessionId())) {
+            connectionCount.decrementAndGet();
+        }
         log.info("WebSocket断开: sessionId={}, 连接数={}", event.getSessionId(), connectionCount.get());
     }
 }

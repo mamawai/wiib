@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { Stock, User, Position, OrderRequest, Order, DayTick, Kline, Settlement, PageResult, News, RankingItem, OptionChainItem, OptionQuote, OptionPosition, OptionOrder, OptionOrderRequest, OptionOrderResult, BuffStatus, UserBuff, BlackjackStatus, GameState, ConvertResult, MinesStatus, MinesGameState, CryptoPrice, CryptoOrderRequest, CryptoOrder, CryptoPosition, CardRoom, Card414GameState, FuturesOpenRequest, FuturesCloseRequest, FuturesAddMarginRequest, FuturesIncreaseRequest, FuturesStopLossRequest, FuturesTakeProfitRequest, FuturesPosition, FuturesOrder } from '../types';
+import type { Stock, User, Position, OrderRequest, Order, DayTick, Kline, Settlement, PageResult, News, RankingItem, OptionChainItem, OptionQuote, OptionPosition, OptionOrder, OptionOrderRequest, OptionOrderResult, BuffStatus, UserBuff, BlackjackStatus, GameState, ConvertResult, MinesStatus, MinesGameState, VideoPokerStatus, VideoPokerGameState, CryptoPrice, CryptoOrderRequest, CryptoOrder, CryptoPosition, CardRoom, Card414GameState, FuturesOpenRequest, FuturesCloseRequest, FuturesAddMarginRequest, FuturesIncreaseRequest, FuturesStopLossRequest, FuturesTakeProfitRequest, FuturesPosition, FuturesOrder } from '../types';
 
 const api = axios.create({
   baseURL: '/api',
@@ -194,6 +194,13 @@ export const minesApi = {
   bet: (amount: number) => api.post<unknown, MinesGameState>('/mines/bet', { amount }),
   reveal: (cell: number) => api.post<unknown, MinesGameState>('/mines/reveal', { cell }),
   cashout: () => api.post<unknown, MinesGameState>('/mines/cashout'),
+};
+
+// ========== 视频扑克接口 ==========
+export const videoPokerApi = {
+  status: () => api.get<unknown, VideoPokerStatus>('/videopoker/status'),
+  bet: (amount: number) => api.post<unknown, VideoPokerGameState>('/videopoker/bet', { amount }),
+  draw: (held: number[]) => api.post<unknown, VideoPokerGameState>('/videopoker/draw', { held }),
 };
 
 // ========== 加密货币行情接口 ==========

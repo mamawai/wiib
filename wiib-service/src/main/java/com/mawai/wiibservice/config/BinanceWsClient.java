@@ -3,7 +3,7 @@ package com.mawai.wiibservice.config;
 import com.mawai.wiibservice.service.CacheService;
 import com.mawai.wiibservice.service.CryptoOrderService;
 import com.mawai.wiibservice.service.FuturesLiquidationService;
-import com.mawai.wiibservice.service.FuturesService;
+import com.mawai.wiibservice.service.FuturesSettlementService;
 import com.mawai.wiibservice.service.impl.RedisMessageBroadcastService;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
@@ -40,7 +40,7 @@ public class BinanceWsClient {
     private final BinanceRestClient restClient;
     private final CryptoOrderService cryptoOrderService;
     private final FuturesLiquidationService futuresLiquidationService;
-    private final FuturesService futuresService;
+    private final FuturesSettlementService futuresSettlementService;
     private final CacheService cacheService;
 
     private HttpClient httpClient;
@@ -150,7 +150,7 @@ public class BinanceWsClient {
             catch (Exception e) { log.warn("crypto限价单检查异常 {}: {}", symbol, e.getMessage()); }
         });
         Thread.startVirtualThread(() -> {
-            try { futuresService.onPriceUpdate(symbol, bd); }
+            try { futuresSettlementService.onPriceUpdate(symbol, bd); }
             catch (Exception e) { log.warn("futures限价单检查异常 {}: {}", symbol, e.getMessage()); }
         });
     }
@@ -267,7 +267,7 @@ public class BinanceWsClient {
                 }
                 BigDecimal[] markLowHigh = restClient.getRecentMarkPriceHighLow(symbol);
                 if (markLowHigh != null) {
-                    futuresService.recoverLimitOrders(symbol, markLowHigh[0], markLowHigh[1]);
+                    futuresSettlementService.recoverLimitOrders(symbol, markLowHigh[0], markLowHigh[1]);
                 }
             }
         } catch (Exception e) {

@@ -44,7 +44,7 @@ export function LatestTradesCard({ trades, loading }: Props) {
         {loading ? (
           <div className="space-y-0">
             {Array.from({ length: 5 }).map((_, i) => (
-              <div key={i} className="flex justify-between items-center p-3 border-b border-border last:border-b-0">
+              <div key={i} className="flex justify-between items-center p-3 border-b border-border/20 last:border-b-0">
                 <Skeleton className="h-4 w-24" />
                 <Skeleton className="h-4 w-16" />
               </div>
@@ -56,7 +56,7 @@ export function LatestTradesCard({ trades, loading }: Props) {
               const tone = t.sideTone ?? (t.orderSide === 'BUY' ? 'buy' : 'sell');
               const sideLabel = t.sideLabel ?? (tone === 'buy' ? '买' : '卖');
               return (
-                <div key={t.id} className="flex items-center justify-between px-4 py-2.5 border-b border-border last:border-b-0 text-sm">
+                <div key={t.id} className="flex items-center justify-between px-4 py-2.5 border-b border-border/20 last:border-b-0 text-sm">
                   <div className="flex items-center gap-2 min-w-0">
                     <span className={`text-xs font-medium px-1.5 py-0.5 rounded ${tone === 'buy' ? 'bg-gain/10 text-gain' : 'bg-loss/10 text-loss'}`}>
                       {sideLabel}

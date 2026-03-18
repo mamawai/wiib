@@ -28,6 +28,7 @@ export function useQuote(stockCode: string | undefined, initialTicks?: DayTick[]
 
     const client = new Client({
       webSocketFactory: () => new SockJS('/ws/quotes'),
+      reconnectDelay: 5000,
       onConnect: () => {
         console.log('行情WebSocket已连接');
         client.subscribe(`/topic/quote/${stockCode}`, (msg) => {

@@ -285,7 +285,7 @@ export function Options() {
               <div className="font-medium text-foreground">注意</div>
               <ul className="list-disc pl-5 space-y-1">
                 <li>交易需在交易时段内且到期前进行</li>
-                <div>总价 = 权利金 × 张数，实际金额以订单记录为准（含手续费）</div>
+                <li>总价 = 权利金 × 张数，实际金额以订单记录为准（含手续费）</li>
                 <li>持仓盈亏为估算值，不含手续费</li>
               </ul>
             </div>

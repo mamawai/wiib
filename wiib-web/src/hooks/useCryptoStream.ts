@@ -30,6 +30,7 @@ export function useCryptoStream(symbol: string | undefined): CryptoTick | null {
 
     const client = new Client({
       webSocketFactory: () => new SockJS('/ws/quotes'),
+      reconnectDelay: 5000,
       onConnect: () => {
         client.subscribe(`/topic/crypto/${symbol}`, (msg) => {
           try {

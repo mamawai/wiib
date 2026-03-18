@@ -155,7 +155,7 @@ export function Card414Game({ gameState, room, player, sendWs, onForceQuit, game
       </div>
 
       {/* 牌桌 */}
-      <div className="card414-table px-4 py-6 sm:px-8 sm:py-8 space-y-5">
+      <div className="card414-table casino-felt px-4 py-6 sm:px-8 sm:py-8 space-y-5">
 
         {/* 对家(上) */}
         <div className="flex justify-center">

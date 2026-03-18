@@ -80,9 +80,21 @@ export function useAgoraVoice({ roomCode, playerUuid, enabled }: UseAgoraVoiceOp
     setMicOn(false);
   }, []);
 
+  const publishMic = useCallback(async (client: IAgoraRTCClient) => {
+    try {
+      const track = await AgoraRTC.createMicrophoneAudioTrack();
+      localTrackRef.current = track;
+      await client.publish(track);
+      setMicOn(true);
+    } catch (e) {
+      console.error('麦克风获取失败:', e);
+    }
+  }, []);
+
   const toggleMic = useCallback(async () => {
     if (!clientRef.current) {
       await connect();
+      if (clientRef.current) await publishMic(clientRef.current);
       return;
     }
 
@@ -94,16 +106,9 @@ export function useAgoraVoice({ roomCode, playerUuid, enabled }: UseAgoraVoiceOp
       }
       setMicOn(false);
     } else {
-      try {
-        const track = await AgoraRTC.createMicrophoneAudioTrack();
-        localTrackRef.current = track;
-        await clientRef.current.publish(track);
-        setMicOn(true);
-      } catch (e) {
-        console.error('麦克风获取失败:', e);
-      }
+      await publishMic(clientRef.current);
     }
-  }, [micOn, connect]);
+  }, [micOn, connect, publishMic]);
 
   useEffect(() => {
     if (enabled && roomCode) {

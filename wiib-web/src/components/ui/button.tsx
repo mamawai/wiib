@@ -7,13 +7,13 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        default: "bg-primary text-primary-foreground border-[2.5px] border-edge rounded-full shadow-[3px_3px_0_0_var(--color-edge)] hover:shadow-[1px_1px_0_0_var(--color-edge)] hover:translate-x-[2px] hover:translate-y-[2px] active:shadow-none active:translate-x-[3px] active:translate-y-[3px]",
-        destructive: "bg-destructive text-white border-[2.5px] border-edge rounded-full shadow-[3px_3px_0_0_var(--color-edge)] hover:shadow-[1px_1px_0_0_var(--color-edge)] hover:translate-x-[2px] hover:translate-y-[2px] active:shadow-none active:translate-x-[3px] active:translate-y-[3px]",
-        outline: "bg-card border-[2.5px] border-edge rounded-full shadow-[3px_3px_0_0_var(--color-edge)] hover:shadow-[1px_1px_0_0_var(--color-edge)] hover:translate-x-[2px] hover:translate-y-[2px] active:shadow-none active:translate-x-[3px] active:translate-y-[3px]",
-        secondary: "bg-secondary text-secondary-foreground border-[2px] border-edge/30 rounded-full hover:bg-secondary/80",
+        default: "bg-primary text-primary-foreground rounded-full neu-btn-sm",
+        destructive: "bg-destructive text-white rounded-full neu-btn-sm",
+        outline: "bg-card text-foreground rounded-full neu-btn-sm",
+        secondary: "bg-secondary text-secondary-foreground rounded-full neu-flat hover:bg-secondary/80",
         ghost: "rounded-xl hover:bg-surface-hover",
         link: "text-primary underline-offset-4 hover:underline",
-        success: "bg-success text-white border-[2.5px] border-edge rounded-full shadow-[3px_3px_0_0_var(--color-edge)] hover:shadow-[1px_1px_0_0_var(--color-edge)] hover:translate-x-[2px] hover:translate-y-[2px] active:shadow-none active:translate-x-[3px] active:translate-y-[3px]",
+        success: "bg-success text-white rounded-full neu-btn-sm",
       },
       size: {
         default: "h-11 px-6 py-2 text-sm",

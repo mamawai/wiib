@@ -4,7 +4,6 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.mawai.wiibcommon.entity.Settlement;
 import com.mawai.wiibcommon.entity.User;
 import com.mawai.wiibcommon.enums.ErrorCode;
-import com.mawai.wiibcommon.event.AssetChangeEvent;
 import com.mawai.wiibcommon.exception.BizException;
 import com.mawai.wiibcommon.util.SpringUtils;
 import com.mawai.wiibservice.config.TradingConfig;
@@ -16,7 +15,6 @@ import com.mawai.wiibservice.mapper.SettlementMapper;
 import com.mawai.wiibservice.mapper.UserMapper;
 import com.mawai.wiibservice.service.BankruptcyService;
 import com.mawai.wiibservice.service.CryptoPositionService;
-import com.mawai.wiibservice.service.EventPublisher;
 import com.mawai.wiibservice.service.PositionService;
 import com.mawai.wiibservice.service.SettlementService;
 import com.mawai.wiibservice.service.UserService;
@@ -44,7 +42,6 @@ public class BankruptcyServiceImpl implements BankruptcyService {
     private final PositionService positionService;
     private final CryptoPositionService cryptoPositionService;
     private final SettlementService settlementService;
-    private final EventPublisher eventPublisher;
     private final TradingConfig tradingConfig;
     private final CryptoOrderMapper cryptoOrderMapper;
     private final FuturesPositionMapper futuresPositionMapper;
@@ -152,22 +149,6 @@ public class BankruptcyServiceImpl implements BankruptcyService {
         positionMapper.deleteByUserId(userId);
         settlementMapper.deletePendingByUserId(userId);
 
-        User user = userService.getById(userId);
-        AssetChangeEvent event = new AssetChangeEvent(
-                userId,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                true,
-                user != null && user.getBankruptCount() != null ? user.getBankruptCount() : 0,
-                user != null ? user.getBankruptResetDate() : resetDate,
-                "BANKRUPT"
-        );
-        eventPublisher.publishAssetChange(event);
-
         log.warn("用户爆仓 userId={} resetDate={}", userId, resetDate);
     }
 
@@ -181,23 +162,6 @@ public class BankruptcyServiceImpl implements BankruptcyService {
         orderMapper.cancelOpenOrdersByUserId(userId);
         positionMapper.deleteByUserId(userId);
         settlementMapper.deletePendingByUserId(userId);
-
-        User user = userService.getById(userId);
-        int bankruptCount = user != null && user.getBankruptCount() != null ? user.getBankruptCount() : 0;
-        AssetChangeEvent event = new AssetChangeEvent(
-                userId,
-                initialBalance,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                false,
-                bankruptCount,
-                null,
-                "BANKRUPTCY_RESET"
-        );
-        eventPublisher.publishAssetChange(event);
 
         log.info("用户恢复初始资金 userId={} balance={}", userId, initialBalance);
     }

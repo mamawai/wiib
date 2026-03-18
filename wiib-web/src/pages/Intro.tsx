@@ -1,0 +1,139 @@
+import { useNavigate } from 'react-router-dom';
+import { Card, CardContent } from '../components/ui/card';
+import { Button } from '../components/ui/button';
+import { Bell } from 'lucide-react';
+
+const HIDE_NOTICE_KEY = 'wiib-notice-hide-date';
+function hideNoticeToday() { localStorage.setItem(HIDE_NOTICE_KEY, new Date().toDateString()); }
+
+export function Intro() {
+  const navigate = useNavigate();
+  const goHome = () => navigate('/', { replace: true });
+
+  return (
+    <div className="max-w-2xl mx-auto px-4 md:px-6 py-6 pb-36 md:pb-24 space-y-5">
+
+      <h1 className="text-2xl font-extrabold flex items-center gap-2">
+        <Bell className="w-6 h-6 text-primary" />
+        玩法说明
+      </h1>
+
+      {/* 欢迎 + 风险提示 */}
+      <Card>
+        <CardContent className="pt-5 space-y-3 text-sm leading-relaxed">
+          <h2 className="font-bold text-base text-primary">欢迎</h2>
+          <p className="text-muted-foreground">虚拟股票交易模拟器，体验"如果当初买了会怎样"。所有数据均为模拟。</p>
+          <div className="bg-primary/8 p-3 rounded-xl border-2 border-primary/20">
+            <p className="text-primary/80 text-xs font-medium">仅供娱乐，不构成投资建议。杠杆有风险，可能爆仓。</p>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* 交易规则 */}
+      <Card>
+        <CardContent className="pt-5 space-y-4 text-sm leading-relaxed">
+          <h2 className="font-bold text-base text-primary">交易规则</h2>
+
+          <section>
+            <h3 className="font-bold mb-1">交易时间</h3>
+            <p className="text-muted-foreground">周一至周五 9:30-11:30、13:00-15:00，每10秒更新行情</p>
+          </section>
+
+          <section>
+            <h3 className="font-bold mb-1">股票交易</h3>
+            <ul className="list-disc list-inside text-muted-foreground space-y-1">
+              <li><strong>市价单</strong>：当前价立即成交</li>
+              <li><strong>限价单</strong>：设定价格，触发后成交（当日有效）</li>
+              <li><strong>手续费</strong>：0.05%，最低$5</li>
+              <li><strong>T+1结算</strong>：卖出后资金24小时到账</li>
+              <li><strong>初始资金</strong>：$100,000</li>
+            </ul>
+          </section>
+
+          <section>
+            <h3 className="font-bold mb-1">杠杆交易</h3>
+            <ul className="list-disc list-inside text-muted-foreground space-y-1">
+              <li>市价买入可选1-10倍杠杆</li>
+              <li>借款按日计息0.05%</li>
+              <li>爆仓：资产低于借款时自动清仓，次日9:00恢复</li>
+            </ul>
+          </section>
+
+          <section>
+            <h3 className="font-bold mb-1">期权交易</h3>
+            <ul className="list-disc list-inside text-muted-foreground space-y-1">
+              <li><strong>CALL看涨</strong>：涨得越多赚得越多</li>
+              <li><strong>PUT看跌</strong>：跌得越多赚得越多</li>
+              <li>仅支持买入开仓，到期前可平仓或等待结算</li>
+              <li>现金结算，不涉及股票交割</li>
+            </ul>
+          </section>
+
+          <section>
+            <h3 className="font-bold mb-1">BTC模拟交易</h3>
+            <ul className="list-disc list-inside text-muted-foreground space-y-1">
+              <li><strong>实时行情</strong>：接入Binance WebSocket</li>
+              <li><strong>支持小数</strong>：最小0.00001 BTC</li>
+              <li><strong>手续费</strong>：0.1%</li>
+              <li><strong>限价单</strong>：50%-150%市价，24小时有效</li>
+              <li><strong>杠杆</strong>：1-10倍，日息0.05%</li>
+              <li><strong>卖出到账</strong>：5分钟到账，优先偿还借款</li>
+            </ul>
+          </section>
+
+          <section>
+            <h3 className="font-bold mb-1">合约交易</h3>
+            <ul className="list-disc list-inside text-muted-foreground space-y-1">
+              <li>支持开多/开空，1-50倍杠杆</li>
+              <li>实时盈亏计算，爆仓自动平仓</li>
+              <li>手续费：开仓/平仓各0.05%</li>
+            </ul>
+          </section>
+        </CardContent>
+      </Card>
+
+      {/* 游戏规则 */}
+      <Card>
+        <CardContent className="pt-5 space-y-4 text-sm leading-relaxed">
+          <h2 className="font-bold text-base text-primary">游戏规则</h2>
+
+          <section>
+            <h3 className="font-bold mb-1">21点</h3>
+            <p className="text-muted-foreground">经典Blackjack，点数最接近21点不爆牌即赢。支持分牌、加倍、保险。</p>
+          </section>
+
+          <section>
+            <h3 className="font-bold mb-1">视频扑克</h3>
+            <p className="text-muted-foreground">发5张牌，选择保留后换牌一次，按最终牌型赔付。</p>
+          </section>
+
+          <section>
+            <h3 className="font-bold mb-1">翻翻爆金币</h3>
+            <p className="text-muted-foreground">5×5方格隐藏地雷，每翻开一个安全格奖金递增，踩雷则全部归零。随时可收手。</p>
+          </section>
+        </CardContent>
+      </Card>
+
+      {/* 每日福利 */}
+      <Card>
+        <CardContent className="pt-5 text-sm leading-relaxed">
+          <h2 className="font-bold text-base text-primary mb-2">每日福利</h2>
+          <p className="text-muted-foreground">每天可抽一次，有机会获得红包、股票或折扣券</p>
+        </CardContent>
+      </Card>
+
+      {/* 风险声明 */}
+      <div className="bg-red-500/10 border-2 border-red-500/20 rounded-2xl p-4 text-xs text-red-500 dark:text-red-400 font-medium leading-relaxed">
+        风险声明：本平台所有交易均为虚拟模拟，不涉及真实资金。任何数据、行情、收益均不构成投资建议。杠杆与合约交易存在爆仓风险，请谨慎体验。
+      </div>
+
+      {/* sticky 底部按钮 */}
+      <div className="fixed left-0 right-0 bottom-20 md:bottom-6 px-4 md:px-6 z-50">
+        <div className="max-w-2xl mx-auto flex gap-3">
+          <Button variant="outline" className="flex-1" onClick={() => { hideNoticeToday(); goHome(); }}>今日不展示</Button>
+          <Button className="flex-1" onClick={goHome}>我知道了</Button>
+        </div>
+      </div>
+    </div>
+  );
+}

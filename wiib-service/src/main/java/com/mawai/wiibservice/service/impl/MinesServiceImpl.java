@@ -6,23 +6,19 @@ import com.mawai.wiibcommon.entity.MinesGame;
 import com.mawai.wiibcommon.enums.ErrorCode;
 import com.mawai.wiibcommon.exception.BizException;
 import com.mawai.wiibservice.mapper.MinesGameMapper;
-import com.mawai.wiibservice.service.CacheService;
 import com.mawai.wiibservice.service.MinesService;
 import com.mawai.wiibservice.service.UserService;
-import com.mawai.wiibservice.util.RedisLockUtil;
+import com.mawai.wiibservice.util.GameLockExecutor;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.security.SecureRandom;
 import java.time.LocalDateTime;
 import java.util.*;
-import java.util.concurrent.TimeUnit;
-import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -31,9 +27,8 @@ import java.util.stream.Collectors;
 public class MinesServiceImpl implements MinesService {
 
     private final MinesGameMapper minesGameMapper;
-    private final CacheService cacheService;
     private final UserService userService;
-    private final RedisLockUtil redisLockUtil;
+    private final GameLockExecutor gameLock;
 
     private static final int GRID_SIZE = 25;
     private static final int MINE_COUNT = 5;
@@ -43,11 +38,9 @@ public class MinesServiceImpl implements MinesService {
     private static final BigDecimal HOUSE_EDGE = new BigDecimal("0.50");
     private static final double DAMPEN = 0.9;
 
-    private static final String SESSION_KEY_PREFIX = "mines:session:";
-    private static final String USER_LOCK_KEY_PREFIX = "mines:user:";
-    private static final long SESSION_TTL_HOURS = 2;
-    private static final long LOCK_TIMEOUT_SECONDS = 20;
-    private static final long LOCK_WAIT_MILLIS = 3_000;
+    private static final String SK = "mines:session:";
+    private static final String LK = "mines:user:";
+    private static final long SESSION_TTL = 2;
 
     private static final String PHASE_PLAYING = "PLAYING";
     private static final String PHASE_SETTLED = "SETTLED";
@@ -90,11 +83,11 @@ public class MinesServiceImpl implements MinesService {
 
     @Override
     public MinesStatusDTO getStatus(Long userId) {
-        return withUserLock(userId, () -> {
+        return gameLock.executeInLock(LK, userId, () -> {
             MinesStatusDTO dto = new MinesStatusDTO();
             dto.setBalance(userService.getUserPortfolio(userId).getBalance());
 
-            MinesSession session = getSession(userId);
+            MinesSession session = gameLock.getSession(SK, userId);
             if (session != null) {
                 dto.setActiveGame(buildPlayingState(session, dto.getBalance()));
             }
@@ -103,14 +96,13 @@ public class MinesServiceImpl implements MinesService {
     }
 
     @Override
-    @Transactional(rollbackFor = Exception.class)
     public MinesGameStateDTO bet(Long userId, BigDecimal amount) {
-        return withUserLock(userId, () -> {
+        return gameLock.executeInLockTx(LK, userId, () -> {
             if (amount == null || amount.compareTo(MIN_BET) < 0 || amount.compareTo(MAX_BET) > 0) {
                 throw new BizException(ErrorCode.MINES_INVALID_BET);
             }
 
-            if (getSession(userId) != null) {
+            if (gameLock.getSession(SK, userId) != null) {
                 throw new BizException(ErrorCode.MINES_GAME_IN_PROGRESS);
             }
 
@@ -148,7 +140,7 @@ public class MinesServiceImpl implements MinesService {
             session.setMinePositions(mines);
             session.setRevealed(new ArrayList<>());
             session.setPhase(PHASE_PLAYING);
-            saveSession(userId, session);
+            gameLock.saveSession(SK, userId, session, SESSION_TTL);
 
             BigDecimal newBalance = userService.getUserPortfolio(userId).getBalance();
             return buildPlayingState(session, newBalance);
@@ -156,14 +148,13 @@ public class MinesServiceImpl implements MinesService {
     }
 
     @Override
-    @Transactional(rollbackFor = Exception.class)
     public MinesGameStateDTO reveal(Long userId, int cell) {
-        return withUserLock(userId, () -> {
+        return gameLock.executeInLockTx(LK, userId, () -> {
             if (cell < 0 || cell >= GRID_SIZE) {
                 throw new BizException(ErrorCode.MINES_INVALID_CELL);
             }
 
-            MinesSession session = requireSession(userId);
+            MinesSession session = gameLock.requireSession(SK, userId, ErrorCode.MINES_NO_ACTIVE_GAME);
             requirePlaying(session);
 
             if (session.getRevealed().contains(cell)) {
@@ -184,7 +175,7 @@ public class MinesServiceImpl implements MinesService {
                 game.setUpdatedAt(LocalDateTime.now());
                 minesGameMapper.updateById(game);
 
-                deleteSession(userId);
+                gameLock.deleteSession(SK, userId);
 
                 BigDecimal balance = userService.getUserPortfolio(userId).getBalance();
 
@@ -213,7 +204,7 @@ public class MinesServiceImpl implements MinesService {
                 return doCashout(userId, session, multiplier);
             }
 
-            saveSession(userId, session);
+            gameLock.saveSession(SK, userId, session, SESSION_TTL);
 
             // 更新DB中的revealed
             MinesGame game = minesGameMapper.selectById(session.getGameId());
@@ -228,10 +219,9 @@ public class MinesServiceImpl implements MinesService {
     }
 
     @Override
-    @Transactional(rollbackFor = Exception.class)
     public MinesGameStateDTO cashout(Long userId) {
-        return withUserLock(userId, () -> {
-            MinesSession session = requireSession(userId);
+        return gameLock.executeInLockTx(LK, userId, () -> {
+            MinesSession session = gameLock.requireSession(SK, userId, ErrorCode.MINES_NO_ACTIVE_GAME);
             requirePlaying(session);
 
             if (session.getRevealed().isEmpty()) {
@@ -260,7 +250,7 @@ public class MinesServiceImpl implements MinesService {
         game.setUpdatedAt(LocalDateTime.now());
         minesGameMapper.updateById(game);
 
-        deleteSession(userId);
+        gameLock.deleteSession(SK, userId);
 
         BigDecimal balance = userService.getUserPortfolio(userId).getBalance();
 
@@ -318,55 +308,9 @@ public class MinesServiceImpl implements MinesService {
         return list.stream().map(String::valueOf).collect(Collectors.joining(","));
     }
 
-    // ==================== Redis会话 ====================
-
-    private String sessionKey(Long userId) {
-        return SESSION_KEY_PREFIX + userId;
-    }
-
-    private MinesSession getSession(Long userId) {
-        return cacheService.getObject(sessionKey(userId));
-    }
-
-    private MinesSession requireSession(Long userId) {
-        MinesSession session = getSession(userId);
-        if (session == null) {
-            throw new BizException(ErrorCode.MINES_NO_ACTIVE_GAME);
-        }
-        return session;
-    }
-
-    private void saveSession(Long userId, MinesSession session) {
-        cacheService.setObject(sessionKey(userId), session, SESSION_TTL_HOURS, TimeUnit.HOURS);
-    }
-
-    private void deleteSession(Long userId) {
-        cacheService.delete(sessionKey(userId));
-    }
-
     private void requirePlaying(MinesSession session) {
         if (!PHASE_PLAYING.equals(session.getPhase())) {
             throw new BizException(ErrorCode.MINES_NO_ACTIVE_GAME);
-        }
-    }
-
-    // ==================== 分布式锁 ====================
-
-    private <T> T withUserLock(Long userId, Supplier<T> supplier) {
-        try {
-            return redisLockUtil.executeWithLock(
-                    USER_LOCK_KEY_PREFIX + userId,
-                    LOCK_TIMEOUT_SECONDS,
-                    LOCK_WAIT_MILLIS,
-                    supplier
-            );
-        } catch (BizException ex) {
-            throw ex;
-        } catch (RuntimeException ex) {
-            if (ex.getMessage() != null && ex.getMessage().contains("获取锁失败")) {
-                throw new BizException(ErrorCode.CONCURRENT_UPDATE_FAILED);
-            }
-            throw ex;
         }
     }
 }

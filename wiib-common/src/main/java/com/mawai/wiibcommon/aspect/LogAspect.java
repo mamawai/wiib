@@ -34,7 +34,7 @@ public class LogAspect {
             HttpServletRequest req = attrs.getRequest();
             url = req.getRequestURL().toString();
             httpMethod = req.getMethod();
-            ip = req.getRemoteAddr();
+            ip = realIp(req);
         }
 
         String className = point.getSignature().getDeclaringTypeName();
@@ -46,16 +46,16 @@ public class LogAspect {
             long cost = System.currentTimeMillis() - start;
 
             log.info("""
-                            
+
                             ========== Request ==========
                             URL: {} {}
                             IP: {}
                             Method: {}.{}
                             Args: {}
-                            Result: {}
                             Cost: {}ms
                             =============================""",
-                    httpMethod, url, ip, className, methodName, Arrays.toString(point.getArgs()), result, cost);
+                    httpMethod, url, ip, className, methodName, Arrays.toString(point.getArgs()), cost);
+            log.debug("Result: {}", result);
 
             return result;
         } catch (Throwable e) {
@@ -75,5 +75,13 @@ public class LogAspect {
 
             throw e;
         }
+    }
+
+    private static String realIp(HttpServletRequest req) {
+        String ip = req.getHeader("X-Forwarded-For");
+        if (ip != null && !ip.isEmpty()) return ip.split(",")[0].trim();
+        ip = req.getHeader("X-Real-IP");
+        if (ip != null && !ip.isEmpty()) return ip;
+        return req.getRemoteAddr();
     }
 }

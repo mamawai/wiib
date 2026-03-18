@@ -1,15 +1,14 @@
 package com.mawai.wiibservice.service;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.mawai.wiibcommon.dto.RankingDTO;
-import com.mawai.wiibcommon.entity.CryptoPosition;
-import com.mawai.wiibcommon.entity.Position;
-import com.mawai.wiibcommon.entity.Settlement;
-import com.mawai.wiibcommon.entity.User;
+import com.mawai.wiibcommon.entity.*;
 import com.mawai.wiibservice.mapper.CryptoOrderMapper;
+import com.mawai.wiibservice.mapper.FuturesPositionMapper;
+import com.mawai.wiibservice.mapper.OptionContractMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -20,6 +19,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -34,7 +34,10 @@ public class RankingService {
     private final SettlementService settlementService;
     private final StockCacheService stockCacheService;
     private final CryptoOrderMapper cryptoOrderMapper;
-    private final StringRedisTemplate stringRedisTemplate;
+    private final FuturesPositionMapper futuresPositionMapper;
+    private final OptionPositionService optionPositionService;
+    private final OptionContractMapper optionContractMapper;
+    private final OptionPricingService optionPricingService;
 
     private static final String RANKING_KEY = "ranking:top";
     private static final int TOP_N = 50;
@@ -70,6 +73,29 @@ public class RankingService {
                         m -> ((Number) m.get("user_id")).longValue(),
                         m -> (BigDecimal) m.get("amount")
                 ));
+
+        // 合约OPEN仓位
+        List<FuturesPosition> allFuturesPositions = futuresPositionMapper.selectList(
+                new LambdaQueryWrapper<FuturesPosition>().eq(FuturesPosition::getStatus, "OPEN"));
+        Map<Long, List<FuturesPosition>> futuresPositionMap = allFuturesPositions.stream()
+                .collect(Collectors.groupingBy(FuturesPosition::getUserId));
+        Map<String, BigDecimal> futuresMarkPriceMap = allFuturesPositions.stream()
+                .map(FuturesPosition::getSymbol).distinct()
+                .collect(Collectors.toMap(Function.identity(), s -> {
+                    BigDecimal mp = cacheService.getMarkPrice(s);
+                    return mp != null ? mp : cacheService.getCryptoPrice(s);
+                }));
+
+        // 期权持仓(quantity > 0) + 合约详情
+        List<OptionPosition> allOptionPositions = optionPositionService.list(
+                new LambdaQueryWrapper<OptionPosition>().gt(OptionPosition::getQuantity, 0));
+        Map<Long, List<OptionPosition>> optionPositionMap = allOptionPositions.stream()
+                .collect(Collectors.groupingBy(OptionPosition::getUserId));
+        Set<Long> contractIds = allOptionPositions.stream()
+                .map(OptionPosition::getContractId).collect(Collectors.toSet());
+        Map<Long, OptionContract> optionContractMap = contractIds.isEmpty() ? Map.of()
+                : optionContractMapper.selectByIds(contractIds).stream()
+                .collect(Collectors.toMap(OptionContract::getId, Function.identity()));
 
         // userId -> positions
         Map<Long, List<Position>> positionMap = allPositions.stream()
@@ -133,7 +159,36 @@ public class RankingService {
                 }
             }
 
-            BigDecimal totalAssets = balance.add(frozen).add(marketValue).add(cryptoMarketValue).add(pendingSettlement)
+            // 合约仓位: margin + unrealizedPnl
+            BigDecimal futuresValue = BigDecimal.ZERO;
+            List<FuturesPosition> futuresPositions = futuresPositionMap.get(user.getId());
+            if (futuresPositions != null) {
+                for (FuturesPosition fp : futuresPositions) {
+                    BigDecimal markPrice = futuresMarkPriceMap.getOrDefault(fp.getSymbol(), BigDecimal.ZERO);
+                    BigDecimal unrealizedPnl = "LONG".equals(fp.getSide())
+                            ? markPrice.subtract(fp.getEntryPrice()).multiply(fp.getQuantity())
+                            : fp.getEntryPrice().subtract(markPrice).multiply(fp.getQuantity());
+                    futuresValue = futuresValue.add(fp.getMargin()).add(unrealizedPnl);
+                }
+            }
+
+            // 期权持仓市值
+            BigDecimal optionValue = BigDecimal.ZERO;
+            List<OptionPosition> optionPositions = optionPositionMap.get(user.getId());
+            if (optionPositions != null) {
+                for (OptionPosition op : optionPositions) {
+                    OptionContract contract = optionContractMap.get(op.getContractId());
+                    if (contract == null) continue;
+                    BigDecimal spotPrice = priceMap.getOrDefault(contract.getStockId(), BigDecimal.ZERO);
+                    BigDecimal premium = optionPricingService.calculatePremium(
+                            contract.getOptionType(), spotPrice, contract.getStrike(),
+                            contract.getExpireAt(), contract.getSigma());
+                    optionValue = optionValue.add(premium.multiply(BigDecimal.valueOf(op.getQuantity())));
+                }
+            }
+
+            BigDecimal totalAssets = balance.add(frozen).add(marketValue).add(cryptoMarketValue)
+                    .add(pendingSettlement).add(futuresValue).add(optionValue)
                     .subtract(marginLoanPrincipal)
                     .subtract(marginInterestAccrued);
             RankingDTO dto = getRankingDTO(user, totalAssets);

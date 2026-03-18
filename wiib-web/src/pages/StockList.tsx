@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { stockApi } from '../api';
 import { StockCard } from '../components/StockCard';
@@ -115,7 +115,7 @@ export function StockList() {
   }, [allStocks, query, sortField, sortOrder]);
 
   // Reset page when filter changes
-  useMemo(() => {
+  useEffect(() => {
     setPage(1);
   }, [query, sortField, sortOrder]);
 

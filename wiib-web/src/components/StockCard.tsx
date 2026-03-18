@@ -21,7 +21,7 @@ export function StockCard({ stock, onClick }: Props) {
         "w-full text-left",
         "flex justify-between items-center px-4 py-3 cursor-pointer",
         "transition-colors duration-150",
-        "hover:bg-surface-hover border-b border-edge/10 last:border-b-0",
+        "hover:bg-surface-hover border-b border-border/20 last:border-b-0",
         "group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       )}
     >
@@ -41,7 +41,7 @@ export function StockCard({ stock, onClick }: Props) {
         </span>
         <span className={cn(
           "text-xs tabular-nums font-bold px-3 py-1 rounded-full min-w-[5rem] text-center border-2",
-          isUp ? "bg-gain/8 text-gain border-gain/20" : isDown ? "bg-loss/8 text-loss border-loss/20" : "bg-muted text-muted-foreground border-edge/10"
+          isUp ? "bg-gain/8 text-gain border-gain/20" : isDown ? "bg-loss/8 text-loss border-loss/20" : "bg-muted text-muted-foreground border-border/20"
         )}>
           {isUp ? '+' : ''}{changePct.toFixed(2)}%
         </span>

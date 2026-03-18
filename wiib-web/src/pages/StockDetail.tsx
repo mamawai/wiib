@@ -2,7 +2,6 @@ import { useState, useRef, useMemo, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { stockApi, orderApi, newsApi, userApi, buffApi } from '../api';
 import { useQuote } from '../hooks/useQuote';
-import { useUserEvents } from '../hooks/useUserEvents';
 import { TickChart } from '../components/TickChart';
 import { useUserStore } from '../stores/userStore';
 import { useToast } from '../components/ui/use-toast';
@@ -31,7 +30,7 @@ import {
   Sparkles,
   ChartCandlestick,
 } from 'lucide-react';
-import type { Stock, DayTick, News, Position, PositionChangeEvent, OrderStatusEvent, AssetChangeEvent, UserBuff } from '../types';
+import type { Stock, DayTick, News, Position, UserBuff } from '../types';
 
 export function StockDetail() {
   const { id } = useParams<{ id: string }>();
@@ -102,57 +101,6 @@ export function StockDetail() {
   const quoteTime = quote?.timestamp
     ? new Date(quote.timestamp).toLocaleTimeString('zh-CN', { hour12: false })
     : null;
-
-  // 监听WebSocket事件（持仓变化、订单状态、资产变化）
-  useUserEvents(user?.id, {
-    onAssetChange: (event: AssetChangeEvent) => {
-      useUserStore.setState((state) => {
-        if (!state.user) return {};
-        return {
-          user: {
-            ...state.user,
-            balance: event.balance,
-            frozenBalance: event.frozenBalance,
-            positionMarketValue: event.positionMarketValue,
-            pendingSettlement: event.pendingSettlement,
-            marginLoanPrincipal: event.marginLoanPrincipal,
-            marginInterestAccrued: event.marginInterestAccrued,
-            bankrupt: event.bankrupt,
-            bankruptCount: event.bankruptCount,
-            bankruptResetDate: event.bankruptResetDate,
-            totalAssets: event.totalAssets,
-          },
-        };
-      });
-    },
-    onPositionChange: (event: PositionChangeEvent) => {
-      if (!stock || event.stockId !== stock.id) return;
-      if (event.quantity === 0 && event.frozenQuantity === 0) {
-        setPosition(null);
-        return;
-      }
-      setPosition((prev) => ({
-        id: prev?.id ?? 0,
-        stockId: event.stockId,
-        stockCode: event.stockCode,
-        stockName: event.stockName,
-        quantity: event.quantity,
-        avgCost: event.avgCost,
-        currentPrice: event.currentPrice,
-        marketValue: event.marketValue,
-        profit: event.profit,
-        profitPct: event.profitPct,
-      }));
-    },
-    onOrderStatus: (event: OrderStatusEvent) => {
-      if (!stock || event.stockCode !== stock.code) return;
-      const statusText = event.newStatus === 'FILLED' ? '已成交' :
-                         event.newStatus === 'CANCELLED' ? '已取消' :
-                         event.newStatus === 'PENDING' ? '已挂单' : event.newStatus;
-      toast(`${event.orderSide === 'BUY' ? '买入' : '卖出'}订单${statusText}`,
-            event.newStatus === 'FILLED' ? 'success' : 'info');
-    },
-  });
 
   // 加载折扣Buff
   useEffect(() => {
@@ -307,6 +255,8 @@ export function StockDetail() {
         await orderApi.sell(request);
       }
       toast('下单成功', 'success');
+      setRefreshNonce((n) => n + 1);
+      userApi.portfolio().then((u) => useUserStore.setState({ user: u })).catch(() => {});
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : '下单失败';
       toast(msg, 'error');

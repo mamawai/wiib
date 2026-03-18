@@ -17,9 +17,6 @@ import com.mawai.wiibcommon.enums.ErrorCode;
 import com.mawai.wiibcommon.enums.OrderSide;
 import com.mawai.wiibcommon.enums.OrderStatus;
 import com.mawai.wiibcommon.enums.OrderType;
-import com.mawai.wiibcommon.event.AssetChangeEvent;
-import com.mawai.wiibcommon.event.OrderStatusEvent;
-import com.mawai.wiibcommon.event.PositionChangeEvent;
 import com.mawai.wiibcommon.exception.BizException;
 import com.mawai.wiibcommon.util.SpringUtils;
 import com.mawai.wiibservice.config.TradingConfig;
@@ -27,7 +24,6 @@ import com.mawai.wiibservice.mapper.CryptoOrderMapper;
 import com.mawai.wiibservice.mapper.OrderMapper;
 import com.mawai.wiibservice.service.CacheService;
 import com.mawai.wiibservice.service.CryptoPositionService;
-import com.mawai.wiibservice.service.EventPublisher;
 import com.mawai.wiibservice.service.MarginAccountService;
 import com.mawai.wiibservice.service.OrderService;
 import com.mawai.wiibservice.service.PositionService;
@@ -78,7 +74,6 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
     private final CacheService cacheService;
     private final TradingConfig tradingConfig;
     private final RedisLockUtil redisLockUtil;
-    private final EventPublisher eventPublisher;
     private final MarginAccountService marginAccountService;
     private final BuffService buffService;
     private final CryptoPositionService cryptoPositionService;
@@ -543,8 +538,6 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
                     OrderStatus.CANCELLED.getCode());
             if (affected > 0) {
                 order.setStatus(OrderStatus.CANCELLED.getCode());
-                Thread.startVirtualThread(() -> publishOrderStatusEvent(order, stock,
-                        OrderStatus.TRIGGERED.getCode(), OrderStatus.CANCELLED.getCode()));
             }
             return false;
         }
@@ -598,14 +591,6 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
                 throw new BizException(ErrorCode.SYSTEM_ERROR.getCode(), "创建结算记录失败");
             }
         }
-
-        // 5) 推送事件（实时刷新用）
-        Thread.startVirtualThread(() -> {
-            publishOrderFilledEvents(order.getUserId(), order.getStockId(),
-                    stock.getCode(), stock.getName(), order.getOrderSide(),
-                    order.getQuantity());
-            publishOrderStatusEvent(order, stock, OrderStatus.TRIGGERED.getCode(), OrderStatus.FILLED.getCode());
-        });
 
         return true;
     }
@@ -770,13 +755,6 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         log.info("市价买入成交 userId={} stock={} qty={} price={} amount={} commission={}",
                 userId, stock.getCode(), quantity, price, amount, commission);
 
-        // 发布订单成交事件
-        Thread.startVirtualThread(() -> {
-            publishOrderFilledEvents(userId, stock.getId(), stock.getCode(), stock.getName(),
-                    OrderSide.BUY.getCode(), quantity);
-            publishOrderStatusEvent(order, stock, null, OrderStatus.FILLED.getCode());
-        });
-
         return buildOrderResponse(order, stock);
     }
 
@@ -794,12 +772,6 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
 
         log.info("市价杠杆买入成交 userId={} stock={} qty={} price={} amount={} margin={} borrowed={} commission={}",
                 userId, stock.getCode(), quantity, price, amount, margin, borrowed, commission);
-
-        Thread.startVirtualThread(() -> {
-            publishOrderFilledEvents(userId, stock.getId(), stock.getCode(), stock.getName(),
-                    OrderSide.BUY.getCode(), quantity);
-            publishOrderStatusEvent(order, stock, null, OrderStatus.FILLED.getCode());
-        });
 
         return buildOrderResponse(order, stock);
     }
@@ -821,13 +793,6 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
 
         log.info("市价卖出成交 userId={} stock={} qty={} price={} amount={} commission={} (T+1到账)",
                 userId, stock.getCode(), quantity, price, amount, commission);
-
-        // 发布订单成交事件
-        Thread.startVirtualThread(() -> {
-            publishOrderFilledEvents(userId, stock.getId(), stock.getCode(), stock.getName(),
-                    OrderSide.SELL.getCode(), quantity);
-            publishOrderStatusEvent(order, stock, null, OrderStatus.FILLED.getCode());
-        });
 
         return buildOrderResponse(order, stock);
     }
@@ -909,86 +874,5 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         resp.setExpireAt(order.getExpireAt());
         resp.setCreatedAt(order.getCreatedAt());
         return resp;
-    }
-
-    /**
-     * 发布订单成交后的资产和持仓变化事件
-     */
-    private void publishOrderFilledEvents(Long userId, Long stockId, String stockCode, String stockName,
-                                          String orderSide, Integer quantity) {
-        try {
-            // 获取用户最新资产信息
-            User user = userService.getById(userId);
-            BigDecimal positionMarketValue = positionService.calculateTotalMarketValue(userId);
-
-            // crypto持仓市值
-            positionMarketValue = positionMarketValue.add(cryptoPositionService.calculateCryptoMarketValue(userId));
-
-            BigDecimal pendingSettlement = settlementService.getPendingSettlements(userId).stream()
-                    .map(Settlement::getAmount)
-                    .reduce(BigDecimal.ZERO, BigDecimal::add);
-            pendingSettlement = pendingSettlement.add(cryptoOrderMapper.sumSettlingAmount(userId));
-
-            // 发布资产变化事件
-            AssetChangeEvent assetEvent = new AssetChangeEvent(
-                    userId,
-                    user.getBalance(),
-                    user.getFrozenBalance(),
-                    positionMarketValue,
-                    pendingSettlement,
-                    user.getMarginLoanPrincipal(),
-                    user.getMarginInterestAccrued(),
-                    Boolean.TRUE.equals(user.getIsBankrupt()),
-                    user.getBankruptCount(),
-                    user.getBankruptResetDate(),
-                    "ORDER_FILLED"
-            );
-            eventPublisher.publishAssetChange(assetEvent);
-
-            // 发布持仓变化事件
-            Position position = positionService.findByUserAndStock(userId, stockId);
-            if (position != null) {
-                BigDecimal currentPrice = cacheService.getCurrentPrice(stockId);
-                PositionChangeEvent positionEvent = new PositionChangeEvent(
-                        userId,
-                        stockId,
-                        stockCode,
-                        stockName,
-                        position.getQuantity(),
-                        position.getFrozenQuantity(),
-                        position.getAvgCost(),
-                        currentPrice,
-                        orderSide,
-                        OrderSide.BUY.getCode().equals(orderSide) ? quantity : -quantity
-                );
-                eventPublisher.publishPositionChange(positionEvent);
-            }
-        } catch (Exception e) {
-            log.error("发布订单成交事件失败 userId={} stockCode={}", userId, stockCode, e);
-        }
-    }
-
-    /**
-     * 发布订单状态变化事件
-     */
-    private void publishOrderStatusEvent(Order order, Stock stock, String oldStatus, String newStatus) {
-        try {
-            OrderStatusEvent event = new OrderStatusEvent(
-                    order.getUserId(),
-                    order.getId(),
-                    stock.getCode(),
-                    stock.getName(),
-                    order.getOrderType(),
-                    order.getOrderSide(),
-                    order.getQuantity(),
-                    order.getLimitPrice() != null ? order.getLimitPrice() : order.getFilledPrice(),
-                    oldStatus,
-                    newStatus
-            );
-            event.setExecutePrice(order.getFilledPrice());
-            eventPublisher.publishOrderStatus(event);
-        } catch (Exception e) {
-            log.error("发布订单状态变化事件失败 orderId={}", order.getId(), e);
-        }
     }
 }

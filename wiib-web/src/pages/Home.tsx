@@ -8,7 +8,6 @@ import type { TradeItem } from '../components/LatestTradesCard';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Skeleton } from '../components/ui/skeleton';
-import { Dialog, DialogHeader, DialogContent, DialogFooter } from '../components/ui/dialog';
 import { useToast } from '../components/ui/use-toast';
 import {
   TrendingUp, TrendingDown, LineChart, RefreshCcw, Bell,
@@ -20,18 +19,18 @@ import { useUserStore } from '../stores/userStore';
 import { cn } from '../lib/utils';
 
 const HIDE_NOTICE_KEY = 'wiib-notice-hide-date';
+function shouldShowNotice() { const d = localStorage.getItem(HIDE_NOTICE_KEY); return !d || d !== new Date().toDateString(); }
+
 const FUTURES_SIDE_MAP: Record<string, { label: string; tone: 'buy' | 'sell' }> = {
   OPEN_LONG: { label: '开多', tone: 'buy' },
   OPEN_SHORT: { label: '开空', tone: 'sell' },
   CLOSE_LONG: { label: '平多', tone: 'sell' },
   CLOSE_SHORT: { label: '平空', tone: 'buy' },
 };
-function shouldShowNotice() { const d = localStorage.getItem(HIDE_NOTICE_KEY); return !d || d !== new Date().toDateString(); }
-function hideNoticeToday() { localStorage.setItem(HIDE_NOTICE_KEY, new Date().toDateString()); }
 
 function StockCardSkeleton() {
   return (
-    <div className="flex justify-between items-center px-4 py-3 border-b border-edge/10 last:border-b-0">
+    <div className="flex justify-between items-center px-4 py-3 border-b border-border/20 last:border-b-0">
       <div className="flex flex-col gap-2"><Skeleton className="h-4 w-20" /><Skeleton className="h-3 w-14" /></div>
       <Skeleton className="h-7 w-20 rounded-full" />
     </div>
@@ -53,13 +52,13 @@ export function Home() {
   const [losers, setLosers] = useState<Stock[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshNonce, setRefreshNonce] = useState(0);
-  const [noticeOpen, setNoticeOpen] = useState(false);
+
   const [buffStatus, setBuffStatus] = useState<BuffStatus | null>(null);
   const [latestTrades, setLatestTrades] = useState<TradeItem[]>([]);
   const [tradesLoading, setTradesLoading] = useState(true);
   const requestKey = `home:gainers-losers:limit=5:refresh=${refreshNonce}`;
 
-  useEffect(() => { if (shouldShowNotice()) setNoticeOpen(true); }, []);
+  useEffect(() => { if (shouldShowNotice()) navigate('/intro', { replace: true }); }, []);
   useEffect(() => {
     if (isLoggedIn) buffApi.status().then(setBuffStatus).catch(() => {});
     else setBuffStatus(null);
@@ -96,7 +95,7 @@ export function Home() {
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-5">
             {/* Left: slogan + CTA */}
             <div className="flex-1 space-y-3">
-              <div className="inline-flex items-center gap-2 bg-primary/10 border-2 border-edge/20 rounded-full px-3.5 py-1 text-xs font-bold text-primary">
+              <div className="inline-flex items-center gap-2 bg-primary/10 rounded-full px-3.5 py-1 text-xs font-bold text-primary neu-flat">
                 <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
                 模拟交易平台
               </div>
@@ -109,7 +108,7 @@ export function Home() {
                 <Button size="sm" onClick={() => navigate(isLoggedIn ? '/stocks' : '/login')}>
                   {isLoggedIn ? '开始交易' : '免费开始'} <ArrowRight className="w-3.5 h-3.5" />
                 </Button>
-                <Button variant="outline" size="sm" onClick={() => setNoticeOpen(true)}>玩法说明</Button>
+                <Button variant="outline" size="sm" onClick={() => navigate('/intro')}>玩法说明</Button>
               </div>
             </div>
 
@@ -120,7 +119,7 @@ export function Home() {
                 {user?.id === 1 && (
                   <Button variant="ghost" size="icon" className="w-7 h-7" onClick={() => navigate('/admin')}><Settings className="w-3.5 h-3.5" /></Button>
                 )}
-                <Button variant="ghost" size="icon" className="w-7 h-7" onClick={() => setNoticeOpen(true)}><Bell className="w-3.5 h-3.5 text-primary" /></Button>
+                <Button variant="ghost" size="icon" className="w-7 h-7" onClick={() => navigate('/intro')}><Bell className="w-3.5 h-3.5 text-primary" /></Button>
                 <Button variant="ghost" size="icon" className="w-7 h-7" onClick={() => { setRefreshNonce(n => n + 1); toast('已刷新', 'info'); }}><RefreshCcw className="w-3.5 h-3.5" /></Button>
               </div>
               <div className="text-xs font-bold text-muted-foreground uppercase tracking-wider">总资产</div>
@@ -172,9 +171,9 @@ export function Home() {
           <button
             key={to}
             onClick={() => navigate(to)}
-            className="flex flex-col items-center gap-2.5 py-4 rounded-2xl border-[3px] border-edge bg-card shadow-[3px_3px_0_0_var(--color-edge)] hover:shadow-[1px_1px_0_0_var(--color-edge)] hover:translate-x-0.5 hover:translate-y-0.5 active:shadow-none active:translate-x-0.75 active:translate-y-0.75 transition-all cursor-pointer"
+            className="flex flex-col items-center gap-2.5 py-4 rounded-2xl bg-card neu-btn-sm transition-all cursor-pointer"
           >
-            <div className={cn("w-11 h-11 rounded-xl flex items-center justify-center border-2 border-edge/15", bg)}>
+            <div className={cn("w-11 h-11 rounded-xl flex items-center justify-center", bg)}>
               <Icon className={cn("w-5 h-5", ic)} />
             </div>
             <span className="text-xs font-bold">{label}</span>
@@ -193,7 +192,7 @@ export function Home() {
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-2 text-sm">
-              <div className="w-7 h-7 rounded-lg bg-gain/10 border-2 border-edge/15 flex items-center justify-center">
+              <div className="w-7 h-7 rounded-lg bg-gain/10 flex items-center justify-center">
                 <TrendingUp className="w-3.5 h-3.5 text-gain" />
               </div>
               涨幅榜
@@ -211,7 +210,7 @@ export function Home() {
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-2 text-sm">
-              <div className="w-7 h-7 rounded-lg bg-loss/10 border-2 border-edge/15 flex items-center justify-center">
+              <div className="w-7 h-7 rounded-lg bg-loss/10 flex items-center justify-center">
                 <TrendingDown className="w-3.5 h-3.5 text-loss" />
               </div>
               跌幅榜
@@ -228,31 +227,6 @@ export function Home() {
         </Card>
       </div>
 
-      {/* ====== Notice Dialog ====== */}
-      <Dialog open={noticeOpen} onClose={() => setNoticeOpen(false)} className="max-w-xl">
-        <DialogHeader>
-          <h2 className="text-xl font-extrabold flex items-center gap-2">
-            <Bell className="w-5 h-5 text-primary" />
-            玩法说明
-          </h2>
-        </DialogHeader>
-        <DialogContent>
-          <div className="space-y-4 text-sm leading-relaxed">
-            <section><h3 className="font-bold text-base mb-2 text-primary">欢迎</h3><p className="text-muted-foreground">虚拟股票交易模拟器，体验"如果当初买了会怎样"。所有数据均为模拟。</p></section>
-            <section className="bg-primary/8 p-3 rounded-xl border-2 border-primary/20"><p className="text-primary/80 text-xs font-medium">仅供娱乐，不构成投资建议。杠杆有风险，可能爆仓。</p></section>
-            <section><h3 className="font-bold text-base mb-2 text-primary">交易时间</h3><p className="text-muted-foreground">周一至周五 9:30-11:30、13:00-15:00，每10秒更新行情</p></section>
-            <section><h3 className="font-bold text-base mb-2 text-primary">股票交易</h3><ul className="list-disc list-inside text-muted-foreground space-y-1"><li><strong>市价单</strong>：当前价立即成交</li><li><strong>限价单</strong>：设定价格，触发后成交（当日有效）</li><li><strong>手续费</strong>：0.05%，最低$5</li><li><strong>T+1结算</strong>：卖出后资金24小时到账</li><li><strong>初始资金</strong>：$100,000</li></ul></section>
-            <section><h3 className="font-bold text-base mb-2 text-primary">杠杆交易</h3><ul className="list-disc list-inside text-muted-foreground space-y-1"><li>市价买入可选1-10倍杠杆</li><li>借款按日计息0.05%</li><li>爆仓：资产低于借款时自动清仓，次日9:00恢复</li></ul></section>
-            <section><h3 className="font-bold text-base mb-2 text-primary">期权交易</h3><ul className="list-disc list-inside text-muted-foreground space-y-1"><li><strong>CALL看涨</strong>：涨得越多赚得越多</li><li><strong>PUT看跌</strong>：跌得越多赚得越多</li><li>仅支持买入开仓，到期前可平仓或等待结算</li><li>现金结算，不涉及股票交割</li></ul></section>
-            <section><h3 className="font-bold text-base mb-2 text-primary">BTC模拟交易</h3><ul className="list-disc list-inside text-muted-foreground space-y-1"><li><strong>实时行情</strong>：接入Binance WebSocket</li><li><strong>支持小数</strong>：最小0.00001 BTC</li><li><strong>手续费</strong>：0.1%</li><li><strong>限价单</strong>：50%-150%市价，24小时有效</li><li><strong>杠杆</strong>：1-10倍，日息0.05%</li><li><strong>卖出到账</strong>：5分钟到账，优先偿还借款</li></ul></section>
-            <section><h3 className="font-bold text-base mb-2 text-primary">每日福利</h3><p className="text-muted-foreground">每天可抽一次，有机会获得红包、股票或折扣券</p></section>
-          </div>
-        </DialogContent>
-        <DialogFooter>
-          <Button variant="ghost" size="sm" onClick={() => { hideNoticeToday(); setNoticeOpen(false); }}>今日不再显示</Button>
-          <Button size="sm" onClick={() => setNoticeOpen(false)}>我知道了</Button>
-        </DialogFooter>
-      </Dialog>
     </div>
   );
 }

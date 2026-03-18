@@ -2,25 +2,25 @@ package com.mawai.wiibservice.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.mawai.wiibcommon.dto.OptionPositionDTO;
 import com.mawai.wiibcommon.dto.UserDTO;
+import com.mawai.wiibcommon.entity.FuturesPosition;
 import com.mawai.wiibcommon.entity.Settlement;
 import com.mawai.wiibcommon.entity.User;
 import com.mawai.wiibcommon.enums.ErrorCode;
 import com.mawai.wiibcommon.exception.BizException;
 import com.mawai.wiibservice.mapper.CryptoOrderMapper;
+import com.mawai.wiibservice.mapper.FuturesPositionMapper;
 import com.mawai.wiibservice.mapper.UserMapper;
-import com.mawai.wiibservice.service.CryptoPositionService;
-import com.mawai.wiibservice.service.PositionService;
-import com.mawai.wiibservice.service.SettlementService;
-import com.mawai.wiibservice.service.UserService;
+import com.mawai.wiibservice.service.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.util.List;
 
 /**
  * 用户服务实现
@@ -35,7 +35,9 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
     private final SettlementService settlementService;
     private final CryptoPositionService cryptoPositionService;
     private final CryptoOrderMapper cryptoOrderMapper;
-    private final StringRedisTemplate stringRedisTemplate;
+    private final FuturesPositionMapper futuresPositionMapper;
+    private final CacheService cacheService;
+    private final OptionPositionService optionPositionService;
 
     @Value("${trading.initial-balance:100000}")
     private BigDecimal initialBalance;
@@ -73,10 +75,34 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         BigDecimal cryptoSettling = cryptoOrderMapper.sumSettlingAmount(userId);
         pendingSettlement = pendingSettlement.add(cryptoSettling);
 
+        // 合约仓位: margin + unrealizedPnl
+        BigDecimal futuresValue = BigDecimal.ZERO;
+        List<FuturesPosition> futuresPositions = futuresPositionMapper.selectList(
+                new LambdaQueryWrapper<FuturesPosition>()
+                        .eq(FuturesPosition::getUserId, userId)
+                        .eq(FuturesPosition::getStatus, "OPEN"));
+        for (FuturesPosition fp : futuresPositions) {
+            BigDecimal markPrice = cacheService.getMarkPrice(fp.getSymbol());
+            if (markPrice == null) markPrice = cacheService.getCryptoPrice(fp.getSymbol());
+            BigDecimal unrealizedPnl = "LONG".equals(fp.getSide())
+                    ? markPrice.subtract(fp.getEntryPrice()).multiply(fp.getQuantity())
+                    : fp.getEntryPrice().subtract(markPrice).multiply(fp.getQuantity());
+            futuresValue = futuresValue.add(fp.getMargin()).add(unrealizedPnl);
+        }
+
+        // 期权持仓市值
+        BigDecimal optionValue = BigDecimal.ZERO;
+        List<OptionPositionDTO> optionPositions = optionPositionService.getUserPositions(userId);
+        for (OptionPositionDTO op : optionPositions) {
+            optionValue = optionValue.add(op.getMarketValue());
+        }
+
         BigDecimal totalAssets = user.getBalance()
                 .add(frozenBalance)
                 .add(marketValue)
                 .add(pendingSettlement)
+                .add(futuresValue)
+                .add(optionValue)
                 .subtract(marginLoanPrincipal)
                 .subtract(marginInterestAccrued);
 
@@ -122,7 +148,6 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
             throw new BizException(ErrorCode.BALANCE_NOT_ENOUGH);
         }
         log.info("用户{}余额更新: {}", userId, amount);
-        baseMapper.selectById(userId);
     }
 
     @Override
@@ -135,7 +160,6 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
             throw new BizException(ErrorCode.BALANCE_NOT_ENOUGH);
         }
         log.info("用户{}冻结余额: {}", userId, amount);
-        baseMapper.selectById(userId);
     }
 
     @Override
@@ -148,7 +172,6 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
             throw new BizException(ErrorCode.FROZEN_BALANCE_NOT_ENOUGH);
         }
         log.info("用户{}解冻余额: {}", userId, amount);
-        baseMapper.selectById(userId);
     }
 
     @Override

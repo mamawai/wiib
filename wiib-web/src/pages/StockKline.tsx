@@ -8,6 +8,7 @@ import { Button } from '../components/ui/button';
 import { Skeleton } from '../components/ui/skeleton';
 import { ArrowLeft, Loader2 } from 'lucide-react';
 import type { Kline, DayTick } from '../types';
+import { useIsDark } from '../hooks/useIsDark';
 
 export function StockKline() {
   const { id } = useParams<{ id: string }>();
@@ -21,6 +22,7 @@ export function StockKline() {
   const [tickData, setTickData] = useState<DayTick[]>([]);
   const [loading, setLoading] = useState(true);
   const [tickLoading, setTickLoading] = useState(false);
+  const isDark = useIsDark();
 
   useEffect(() => {
     if (!id) return;
@@ -43,7 +45,7 @@ export function StockKline() {
   useEffect(() => {
     if (!chartRef.current || sortedKline.length === 0) return;
 
-    const chart = echarts.init(chartRef.current, 'dark');
+    const chart = echarts.init(chartRef.current, isDark ? 'dark' : undefined);
     const dates = sortedKline.map(k => k.date);
     // candlestick: [open, close, low, high]
     const ohlcData = sortedKline.map(k => [k.open, k.close, k.low, k.high]);
@@ -63,16 +65,16 @@ export function StockKline() {
         scale: true,
         axisLabel: { color: '#888', fontSize: 11, formatter: (v: number) => v.toFixed(2) },
         axisLine: { show: false },
-        splitLine: { lineStyle: { color: '#222', type: 'dashed' } },
+        splitLine: { lineStyle: { color: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.12)', type: 'dashed' } },
       },
       series: [{
         type: 'candlestick',
         data: ohlcData,
         itemStyle: {
-          color: '#ef4444',
-          color0: '#22c55e',
-          borderColor: '#ef4444',
-          borderColor0: '#22c55e',
+          color: '#f23645',
+          color0: '#089981',
+          borderColor: '#f23645',
+          borderColor0: '#089981',
         },
       }],
       tooltip: {
@@ -88,7 +90,7 @@ export function StockKline() {
           // ECharts candlestick d.data = [categoryIndex, open, close, low, high]
           const [, open, close, low, high] = d.data;
           if (open == null) return '';
-          const color = close >= open ? '#ef4444' : '#22c55e';
+          const color = close >= open ? '#f23645' : '#089981';
           return `<div style="padding:4px 0">
             <div style="color:#888;margin-bottom:4px">${d.name}</div>
             <div>开: ${Number(open).toFixed(2)}</div>
@@ -116,7 +118,15 @@ export function StockKline() {
       window.removeEventListener('resize', onResize);
       chart.dispose();
     };
-  }, [sortedKline]);
+  }, [sortedKline, isDark]);
+
+  useEffect(() => {
+    if (!chartRef.current) return;
+    const c = echarts.getInstanceByDom(chartRef.current);
+    if (!c) return;
+    const gridColor = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.12)';
+    c.setOption({ yAxis: { splitLine: { lineStyle: { color: gridColor } } } });
+  }, [isDark]);
 
   // 悬停加载分时（带内存缓存 + 请求取消）
   const tickCache = useRef<Map<string, DayTick[]>>(new Map());

@@ -125,57 +125,6 @@ export interface News {
   publishTime: string;
 }
 
-// WebSocket事件类型（与后端对应）
-
-export interface AssetChangeEvent {
-  userId: number;
-  balance: number;
-  frozenBalance: number;
-  positionMarketValue: number;
-  pendingSettlement: number;
-  marginLoanPrincipal: number;
-  marginInterestAccrued: number;
-  bankrupt: boolean;
-  bankruptCount: number;
-  bankruptResetDate?: string;
-  totalAssets: number;
-  profit: number;
-  profitPct: number;
-  reason: string;
-  timestamp: number;
-}
-
-export interface PositionChangeEvent {
-  userId: number;
-  stockId: number;
-  stockCode: string;
-  stockName: string;
-  quantity: number;
-  frozenQuantity: number;
-  avgCost: number;
-  currentPrice: number;
-  marketValue: number;
-  profit: number;
-  profitPct: number;
-  changeType: 'BUY' | 'SELL' | 'FREEZE' | 'UNFREEZE';
-  changeQuantity: number;
-  timestamp: number;
-}
-
-export interface OrderStatusEvent {
-  userId: number;
-  orderId: number;
-  stockCode: string;
-  stockName: string;
-  orderType: 'MARKET' | 'LIMIT';
-  orderSide: 'BUY' | 'SELL';
-  quantity: number;
-  price: number;
-  oldStatus: string;
-  newStatus: 'PENDING' | 'TRIGGERED' | 'SETTLING' | 'FILLED' | 'CANCELLED' | 'EXPIRED';
-  executePrice?: number;
-  timestamp: number;
-}
 
 export interface RankingItem {
   rank: number;
@@ -335,6 +284,24 @@ export interface MinesGameState {
 export interface MinesStatus {
   balance: number;
   activeGame: MinesGameState | null;
+}
+
+// ========== 视频扑克类型 ==========
+export interface VideoPokerGameState {
+  gameId: number;
+  betAmount: number;
+  cards: string[];
+  heldPositions: number[];
+  handRank: string;
+  multiplier: number;
+  payout: number;
+  phase: 'DEALING' | 'SETTLED';
+  balance: number;
+}
+
+export interface VideoPokerStatus {
+  balance: number;
+  activeGame: VideoPokerGameState | null;
 }
 
 // ========== 加密货币行情类型 ==========

@@ -5,17 +5,14 @@ import com.github.benmanes.caffeine.cache.Caffeine;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.*;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
+import org.springframework.data.redis.core.script.RedisScript;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.LocalDate;
-import java.util.Collection;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -183,6 +180,28 @@ public class CacheService {
         return stringRedisTemplate.opsForValue().increment(key, delta);
     }
 
+    /**
+     * 原子扣减，不允许低于 floor。
+     * @return 实际扣减量（0 ~ amount）
+     */
+    public long decrementWithFloor(String key, long amount, long floor) {
+        String lua = """
+                local cur = tonumber(redis.call('GET', KEYS[1]) or '0')
+                local amt = tonumber(ARGV[1])
+                local flr = tonumber(ARGV[2])
+                local avail = cur - flr
+                if avail <= 0 then return 0 end
+                if amt > avail then amt = avail end
+                redis.call('DECRBY', KEYS[1], amt)
+                return amt
+                """;
+        return stringRedisTemplate.execute(
+                RedisScript.of(lua, Long.class),
+                List.of(key),
+                String.valueOf(amount), String.valueOf(floor)
+        );
+    }
+
     // ==================== Hash操作 ====================
 
     public void hSet(String key, String field, String value) {
@@ -313,6 +332,31 @@ public class CacheService {
 
     public Set<String> zRangeByScore(String key, double min, double max) {
         return stringRedisTemplate.opsForZSet().rangeByScore(key, min, max);
+    }
+
+    @SuppressWarnings("unchecked")
+    public Map<String, Double> zRangeByScoreAndRemove(String key, double min, double max) {
+        String lua = """
+                local hits = redis.call('ZRANGEBYSCORE', KEYS[1], ARGV[1], ARGV[2])
+                if #hits == 0 then return {} end
+                local result = {}
+                for i, m in ipairs(hits) do
+                    result[#result + 1] = m
+                    result[#result + 1] = redis.call('ZSCORE', KEYS[1], m)
+                end
+                redis.call('ZREM', KEYS[1], unpack(hits))
+                return result
+                """;
+        List<String> raw = stringRedisTemplate.execute(
+                RedisScript.of(lua, List.class),
+                List.of(key),
+                String.valueOf(min), String.valueOf(max));
+        if (raw.isEmpty()) return Map.of();
+        Map<String, Double> result = new LinkedHashMap<>();
+        for (int i = 0; i < raw.size(); i += 2) {
+            result.put(raw.get(i), Double.parseDouble(raw.get(i + 1)));
+        }
+        return result;
     }
 
     public Set<ZSetOperations.TypedTuple<String>> zRangeByScoreWithScores(String key, double min, double max) {

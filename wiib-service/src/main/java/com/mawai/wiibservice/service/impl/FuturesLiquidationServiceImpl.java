@@ -2,7 +2,7 @@ package com.mawai.wiibservice.service.impl;
 
 import com.mawai.wiibservice.service.CacheService;
 import com.mawai.wiibservice.service.FuturesLiquidationService;
-import com.mawai.wiibservice.service.FuturesService;
+import com.mawai.wiibservice.service.FuturesRiskService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -15,7 +15,7 @@ import java.util.*;
 @RequiredArgsConstructor
 public class FuturesLiquidationServiceImpl implements FuturesLiquidationService {
 
-    private final FuturesService futuresService;
+    private final FuturesRiskService futuresRiskService;
     private final CacheService cacheService;
 
     private static final String LIQ_LONG_PREFIX = "futures:liq:long:";
@@ -25,10 +25,13 @@ public class FuturesLiquidationServiceImpl implements FuturesLiquidationService 
     private static final String TP_LONG_PREFIX = "futures:tp:long:";
     private static final String TP_SHORT_PREFIX = "futures:tp:short:";
 
+    private record RecoveryEntry(String key, String member, double score) {}
+
     private static class PositionHitGroup {
         boolean liq;
         final List<String> slIds = new ArrayList<>();
         final List<String> tpIds = new ArrayList<>();
+        final List<RecoveryEntry> recovery = new ArrayList<>();
     }
 
     @Override
@@ -56,49 +59,56 @@ public class FuturesLiquidationServiceImpl implements FuturesLiquidationService 
                 try {
                     Long pid = Long.parseLong(posId);
                     if (group.liq) {
-                        futuresService.forceClose(pid, markPrice);
+                        futuresRiskService.forceClose(pid, markPrice);
                     } else if (!group.slIds.isEmpty()) {
-                        futuresService.batchTriggerStopLoss(pid, group.slIds, markPrice);
+                        futuresRiskService.batchTriggerStopLoss(pid, group.slIds, markPrice);
                     } else if (!group.tpIds.isEmpty()) {
-                        futuresService.batchTriggerTakeProfit(pid, group.tpIds, currentPrice);
+                        futuresRiskService.batchTriggerTakeProfit(pid, group.tpIds, currentPrice);
                     }
                 } catch (Exception e) {
-                    log.error("futures仓位处理失败 posId={}", posId, e);
+                    log.error("futures仓位处理失败 posId={}, 恢复索引", posId, e);
+                    for (RecoveryEntry re : group.recovery) {
+                        cacheService.zAdd(re.key(), re.member(), re.score());
+                    }
                 }
             });
         }
     }
 
     private void collectLiq(String key, double min, double max, Map<String, PositionHitGroup> groups) {
-        Set<String> hits = cacheService.zRangeByScore(key, min, max);
-        if (hits == null || hits.isEmpty()) return;
-        cacheService.zRemove(key, hits.toArray());
-        for (String posId : hits) {
-            groups.computeIfAbsent(posId, k -> new PositionHitGroup()).liq = true;
+        Map<String, Double> hits = cacheService.zRangeByScoreAndRemove(key, min, max);
+        if (hits.isEmpty()) return;
+        for (var e : hits.entrySet()) {
+            PositionHitGroup g = groups.computeIfAbsent(e.getKey(), k -> new PositionHitGroup());
+            g.liq = true;
+            g.recovery.add(new RecoveryEntry(key, e.getKey(), e.getValue()));
         }
     }
 
     private void collectSl(String key, double min, double max, Map<String, PositionHitGroup> groups) {
-        Set<String> hits = cacheService.zRangeByScore(key, min, max);
-        if (hits == null || hits.isEmpty()) return;
-        cacheService.zRemove(key, hits.toArray());
-        for (String member : hits) {
-            int sep = member.indexOf(':');
-            String posId = member.substring(0, sep);
-            String slId = member.substring(sep + 1);
-            groups.computeIfAbsent(posId, k -> new PositionHitGroup()).slIds.add(slId);
+        Map<String, Double> hits = cacheService.zRangeByScoreAndRemove(key, min, max);
+        if (hits.isEmpty()) return;
+        for (var e : hits.entrySet()) {
+            solveHits(key, e, groups, true);
         }
     }
 
     private void collectTp(String key, double min, double max, Map<String, PositionHitGroup> groups) {
-        Set<String> hits = cacheService.zRangeByScore(key, min, max);
-        if (hits == null || hits.isEmpty()) return;
-        cacheService.zRemove(key, hits.toArray());
-        for (String member : hits) {
-            int sep = member.indexOf(':');
-            String posId = member.substring(0, sep);
-            String tpId = member.substring(sep + 1);
-            groups.computeIfAbsent(posId, k -> new PositionHitGroup()).tpIds.add(tpId);
+        Map<String, Double> hits = cacheService.zRangeByScoreAndRemove(key, min, max);
+        if (hits.isEmpty()) return;
+        for (var e : hits.entrySet()) {
+            solveHits(key, e, groups, false);
         }
+    }
+
+    private void solveHits(String key, Map.Entry<String, Double> e, Map<String, PositionHitGroup> groups, boolean isSL) {
+        String member = e.getKey();
+        int sep = member.indexOf(':');
+        String posId = member.substring(0, sep);
+        String id = member.substring(sep + 1);
+        PositionHitGroup g = groups.computeIfAbsent(posId, k -> new PositionHitGroup());
+        if (isSL) g.slIds.add(id);
+        else g.tpIds.add(id);
+        g.recovery.add(new RecoveryEntry(key, member, e.getValue()));
     }
 }
