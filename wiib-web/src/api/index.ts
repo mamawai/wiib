@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { Stock, User, Position, OrderRequest, Order, DayTick, Kline, Settlement, PageResult, News, RankingItem, OptionChainItem, OptionQuote, OptionPosition, OptionOrder, OptionOrderRequest, OptionOrderResult, BuffStatus, UserBuff, BlackjackStatus, GameState, ConvertResult, MinesStatus, MinesGameState, VideoPokerStatus, VideoPokerGameState, CryptoPrice, CryptoOrderRequest, CryptoOrder, CryptoPosition, CardRoom, Card414GameState, FuturesOpenRequest, FuturesCloseRequest, FuturesAddMarginRequest, FuturesIncreaseRequest, FuturesStopLossRequest, FuturesTakeProfitRequest, FuturesPosition, FuturesOrder } from '../types';
+import type { Stock, User, Position, OrderRequest, Order, DayTick, Kline, Settlement, PageResult, News, RankingItem, OptionChainItem, OptionQuote, OptionPosition, OptionOrder, OptionOrderRequest, OptionOrderResult, BuffStatus, UserBuff, BlackjackStatus, GameState, ConvertResult, MinesStatus, MinesGameState, VideoPokerStatus, VideoPokerGameState, CryptoPrice, CryptoOrderRequest, CryptoOrder, CryptoPosition, CardRoom, Card414GameState, FuturesOpenRequest, FuturesCloseRequest, FuturesAddMarginRequest, FuturesIncreaseRequest, FuturesStopLossRequest, FuturesTakeProfitRequest, FuturesPosition, FuturesOrder, PredictionRound, PredictionBet, PredictionBuyRequest, PredictionBetLive, PredictionPnl } from '../types';
 
 const api = axios.create({
   baseURL: '/api',
@@ -268,4 +268,18 @@ export const futuresApi = {
   orders: (status?: string, pageNum = 1, pageSize = 10, symbol?: string) =>
     api.get<unknown, PageResult<FuturesOrder>>('/futures/orders', { params: { status, pageNum, pageSize, symbol } }),
   live: () => api.get<unknown, FuturesOrder[]>('/futures/live'),
+};
+
+// ========== BTC 5min 涨跌预测接口 ==========
+export const predictionApi = {
+  current: () => api.get<unknown, PredictionRound>('/prediction/current'),
+  buy: (data: PredictionBuyRequest) => api.post<unknown, PredictionBet>('/prediction/buy', data),
+  sell: (betId: number) => api.post<unknown, PredictionBet>(`/prediction/sell/${betId}`),
+  bets: (pageNum = 1, pageSize = 10) =>
+    api.get<unknown, PageResult<PredictionBet>>('/prediction/bets', { params: { pageNum, pageSize } }),
+  rounds: (pageNum = 1, pageSize = 10) =>
+    api.get<unknown, PageResult<PredictionRound>>('/prediction/rounds', { params: { pageNum, pageSize } }),
+  live: () => api.get<unknown, PredictionBetLive[]>('/prediction/live'),
+  priceHistory: () => api.get<unknown, { time: number; price: string }[]>('/prediction/price-history'),
+  pnl: () => api.get<unknown, PredictionPnl>('/prediction/pnl'),
 };

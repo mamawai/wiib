@@ -403,3 +403,27 @@ html.dark .neu-btn-sm:active:not(:disabled) { box-shadow: inset 3px 3px 6px var(
   to { opacity: 1; transform: translateY(0) scale(1); }
 }
 .vp-card-deal { animation: vp-card-deal 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) both }
+
+/* Rolling digit animations */
+@keyframes roll-up-out {
+  from { transform: translateY(0); }
+  to { transform: translateY(-100%); }
+}
+@keyframes roll-down-out {
+  from { transform: translateY(0); }
+  to { transform: translateY(100%); }
+}
+.roll-up {
+  animation: roll-up-out 0.3s ease-in-out forwards;
+}
+.roll-down {
+  animation: roll-down-out 0.3s ease-in-out forwards;
+}
+
+@keyframes pred-feed-slide {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.pred-feed-in {
+  animation: pred-feed-slide 0.35s ease-out both;
+}

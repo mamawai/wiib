@@ -36,12 +36,14 @@ public class RedisMessageBroadcastService implements MessageListener {
     private static final String CHANNEL_PREFIX = "ws:broadcast:";
     private static final String STOCK_CHANNEL = CHANNEL_PREFIX + "stock";
     private static final String CRYPTO_CHANNEL = CHANNEL_PREFIX + "crypto";
+    private static final String PREDICTION_CHANNEL = CHANNEL_PREFIX + "prediction";
 
     @PostConstruct
     public void init() {
         redisMessageListenerContainer.addMessageListener(this, new ChannelTopic(STOCK_CHANNEL));
         redisMessageListenerContainer.addMessageListener(this, new ChannelTopic(CRYPTO_CHANNEL));
-        log.info("已订阅Redis广播频道: {}, {}", STOCK_CHANNEL, CRYPTO_CHANNEL);
+        redisMessageListenerContainer.addMessageListener(this, new ChannelTopic(PREDICTION_CHANNEL));
+        log.info("已订阅Redis广播频道: {}, {}, {}", STOCK_CHANNEL, CRYPTO_CHANNEL, PREDICTION_CHANNEL);
     }
 
     /**
@@ -74,6 +76,19 @@ public class RedisMessageBroadcastService implements MessageListener {
     }
 
     /**
+     * 广播预测市场消息
+     * @param topic price/round/activity
+     */
+    public void broadcastPrediction(String topic, String message) {
+        try {
+            String payload = topic + "|" + message;
+            redisTemplate.convertAndSend(PREDICTION_CHANNEL, payload);
+        } catch (Exception e) {
+            log.error("广播预测市场消息失败: {}", topic, e);
+        }
+    }
+
+    /**
      * 接收Redis消息并推送到本地WebSocket连接
      */
     @Override
@@ -92,6 +107,8 @@ public class RedisMessageBroadcastService implements MessageListener {
 
             if (CRYPTO_CHANNEL.equals(channel)) {
                 messagingTemplate.convertAndSend("/topic/crypto/" + code, jsonMessage);
+            } else if (PREDICTION_CHANNEL.equals(channel)) {
+                messagingTemplate.convertAndSend("/topic/prediction/" + code, jsonMessage);
             } else {
                 messagingTemplate.convertAndSend("/topic/quote/" + code, jsonMessage);
                 log.debug("本地推送股票行情: {}", code);

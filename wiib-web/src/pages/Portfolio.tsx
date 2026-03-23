@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useUserStore } from '../stores/userStore';
-import { userApi, orderApi, settlementApi, cryptoOrderApi, cryptoApi, futuresApi, optionApi } from '../api';
+import { userApi, orderApi, settlementApi, cryptoOrderApi, cryptoApi, futuresApi, optionApi, predictionApi } from '../api';
 import { Card, CardContent } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
@@ -25,8 +25,9 @@ import {
   CircleDollarSign,
   Scale,
   Layers,
+  Target,
 } from 'lucide-react';
-import type { Position, Order, Settlement, CryptoPosition, FuturesPosition, OptionPosition } from '../types';
+import type { Position, Order, Settlement, CryptoPosition, FuturesPosition, OptionPosition, PredictionPnl } from '../types';
 import { useDedupedEffect } from '../hooks/useDedupedEffect';
 import { getCoin } from '../lib/coinConfig';
 
@@ -75,6 +76,7 @@ export function Portfolio() {
   const [cryptoRows, setCryptoRows] = useState<CryptoRow[]>([]);
   const [futuresPositions, setFuturesPositions] = useState<FuturesPosition[]>([]);
   const [optionPositions, setOptionPositions] = useState<OptionPosition[]>([]);
+  const [predictionPnl, setPredictionPnl] = useState<PredictionPnl | null>(null);
   const [orders, setOrders] = useState<Order[]>([]);
   const [orderTotal, setOrderTotal] = useState(0);
   const [orderPage, setOrderPage] = useState(1);
@@ -146,6 +148,7 @@ export function Portfolio() {
           loadCryptoPositions();
           futuresApi.positions().then(setFuturesPositions).catch(() => setFuturesPositions([]));
           optionApi.positions().then(setOptionPositions).catch(() => setOptionPositions([]));
+          predictionApi.pnl().then(setPredictionPnl).catch(() => setPredictionPnl(null));
         })
         .catch(() => {
           if (cancelled) return;
@@ -157,6 +160,7 @@ export function Portfolio() {
           setCryptoRows([]);
           setFuturesPositions([]);
           setOptionPositions([]);
+          setPredictionPnl(null);
           toast('获取账户数据失败', 'error', { description: '请稍后重试' });
         })
         .finally(() => {
@@ -197,11 +201,13 @@ export function Portfolio() {
   const futuresTotal = futuresMargin + futuresProfit;
   const optionTotal = optionPositions.reduce((s, o) => s + o.marketValue, 0);
   const optionProfit = optionPositions.reduce((s, o) => s + o.pnl, 0);
+  const hasPrediction = predictionPnl != null && predictionPnl.totalBets > 0;
+  const predictionProfit = predictionPnl?.totalPnl ?? 0;
   const hasStock = positions.length > 0;
   const hasCrypto = cryptoRows.length > 0;
   const hasFutures = futuresPositions.length > 0;
   const hasOptions = optionPositions.length > 0;
-  const hasPositions = hasStock || hasCrypto || hasFutures || hasOptions;
+  const hasPositions = hasStock || hasCrypto || hasFutures || hasOptions || hasPrediction;
 
   return (
     <div className="max-w-4xl mx-auto p-4 space-y-4">
@@ -690,10 +696,69 @@ export function Portfolio() {
                 </Card>
               )}
 
+              {/* 预测盈亏 */}
+              {hasPrediction && predictionPnl && (
+                <Card className="overflow-hidden">
+                  <button
+                    type="button"
+                    onClick={() => navigate('/prediction')}
+                    className="w-full text-left"
+                  >
+                    <div className="px-4 py-3 flex items-center justify-between border-b border-border/40 bg-gradient-to-r from-amber-500/[0.06] to-transparent">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-8 h-8 rounded-lg bg-amber-500/10 flex items-center justify-center ring-1 ring-amber-500/20">
+                          <Target className="w-4 h-4 text-amber-400" />
+                        </div>
+                        <div>
+                          <span className="text-sm font-semibold tracking-tight">BTC涨跌预测</span>
+                          <span className="text-[11px] text-muted-foreground ml-1.5">{predictionPnl.totalBets}笔</span>
+                        </div>
+                      </div>
+                      <div className="text-right flex items-center gap-2">
+                        <div>
+                          <div className={cn("text-[13px] font-bold tabular-nums", predictionProfit >= 0 ? "text-red-400" : "text-green-400")}>
+                            {predictionProfit >= 0 ? '+' : ''}{fmt(predictionProfit)}
+                          </div>
+                          <div className="text-[11px] text-muted-foreground tabular-nums">
+                            胜率 {predictionPnl.winRate}%
+                          </div>
+                        </div>
+                        <ChevronRight className="w-3.5 h-3.5 text-muted-foreground/40" />
+                      </div>
+                    </div>
+                  </button>
+                  <CardContent className="p-0 divide-y divide-border/30">
+                    <div className="px-4 py-3 flex items-center justify-between">
+                      <span className="text-[12px] text-muted-foreground">已实现盈亏</span>
+                      <span className={cn("text-[13px] font-semibold tabular-nums", predictionPnl.realizedPnl >= 0 ? "text-red-400" : "text-green-400")}>
+                        {predictionPnl.realizedPnl >= 0 ? '+' : ''}{fmt(predictionPnl.realizedPnl)}
+                      </span>
+                    </div>
+                    {predictionPnl.activeBets > 0 && (
+                      <div className="px-4 py-3 flex items-center justify-between">
+                        <span className="text-[12px] text-muted-foreground">活跃持仓 ({predictionPnl.activeBets}笔)</span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-[12px] text-muted-foreground tabular-nums">成本 {fmt(predictionPnl.activeCost)}</span>
+                          <span className="text-[13px] font-semibold tabular-nums">市值 {fmt(predictionPnl.activeValue)}</span>
+                        </div>
+                      </div>
+                    )}
+                    <div className="px-4 py-3 flex items-center justify-between">
+                      <span className="text-[12px] text-muted-foreground">胜/负</span>
+                      <span className="text-[13px] tabular-nums">
+                        <span className="text-red-400 font-semibold">{predictionPnl.wonBets}</span>
+                        <span className="text-muted-foreground mx-1">/</span>
+                        <span className="text-green-400 font-semibold">{predictionPnl.lostBets}</span>
+                      </span>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
               {/* 合计汇总 */}
-              {[hasStock, hasCrypto, hasFutures, hasOptions].filter(Boolean).length > 1 && (() => {
-                const allProfit = stockProfit + cryptoProfit + futuresProfit + optionProfit;
-                const allTotal = stockTotal + cryptoTotal + futuresTotal + optionTotal;
+              {[hasStock, hasCrypto, hasFutures, hasOptions, hasPrediction].filter(Boolean).length > 1 && (() => {
+                const allProfit = stockProfit + cryptoProfit + futuresProfit + optionProfit + predictionProfit;
+                const allTotal = stockTotal + cryptoTotal + futuresTotal + optionTotal + (predictionPnl?.activeValue ?? 0);
                 const up = allProfit >= 0;
                 return (
                   <div className="rounded-xl border border-dashed border-border/60 bg-card/50 backdrop-blur-sm px-4 py-3 flex items-center justify-between">

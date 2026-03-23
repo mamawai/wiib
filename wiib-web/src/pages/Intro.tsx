@@ -111,6 +111,17 @@ export function Intro() {
             <h3 className="font-bold mb-1">翻翻爆金币</h3>
             <p className="text-muted-foreground">5×5方格隐藏地雷，每翻开一个安全格奖金递增，踩雷则全部归零。随时可收手。</p>
           </section>
+
+          <section>
+            <h3 className="font-bold mb-1">BTC 5分钟涨跌预测 <span className="text-[10px] text-amber-500 font-bold ml-1">NEW</span></h3>
+            <ul className="list-disc list-inside text-muted-foreground space-y-1">
+              <li>每5分钟一轮，预测BTC价格涨跌</li>
+              <li>基于 Polymarket 实时概率定价</li>
+              <li>买入看涨/看跌合约，预测正确每份值$1</li>
+              <li>可随时卖出，按当前市场价成交</li>
+              <li>手续费根据概率动态计算（0.1%~2%）</li>
+            </ul>
+          </section>
         </CardContent>
       </Card>
 

@@ -107,7 +107,14 @@ public enum ErrorCode {
     VP_NO_ACTIVE_GAME(1852, "没有进行中的视频扑克"),
     VP_BALANCE_NOT_ENOUGH(1853, "余额不足"),
     VP_INVALID_BET(1854, "下注金额无效"),
-    VP_INVALID_HOLD(1855, "HOLD位置无效");
+    VP_INVALID_HOLD(1855, "HOLD位置无效"),
+
+    // Prediction错误码 1900+
+    PREDICTION_ROUND_LOCKED(1900, "回合已锁定"),
+    PREDICTION_ROUND_NOT_FOUND(1901, "回合不存在"),
+    PREDICTION_BET_NOT_FOUND(1902, "下注不存在"),
+    PREDICTION_PRICE_UNAVAILABLE(1903, "无法获取BTC价格"),
+    PREDICTION_AMOUNT_INVALID(1904, "金额无效");
 
     private final int code;
     private final String msg;

@@ -6,33 +6,25 @@ import com.mawai.wiibservice.service.FuturesLiquidationService;
 import com.mawai.wiibservice.service.FuturesSettlementService;
 import com.mawai.wiibservice.service.impl.RedisMessageBroadcastService;
 import jakarta.annotation.PostConstruct;
-import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.SmartLifecycle;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
-import java.net.URI;
 import java.net.http.HttpClient;
-import java.net.http.WebSocket;
-import java.nio.ByteBuffer;
 import java.time.Duration;
-import java.util.concurrent.CompletionStage;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.Consumer;
-import java.util.function.Supplier;
 
 @Slf4j
 @Component
 @RequiredArgsConstructor
-public class BinanceWsClient {
+public class BinanceWsClient implements SmartLifecycle {
 
     private final BinanceProperties props;
     private final StringRedisTemplate redisTemplate;
@@ -52,7 +44,6 @@ public class BinanceWsClient {
     private WsConnection spotWs;
     private WsConnection futuresWs;
 
-    private static final int[] BACKOFF_SECONDS = {1, 2, 5, 10, 30};
     private static final String REDIS_KEY_PREFIX = "market:price:";
     private static final String REDIS_MARK_PRICE_KEY_PREFIX = "market:markprice:";
 
@@ -69,17 +60,20 @@ public class BinanceWsClient {
                 .connectTimeout(Duration.ofSeconds(10))
                 .build();
 
-        // 初始化
-        spotWs = new WsConnection("Spot", this::buildSpotUrl, this::onSpotMessage, this::onSpotConnected);
-        futuresWs = new WsConnection("Futures", this::buildFuturesUrl, this::onFuturesMessage, this::onFuturesConnected);
+        spotWs = new WsConnection("Spot", this::buildSpotUrl, this::onSpotMessage,
+                ws -> onSpotConnected(), this::startFallbackPolling,
+                httpClient, scheduler, shutdown);
+        futuresWs = new WsConnection("Futures", this::buildFuturesUrl, this::onFuturesMessage,
+                ws -> onFuturesConnected(), this::startFuturesFallbackPolling,
+                httpClient, scheduler, shutdown);
 
         // 启动ws
         spotWs.connect();
         futuresWs.connect();
     }
 
-    @PreDestroy
-    public void destroy() {
+    @Override
+    public void stop() {
         shutdown.set(true);
         stopFallbackPolling();
         stopFuturesFallbackPolling();
@@ -89,12 +83,16 @@ public class BinanceWsClient {
         if (httpClient != null) httpClient.close();
     }
 
+    @Override public boolean isRunning() { return !shutdown.get() && scheduler != null; }
+    @Override public int getPhase() { return 1; }
+    @Override public void start() { /* init via @PostConstruct */ }
+
     public boolean isConnected() {
-        return spotWs != null && spotWs.connected.get();
+        return spotWs != null && spotWs.isConnected();
     }
 
     public boolean isFuturesConnected() {
-        return futuresWs != null && futuresWs.connected.get();
+        return futuresWs != null && futuresWs.isConnected();
     }
 
     // ── Spot ──
@@ -299,113 +297,4 @@ public class BinanceWsClient {
         return raw.substring(start, end);
     }
 
-    // ── 通用WS连接 ──
-
-    private class WsConnection {
-        private final String name;
-        private final Supplier<String> urlBuilder;
-        private final Consumer<String> messageHandler;
-        private final Runnable onConnected;
-
-        final AtomicReference<WebSocket> wsRef = new AtomicReference<>();
-        final AtomicBoolean connected = new AtomicBoolean(false);
-        private final AtomicBoolean reconnecting = new AtomicBoolean(false);
-        private final AtomicInteger reconnectAttempt = new AtomicInteger(0);
-
-        WsConnection(String name, Supplier<String> urlBuilder, Consumer<String> messageHandler, Runnable onConnected) {
-            this.name = name;
-            this.urlBuilder = urlBuilder;
-            this.messageHandler = messageHandler;
-            this.onConnected = onConnected;
-        }
-
-        void connect() {
-            if (shutdown.get()) return;
-            String url = urlBuilder.get();
-            log.info("连接Binance {} WS: {}", name, url);
-
-            httpClient.newWebSocketBuilder()
-                    .connectTimeout(Duration.ofSeconds(10))
-                    .buildAsync(URI.create(url), new Listener())
-                    .thenAccept(ws -> {
-                        wsRef.set(ws);
-                        connected.set(true);
-                        reconnecting.set(false);
-                        reconnectAttempt.set(0);
-                        log.info("Binance {} WS已连接", name);
-                        if (onConnected != null) onConnected.run();
-                    })
-                    .exceptionally(ex -> {
-                        log.error("Binance {} WS连接失败: {}", name, ex.getMessage());
-                        reconnecting.set(false);
-                        scheduleReconnect();
-                        return null;
-                    });
-        }
-
-        // CAS保证并发场景只触发一次重连
-        void scheduleReconnect() {
-            if (shutdown.get()) return;
-            if (!reconnecting.compareAndSet(false, true)) return;
-            connected.set(false);
-            // Spot断开时自动启动REST轮询兜底
-            if ("Spot".equals(name)) startFallbackPolling();
-            // Futures断开时自动启动REST轮询mark price兜底
-            if ("Futures".equals(name)) startFuturesFallbackPolling();
-            // 指数退避：1s → 2s → 5s → 10s → 30s封顶
-            int attempt = reconnectAttempt.getAndIncrement();
-            int delay = BACKOFF_SECONDS[Math.min(attempt, BACKOFF_SECONDS.length - 1)];
-            log.info("{}秒后重连Binance {} WS（第{}次）", delay, name, attempt + 1);
-            scheduler.schedule(this::connect, delay, TimeUnit.SECONDS);
-        }
-
-        void close() {
-            WebSocket ws = wsRef.get();
-            if (ws != null) ws.sendClose(WebSocket.NORMAL_CLOSURE, "shutdown");
-        }
-
-        private class Listener implements WebSocket.Listener {
-            // 缓冲区拼接WebSocket帧分片，last=true时为完整消息
-            private final StringBuilder buffer = new StringBuilder();
-
-            @Override
-            public void onOpen(WebSocket webSocket) {
-                log.info("Binance {} WS onOpen", name);
-                // 背压控制：每次只请求1条消息，处理完再拉下一条
-                webSocket.request(1);
-            }
-
-            @Override
-            public CompletionStage<?> onText(WebSocket webSocket, CharSequence data, boolean last) {
-                buffer.append(data);
-                if (last) {
-                    try { messageHandler.accept(buffer.toString()); }
-                    catch (Exception e) { log.warn("解析Binance {} WS消息失败: {}", name, e.getMessage()); }
-                    buffer.setLength(0);
-                }
-                webSocket.request(1);
-                return null;
-            }
-
-            @Override
-            public CompletionStage<?> onPing(WebSocket webSocket, ByteBuffer message) {
-                webSocket.sendPong(message);
-                webSocket.request(1);
-                return null;
-            }
-
-            @Override
-            public CompletionStage<?> onClose(WebSocket webSocket, int statusCode, String reason) {
-                log.warn("Binance {} WS关闭: code={} reason={}", name, statusCode, reason);
-                WsConnection.this.scheduleReconnect();
-                return null;
-            }
-
-            @Override
-            public void onError(WebSocket webSocket, Throwable error) {
-                log.error("Binance {} WS错误: {}", name, error.getMessage());
-                WsConnection.this.scheduleReconnect();
-            }
-        }
-    }
 }

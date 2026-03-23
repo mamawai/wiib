@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import * as echarts from 'echarts';
 import { cryptoApi, cryptoOrderApi, buffApi, futuresApi } from '../api';
 import { useUserStore } from '../stores/userStore';
@@ -188,6 +188,7 @@ export function Coin({ symbol = DEFAULT_SYMBOL }: { symbol?: string }) {
   const cfg = getCoin(symbol);
   const Icon = cfg.icon;
   const MIN_QTY = cfg.minQty;
+  const navigate = useNavigate();
   const { toast } = useToast();
   const user = useUserStore(s => s.user);
   const fetchUser = useUserStore(s => s.fetchUser);
@@ -809,6 +810,21 @@ export function Coin({ symbol = DEFAULT_SYMBOL }: { symbol?: string }) {
           {activeTab === 2 && <div style={{ height: 500 }}><TradingViewWidget symbol={cfg.tvSymbol} label={cfg.name} /></div>}
         </CardContent>
       </Card>
+
+      {/* BTC涨跌预测入口 */}
+      {symbol === 'BTCUSDT' && (
+        <button onClick={() => navigate('/prediction')}
+                className="w-full flex items-center justify-between px-5 py-3.5 rounded-2xl bg-gradient-to-r from-amber-500/10 to-orange-500/10 border border-amber-500/30 hover:border-amber-500/50 transition-all group">
+          <div className="flex items-center gap-3">
+            <span className="text-lg">🔮</span>
+            <div className="text-left">
+              <div className="text-sm font-bold">BTC 5分钟涨跌预测 <span className="text-[10px] font-bold text-amber-500 ml-1">NEW</span></div>
+              <div className="text-[11px] text-muted-foreground">基于 Polymarket 实时概率，预测BTC短期走势</div>
+            </div>
+          </div>
+          <ChevronRight className="w-4 h-4 text-muted-foreground group-hover:text-foreground transition-colors" />
+        </button>
+      )}
 
       {/* 交易面板 */}
       <Card className="mb-6">

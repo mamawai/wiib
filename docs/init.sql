@@ -663,3 +663,56 @@ COMMENT ON COLUMN video_poker_game.status IS 'DEALING/SETTLED';
 
 CREATE INDEX idx_vp_game_user ON video_poker_game(user_id);
 CREATE INDEX idx_vp_game_status ON video_poker_game(status);
+
+-- ============================================
+-- 21. BTC 5min 涨跌预测回合表
+-- ============================================
+CREATE TABLE IF NOT EXISTS prediction_round (
+    id BIGSERIAL PRIMARY KEY,
+    window_start BIGINT NOT NULL UNIQUE,
+    start_price NUMERIC(20, 8),
+    end_price NUMERIC(20, 8),
+    outcome VARCHAR(10),
+    status VARCHAR(20) DEFAULT 'OPEN',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+COMMENT ON TABLE prediction_round IS 'BTC 5min涨跌预测回合';
+COMMENT ON COLUMN prediction_round.window_start IS '窗口起始时间戳(秒)';
+COMMENT ON COLUMN prediction_round.start_price IS '起始BTC价格(Chainlink)';
+COMMENT ON COLUMN prediction_round.end_price IS '结束BTC价格(Chainlink)';
+COMMENT ON COLUMN prediction_round.outcome IS '结果：UP/DOWN/DRAW';
+COMMENT ON COLUMN prediction_round.status IS '状态：OPEN/LOCKED/SETTLED';
+
+-- ============================================
+-- 22. BTC 5min 涨跌预测下注表
+-- ============================================
+CREATE TABLE IF NOT EXISTS prediction_bet (
+    id BIGSERIAL PRIMARY KEY,
+    user_id BIGINT NOT NULL,
+    round_id BIGINT NOT NULL,
+    side VARCHAR(10) NOT NULL,
+    contracts NUMERIC(20, 4) NOT NULL,
+    cost NUMERIC(20, 4) NOT NULL,
+    avg_price NUMERIC(10, 4) NOT NULL,
+    payout NUMERIC(20, 4),
+    window_start BIGINT NOT NULL,
+    status VARCHAR(20) DEFAULT 'ACTIVE',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+COMMENT ON TABLE prediction_bet IS 'BTC 5min涨跌预测下注';
+COMMENT ON COLUMN prediction_bet.user_id IS '用户ID';
+COMMENT ON COLUMN prediction_bet.round_id IS '回合ID';
+COMMENT ON COLUMN prediction_bet.side IS '方向：UP/DOWN';
+COMMENT ON COLUMN prediction_bet.contracts IS '合约数量';
+COMMENT ON COLUMN prediction_bet.cost IS '购买成本';
+COMMENT ON COLUMN prediction_bet.avg_price IS '平均买入价';
+COMMENT ON COLUMN prediction_bet.payout IS '结算赔付';
+COMMENT ON COLUMN prediction_bet.window_start IS '窗口起始时间戳(秒)';
+COMMENT ON COLUMN prediction_bet.status IS '状态：ACTIVE/WON/LOST/DRAW/SOLD';
+
+CREATE INDEX idx_pred_bet_round ON prediction_bet(round_id, status);
+CREATE INDEX idx_pred_bet_user ON prediction_bet(user_id, created_at DESC);

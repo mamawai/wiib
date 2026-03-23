@@ -503,3 +503,61 @@ export interface FuturesOrder {
   expireAt?: string;
   createdAt: string;
 }
+
+// ========== BTC 5min 涨跌预测 ==========
+
+export interface PredictionRound {
+  id?: number;
+  windowStart: number;
+  startPrice?: string;
+  endPrice?: string;
+  outcome?: string;
+  upPrice?: string;
+  downPrice?: string;
+  status: string;
+  remainingSeconds: number;
+}
+
+export interface PredictionBet {
+  id: number;
+  roundId: number;
+  windowStart?: number;
+  side: string;
+  contracts: number;
+  cost: number;
+  avgPrice: number;
+  payout?: number;
+  currentValue?: number;
+  status: string;
+  createdAt: string;
+}
+
+export interface PredictionPnl {
+  totalBets: number;
+  activeBets: number;
+  wonBets: number;
+  lostBets: number;
+  totalCost: number;
+  realizedPnl: number;
+  activeCost: number;
+  activeValue: number;
+  totalPnl: number;
+  winRate: number;
+}
+
+export interface PredictionBuyRequest {
+  side: 'UP' | 'DOWN';
+  amount: number;
+}
+
+export interface PredictionBetLive {
+  username: string;
+  avatar?: string;
+  side?: string;
+  outcome?: string;
+  price?: number;
+  size?: number;
+  amount?: number;
+  source?: string;
+  ts: number;
+}

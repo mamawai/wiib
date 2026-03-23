@@ -5,7 +5,6 @@ import com.github.benmanes.caffeine.cache.Caffeine;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.*;
-import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.data.redis.core.script.RedisScript;
 import org.springframework.stereotype.Service;
 
@@ -13,6 +12,8 @@ import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -100,6 +101,85 @@ public class CacheService {
         return last != null ? new BigDecimal(last) : null;
     }
 
+    // ==================== Polymarket openPrice ====================
+
+    private final ConcurrentHashMap<Long, BigDecimal> polymarketOpenPriceMap = new ConcurrentHashMap<>();
+
+    public void putPolymarketOpenPrice(long windowStart, BigDecimal price) {
+        polymarketOpenPriceMap.put(windowStart, price);
+        polymarketOpenPriceMap.keySet().removeIf(k -> k < windowStart - 600);
+    }
+
+    public BigDecimal getPolymarketOpenPrice(long windowStart) {
+        return polymarketOpenPriceMap.get(windowStart);
+    }
+
+    private final ConcurrentHashMap<Long, BigDecimal> polymarketClosePriceMap = new ConcurrentHashMap<>();
+
+    public void putPolymarketClosePrice(long windowStart, BigDecimal price) {
+        polymarketClosePriceMap.put(windowStart, price);
+        polymarketClosePriceMap.keySet().removeIf(k -> k < windowStart - 600);
+    }
+
+    public BigDecimal getPolymarketClosePrice(long windowStart) {
+        return polymarketClosePriceMap.get(windowStart);
+    }
+
+    // ==================== BTC价格历史（纯内存，ConcurrentLinkedDeque） ====================
+
+    private static final long PRICE_HISTORY_TTL_MS = 360_000;
+    private final ConcurrentLinkedDeque<long[]> btcPriceDeque = new ConcurrentLinkedDeque<>();
+
+    /** ts=毫秒时间戳, price缩放为 long（×100去小数） */
+    public void addBtcPricePoint(long timestampMs, BigDecimal price) {
+        btcPriceDeque.addLast(new long[]{timestampMs, price.movePointRight(2).longValue()});
+        long cutoff = timestampMs - PRICE_HISTORY_TTL_MS;
+        while (!btcPriceDeque.isEmpty() && btcPriceDeque.peekFirst()[0] < cutoff) {
+            btcPriceDeque.pollFirst();
+        }
+    }
+
+    public List<Map<String, Object>> getBtcPriceHistory(long fromMs) {
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (long[] e : btcPriceDeque) {
+            if (e[0] >= fromMs) {
+                result.add(Map.of("time", e[0], "price", BigDecimal.valueOf(e[1], 2).toPlainString()));
+            }
+        }
+        return result;
+    }
+
+    // ==================== Chainlink价格（Prediction用） ====================
+
+    public void putChainlinkPrice(String symbol, BigDecimal price) {
+        cryptoPriceCache.put("chainlink:" + symbol, price);
+    }
+
+    // ==================== Polymarket UP/DOWN 价格 ====================
+
+    public void putPredictionBid(String side, BigDecimal bid) {
+        cryptoPriceCache.put("prediction:" + side + ":bid", bid);
+    }
+
+    public BigDecimal getPredictionBid(String side) {
+        return cryptoPriceCache.getIfPresent("prediction:" + side + ":bid");
+    }
+
+    public void putPredictionAsk(String side, BigDecimal ask) {
+        cryptoPriceCache.put("prediction:" + side + ":ask", ask);
+    }
+
+    public BigDecimal getPredictionAsk(String side) {
+        return cryptoPriceCache.getIfPresent("prediction:" + side + ":ask");
+    }
+
+    public void clearPredictionPrices() {
+        cryptoPriceCache.invalidate("prediction:UP:bid");
+        cryptoPriceCache.invalidate("prediction:UP:ask");
+        cryptoPriceCache.invalidate("prediction:DOWN:bid");
+        cryptoPriceCache.invalidate("prediction:DOWN:ask");
+    }
+
     // ==================== 加密货币价格 ====================
 
     public BigDecimal getCryptoPrice(String symbol) {
@@ -150,6 +230,10 @@ public class CacheService {
 
     public void set(String key, String value, Duration duration) {
         stringRedisTemplate.opsForValue().set(key, value, duration);
+    }
+
+    public void set(String key, String value) {
+        stringRedisTemplate.opsForValue().set(key, value);
     }
 
     public String get(String key) {
