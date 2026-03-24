@@ -108,7 +108,7 @@ function RankingRow({ item }: { item: RankingItem }) {
           variant="secondary"
           className={cn(
             "text-xs gap-0.5",
-            isProfit ? "text-red-500" : "text-green-500"
+            isProfit ? "text-green-500" : "text-red-500"
           )}
         >
           {isProfit ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}

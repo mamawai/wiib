@@ -348,13 +348,13 @@ export function StockDetail() {
             <div className="text-right">
               <div className="flex items-center justify-end gap-2">
                 {isUp ? (
-                  <TrendingUp className="w-5 h-5 text-red-500" />
+                  <TrendingUp className="w-5 h-5 text-green-500" />
                 ) : isDown ? (
-                  <TrendingDown className="w-5 h-5 text-green-500" />
+                  <TrendingDown className="w-5 h-5 text-red-500" />
                 ) : null}
                 <span className={cn(
                   "text-3xl font-bold tabular-nums",
-                  isUp ? "text-red-500" : isDown ? "text-green-500" : "text-muted-foreground"
+                  isUp ? "text-green-500" : isDown ? "text-red-500" : "text-muted-foreground"
                 )}>
                   {currentPrice.toFixed(2)}
                 </span>
@@ -369,7 +369,7 @@ export function StockDetail() {
               )}
               <span className={cn(
                 "text-sm tabular-nums",
-                isUp ? "text-red-500" : isDown ? "text-green-500" : "text-muted-foreground"
+                isUp ? "text-green-500" : isDown ? "text-red-500" : "text-muted-foreground"
               )}>
                 {isUp ? '+' : ''}{change.toFixed(2)} ({isUp ? '+' : ''}{changePct.toFixed(2)}%)
               </span>
@@ -474,7 +474,7 @@ export function StockDetail() {
                         (() => {
                           const marketValue = position.quantity * currentPrice;
                           const profit = marketValue - (position.quantity * position.avgCost);
-                          return profit >= 0 ? "text-red-500" : "text-green-500";
+                          return profit >= 0 ? "text-green-500" : "text-red-500";
                         })()
                       )}>
                         {(() => {
@@ -1001,8 +1001,8 @@ function InfoItem({ label, value, isHigh, isLow }: { label: string; value?: stri
       <span className="text-xs text-muted-foreground block mb-1">{label}</span>
       <span className={cn(
         "text-sm font-medium tabular-nums",
-        isHigh && "text-red-500",
-        isLow && "text-green-500"
+        isHigh && "text-green-500",
+        isLow && "text-red-500"
       )}>
         {value ?? '--'}
       </span>
@@ -1019,16 +1019,16 @@ function TrendChart({ trendList }: { trendList: number[] }) {
             <div
               className={cn(
                 "w-2.5 h-2.5 rounded-full transition-all",
-                trend === 1 && "bg-red-500 shadow-[0_0_8px_2px_rgba(239,68,68,0.5)]",
-                trend === -1 && "bg-green-500 shadow-[0_0_8px_2px_rgba(34,197,94,0.5)]",
+                trend === 1 && "bg-green-500 shadow-[0_0_8px_2px_rgba(34,197,94,0.5)]",
+                trend === -1 && "bg-red-500 shadow-[0_0_8px_2px_rgba(239,68,68,0.5)]",
                 trend === 0 && "bg-zinc-400 dark:bg-zinc-500",
                 i === trendList.length - 1 && "w-3 h-3 animate-pulse"
               )}
             />
             <span className={cn(
               "text-[10px]",
-              trend === 1 && "text-red-500",
-              trend === -1 && "text-green-500",
+              trend === 1 && "text-green-500",
+              trend === -1 && "text-red-500",
               trend === 0 && "text-muted-foreground"
             )}>
               {i === trendList.length - 1 ? '今' : 9 - i}
@@ -1039,11 +1039,11 @@ function TrendChart({ trendList }: { trendList: number[] }) {
 
       <div className="flex justify-center gap-4 text-xs text-muted-foreground">
         <span className="inline-flex items-center gap-1.5">
-          <span className="w-2 h-2 rounded-full bg-red-500 shadow-[0_0_6px_1px_rgba(239,68,68,0.5)]" />
+          <span className="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_6px_1px_rgba(34,197,94,0.5)]" />
           涨
         </span>
         <span className="inline-flex items-center gap-1.5">
-          <span className="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_6px_1px_rgba(34,197,94,0.5)]" />
+          <span className="w-2 h-2 rounded-full bg-red-500 shadow-[0_0_6px_1px_rgba(239,68,68,0.5)]" />
           跌
         </span>
         <span className="inline-flex items-center gap-1.5">

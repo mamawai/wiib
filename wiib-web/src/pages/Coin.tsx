@@ -11,6 +11,7 @@ import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Badge } from '../components/ui/badge';
 import { Skeleton } from '../components/ui/skeleton';
+import { FuturesActionButton } from '../components/FuturesActionButton';
 import { TrendingUp, TrendingDown, ChevronLeft, ChevronRight, Loader2, X, RefreshCw, Sparkles, Wallet, Warehouse, Scale, HelpCircle, Plus } from 'lucide-react';
 import TradingViewWidget from '../components/TradingViewWidget';
 import { COIN_MAP, getCoin, DEFAULT_SYMBOL } from '../lib/coinConfig';
@@ -158,12 +159,12 @@ const FUTURES_ORDER_FILTERS = [
 ];
 
 const FUTURES_SIDE_MAP: Record<string, { label: string; color: string }> = {
-  OPEN_LONG: { label: '多头开仓', color: 'text-red-500' },
-  OPEN_SHORT: { label: '空头开仓', color: 'text-green-500' },
-  CLOSE_LONG: { label: '多头平仓', color: 'text-green-500' },
-  CLOSE_SHORT: { label: '空头平仓', color: 'text-red-500' },
-  INCREASE_LONG: { label: '多头加仓', color: 'text-red-500' },
-  INCREASE_SHORT: { label: '空头加仓', color: 'text-green-500' },
+  OPEN_LONG: { label: '多头开仓', color: 'text-green-500' },
+  OPEN_SHORT: { label: '空头开仓', color: 'text-red-500' },
+  CLOSE_LONG: { label: '多头平仓', color: 'text-red-500' },
+  CLOSE_SHORT: { label: '空头平仓', color: 'text-green-500' },
+  INCREASE_LONG: { label: '多头加仓', color: 'text-green-500' },
+  INCREASE_SHORT: { label: '空头加仓', color: 'text-red-500' },
 };
 
 const STATUS_MAP: Record<string, { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline' | 'success' | 'warning' }> = {
@@ -254,6 +255,8 @@ export function Coin({ symbol = DEFAULT_SYMBOL }: { symbol?: string }) {
   const [futuresOrderPages, setFuturesOrderPages] = useState(0);
   const [futuresOrderFilter, setFuturesOrderFilter] = useState('');
   const [futuresOrdersLoading, setFuturesOrdersLoading] = useState(false);
+  const [futuresActionSuccess, setFuturesActionSuccess] = useState(false);
+  const [spotActionSuccess, setSpotActionSuccess] = useState(false);
   const [openSlEnabled, setOpenSlEnabled] = useState(false);
   const [openSlRows, setOpenSlRows] = useState<SLTPRow[]>([{ price: '', quantity: '' }]);
   const [openTpEnabled, setOpenTpEnabled] = useState(false);
@@ -349,9 +352,9 @@ export function Coin({ symbol = DEFAULT_SYMBOL }: { symbol?: string }) {
     const first = closes[0];
     const last = closes[closes.length - 1];
     const isUp = last >= first;
-    const lineColor = isUp ? '#f23645' : '#089981';
-    const areaStart = isUp ? 'rgba(242,54,69,0.12)' : 'rgba(8,153,129,0.12)';
-    const areaEnd = isUp ? 'rgba(242,54,69,0.01)' : 'rgba(8,153,129,0.01)';
+    const lineColor = isUp ? '#089981' : '#f23645';
+    const areaStart = isUp ? 'rgba(8,153,129,0.12)' : 'rgba(242,54,69,0.12)';
+    const areaEnd = isUp ? 'rgba(8,153,129,0.01)' : 'rgba(242,54,69,0.01)';
 
     if (!readyRef.current) {
       const now = Date.now();
@@ -485,6 +488,18 @@ export function Coin({ symbol = DEFAULT_SYMBOL }: { symbol?: string }) {
     if (orderType === 'FUTURES') fetchFuturesOrders(futuresOrderFilter, futuresOrderPage);
   }, [futuresOrderFilter, futuresOrderPage, orderType, fetchFuturesOrders]);
 
+  useEffect(() => {
+    if (!futuresActionSuccess) return;
+    const timer = window.setTimeout(() => setFuturesActionSuccess(false), 1600);
+    return () => window.clearTimeout(timer);
+  }, [futuresActionSuccess]);
+
+  useEffect(() => {
+    if (!spotActionSuccess) return;
+    const timer = window.setTimeout(() => setSpotActionSuccess(false), 1600);
+    return () => window.clearTimeout(timer);
+  }, [spotActionSuccess]);
+
   // 下单
   const handleSubmit = async () => {
     const qty = parseFloat(quantity);
@@ -519,6 +534,8 @@ export function Coin({ symbol = DEFAULT_SYMBOL }: { symbol?: string }) {
           ...(slItems.length > 0 ? { stopLosses: slItems } : {}),
           ...(tpItems.length > 0 ? { takeProfits: tpItems } : {}),
         });
+        setFuturesActionSuccess(true);
+        if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
         toast(`${futuresSide === 'LONG' ? '做多' : '做空'}开仓成功`, 'success');
         setQuantity(String(MIN_QTY));
         setLimitPrice('');
@@ -558,6 +575,8 @@ export function Coin({ symbol = DEFAULT_SYMBOL }: { symbol?: string }) {
         await cryptoOrderApi.sell(req);
         toast('卖出成功', 'success');
       }
+      setSpotActionSuccess(true);
+      if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
       if (useBuff && discountBuff) { setDiscountBuff(null); setUseBuff(false); }
       setQuantity(String(MIN_QTY));
       setLimitPrice('');
@@ -1042,9 +1061,15 @@ export function Coin({ symbol = DEFAULT_SYMBOL }: { symbol?: string }) {
               </div>
 
               {/* 开仓按钮 */}
-              <Button onClick={handleSubmit} disabled={submitting || currentPrice <= 0} variant={futuresSide === 'LONG' ? 'destructive' : 'success'} className="w-full h-14 text-base mt-2">
-                {submitting ? <Loader2 className="w-5 h-5 animate-spin" /> : `${futuresSide === 'LONG' ? '做多' : '做空'} ${futuresLeverage}x`}
-              </Button>
+              <FuturesActionButton
+                className="mt-2"
+                onClick={handleSubmit}
+                disabled={submitting || currentPrice <= 0}
+                loading={submitting}
+                success={futuresActionSuccess}
+                side={futuresSide}
+                leverage={futuresLeverage}
+              />
             </>
           )}
 
@@ -1090,7 +1115,7 @@ export function Coin({ symbol = DEFAULT_SYMBOL }: { symbol?: string }) {
                     } else {
                       raw = (position?.quantity ?? 0) * pct;
                     }
-                    const qty = Math.max(MIN_QTY, Math.round(raw / MIN_QTY) * MIN_QTY);
+                    const qty = Math.max(MIN_QTY, Math.floor(raw / MIN_QTY) * MIN_QTY);
                     const target = qty <= MIN_QTY && raw < MIN_QTY ? MIN_QTY : qty;
                     animateQuantity(target, MIN_QTY);
                   };
@@ -1185,9 +1210,15 @@ export function Coin({ symbol = DEFAULT_SYMBOL }: { symbol?: string }) {
                 )}
               </div>
             )}
-            <Button onClick={handleSubmit} disabled={submitting || currentPrice <= 0} variant="default" className="w-full h-14 text-base">
-              {submitting ? <Loader2 className="w-5 h-5 animate-spin" /> : (side === 'BUY' ? `买入 ${cfg.name}` : `卖出 ${cfg.name}`)}
-            </Button>
+            <FuturesActionButton
+              className="mt-2"
+              onClick={handleSubmit}
+              disabled={submitting || currentPrice <= 0}
+              loading={submitting}
+              success={spotActionSuccess}
+              side={side}
+              label={cfg.name}
+            />
           </div>
             </>
           )}
@@ -1218,15 +1249,15 @@ export function Coin({ symbol = DEFAULT_SYMBOL }: { symbol?: string }) {
                   <div className={`absolute top-0 bottom-0 left-0 w-2.5 border-r border-border ${isLong ? 'bg-gain' : 'bg-loss'}`} />
                   <div className="flex items-center justify-between pl-3">
                     <div className="flex items-center gap-2.5">
-                      <Badge variant={isLong ? 'destructive' : 'success'} className="text-[10px] px-2 py-0.5">{isLong ? '做多' : '做空'}</Badge>
+                      <Badge variant={isLong ? 'success' : 'destructive'} className="text-[10px] px-2 py-0.5">{isLong ? '做多' : '做空'}</Badge>
                       <span className="text-base font-black">{pos.leverage}x</span>
                       <span className="text-sm font-bold text-muted-foreground">{pos.quantity} {cfg.name}</span>
                     </div>
                     <div className="text-right">
-                      <div className={`text-sm font-bold ${isPnlUp ? 'text-red-500' : 'text-green-500'}`}>
+                      <div className={`text-sm font-bold ${isPnlUp ? 'text-green-500' : 'text-red-500'}`}>
                         {isPnlUp ? '+' : ''}{pos.unrealizedPnlPct.toFixed(2)}%
                       </div>
-                      <div className={`text-xs ${isPnlUp ? 'text-red-500/70' : 'text-green-500/70'}`}>
+                      <div className={`text-xs ${isPnlUp ? 'text-green-500/70' : 'text-red-500/70'}`}>
                         {isPnlUp ? '+' : ''}${formatPrice(pos.unrealizedPnl)}
                       </div>
                     </div>
@@ -1448,7 +1479,7 @@ export function Coin({ symbol = DEFAULT_SYMBOL }: { symbol?: string }) {
                             <td className="px-2 py-2.5 text-right font-mono">{o.leverage}x</td>
                             <td className="px-2 py-2.5 text-right font-mono">{o.limitPrice != null ? formatPrice(o.limitPrice) : '-'}</td>
                             <td className="px-2 py-2.5 text-right font-mono">{o.filledPrice != null ? formatPrice(o.filledPrice) : '-'}</td>
-                            <td className={`px-2 py-2.5 text-right font-mono ${hasPnl ? (o.realizedPnl! > 0 ? 'text-red-500' : 'text-green-500') : ''}`}>
+                            <td className={`px-2 py-2.5 text-right font-mono ${hasPnl ? (o.realizedPnl! > 0 ? 'text-green-500' : 'text-red-500') : ''}`}>
                               {hasPnl ? `${o.realizedPnl! > 0 ? '+' : ''}${formatPrice(o.realizedPnl!)}` : '-'}
                             </td>
                             <td className="px-2 py-2.5 text-center"><Badge variant={st.variant}>{st.label}</Badge></td>
@@ -1509,7 +1540,7 @@ export function Coin({ symbol = DEFAULT_SYMBOL }: { symbol?: string }) {
                         return (
                           <tr key={o.orderId} className="border-b border-border/30 hover:bg-accent/30 transition-colors">
                             <td className="px-4 py-2.5 text-muted-foreground whitespace-nowrap">{formatDateTime(o.createdAt)}</td>
-                            <td className={`px-2 py-2.5 font-medium ${isBuy ? 'text-red-500' : 'text-green-500'}`}>{isBuy ? '买入' : '卖出'}</td>
+                            <td className={`px-2 py-2.5 font-medium ${isBuy ? 'text-green-500' : 'text-red-500'}`}>{isBuy ? '买入' : '卖出'}</td>
                             <td className="px-2 py-2.5">{o.orderType === 'MARKET' ? '市价' : '限价'}{o.leverage > 1 ? ` ${o.leverage}x` : ''}</td>
                             <td className="px-2 py-2.5 text-right font-mono">{o.quantity}</td>
                             <td className="px-2 py-2.5 text-right font-mono">{o.limitPrice != null ? formatPrice(o.limitPrice) : '-'}</td>

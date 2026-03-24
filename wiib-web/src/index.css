@@ -21,8 +21,8 @@
   --color-ring: #F97316;
   --color-success: #22c55e;
   --color-warning: #f59e0b;
-  --color-gain: #f23645;
-  --color-loss: #089981;
+  --color-gain: #089981;
+  --color-loss: #f23645;
   --color-surface: #e0e5ec;
   --color-surface-hover: #d5dae1;
   --radius-sm: 0.5rem;
@@ -56,8 +56,8 @@ html.dark {
   --color-ring: #F97316;
   --color-success: #22C55E;
   --color-warning: #F59E0B;
-  --color-gain: #f23645;
-  --color-loss: #089981;
+  --color-gain: #089981;
+  --color-loss: #f23645;
   --color-surface: #2d3039;
   --color-surface-hover: #353840;
   --shadow-dark: #252830;

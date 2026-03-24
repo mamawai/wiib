@@ -9,6 +9,8 @@ import { Skeleton } from '../components/ui/skeleton';
 import { Dialog, DialogContent, DialogFooter, DialogHeader } from '../components/ui/dialog';
 import { useToast } from '../components/ui/use-toast';
 import { PortfolioChart } from '../components/PortfolioChart';
+import { PortfolioWallet } from '../components/PortfolioWallet';
+import type { WalletAsset } from '../components/PortfolioWallet';
 import { cn } from '../lib/utils';
 import {
   Wallet,
@@ -88,8 +90,10 @@ export function Portfolio() {
   const [refreshNonce, setRefreshNonce] = useState(0);
   const [cancelOrder, setCancelOrder] = useState<Order | null>(null);
   const [cancelSubmitting, setCancelSubmitting] = useState(false);
-  const [showChart, setShowChart] = useState(true);
+  const [showChart, setShowChart] = useState(false);
+  const [showWallet, setShowWallet] = useState(true);
   const [chartReady, setChartReady] = useState(false);
+  const [walletReady, setWalletReady] = useState(false);
 
   useEffect(() => {
     if (!user) {
@@ -131,6 +135,7 @@ export function Portfolio() {
 
       setLoading(true);
       setChartReady(false);
+      setWalletReady(false);
       Promise.all([
           userApi.portfolio(),
           userApi.positions(),
@@ -145,10 +150,15 @@ export function Portfolio() {
           setOrders(o.records);
           setOrderTotal(o.total);
           setSettlements(s);
-          loadCryptoPositions();
-          futuresApi.positions().then(setFuturesPositions).catch(() => setFuturesPositions([]));
-          optionApi.positions().then(setOptionPositions).catch(() => setOptionPositions([]));
-          predictionApi.pnl().then(setPredictionPnl).catch(() => setPredictionPnl(null));
+          Promise.all([
+            loadCryptoPositions(),
+            futuresApi.positions().then(setFuturesPositions).catch(() => setFuturesPositions([])),
+            optionApi.positions().then(setOptionPositions).catch(() => setOptionPositions([])),
+            predictionApi.pnl().then(setPredictionPnl).catch(() => setPredictionPnl(null)),
+          ]).then(() => {
+            if (!cancelled && activeRequestKey.current === (requestKey ?? ''))
+              setWalletReady(true);
+          });
         })
         .catch(() => {
           if (cancelled) return;
@@ -162,6 +172,7 @@ export function Portfolio() {
           setOptionPositions([]);
           setPredictionPnl(null);
           toast('获取账户数据失败', 'error', { description: '请稍后重试' });
+          setWalletReady(true);
         })
         .finally(() => {
           if (cancelled) return;
@@ -209,6 +220,17 @@ export function Portfolio() {
   const hasOptions = optionPositions.length > 0;
   const hasPositions = hasStock || hasCrypto || hasFutures || hasOptions || hasPrediction;
 
+  const holdingsTotal = stockTotal + cryptoTotal + futuresTotal + optionTotal;
+  const holdingsProfit = stockProfit + cryptoProfit + futuresProfit + optionProfit;
+  const holdingsItems = [
+    { label: '股票', value: stockTotal },
+    { label: '币种', value: cryptoTotal },
+    { label: '合约', value: futuresTotal },
+  ];
+  const walletAssets: WalletAsset[] = [
+    { name: '持仓', count: holdingsItems, value: holdingsTotal, profit: holdingsProfit, bg: 'linear-gradient(135deg, #4338ca, #635bff)' },
+  ];
+
   return (
     <div className="max-w-4xl mx-auto p-4 space-y-4">
       {user.bankrupt && (
@@ -223,7 +245,7 @@ export function Portfolio() {
       )}
 
       {/* 总资产概览 */}
-      <div className="relative rounded-2xl border border-primary/15 overflow-hidden"
+      <div className={cn("relative rounded-2xl border border-primary/15", showWallet ? "" : "overflow-hidden")}
         style={{
           backgroundImage: `linear-gradient(135deg, color-mix(in oklab, var(--color-primary) 12%, var(--color-card)) 0%, var(--color-card) 60%), repeating-linear-gradient(0deg, transparent, transparent 24px, color-mix(in oklab, var(--color-border) 30%, transparent) 24px, color-mix(in oklab, var(--color-border) 30%, transparent) 25px), repeating-linear-gradient(90deg, transparent, transparent 24px, color-mix(in oklab, var(--color-border) 30%, transparent) 24px, color-mix(in oklab, var(--color-border) 30%, transparent) 25px)`,
         }}
@@ -247,47 +269,73 @@ export function Portfolio() {
                 <p className="text-[11px] text-muted-foreground leading-tight mt-0.5 tracking-wide uppercase">模拟账户</p>
               </div>
             </div>
-            <button
-              onClick={() => setShowChart(!showChart)}
-              className={cn(
-                "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all",
-                showChart
-                  ? "bg-primary/15 text-primary border border-primary/25"
-                  : "text-muted-foreground border border-border/50 hover:border-border hover:text-foreground"
-              )}
-            >
-              <PieChart className="w-3.5 h-3.5" />
-              {showChart ? '隐藏' : '分布'}
-            </button>
+            <div className="flex gap-1.5">
+              <button
+                onClick={() => { setShowChart(v => !v); if (!showChart) setShowWallet(false); }}
+                className={cn(
+                  "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all",
+                  showChart
+                    ? "bg-primary/15 text-primary border border-primary/25"
+                    : "text-muted-foreground border border-border/50 hover:border-border hover:text-foreground"
+                )}
+              >
+                <PieChart className="w-3.5 h-3.5" />
+                分布
+              </button>
+              <button
+                onClick={() => { setShowWallet(v => !v); if (!showWallet) setShowChart(false); }}
+                className={cn(
+                  "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all",
+                  showWallet
+                    ? "bg-primary/15 text-primary border border-primary/25"
+                    : "text-muted-foreground border border-border/50 hover:border-border hover:text-foreground"
+                )}
+              >
+                <Wallet className="w-3.5 h-3.5" />
+                钱包
+              </button>
+            </div>
           </div>
 
           {/* 主体：饼图左 + 数据右 */}
           <div className="flex flex-col sm:flex-row gap-0">
             {/* 左：饼图 */}
-            {showChart && (
+            {(showChart || showWallet) && (
               <div className="sm:w-[48%] sm:border-r border-border/30 sm:pr-4 flex items-center justify-center">
-                {chartReady ? (
-                  <div className="w-full animate-in fade-in duration-300">
-                    <PortfolioChart
-                      positions={positions}
-                      cryptoPositions={cryptoRows}
-                      balance={user.balance}
-                      pendingSettlement={user.pendingSettlement}
-                    />
-                  </div>
+                {showChart ? (
+                  chartReady ? (
+                    <div className="w-full animate-in fade-in duration-300">
+                      <PortfolioChart
+                        positions={positions}
+                        cryptoPositions={cryptoRows}
+                        balance={user.balance}
+                        pendingSettlement={user.pendingSettlement}
+                      />
+                    </div>
+                  ) : (
+                    <div className="w-full h-48 sm:h-56 flex items-center justify-center">
+                      <svg className="w-7 h-7 text-muted-foreground/40 animate-spin" viewBox="0 0 24 24" fill="none">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+                      </svg>
+                    </div>
+                  )
                 ) : (
-                  <div className="w-full h-48 sm:h-56 flex items-center justify-center">
-                    <svg className="w-7 h-7 text-muted-foreground/40 animate-spin" viewBox="0 0 24 24" fill="none">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
-                    </svg>
+                  <div className="animate-in fade-in duration-300 py-4">
+                    <PortfolioWallet
+                      totalAssets={user.totalAssets}
+                      balance={user.balance}
+                      username={user.username}
+                      assets={walletAssets}
+                      ready={walletReady}
+                    />
                   </div>
                 )}
               </div>
             )}
 
             {/* 右：指标区 */}
-            <div className={cn("flex flex-col justify-center", showChart ? "sm:flex-1 sm:pl-5 pt-3 sm:pt-0" : "w-full")}>
+            <div className={cn("flex flex-col justify-center", (showChart || showWallet) ? "sm:flex-1 sm:pl-5 pt-3 sm:pt-0" : "w-full")}>
               {/* 总资产主指标 */}
               <div className="mb-4">
                 <span className="text-[11px] text-muted-foreground uppercase tracking-widest">总资产</span>
@@ -311,7 +359,7 @@ export function Portfolio() {
                   <span className="text-[12px] text-muted-foreground">总盈亏</span>
                   <div className={cn(
                     "flex items-center gap-1 px-2 py-0.5 rounded-md text-[12px] font-bold tabular-nums",
-                    isProfit ? "bg-red-500/10 text-red-400" : "bg-green-500/10 text-green-400"
+                    isProfit ? "bg-green-500/10 text-green-400" : "bg-red-500/10 text-red-400"
                   )}>
                     {isProfit
                       ? <TrendingUp className="w-3 h-3" />
@@ -348,7 +396,7 @@ export function Portfolio() {
                       <span className="text-[12px] text-muted-foreground">合约浮盈</span>
                       <span className={cn(
                         "text-[13px] font-semibold tabular-nums",
-                        futuresProfit >= 0 ? "text-red-400" : "text-green-400"
+                        futuresProfit >= 0 ? "text-green-400" : "text-red-400"
                       )}><AnimNum value={futuresProfit} prefix={futuresProfit >= 0 ? '+' : ''} /></span>
                     </div>
                   </>
@@ -361,7 +409,7 @@ export function Portfolio() {
                       <span className="text-[13px] font-semibold tabular-nums"><AnimNum value={optionTotal} /></span>
                       <span className={cn(
                         "text-[11px] font-medium tabular-nums",
-                        optionProfit >= 0 ? "text-red-400" : "text-green-400"
+                        optionProfit >= 0 ? "text-green-400" : "text-red-400"
                       )}>(<AnimNum value={optionProfit} prefix={optionProfit >= 0 ? '+' : ''} />)</span>
                     </div>
                   </div>
@@ -442,7 +490,7 @@ export function Portfolio() {
                     </div>
                     <div className="text-right">
                       <div className="text-[13px] font-bold tabular-nums tracking-tight"><AnimNum value={stockTotal} /></div>
-                      <div className={cn("text-[11px] tabular-nums font-medium", stockProfit >= 0 ? "text-red-400" : "text-green-400")}>
+                      <div className={cn("text-[11px] tabular-nums font-medium", stockProfit >= 0 ? "text-green-400" : "text-red-400")}>
                         <AnimNum value={stockProfit} prefix={stockProfit >= 0 ? '+' : ''} />
                       </div>
                     </div>
@@ -473,10 +521,10 @@ export function Portfolio() {
                             </div>
                             <div className="text-right shrink-0 flex items-center gap-2">
                               <div>
-                                <div className={cn("text-[13px] font-bold tabular-nums", up ? "text-red-400" : "text-green-400")}>
+                                <div className={cn("text-[13px] font-bold tabular-nums", up ? "text-green-400" : "text-red-400")}>
                                   {up ? '+' : ''}{p.profit.toFixed(2)}
                                 </div>
-                                <div className={cn("text-[11px] tabular-nums font-medium", up ? "text-red-400/70" : "text-green-400/70")}>
+                                <div className={cn("text-[11px] tabular-nums font-medium", up ? "text-green-400/70" : "text-red-400/70")}>
                                   {up ? '+' : ''}{p.profitPct.toFixed(2)}%
                                 </div>
                               </div>
@@ -505,7 +553,7 @@ export function Portfolio() {
                     </div>
                     <div className="text-right">
                       <div className="text-[13px] font-bold tabular-nums tracking-tight"><AnimNum value={cryptoTotal} /></div>
-                      <div className={cn("text-[11px] tabular-nums font-medium", cryptoProfit >= 0 ? "text-red-400" : "text-green-400")}>
+                      <div className={cn("text-[11px] tabular-nums font-medium", cryptoProfit >= 0 ? "text-green-400" : "text-red-400")}>
                         <AnimNum value={cryptoProfit} prefix={cryptoProfit >= 0 ? '+' : ''} />
                       </div>
                     </div>
@@ -545,10 +593,10 @@ export function Portfolio() {
                             </div>
                             <div className="text-right shrink-0 flex items-center gap-2">
                               <div>
-                                <div className={cn("text-[13px] font-bold tabular-nums", up ? "text-red-400" : "text-green-400")}>
+                                <div className={cn("text-[13px] font-bold tabular-nums", up ? "text-green-400" : "text-red-400")}>
                                   {up ? '+' : ''}{fmt(c.profit)}
                                 </div>
-                                <div className={cn("text-[11px] tabular-nums font-medium", up ? "text-red-400/70" : "text-green-400/70")}>
+                                <div className={cn("text-[11px] tabular-nums font-medium", up ? "text-green-400/70" : "text-red-400/70")}>
                                   {up ? '+' : ''}{c.profitPct.toFixed(2)}%
                                 </div>
                               </div>
@@ -577,7 +625,7 @@ export function Portfolio() {
                     </div>
                     <div className="text-right">
                       <div className="text-[11px] text-muted-foreground">保证金 <span className="text-foreground font-bold tabular-nums"><AnimNum value={futuresMargin} /></span></div>
-                      <div className={cn("text-[11px] tabular-nums font-medium", futuresProfit >= 0 ? "text-red-400" : "text-green-400")}>
+                      <div className={cn("text-[11px] tabular-nums font-medium", futuresProfit >= 0 ? "text-green-400" : "text-red-400")}>
                         浮盈 <AnimNum value={futuresProfit} prefix={futuresProfit >= 0 ? '+' : ''} />
                       </div>
                     </div>
@@ -603,7 +651,7 @@ export function Portfolio() {
                               <div className="min-w-0">
                                 <div className="flex items-center gap-1.5 mb-1">
                                   <span className="font-semibold text-[13px] group-hover:text-primary transition-colors">{coin.name}</span>
-                                  <Badge className={cn("text-[9px] px-1 py-0", isLong ? "bg-red-500" : "bg-green-500")}>{isLong ? '多' : '空'}</Badge>
+                                  <Badge className={cn("text-[9px] px-1 py-0", isLong ? "bg-green-500" : "bg-red-500")}>{isLong ? '多' : '空'}</Badge>
                                   <span className="text-[11px] text-muted-foreground">{f.leverage}x</span>
                                 </div>
                                 <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
@@ -617,10 +665,10 @@ export function Portfolio() {
                             </div>
                             <div className="text-right shrink-0 flex items-center gap-2">
                               <div>
-                                <div className={cn("text-[13px] font-bold tabular-nums", up ? "text-red-400" : "text-green-400")}>
+                                <div className={cn("text-[13px] font-bold tabular-nums", up ? "text-green-400" : "text-red-400")}>
                                   {up ? '+' : ''}{fmt(f.unrealizedPnl)}
                                 </div>
-                                <div className={cn("text-[11px] tabular-nums font-medium", up ? "text-red-400/70" : "text-green-400/70")}>
+                                <div className={cn("text-[11px] tabular-nums font-medium", up ? "text-green-400/70" : "text-red-400/70")}>
                                   {up ? '+' : ''}{f.unrealizedPnlPct.toFixed(2)}%
                                 </div>
                               </div>
@@ -649,7 +697,7 @@ export function Portfolio() {
                     </div>
                     <div className="text-right">
                       <div className="text-[13px] font-bold tabular-nums tracking-tight"><AnimNum value={optionTotal} /></div>
-                      <div className={cn("text-[11px] tabular-nums font-medium", optionProfit >= 0 ? "text-red-400" : "text-green-400")}>
+                      <div className={cn("text-[11px] tabular-nums font-medium", optionProfit >= 0 ? "text-green-400" : "text-red-400")}>
                         <AnimNum value={optionProfit} prefix={optionProfit >= 0 ? '+' : ''} />
                       </div>
                     </div>
@@ -667,7 +715,7 @@ export function Portfolio() {
                             <div className="min-w-0 flex-1">
                               <div className="flex items-center gap-1.5 mb-1">
                                 <span className="font-semibold text-[13px]">{o.stockName}</span>
-                                <Badge className={cn("text-[9px] px-1 py-0", isCall ? "bg-red-500" : "bg-green-500")}>{isCall ? 'CALL' : 'PUT'}</Badge>
+                                <Badge className={cn("text-[9px] px-1 py-0", isCall ? "bg-green-500" : "bg-red-500")}>{isCall ? 'CALL' : 'PUT'}</Badge>
                                 <span className="text-[11px] text-muted-foreground">@{o.strike}</span>
                               </div>
                               <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
@@ -681,7 +729,7 @@ export function Portfolio() {
                               </div>
                             </div>
                             <div className="text-right shrink-0">
-                              <div className={cn("text-[13px] font-bold tabular-nums", up ? "text-red-400" : "text-green-400")}>
+                              <div className={cn("text-[13px] font-bold tabular-nums", up ? "text-green-400" : "text-red-400")}>
                                 {up ? '+' : ''}{fmt(o.pnl)}
                               </div>
                               <div className="text-[11px] tabular-nums text-muted-foreground">
@@ -716,7 +764,7 @@ export function Portfolio() {
                       </div>
                       <div className="text-right flex items-center gap-2">
                         <div>
-                          <div className={cn("text-[13px] font-bold tabular-nums", predictionProfit >= 0 ? "text-red-400" : "text-green-400")}>
+                          <div className={cn("text-[13px] font-bold tabular-nums", predictionProfit >= 0 ? "text-green-400" : "text-red-400")}>
                             {predictionProfit >= 0 ? '+' : ''}{fmt(predictionProfit)}
                           </div>
                           <div className="text-[11px] text-muted-foreground tabular-nums">
@@ -730,7 +778,7 @@ export function Portfolio() {
                   <CardContent className="p-0 divide-y divide-border/30">
                     <div className="px-4 py-3 flex items-center justify-between">
                       <span className="text-[12px] text-muted-foreground">已实现盈亏</span>
-                      <span className={cn("text-[13px] font-semibold tabular-nums", predictionPnl.realizedPnl >= 0 ? "text-red-400" : "text-green-400")}>
+                      <span className={cn("text-[13px] font-semibold tabular-nums", predictionPnl.realizedPnl >= 0 ? "text-green-400" : "text-red-400")}>
                         {predictionPnl.realizedPnl >= 0 ? '+' : ''}{fmt(predictionPnl.realizedPnl)}
                       </span>
                     </div>
@@ -746,9 +794,9 @@ export function Portfolio() {
                     <div className="px-4 py-3 flex items-center justify-between">
                       <span className="text-[12px] text-muted-foreground">胜/负</span>
                       <span className="text-[13px] tabular-nums">
-                        <span className="text-red-400 font-semibold">{predictionPnl.wonBets}</span>
+                        <span className="text-green-400 font-semibold">{predictionPnl.wonBets}</span>
                         <span className="text-muted-foreground mx-1">/</span>
-                        <span className="text-green-400 font-semibold">{predictionPnl.lostBets}</span>
+                        <span className="text-red-400 font-semibold">{predictionPnl.lostBets}</span>
                       </span>
                     </div>
                   </CardContent>
@@ -768,7 +816,7 @@ export function Portfolio() {
                     </div>
                     <div className="flex items-center gap-3">
                       <span className="text-sm font-bold tabular-nums"><AnimNum value={allTotal} /></span>
-                      <span className={cn("text-xs font-semibold tabular-nums px-1.5 py-0.5 rounded", up ? "text-red-400 bg-red-500/10" : "text-green-400 bg-green-500/10")}>
+                      <span className={cn("text-xs font-semibold tabular-nums px-1.5 py-0.5 rounded", up ? "text-green-400 bg-green-500/10" : "text-red-400 bg-red-500/10")}>
                         <AnimNum value={allProfit} prefix={up ? '+' : ''} />
                       </span>
                     </div>
@@ -803,7 +851,7 @@ export function Portfolio() {
                         <div className="flex justify-between items-start mb-2">
                           <div className="flex items-center gap-2">
                             <span className="font-medium">{o.stockName}</span>
-                            <Badge variant={o.orderSide === 'BUY' ? 'destructive' : 'success'} className="text-xs">
+                            <Badge variant={o.orderSide === 'BUY' ? 'success' : 'destructive'} className="text-xs">
                               {o.orderSide === 'BUY' ? '买入' : '卖出'}
                             </Badge>
                             <Badge variant={o.status === 'PENDING' || o.status === 'SETTLING' ? 'warning' : o.status === 'FILLED' ? 'success' : 'secondary'}>

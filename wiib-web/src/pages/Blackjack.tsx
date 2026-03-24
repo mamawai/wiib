@@ -257,8 +257,8 @@ export function Blackjack() {
                     <div key={r.handIndex} className="flex justify-between items-center">
                       <span className={cn(
                         'font-bold text-base',
-                        isWin && 'text-red-400',
-                        isLose && 'text-green-400',
+                        isWin && 'text-green-400',
+                        isLose && 'text-red-400',
                         r.result === 'PUSH' && 'text-white/60'
                       )}>
                         {game.playerHands.length > 1 ? `#${r.handIndex + 1} ` : ''}
@@ -266,8 +266,8 @@ export function Blackjack() {
                       </span>
                       <span className={cn(
                         'font-bold text-lg tabular-nums',
-                        r.net > 0 && 'text-red-400',
-                        r.net < 0 && 'text-green-400',
+                        r.net > 0 && 'text-green-400',
+                        r.net < 0 && 'text-red-400',
                         r.net === 0 && 'text-white/50'
                       )}>
                         {r.net > 0 ? '+' : ''}{r.net.toLocaleString()}

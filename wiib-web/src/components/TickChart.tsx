@@ -106,11 +106,11 @@ export function TickChart({ ticks, prevClose }: Props) {
           smooth: 0.3,
           showSymbol: false,
           connectNulls: true,
-          lineStyle: { width: 1.5, color: '#f23645' },
+          lineStyle: { width: 1.5, color: '#089981' },
           areaStyle: {
             color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-              { offset: 0, color: 'rgba(242, 54, 69, 0.15)' },
-              { offset: 1, color: 'rgba(242, 54, 69, 0.02)' },
+              { offset: 0, color: 'rgba(8, 153, 129, 0.15)' },
+              { offset: 1, color: 'rgba(8, 153, 129, 0.02)' },
             ]),
           },
         },
@@ -127,7 +127,7 @@ export function TickChart({ ticks, prevClose }: Props) {
           const val = p.value;
           const base = prevClose ?? val;
           const change = base ? ((val - base) / base * 100).toFixed(2) : '--';
-          const changeColor = val >= base ? '#f23645' : '#089981';
+          const changeColor = val >= base ? '#089981' : '#f23645';
           return `
             <div style="padding: 4px 0">
               <div style="color: #888; margin-bottom: 4px">${p.name.substring(0, 5)}</div>
@@ -173,9 +173,9 @@ export function TickChart({ ticks, prevClose }: Props) {
     const basePrice = prevClose ?? validPrices[0];
     const lastPrice = validPrices[validPrices.length - 1];
     const isUp = lastPrice >= basePrice;
-    const lineColor = isUp ? '#f23645' : '#089981';
-    const areaColorStart = isUp ? 'rgba(242, 54, 69, 0.15)' : 'rgba(8, 153, 129, 0.15)';
-    const areaColorEnd = isUp ? 'rgba(242, 54, 69, 0.02)' : 'rgba(8, 153, 129, 0.02)';
+    const lineColor = isUp ? '#089981' : '#f23645';
+    const areaColorStart = isUp ? 'rgba(8, 153, 129, 0.15)' : 'rgba(242, 54, 69, 0.15)';
+    const areaColorEnd = isUp ? 'rgba(8, 153, 129, 0.02)' : 'rgba(242, 54, 69, 0.02)';
 
     // 增量更新
     chart.setOption({

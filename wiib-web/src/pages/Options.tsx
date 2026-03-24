@@ -336,7 +336,7 @@ export function Options() {
               <div className="grid grid-cols-2 gap-3">
                 {/* CALL 看涨期权 */}
                 <div className="space-y-2">
-                  <div className="text-xs font-medium text-center text-red-500 pb-1 border-b">
+                  <div className="text-xs font-medium text-center text-green-500 pb-1 border-b">
                     看涨期权 (CALL)
                   </div>
                   <div className="space-y-2 max-h-64 overflow-y-auto">
@@ -350,7 +350,7 @@ export function Options() {
                           className={cn(
                             "w-full p-2.5 rounded-lg border transition-all text-left",
                             selectedContract?.contractId === contract.contractId
-                              ? "bg-red-500/10 border-red-500"
+                              ? "bg-green-500/10 border-green-500"
                               : "hover:bg-accent/50 border-border"
                           )}
                         >
@@ -365,7 +365,7 @@ export function Options() {
 
                 {/* PUT 看跌期权 */}
                 <div className="space-y-2">
-                  <div className="text-xs font-medium text-center text-green-500 pb-1 border-b">
+                  <div className="text-xs font-medium text-center text-red-500 pb-1 border-b">
                     看跌期权 (PUT)
                   </div>
                   <div className="space-y-2 max-h-64 overflow-y-auto">
@@ -379,7 +379,7 @@ export function Options() {
                           className={cn(
                             "w-full p-2.5 rounded-lg border transition-all text-left",
                             selectedContract?.contractId === contract.contractId
-                              ? "bg-green-500/10 border-green-500"
+                              ? "bg-red-500/10 border-red-500"
                               : "hover:bg-accent/50 border-border"
                           )}
                         >
@@ -505,7 +505,7 @@ export function Options() {
                           <span className="text-xs text-muted-foreground">{p.stockCode}</span>
                         </div>
                         <div className="text-right">
-                          <div className={cn("text-lg font-bold tabular-nums", p.pnl >= 0 ? "text-red-500" : "text-green-500")}>
+                          <div className={cn("text-lg font-bold tabular-nums", p.pnl >= 0 ? "text-green-500" : "text-red-500")}>
                             {p.pnl >= 0 ? '+' : ''}{p.pnl.toFixed(2)}
                           </div>
                         </div>

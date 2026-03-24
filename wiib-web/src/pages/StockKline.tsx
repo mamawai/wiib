@@ -71,10 +71,10 @@ export function StockKline() {
         type: 'candlestick',
         data: ohlcData,
         itemStyle: {
-          color: '#f23645',
-          color0: '#089981',
-          borderColor: '#f23645',
-          borderColor0: '#089981',
+          color: '#089981',
+          color0: '#f23645',
+          borderColor: '#089981',
+          borderColor0: '#f23645',
         },
       }],
       tooltip: {
@@ -90,7 +90,7 @@ export function StockKline() {
           // ECharts candlestick d.data = [categoryIndex, open, close, low, high]
           const [, open, close, low, high] = d.data;
           if (open == null) return '';
-          const color = close >= open ? '#f23645' : '#089981';
+          const color = close >= open ? '#089981' : '#f23645';
           return `<div style="padding:4px 0">
             <div style="color:#888;margin-bottom:4px">${d.name}</div>
             <div>开: ${Number(open).toFixed(2)}</div>
