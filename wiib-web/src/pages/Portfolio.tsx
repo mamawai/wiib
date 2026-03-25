@@ -72,7 +72,7 @@ function AnimNum({ value, prefix = '', suffix = '', duration = 600 }: { value: n
 
 export function Portfolio() {
   const navigate = useNavigate();
-  const { user } = useUserStore();
+  const { user, token} = useUserStore();
   const { toast } = useToast();
   const [positions, setPositions] = useState<Position[]>([]);
   const [cryptoRows, setCryptoRows] = useState<CryptoRow[]>([]);
@@ -96,10 +96,12 @@ export function Portfolio() {
   const [walletReady, setWalletReady] = useState(false);
 
   useEffect(() => {
-    if (!user) {
+    // 只有当token不存在时才跳转login（用户确实未登录）
+    // 如果token存在但user为null，说明正在等待fetchUser完成，不跳转
+    if (!token) {
       navigate('/login');
     }
-  }, [user, navigate]);
+  }, [token, navigate]);
 
   const loadCryptoPositions = useCallback(async () => {
     try {

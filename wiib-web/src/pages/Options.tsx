@@ -16,7 +16,7 @@ import { useDedupedEffect } from '../hooks/useDedupedEffect';
 
 export function Options() {
   const navigate = useNavigate();
-  const { user } = useUserStore();
+  const { user, token } = useUserStore();
   const { toast } = useToast();
   const [positions, setPositions] = useState<OptionPosition[]>([]);
   const [orders, setOrders] = useState<OptionOrder[]>([]);
@@ -39,10 +39,10 @@ export function Options() {
   const [buying, setBuying] = useState(false);
 
   useEffect(() => {
-    if (!user) {
+    if (!token) {
       navigate('/login');
     }
-  }, [user, navigate]);
+  }, [token, navigate]);
 
   // 加载股票列表
   useEffect(() => {

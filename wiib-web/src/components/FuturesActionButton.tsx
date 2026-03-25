@@ -1,5 +1,8 @@
 import {Loader2, Coins, HandCoins} from 'lucide-react';
 import styled from 'styled-components';
+import { useState, useRef, useEffect } from 'react';
+
+const MOBILE_ANIM_DURATION = 1200;
 
 interface FuturesActionButtonProps {
   side: 'LONG' | 'SHORT' | 'BUY' | 'SELL';
@@ -22,6 +25,41 @@ export function FuturesActionButton({
   className,
   onClick,
 }: FuturesActionButtonProps) {
+  const [activated, setActivated] = useState(false);
+  const activatedRef = useRef(false);
+  const timerRef = useRef<number | null>(null);
+  const isMobileRef = useRef(window.matchMedia('(hover: none)').matches);
+
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, []);
+
+  const handlePointerDown = () => {
+    if (disabled || loading) return;
+    if (!isMobileRef.current) {
+      onClick?.();
+      return;
+    }
+    if (activatedRef.current) return;
+    activatedRef.current = true;
+    setActivated(true);
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = window.setTimeout(() => {
+      activatedRef.current = false;
+      setActivated(false);
+    }, MOBILE_ANIM_DURATION);
+  };
+
+  const prevActivatedRef = useRef(false);
+  useEffect(() => {
+    if (prevActivatedRef.current && !activated && onClick) {
+      onClick();
+    }
+    prevActivatedRef.current = activated;
+  }, [activated, onClick]);
+
   const isSpot = side === 'BUY' || side === 'SELL';
   const actionText = isSpot
     ? `${side === 'BUY' ? '买入' : '卖出'}${label ? ` ${label}` : ''}`
@@ -41,9 +79,9 @@ export function FuturesActionButton({
 
   return (
     <Wrapper
-      className={className}
+      className={`${className ?? ''} ${activated ? 'activated' : ''}`}
       type="button"
-      onClick={onClick}
+      onPointerDown={handlePointerDown}
       disabled={disabled || success}
       $accent={accent}
       $accentSoft={accentSoft}
@@ -215,6 +253,26 @@ const Wrapper = styled.button<WrapperProps>`
     &:hover:not(:disabled) .right-side {
       background: #f8fafc;
     }
+  }
+
+  &.activated:not(:disabled) .left-side {
+    width: 100%;
+  }
+
+  &.activated:not(:disabled) .card {
+    animation: slide-top 1.2s cubic-bezier(0.645, 0.045, 0.355, 1) both;
+  }
+
+  &.activated:not(:disabled) .post {
+    animation: slide-post 1s cubic-bezier(0.165, 0.84, 0.44, 1) both;
+  }
+
+  &.activated:not(:disabled) .dollar {
+    animation: fade-in-fwd 0.3s 1s backwards;
+  }
+
+  &.activated:not(:disabled) .right-side {
+    background: #f8fafc;
   }
 
   .label {
