@@ -40,6 +40,7 @@ public class AssetSnapshotServiceImpl implements AssetSnapshotService {
     private final PositionService positionService;
     private final CryptoPositionService cryptoPositionService;
     private final FuturesPositionMapper futuresPositionMapper;
+    private final FuturesOrderMapper futuresOrderMapper;
     private final CacheService cacheService;
     private final OptionPositionService optionPositionService;
     private final PredictionBetMapper predictionBetMapper;
@@ -48,6 +49,10 @@ public class AssetSnapshotServiceImpl implements AssetSnapshotService {
     private final BlackjackConvertLogMapper blackjackConvertLogMapper;
     private final SettlementService settlementService;
     private final CryptoOrderMapper cryptoOrderMapper;
+    private final OrderMapper orderMapper;
+    private final SettlementMapper settlementMapper;
+    private final OptionOrderMapper optionOrderMapper;
+    private final OptionSettlementMapper optionSettlementMapper;
 
     @org.springframework.beans.factory.annotation.Value("${trading.initial-balance:100000}")
     private BigDecimal initialBalance;
@@ -136,21 +141,9 @@ public class AssetSnapshotServiceImpl implements AssetSnapshotService {
 
     private Map<Long, CategoryAveragesDTO> buildCategoryRankMap(int days) {
         LocalDate today = LocalDate.now();
-        LocalDate yesterday = today.minusDays(1);
-        LocalDate startDate = today.minusDays(days);
 
         List<User> users = userMapper.selectList(null);
-        if (users.isEmpty()) {
-            return Map.of();
-        }
-
-        Map<Long, UserAssetSnapshot> baselineMap = new HashMap<>();
-        if (!startDate.isAfter(yesterday)) {
-            List<UserAssetSnapshot> snapshots = snapshotMapper.listByDateRangeUntil(startDate, yesterday);
-            for (UserAssetSnapshot snapshot : snapshots) {
-                baselineMap.putIfAbsent(snapshot.getUserId(), snapshot);
-            }
-        }
+        if (users.isEmpty()) return Map.of();
 
         Map<String, BigDecimal> cryptoPriceMap = cryptoPositionService.fetchCryptoPriceMap();
         Map<Long, UserAssetSnapshot> currentMap = computeRealtimeSnapshots(users, today, cryptoPriceMap);
@@ -158,10 +151,15 @@ public class AssetSnapshotServiceImpl implements AssetSnapshotService {
         Map<Long, BigDecimal[]> userTotals = new HashMap<>();
         for (User user : users) {
             UserAssetSnapshot current = currentMap.get(user.getId());
-            if (current == null) {
-                continue;
-            }
-            userTotals.put(user.getId(), diffCategoryProfits(current, baselineMap.get(user.getId())));
+            if (current == null) continue;
+            userTotals.put(user.getId(), new BigDecimal[]{
+                    current.getStockProfit(),
+                    current.getCryptoProfit(),
+                    current.getFuturesProfit(),
+                    current.getOptionProfit(),
+                    current.getPredictionProfit(),
+                    current.getGameProfit()
+            });
         }
 
         return buildRankResult(userTotals);
@@ -238,17 +236,6 @@ public class AssetSnapshotServiceImpl implements AssetSnapshotService {
         return dto;
     }
 
-    private BigDecimal[] diffCategoryProfits(UserAssetSnapshot current, UserAssetSnapshot baseline) {
-        BigDecimal[] diff = new BigDecimal[6];
-        diff[0] = sub(current.getStockProfit(), baseline != null ? baseline.getStockProfit() : null);
-        diff[1] = sub(current.getCryptoProfit(), baseline != null ? baseline.getCryptoProfit() : null);
-        diff[2] = sub(current.getFuturesProfit(), baseline != null ? baseline.getFuturesProfit() : null);
-        diff[3] = sub(current.getOptionProfit(), baseline != null ? baseline.getOptionProfit() : null);
-        diff[4] = sub(current.getPredictionProfit(), baseline != null ? baseline.getPredictionProfit() : null);
-        diff[5] = sub(current.getGameProfit(), baseline != null ? baseline.getGameProfit() : null);
-        return diff;
-    }
-
     private void computeAndUpsert(User user, LocalDate date, Map<String, BigDecimal> cryptoPriceMap) {
         UserAssetSnapshot snapshot = computeSnapshot(user, date, cryptoPriceMap);
         snapshotMapper.upsert(snapshot);
@@ -259,10 +246,13 @@ public class AssetSnapshotServiceImpl implements AssetSnapshotService {
 
         List<PositionDTO> stockPositions = positionService.getUserPositions(userId);
         BigDecimal stockMarketValue = stockPositions.stream().map(PositionDTO::getMarketValue).reduce(BigDecimal.ZERO, BigDecimal::add);
-        BigDecimal stockProfit = stockPositions.stream().map(PositionDTO::getProfit).reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal stockFloatingProfit = stockPositions.stream().map(PositionDTO::getProfit).reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal stockRealizedProfit = settlementMapper.sumSettledAmount(userId)
+                .subtract(orderMapper.sumBuyFilledAmount(userId));
+        BigDecimal stockProfit = stockFloatingProfit.add(stockRealizedProfit);
 
-        BigDecimal cryptoProfit = BigDecimal.ZERO;
         BigDecimal cryptoMarketValue = BigDecimal.ZERO;
+        BigDecimal cryptoFloatingProfit = BigDecimal.ZERO;
         List<CryptoPosition> cryptoPositions = cryptoPositionService.getUserPositions(userId);
         for (CryptoPosition cp : cryptoPositions) {
             BigDecimal price = cryptoPriceMap.get(cp.getSymbol());
@@ -270,11 +260,14 @@ public class AssetSnapshotServiceImpl implements AssetSnapshotService {
                 BigDecimal totalQty = cp.getQuantity().add(cp.getFrozenQuantity() != null ? cp.getFrozenQuantity() : BigDecimal.ZERO);
                 BigDecimal mv = price.multiply(totalQty);
                 cryptoMarketValue = cryptoMarketValue.add(mv);
-                cryptoProfit = cryptoProfit.add(mv.subtract(cp.getAvgCost().multiply(totalQty)));
+                cryptoFloatingProfit = cryptoFloatingProfit.add(mv.subtract(cp.getAvgCost().multiply(totalQty)));
             }
         }
+        BigDecimal cryptoRealizedProfit = cryptoOrderMapper.sumSellFilledAmount(userId)
+                .subtract(cryptoOrderMapper.sumBuyFilledAmount(userId));
+        BigDecimal cryptoProfit = cryptoFloatingProfit.add(cryptoRealizedProfit);
 
-        BigDecimal futuresProfit = BigDecimal.ZERO;
+        BigDecimal futuresFloatingProfit = BigDecimal.ZERO;
         BigDecimal futuresValue = BigDecimal.ZERO;
         List<FuturesPosition> fps = futuresPositionMapper.selectList(
                 new LambdaQueryWrapper<FuturesPosition>()
@@ -283,16 +276,23 @@ public class AssetSnapshotServiceImpl implements AssetSnapshotService {
         for (FuturesPosition fp : fps) {
             BigDecimal markPrice = cacheService.getMarkPrice(fp.getSymbol());
             if (markPrice == null) markPrice = cacheService.getCryptoPrice(fp.getSymbol());
+            if (markPrice == null) continue;
             BigDecimal pnl = "LONG".equals(fp.getSide())
                     ? markPrice.subtract(fp.getEntryPrice()).multiply(fp.getQuantity())
                     : fp.getEntryPrice().subtract(markPrice).multiply(fp.getQuantity());
-            futuresProfit = futuresProfit.add(pnl);
+            futuresFloatingProfit = futuresFloatingProfit.add(pnl);
             futuresValue = futuresValue.add(fp.getMargin()).add(pnl);
         }
+        BigDecimal futuresRealizedProfit = futuresOrderMapper.sumRealizedPnl(userId);
+        BigDecimal futuresProfit = futuresFloatingProfit.add(futuresRealizedProfit);
 
         List<OptionPositionDTO> optionPositions = optionPositionService.getUserPositions(userId);
-        BigDecimal optionProfit = optionPositions.stream().map(OptionPositionDTO::getPnl).reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal optionFloatingProfit = optionPositions.stream().map(OptionPositionDTO::getPnl).reduce(BigDecimal.ZERO, BigDecimal::add);
         BigDecimal optionValue = optionPositions.stream().map(OptionPositionDTO::getMarketValue).reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal optionRealizedProfit = optionOrderMapper.sumStcFilledAmount(userId)
+                .add(optionSettlementMapper.sumSettlementAmount(userId))
+                .subtract(optionOrderMapper.sumBtoFilledAmount(userId));
+        BigDecimal optionProfit = optionFloatingProfit.add(optionRealizedProfit);
 
         BigDecimal pendingSettlement = settlementService.getPendingSettlements(userId).stream()
                 .map(Settlement::getAmount).reduce(BigDecimal.ZERO, BigDecimal::add);
@@ -325,12 +325,12 @@ public class AssetSnapshotServiceImpl implements AssetSnapshotService {
         snapshot.setTotalAssets(totalAssets);
         snapshot.setProfit(profit);
         snapshot.setProfitPct(profitPct);
-        snapshot.setStockProfit(stockProfit);
+        snapshot.setStockProfit(stockProfit.setScale(2, RoundingMode.HALF_UP));
         snapshot.setCryptoProfit(cryptoProfit.setScale(2, RoundingMode.HALF_UP));
         snapshot.setFuturesProfit(futuresProfit.setScale(2, RoundingMode.HALF_UP));
-        snapshot.setOptionProfit(optionProfit);
-        snapshot.setPredictionProfit(predictionProfit);
-        snapshot.setGameProfit(gameProfit);
+        snapshot.setOptionProfit(optionProfit.setScale(2, RoundingMode.HALF_UP));
+        snapshot.setPredictionProfit(predictionProfit.setScale(2, RoundingMode.HALF_UP));
+        snapshot.setGameProfit(gameProfit.setScale(2, RoundingMode.HALF_UP));
         snapshot.setCreatedAt(LocalDateTime.now());
         return snapshot;
     }

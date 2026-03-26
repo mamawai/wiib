@@ -53,4 +53,14 @@ public interface CryptoOrderMapper extends BaseMapper<CryptoOrder> {
     @Update("UPDATE crypto_order SET status = 'CANCELLED', updated_at = NOW() " +
             "WHERE user_id = #{userId} AND status IN ('PENDING', 'TRIGGERED')")
     int cancelOpenOrdersByUserId(@Param("userId") Long userId);
+
+    /** 用户所有已成交买入的总额（成本，含手续费） */
+    @Select("SELECT COALESCE(SUM(filled_amount + COALESCE(commission, 0)), 0) FROM crypto_order " +
+            "WHERE user_id = #{userId} AND order_side = 'BUY' AND status = 'FILLED'")
+    BigDecimal sumBuyFilledAmount(@Param("userId") Long userId);
+
+    /** 用户所有已成交卖出的总额（收入，已扣手续费） */
+    @Select("SELECT COALESCE(SUM(filled_amount - COALESCE(commission, 0)), 0) FROM crypto_order " +
+            "WHERE user_id = #{userId} AND order_side = 'SELL' AND status = 'FILLED'")
+    BigDecimal sumSellFilledAmount(@Param("userId") Long userId);
 }

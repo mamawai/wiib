@@ -62,4 +62,12 @@ public interface OptionOrderMapper extends BaseMapper<OptionOrder> {
     @Update("UPDATE option_order SET status = 'CANCELLED', updated_at = NOW() " +
             "WHERE user_id = #{userId} AND status = 'PENDING'")
     int cancelPendingOrdersByUserId(@Param("userId") Long userId);
+
+    @Select("SELECT COALESCE(SUM(filled_amount + COALESCE(commission, 0)), 0) FROM option_order " +
+            "WHERE user_id = #{userId} AND order_side = 'BTO' AND status = 'FILLED'")
+    BigDecimal sumBtoFilledAmount(@Param("userId") Long userId);
+
+    @Select("SELECT COALESCE(SUM(filled_amount - COALESCE(commission, 0)), 0) FROM option_order " +
+            "WHERE user_id = #{userId} AND order_side = 'STC' AND status = 'FILLED'")
+    BigDecimal sumStcFilledAmount(@Param("userId") Long userId);
 }

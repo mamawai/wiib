@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.mawai.wiibcommon.entity.Order;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
 
 import java.math.BigDecimal;
@@ -62,4 +63,9 @@ public interface OrderMapper extends BaseMapper<Order> {
     @Update("UPDATE orders SET status = 'CANCELLED', updated_at = NOW() " +
             "WHERE user_id = #{userId} AND status IN ('PENDING', 'TRIGGERED')")
     int cancelOpenOrdersByUserId(@Param("userId") Long userId);
+
+    /** 用户所有已成交买入的总额（买入成本，含手续费） */
+    @Select("SELECT COALESCE(SUM(filled_amount + COALESCE(commission, 0)), 0) FROM orders " +
+            "WHERE user_id = #{userId} AND order_side = 'BUY' AND status = 'FILLED'")
+    BigDecimal sumBuyFilledAmount(@Param("userId") Long userId);
 }

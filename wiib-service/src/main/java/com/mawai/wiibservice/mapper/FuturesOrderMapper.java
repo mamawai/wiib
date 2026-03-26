@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.mawai.wiibcommon.entity.FuturesOrder;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
 
 import java.math.BigDecimal;
@@ -39,4 +40,9 @@ public interface FuturesOrderMapper extends BaseMapper<FuturesOrder> {
     @Update("UPDATE futures_order SET status = 'TRIGGERED', filled_price = #{triggerPrice}, updated_at = NOW() " +
             "WHERE id = #{orderId} AND status = 'PENDING'")
     int casUpdateToTriggered(@Param("orderId") Long orderId, @Param("triggerPrice") BigDecimal triggerPrice);
+
+    /** 用户所有已平仓单的已实现盈亏（已扣手续费） */
+    @Select("SELECT COALESCE(SUM(realized_pnl - COALESCE(commission, 0)), 0) FROM futures_order " +
+            "WHERE user_id = #{userId} AND realized_pnl IS NOT NULL")
+    BigDecimal sumRealizedPnl(@Param("userId") Long userId);
 }
