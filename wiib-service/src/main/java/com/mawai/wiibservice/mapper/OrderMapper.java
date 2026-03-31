@@ -68,4 +68,39 @@ public interface OrderMapper extends BaseMapper<Order> {
     @Select("SELECT COALESCE(SUM(filled_amount + COALESCE(commission, 0)), 0) FROM orders " +
             "WHERE user_id = #{userId} AND order_side = 'BUY' AND status = 'FILLED'")
     BigDecimal sumBuyFilledAmount(@Param("userId") Long userId);
+
+    @Select("SELECT COUNT(*) FROM orders WHERE user_id = #{userId} AND status = 'FILLED'")
+    long countFilledOrders(@Param("userId") Long userId);
+
+    @Select("""
+            SELECT CASE
+                     WHEN buy_count > sell_count THEN 'BUY_HEAVY'
+                     WHEN sell_count > buy_count THEN 'SELL_HEAVY'
+                     ELSE 'BALANCED'
+                   END
+            FROM (
+                SELECT
+                    SUM(CASE WHEN order_side = 'BUY' THEN 1 ELSE 0 END) AS buy_count,
+                    SUM(CASE WHEN order_side = 'SELL' THEN 1 ELSE 0 END) AS sell_count
+                FROM orders
+                WHERE user_id = #{userId} AND status = 'FILLED'
+            ) t
+            """)
+    String selectSidePreference(@Param("userId") Long userId);
+
+    @Select("""
+            SELECT CASE
+                     WHEN market_count > limit_count THEN 'MARKET_HEAVY'
+                     WHEN limit_count > market_count THEN 'LIMIT_HEAVY'
+                     ELSE 'BALANCED'
+                   END
+            FROM (
+                SELECT
+                    SUM(CASE WHEN order_type = 'MARKET' THEN 1 ELSE 0 END) AS market_count,
+                    SUM(CASE WHEN order_type = 'LIMIT' THEN 1 ELSE 0 END) AS limit_count
+                FROM orders
+                WHERE user_id = #{userId} AND status = 'FILLED'
+            ) t
+            """)
+    String selectOrderTypePreference(@Param("userId") Long userId);
 }

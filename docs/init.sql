@@ -754,3 +754,181 @@ CREATE TABLE IF NOT EXISTS user_asset_snapshot (
 );
 
 COMMENT ON TABLE user_asset_snapshot IS '用户资产每日快照';
+
+-- ============================================
+-- 量化预测：预测周期主表
+-- ============================================
+CREATE TABLE IF NOT EXISTS quant_forecast_cycle (
+    id BIGSERIAL PRIMARY KEY,
+    cycle_id VARCHAR(64) NOT NULL UNIQUE,
+    symbol VARCHAR(20) NOT NULL,
+    forecast_time TIMESTAMP NOT NULL,
+    overall_decision VARCHAR(64) NOT NULL,
+    risk_status VARCHAR(32) NOT NULL,
+    snapshot_json JSONB,
+    report_json JSONB,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+COMMENT ON TABLE quant_forecast_cycle IS '量化预测周期主表';
+COMMENT ON COLUMN quant_forecast_cycle.cycle_id IS '周期唯一ID，格式 qf-yyyyMMdd-HHmmss-SYMBOL';
+COMMENT ON COLUMN quant_forecast_cycle.symbol IS '交易对（如BTCUSDT）';
+COMMENT ON COLUMN quant_forecast_cycle.forecast_time IS '预测时刻';
+COMMENT ON COLUMN quant_forecast_cycle.overall_decision IS '总体决策（如PRIORITIZE_0_10_LONG）';
+COMMENT ON COLUMN quant_forecast_cycle.risk_status IS '风控状态：NORMAL/CAUTIOUS/HIGH_DISAGREEMENT/ALL_NO_TRADE';
+COMMENT ON COLUMN quant_forecast_cycle.snapshot_json IS '当时FeatureSnapshot快照';
+COMMENT ON COLUMN quant_forecast_cycle.report_json IS 'LLM生成的报告';
+
+CREATE INDEX idx_qfc_symbol_time ON quant_forecast_cycle(symbol, forecast_time DESC);
+
+-- ============================================
+-- 量化预测：Agent投票表
+-- ============================================
+CREATE TABLE IF NOT EXISTS quant_agent_vote (
+    id BIGSERIAL PRIMARY KEY,
+    cycle_id VARCHAR(64) NOT NULL,
+    agent VARCHAR(32) NOT NULL,
+    horizon VARCHAR(8) NOT NULL,
+    direction VARCHAR(10) NOT NULL,
+    score DECIMAL(6,4) NOT NULL,
+    confidence DECIMAL(6,4) NOT NULL,
+    expected_move_bps INT NOT NULL DEFAULT 0,
+    volatility_bps INT NOT NULL DEFAULT 0,
+    reason_codes VARCHAR(512),
+    risk_flags VARCHAR(256),
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+COMMENT ON TABLE quant_agent_vote IS '量化预测Agent投票明细';
+COMMENT ON COLUMN quant_agent_vote.cycle_id IS '关联预测周期ID';
+COMMENT ON COLUMN quant_agent_vote.agent IS 'Agent名称：microstructure/momentum/regime/volatility/news_event';
+COMMENT ON COLUMN quant_agent_vote.horizon IS '区间：0_10/10_20/20_30';
+COMMENT ON COLUMN quant_agent_vote.direction IS '方向：LONG/SHORT/NO_TRADE';
+COMMENT ON COLUMN quant_agent_vote.score IS '方向强度 [-1,1]';
+COMMENT ON COLUMN quant_agent_vote.confidence IS '置信度 [0,1]';
+COMMENT ON COLUMN quant_agent_vote.expected_move_bps IS '预期波动(基点)';
+COMMENT ON COLUMN quant_agent_vote.volatility_bps IS '风险估计(基点)';
+COMMENT ON COLUMN quant_agent_vote.reason_codes IS '原因码(逗号分隔)';
+COMMENT ON COLUMN quant_agent_vote.risk_flags IS '风险标志(逗号分隔)';
+
+CREATE INDEX idx_qav_cycle ON quant_agent_vote(cycle_id);
+CREATE INDEX idx_qav_agent_horizon ON quant_agent_vote(agent, horizon);
+
+-- ============================================
+-- 量化预测：区间裁决结果表
+-- ============================================
+CREATE TABLE IF NOT EXISTS quant_horizon_forecast (
+    id BIGSERIAL PRIMARY KEY,
+    cycle_id VARCHAR(64) NOT NULL,
+    horizon VARCHAR(8) NOT NULL,
+    direction VARCHAR(10) NOT NULL,
+    confidence DECIMAL(6,4) NOT NULL,
+    weighted_score DECIMAL(6,4) NOT NULL,
+    disagreement DECIMAL(6,4) NOT NULL,
+    entry_low DECIMAL(18,2),
+    entry_high DECIMAL(18,2),
+    invalidation_price DECIMAL(18,2),
+    tp1 DECIMAL(18,2),
+    tp2 DECIMAL(18,2),
+    max_leverage INT NOT NULL DEFAULT 0,
+    max_position_pct DECIMAL(6,4) NOT NULL DEFAULT 0,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+COMMENT ON TABLE quant_horizon_forecast IS '量化预测区间裁决结果';
+COMMENT ON COLUMN quant_horizon_forecast.cycle_id IS '关联预测周期ID';
+COMMENT ON COLUMN quant_horizon_forecast.horizon IS '区间：0_10/10_20/20_30';
+COMMENT ON COLUMN quant_horizon_forecast.direction IS '方向：LONG/SHORT/NO_TRADE';
+COMMENT ON COLUMN quant_horizon_forecast.confidence IS '置信度';
+COMMENT ON COLUMN quant_horizon_forecast.weighted_score IS '加权得分';
+COMMENT ON COLUMN quant_horizon_forecast.disagreement IS '分歧度';
+COMMENT ON COLUMN quant_horizon_forecast.entry_low IS '入场区间下沿';
+COMMENT ON COLUMN quant_horizon_forecast.entry_high IS '入场区间上沿';
+COMMENT ON COLUMN quant_horizon_forecast.invalidation_price IS '失效价（止损）';
+COMMENT ON COLUMN quant_horizon_forecast.tp1 IS '止盈目标1';
+COMMENT ON COLUMN quant_horizon_forecast.tp2 IS '止盈目标2';
+COMMENT ON COLUMN quant_horizon_forecast.max_leverage IS '最大杠杆';
+COMMENT ON COLUMN quant_horizon_forecast.max_position_pct IS '最大仓位比例';
+
+CREATE INDEX idx_qhf_cycle ON quant_horizon_forecast(cycle_id);
+
+-- ============================================
+-- 量化预测：风控后最终信号表
+-- ============================================
+CREATE TABLE IF NOT EXISTS quant_signal_decision (
+    id BIGSERIAL PRIMARY KEY,
+    cycle_id VARCHAR(64) NOT NULL,
+    horizon VARCHAR(8) NOT NULL,
+    direction VARCHAR(10) NOT NULL,
+    confidence DECIMAL(6,4) NOT NULL,
+    max_leverage INT NOT NULL DEFAULT 0,
+    max_position_pct DECIMAL(6,4) NOT NULL DEFAULT 0,
+    risk_status VARCHAR(32) NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+COMMENT ON TABLE quant_signal_decision IS '量化预测风控后最终信号';
+COMMENT ON COLUMN quant_signal_decision.cycle_id IS '关联预测周期ID';
+COMMENT ON COLUMN quant_signal_decision.horizon IS '区间：0_10/10_20/20_30';
+COMMENT ON COLUMN quant_signal_decision.direction IS '风控后方向';
+COMMENT ON COLUMN quant_signal_decision.confidence IS '风控后置信度';
+COMMENT ON COLUMN quant_signal_decision.max_leverage IS '风控后杠杆上限';
+COMMENT ON COLUMN quant_signal_decision.max_position_pct IS '风控后仓位上限';
+COMMENT ON COLUMN quant_signal_decision.risk_status IS '风控状态';
+
+CREATE INDEX idx_qsd_cycle ON quant_signal_decision(cycle_id);
+CREATE INDEX idx_qsd_horizon_time ON quant_signal_decision(horizon, created_at DESC);
+
+-- ============================================
+-- 量化预测：预测验证表（事后对比实际价格）
+-- ============================================
+CREATE TABLE IF NOT EXISTS quant_forecast_verification (
+    id BIGSERIAL PRIMARY KEY,
+    cycle_id VARCHAR(64) NOT NULL,
+    symbol VARCHAR(20) NOT NULL,
+    horizon VARCHAR(8) NOT NULL,
+    predicted_direction VARCHAR(10) NOT NULL,
+    predicted_confidence DECIMAL(6,4),
+    actual_price_at_forecast DECIMAL(18,2),
+    actual_price_after DECIMAL(18,2),
+    actual_change_bps INT,
+    prediction_correct BOOLEAN,
+    verified_at TIMESTAMP NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+COMMENT ON TABLE quant_forecast_verification IS '预测验证（事后对比实际价格）';
+COMMENT ON COLUMN quant_forecast_verification.cycle_id IS '关联预测周期ID';
+COMMENT ON COLUMN quant_forecast_verification.actual_change_bps IS '实际价格变化（基点）';
+COMMENT ON COLUMN quant_forecast_verification.prediction_correct IS '预测方向是否正确';
+
+CREATE INDEX idx_qfv_symbol_time ON quant_forecast_verification(symbol, verified_at DESC);
+CREATE INDEX idx_qfv_cycle_id ON quant_forecast_verification(cycle_id);
+
+-- ============================================
+-- 量化预测：反思记忆表（LLM反思结论）
+-- ============================================
+CREATE TABLE IF NOT EXISTS quant_reflection_memory (
+    id BIGSERIAL PRIMARY KEY,
+    symbol VARCHAR(20) NOT NULL,
+    cycle_id VARCHAR(64) NOT NULL,
+    regime VARCHAR(20) NOT NULL,
+    overall_decision VARCHAR(64),
+    predicted_direction VARCHAR(10),
+    actual_price_change_bps INT,
+    prediction_correct BOOLEAN,
+    reflection_text TEXT NOT NULL,
+    lesson_tags VARCHAR(256),
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+COMMENT ON TABLE quant_reflection_memory IS '量化预测反思记忆（LLM生成的教训）';
+COMMENT ON COLUMN quant_reflection_memory.regime IS '预测时的市场状态';
+COMMENT ON COLUMN quant_reflection_memory.reflection_text IS 'LLM反思结论';
+COMMENT ON COLUMN quant_reflection_memory.lesson_tags IS '结构化标签，如TREND_UP_OVERCONFIDENT';
+
+CREATE INDEX idx_qrm_symbol_regime ON quant_reflection_memory(symbol, regime);
+CREATE INDEX idx_qrm_symbol_time ON quant_reflection_memory(symbol, created_at DESC);
+
+-- quant_forecast_cycle 增加辩论记录字段
+ALTER TABLE quant_forecast_cycle ADD COLUMN IF NOT EXISTS debate_json JSONB;

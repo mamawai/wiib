@@ -34,4 +34,37 @@ public interface PredictionBetMapper extends BaseMapper<PredictionBet> {
     @Update("UPDATE prediction_bet SET status = 'DRAW', payout = cost, updated_at = NOW() " +
             "WHERE round_id = #{roundId} AND status = 'ACTIVE'")
     int settleDraw(@Param("roundId") Long roundId);
+
+    @Select("SELECT COUNT(*) FROM prediction_bet WHERE user_id = #{userId} AND status IN ('WON', 'LOST', 'DRAW', 'SOLD')")
+    int countSettledBets(@Param("userId") Long userId);
+
+    @Select("""
+            SELECT COALESCE(
+                ROUND(
+                    100.0 * SUM(CASE WHEN status = 'WON' THEN 1 ELSE 0 END)
+                    / NULLIF(SUM(CASE WHEN status IN ('WON', 'LOST') THEN 1 ELSE 0 END), 0),
+                    2
+                ),
+                0
+            )
+            FROM prediction_bet
+            WHERE user_id = #{userId}
+            """)
+    BigDecimal selectWinRate(@Param("userId") Long userId);
+
+    @Select("""
+            SELECT CASE
+                     WHEN up_count > down_count THEN 'UP'
+                     WHEN down_count > up_count THEN 'DOWN'
+                     ELSE 'BOTH'
+                   END
+            FROM (
+                SELECT
+                    SUM(CASE WHEN side = 'UP' THEN 1 ELSE 0 END) AS up_count,
+                    SUM(CASE WHEN side = 'DOWN' THEN 1 ELSE 0 END) AS down_count
+                FROM prediction_bet
+                WHERE user_id = #{userId}
+            ) t
+            """)
+    String selectDirectionPreference(@Param("userId") Long userId);
 }

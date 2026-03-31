@@ -70,4 +70,17 @@ public interface FuturesPositionMapper extends BaseMapper<FuturesPosition> {
     @Update("UPDATE futures_position SET take_profits = #{takeProfits,jdbcType=OTHER,typeHandler=com.mawai.wiibcommon.handler.FuturesTakeProfitListTypeHandler}::jsonb, updated_at = NOW() " +
             "WHERE id = #{positionId} AND status = 'OPEN'")
     int updateTakeProfits(@Param("positionId") Long positionId, @Param("takeProfits") List<FuturesTakeProfit> takeProfits);
+
+    @Select("""
+            SELECT COALESCE(
+                AVG(CASE WHEN stop_losses IS NOT NULL AND stop_losses::text != '[]' THEN 1 ELSE 0 END),
+                0
+            )
+            FROM futures_position
+            WHERE user_id = #{userId}
+            """)
+    BigDecimal selectStopLossRate(@Param("userId") Long userId);
+
+    @Select("SELECT COUNT(*) FROM futures_position WHERE user_id = #{userId} AND status = 'LIQUIDATED'")
+    int countLiquidatedPositions(@Param("userId") Long userId);
 }

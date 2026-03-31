@@ -63,4 +63,17 @@ public interface CryptoOrderMapper extends BaseMapper<CryptoOrder> {
     @Select("SELECT COALESCE(SUM(filled_amount - COALESCE(commission, 0)), 0) FROM crypto_order " +
             "WHERE user_id = #{userId} AND order_side = 'SELL' AND status = 'FILLED'")
     BigDecimal sumSellFilledAmount(@Param("userId") Long userId);
+
+    @Select("SELECT * FROM crypto_order WHERE user_id = #{userId} AND status = 'FILLED' " +
+            "ORDER BY updated_at DESC LIMIT #{limit}")
+    List<CryptoOrder> selectRecentOrders(@Param("userId") Long userId, @Param("limit") int limit);
+
+    @Select("""
+            SELECT COALESCE(AVG(leverage), 0)
+            FROM crypto_order
+            WHERE user_id = #{userId}
+              AND status = 'FILLED'
+              AND leverage IS NOT NULL
+            """)
+    BigDecimal selectAvgLeverage(@Param("userId") Long userId);
 }

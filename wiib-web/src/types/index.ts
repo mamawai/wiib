@@ -592,3 +592,72 @@ export interface CategoryAverages {
   predictionProfit: number;
   gameProfit: number;
 }
+
+// ========== AI Agent 类型 ==========
+export interface BehaviorAnalysisReport {
+  overview: {
+    totalAssets: number;
+    totalProfitPct: number;
+    distribution: { category: string; value: number }[];
+    trend: { date: string; totalAssets: number }[];
+  };
+  tradeBehavior: {
+    stock: { positionCount: number; orderCount: number; totalBuyAmount: number; preference: string };
+    crypto: { positionCount: number; totalBuyAmount: number; totalSellAmount: number; leverageUsage: string };
+    futures: { realizedPnl: number; orderCount: number; direction: string; avgLeverage: number; stopLossRate: number; liquidationCount: number };
+    option: { totalBtoAmount: number; totalStcAmount: number };
+    prediction: { frequency: number; netProfit: number; winRate: number; directionPreference: string };
+  };
+  gameBehavior: {
+    blackjack: { totalHands: number; totalWon: number; totalLost: number; biggestWin: number; todayConverted: number };
+    mines: { frequency: number; netProfit: number };
+    videoPoker: { frequency: number; netProfit: number };
+  };
+  riskProfile: {
+    riskLevel: string;
+    bankruptCount: number;
+    maxDrawdown: string;
+    bankruptAt: string;
+  };
+  suggestions: string[];
+}
+
+export interface CryptoAnalysisReport {
+  summary: string;
+  analysisBasis: string;
+  direction: { ultraShort: string; shortTerm: string; mid: string; longTerm: string };
+  keyLevels: { support: string[]; resistance: string[] };
+  indicators: string;
+  importantNews: { title: string; sentiment: string; summary: string }[];
+  positionAdvice: { period: string; type: string; entry: string; stopLoss: string; takeProfit: string; riskReward: string }[];
+  riskWarnings: string[];
+  confidence: number;
+}
+
+export interface QuantSignalDecision {
+  horizon: string;
+  direction: string;
+  confidence: number;
+  maxLeverage: number;
+  maxPositionPct: number;
+  riskStatus: string;
+}
+
+export interface QuantLatestSignal {
+  cycleId: string;
+  symbol: string;
+  forecastTime: string;
+  overallDecision: string;
+  riskStatus: string;
+  signals: QuantSignalDecision[];
+}
+
+export interface QuantForecastCycle {
+  id: number;
+  cycleId: string;
+  symbol: string;
+  forecastTime: string;
+  overallDecision: string;
+  riskStatus: string;
+  reportJson: string | null;
+}

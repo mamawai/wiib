@@ -13,4 +13,7 @@ public interface MinesGameMapper extends BaseMapper<MinesGame> {
 
     @Select("SELECT COALESCE(SUM(COALESCE(payout, 0) - bet_amount), 0) FROM mines_game WHERE user_id = #{userId} AND status IN ('CASHED_OUT', 'EXPLODED')")
     BigDecimal sumNetProfit(@Param("userId") Long userId);
+
+    @Select("SELECT COUNT(*) FROM mines_game WHERE user_id = #{userId} AND status IN ('CASHED_OUT', 'EXPLODED')")
+    int countFinishedGames(@Param("userId") Long userId);
 }

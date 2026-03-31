@@ -39,6 +39,15 @@
 
     <dependencyManagement>
         <dependencies>
+            <!-- Spring AI Alibaba BOM（统一管理Spring AI版本） -->
+            <dependency>
+                <groupId>com.alibaba.cloud.ai</groupId>
+                <artifactId>spring-ai-alibaba-bom</artifactId>
+                <version>1.1.2.0</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+
             <dependency>
                 <groupId>com.mawai</groupId>
                 <artifactId>wiib-common</artifactId>

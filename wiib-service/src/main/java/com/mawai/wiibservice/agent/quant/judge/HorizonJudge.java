@@ -1,0 +1,217 @@
+package com.mawai.wiibservice.agent.quant.judge;
+
+import com.mawai.wiibservice.agent.quant.domain.*;
+import lombok.extern.slf4j.Slf4j;
+
+import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * 区间裁决器：对单个时间区间的全部AgentVote做加权汇总，输出HorizonForecast。
+ * <p>
+ * 裁决逻辑：
+ * 1. 按Agent权重加权计算longScore和shortScore
+ * 2. 计算edge和disagreement
+ * 3. 当edge过小、分歧过大或预期收益覆盖不了成本时，输出NO_TRADE
+ */
+@Slf4j
+public class HorizonJudge {
+
+    private static final double MAX_DISAGREEMENT = 0.35;
+    private static final double EPSILON = 1e-9;
+
+    /** 初始权重表: agent → horizon → weight */
+    private static final Map<String, Map<String, Double>> DEFAULT_WEIGHTS = Map.of(
+            "microstructure", Map.of("0_10", 0.35, "10_20", 0.15, "20_30", 0.05),
+            "momentum",       Map.of("0_10", 0.25, "10_20", 0.30, "20_30", 0.30),
+            "regime",         Map.of("0_10", 0.15, "10_20", 0.20, "20_30", 0.25),
+            "volatility",     Map.of("0_10", 0.15, "10_20", 0.15, "20_30", 0.15),
+            "news_event",     Map.of("0_10", 0.10, "10_20", 0.20, "20_30", 0.25)
+    );
+
+    private final String horizon;
+
+    public HorizonJudge(String horizon) {
+        this.horizon = horizon;
+    }
+
+    public HorizonForecast judge(List<AgentVote> allVotes, BigDecimal lastPrice, List<String> qualityFlags) {
+        List<AgentVote> filtered = allVotes.stream()
+                .filter(v -> horizon.equals(v.horizon()))
+                .toList();
+
+        if (filtered.isEmpty()) {
+            log.info("[Q4.judge] {} 无投票 → NO_TRADE", horizon);
+            return HorizonForecast.noTrade(horizon, 1.0);
+        }
+
+        double longScore = 0;
+        double shortScore = 0;
+        double longMoveWeighted = 0;
+        double shortMoveWeighted = 0;
+        double longVolWeighted = 0;
+        double shortVolWeighted = 0;
+        double longWeightSum = 0;
+        double shortWeightSum = 0;
+
+        for (AgentVote vote : filtered) {
+            double weight = getWeight(vote.agent(), horizon);
+            double weighted = weight * Math.abs(vote.score()) * vote.confidence();
+            if (weighted <= 0) {
+                continue;
+            }
+
+            int calibratedMoveBps = calibrateMoveBps(vote);
+            int calibratedVolBps = Math.max(vote.volatilityBps(), calibratedMoveBps);
+
+            if (vote.score() > 0) {
+                longScore += weighted;
+                longMoveWeighted += weighted * calibratedMoveBps;
+                longVolWeighted += weighted * calibratedVolBps;
+                longWeightSum += weighted;
+            } else if (vote.score() < 0) {
+                shortScore += weighted;
+                shortMoveWeighted += weighted * calibratedMoveBps;
+                shortVolWeighted += weighted * calibratedVolBps;
+                shortWeightSum += weighted;
+            }
+        }
+
+        if (longScore < EPSILON && shortScore < EPSILON) {
+            log.info("[Q4.judge] {} 全部弱信号/无效票 → NO_TRADE", horizon);
+            return HorizonForecast.noTrade(horizon, 1.0);
+        }
+
+        double edge = Math.abs(longScore - shortScore);
+        double total = longScore + shortScore + EPSILON;
+        double disagreement = 1.0 - edge / total;
+        Direction direction = longScore >= shortScore ? Direction.LONG : Direction.SHORT;
+        double dominantWeightSum = direction == Direction.LONG ? longWeightSum : shortWeightSum;
+        int dominantMoveBps = dominantWeightSum > EPSILON
+                ? (int) Math.round((direction == Direction.LONG ? longMoveWeighted : shortMoveWeighted) / dominantWeightSum)
+                : 0;
+        int dominantVolBps = dominantWeightSum > EPSILON
+                ? (int) Math.round((direction == Direction.LONG ? longVolWeighted : shortVolWeighted) / dominantWeightSum)
+                : 0;
+        double minEdge = getMinEdge(qualityFlags);
+        int minMoveBps = getMinMoveBps();
+
+        // NO_TRADE 判断
+        if (edge < minEdge || disagreement > MAX_DISAGREEMENT || dominantMoveBps < minMoveBps) {
+            log.info("[Q4.judge] {} long={} short={} edge={} disagree={} domMoveBps={} domVolBps={} → NO_TRADE(edge<{}:{} disagree>{}:{} move<{}:{})",
+                    horizon, String.format("%.3f", longScore), String.format("%.3f", shortScore),
+                    String.format("%.3f", edge), String.format("%.3f", disagreement), dominantMoveBps, dominantVolBps,
+                    String.format("%.2f", minEdge), edge < minEdge, MAX_DISAGREEMENT, disagreement > MAX_DISAGREEMENT,
+                    minMoveBps, dominantMoveBps < minMoveBps);
+            return HorizonForecast.noTrade(horizon, disagreement);
+        }
+
+        double confidence = Math.min(1.0, edge * 1.7 * (1.0 - disagreement * 0.35));
+        double weightedScore = longScore > shortScore ? longScore : -shortScore;
+
+        // 入场区间和止损止盈
+        BigDecimal entryLow, entryHigh, invalidation, tp1, tp2;
+        if (lastPrice != null && lastPrice.signum() > 0) {
+            BigDecimal basisBps = BigDecimal.valueOf(Math.max(dominantVolBps, dominantMoveBps));
+            BigDecimal volOffset = lastPrice.multiply(basisBps)
+                    .divide(BigDecimal.valueOf(10000), 2, RoundingMode.HALF_UP);
+            BigDecimal entryBuffer = volOffset.multiply(BigDecimal.valueOf(0.35)).setScale(2, RoundingMode.HALF_UP);
+            BigDecimal stopOffset = volOffset.multiply(BigDecimal.valueOf(0.95)).setScale(2, RoundingMode.HALF_UP);
+            BigDecimal tp1Offset = volOffset.multiply(BigDecimal.valueOf(1.10)).setScale(2, RoundingMode.HALF_UP);
+            BigDecimal tp2Offset = volOffset.multiply(BigDecimal.valueOf(1.85)).setScale(2, RoundingMode.HALF_UP);
+
+            if (direction == Direction.LONG) {
+                entryLow = lastPrice.subtract(entryBuffer);
+                entryHigh = lastPrice.add(entryBuffer.multiply(BigDecimal.valueOf(0.4)).setScale(2, RoundingMode.HALF_UP));
+                invalidation = entryLow.subtract(stopOffset);
+                tp1 = entryHigh.add(tp1Offset);
+                tp2 = entryHigh.add(tp2Offset);
+            } else {
+                entryLow = lastPrice.subtract(entryBuffer.multiply(BigDecimal.valueOf(0.4)).setScale(2, RoundingMode.HALF_UP));
+                entryHigh = lastPrice.add(entryBuffer);
+                invalidation = entryHigh.add(stopOffset);
+                tp1 = entryLow.subtract(tp1Offset);
+                tp2 = entryLow.subtract(tp2Offset);
+            }
+        } else {
+            entryLow = entryHigh = invalidation = tp1 = tp2 = null;
+        }
+
+        int maxLeverage = getMaxLeverage(horizon);
+
+        log.info("[Q4.judge] {} long={} short={} edge={} disagree={} → {} conf={}",
+                horizon, String.format("%.3f", longScore), String.format("%.3f", shortScore),
+                String.format("%.3f", edge), String.format("%.3f", disagreement),
+                direction, String.format("%.2f", confidence));
+
+        return new HorizonForecast(horizon, direction, confidence, weightedScore, disagreement,
+                entryLow, entryHigh, invalidation, tp1, tp2, maxLeverage,
+                getBasePositionPct(horizon));
+    }
+
+    private static double getWeight(String agent, String horizon) {
+        return DEFAULT_WEIGHTS.getOrDefault(agent, Map.of())
+                .getOrDefault(horizon, 0.1);
+    }
+
+    private static int getMaxLeverage(String horizon) {
+        return 5; // 所有区间默认5x
+    }
+
+    private static double getBasePositionPct(String horizon) {
+        return switch (horizon) {
+            case "0_10" -> 0.08;
+            case "10_20" -> 0.10;
+            case "20_30" -> 0.12;
+            default -> 0.08;
+        };
+    }
+
+    private double getMinEdge(List<String> qualityFlags) {
+        double base = switch (horizon) {
+            case "0_10" -> 0.12;
+            case "10_20" -> 0.10;
+            case "20_30" -> 0.08;
+            default -> 0.12;
+        };
+        if (qualityFlags == null || qualityFlags.isEmpty()) {
+            return base;
+        }
+        boolean partialData = qualityFlags.contains("PARTIAL_KLINE_DATA");
+        boolean missing15m = qualityFlags.contains("MISSING_TF_15M");
+        boolean missing5m = qualityFlags.contains("MISSING_TF_5M");
+        if (partialData) {
+            double factor = switch (horizon) {
+                case "0_10" -> missing5m ? 0.75 : 0.90;
+                case "10_20" -> (missing15m || missing5m) ? 0.60 : 0.85;
+                case "20_30" -> missing15m ? 0.60 : 0.85;
+                default -> 0.80;
+            };
+            return Math.max(0.05, base * factor);
+        }
+        return base;
+    }
+
+    private int getMinMoveBps() {
+        return switch (horizon) {
+            case "0_10" -> 4;
+            case "10_20" -> 5;
+            case "20_30" -> 6;
+            default -> 5;
+        };
+    }
+
+    private int calibrateMoveBps(AgentVote vote) {
+        double moveFloorRatio = switch (horizon) {
+            case "0_10" -> 0.60;
+            case "10_20" -> 0.68;
+            case "20_30" -> 0.75;
+            default -> 0.65;
+        };
+        double confidenceFloor = Math.max(0.5, vote.confidence());
+        int volatilityFloor = (int) Math.round(vote.volatilityBps() * moveFloorRatio * confidenceFloor);
+        return Math.max(vote.expectedMoveBps(), volatilityFloor);
+    }
+}

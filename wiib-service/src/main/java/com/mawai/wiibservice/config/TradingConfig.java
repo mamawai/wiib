@@ -27,8 +27,14 @@ public class TradingConfig {
     /** 最低手续费（默认5元） */
     private BigDecimal minCommission = new BigDecimal("5.00");
 
-    /** crypto手续费率（默认0.1%） */
+    /** crypto现货手续费率（默认0.1%，用于现货加密货币交易） */
     private BigDecimal cryptoCommissionRate = new BigDecimal("0.001");
+
+    /** 合约开仓手续费率（默认0.04%） */
+    private BigDecimal futuresOpenCommissionRate = new BigDecimal("0.0004");
+
+    /** 合约平仓手续费率（默认0.04%） */
+    private BigDecimal futuresCloseCommissionRate = new BigDecimal("0.0004");
 
     /** 市价单滑点保护（默认±2%） */
     private BigDecimal slippageLimit = new BigDecimal("0.02");
@@ -120,12 +126,17 @@ public class TradingConfig {
      * 计算手续费（不满5元按5元收取）
      */
     public BigDecimal calculateCommission(BigDecimal amount) {
-        BigDecimal commission = amount.multiply(commissionRate).setScale(2, java.math.RoundingMode.HALF_UP);
+        BigDecimal commission = amount.multiply(commissionRate).setScale(2, RoundingMode.HALF_UP);
         return commission.compareTo(minCommission) < 0 ? minCommission : commission;
     }
 
     public BigDecimal calculateCryptoCommission(BigDecimal amount) {
-        return amount.multiply(cryptoCommissionRate).setScale(2, java.math.RoundingMode.HALF_UP);
+        return amount.multiply(cryptoCommissionRate).setScale(2, RoundingMode.HALF_UP);
+    }
+
+    public BigDecimal calculateFuturesCommission(BigDecimal amount, boolean isClose) {
+        BigDecimal rate = isClose ? futuresCloseCommissionRate : futuresOpenCommissionRate;
+        return amount.multiply(rate).setScale(2, RoundingMode.HALF_UP);
     }
 
     /**

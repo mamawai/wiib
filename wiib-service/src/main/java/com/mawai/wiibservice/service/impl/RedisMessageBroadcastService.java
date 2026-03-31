@@ -37,13 +37,15 @@ public class RedisMessageBroadcastService implements MessageListener {
     private static final String STOCK_CHANNEL = CHANNEL_PREFIX + "stock";
     private static final String CRYPTO_CHANNEL = CHANNEL_PREFIX + "crypto";
     private static final String PREDICTION_CHANNEL = CHANNEL_PREFIX + "prediction";
+    private static final String QUANT_CHANNEL = CHANNEL_PREFIX + "quant";
 
     @PostConstruct
     public void init() {
         redisMessageListenerContainer.addMessageListener(this, new ChannelTopic(STOCK_CHANNEL));
         redisMessageListenerContainer.addMessageListener(this, new ChannelTopic(CRYPTO_CHANNEL));
         redisMessageListenerContainer.addMessageListener(this, new ChannelTopic(PREDICTION_CHANNEL));
-        log.info("已订阅Redis广播频道: {}, {}, {}", STOCK_CHANNEL, CRYPTO_CHANNEL, PREDICTION_CHANNEL);
+        redisMessageListenerContainer.addMessageListener(this, new ChannelTopic(QUANT_CHANNEL));
+        log.info("已订阅Redis广播频道: {}, {}, {}, {}", STOCK_CHANNEL, CRYPTO_CHANNEL, PREDICTION_CHANNEL, QUANT_CHANNEL);
     }
 
     /**
@@ -89,6 +91,20 @@ public class RedisMessageBroadcastService implements MessageListener {
     }
 
     /**
+     * 广播量化预测信号
+     * @param symbol 交易对
+     * @param message JSON消息
+     */
+    public void broadcastQuantSignal(String symbol, String message) {
+        try {
+            String payload = symbol + "|" + message;
+            redisTemplate.convertAndSend(QUANT_CHANNEL, payload);
+        } catch (Exception e) {
+            log.error("广播量化信号失败: {}", symbol, e);
+        }
+    }
+
+    /**
      * 接收Redis消息并推送到本地WebSocket连接
      */
     @Override
@@ -109,6 +125,8 @@ public class RedisMessageBroadcastService implements MessageListener {
                 messagingTemplate.convertAndSend("/topic/crypto/" + code, jsonMessage);
             } else if (PREDICTION_CHANNEL.equals(channel)) {
                 messagingTemplate.convertAndSend("/topic/prediction/" + code, jsonMessage);
+            } else if (QUANT_CHANNEL.equals(channel)) {
+                messagingTemplate.convertAndSend("/topic/quant/" + code, jsonMessage);
             } else {
                 messagingTemplate.convertAndSend("/topic/quote/" + code, jsonMessage);
                 log.debug("本地推送股票行情: {}", code);

@@ -50,8 +50,14 @@ function fmt(n: number) {
 
 function AnimNum({ value, prefix = '', suffix = '', duration = 600 }: { value: number; prefix?: string; suffix?: string; duration?: number }) {
   const ref = useRef<HTMLSpanElement>(null);
-  const prev = useRef(0);
+  const prev = useRef(value);
+  const mounted = useRef(false);
   useEffect(() => {
+    if (!mounted.current) {
+      mounted.current = true;
+      if (ref.current) ref.current.textContent = prefix + fmt(value) + suffix;
+      return;
+    }
     const from = prev.current;
     const to = value;
     prev.current = to;
@@ -71,7 +77,7 @@ function AnimNum({ value, prefix = '', suffix = '', duration = 600 }: { value: n
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
   }, [value, prefix, suffix, duration]);
-  return <span ref={ref}>{prefix}{fmt(value)}{suffix}</span>;
+  return <span ref={ref} />;
 }
 
 export function Portfolio() {

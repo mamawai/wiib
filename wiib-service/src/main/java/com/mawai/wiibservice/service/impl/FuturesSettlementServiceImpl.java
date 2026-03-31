@@ -142,7 +142,7 @@ public class FuturesSettlementServiceImpl implements FuturesSettlementService {
         BigDecimal quantity = order.getQuantity();
         BigDecimal positionValue = executePrice.multiply(quantity).setScale(2, RoundingMode.HALF_UP);
         BigDecimal margin = positionValue.divide(BigDecimal.valueOf(order.getLeverage()), 2, RoundingMode.CEILING);
-        BigDecimal commission = tradingConfig.calculateCryptoCommission(positionValue);
+        BigDecimal commission = tradingConfig.calculateFuturesCommission(positionValue, false);
         BigDecimal actualCost = margin.add(commission);
 
         BigDecimal frozenAmount = order.getFrozenAmount();
@@ -189,7 +189,7 @@ public class FuturesSettlementServiceImpl implements FuturesSettlementService {
         int leverage = position.getLeverage();
         BigDecimal addValue = executePrice.multiply(addQty).setScale(2, RoundingMode.HALF_UP);
         BigDecimal addMargin = addValue.divide(BigDecimal.valueOf(leverage), 2, RoundingMode.CEILING);
-        BigDecimal commission = tradingConfig.calculateCryptoCommission(addValue);
+        BigDecimal commission = tradingConfig.calculateFuturesCommission(addValue, false);
         BigDecimal actualCost = addMargin.add(commission);
 
         BigDecimal frozenAmount = order.getFrozenAmount();
@@ -225,7 +225,7 @@ public class FuturesSettlementServiceImpl implements FuturesSettlementService {
         BigDecimal closeQty = order.getQuantity();
         BigDecimal pnl = calculatePnl(position.getSide(), position.getEntryPrice(), executePrice, closeQty);
         BigDecimal closeValue = executePrice.multiply(closeQty).setScale(2, RoundingMode.HALF_UP);
-        BigDecimal commission = tradingConfig.calculateCryptoCommission(closeValue);
+        BigDecimal commission = tradingConfig.calculateFuturesCommission(closeValue, true);
 
         boolean isFullClose = closeQty.compareTo(position.getQuantity()) == 0;
 

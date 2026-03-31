@@ -1,8 +1,8 @@
 package com.mawai.wiibservice.service.impl;
 
-import cn.hutool.json.JSONArray;
-import cn.hutool.json.JSONObject;
-import cn.hutool.json.JSONUtil;
+import com.alibaba.fastjson2.JSON;
+import com.alibaba.fastjson2.JSONArray;
+import com.alibaba.fastjson2.JSONObject;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.mawai.wiibcommon.dto.DayTickDTO;
 import com.mawai.wiibcommon.dto.KlineDTO;
@@ -452,11 +452,11 @@ public class MarketDataServiceImpl implements MarketDataService {
         try {
             String response = aiService.chat(prompt);
             String json = response.replaceAll("(?s).*?(\\{.*?}).*", "$1");
-            JSONObject obj = JSONUtil.parseObj(json);
+            JSONObject obj = JSON.parseObject(json);
 
-            openPrice = obj.getDouble("openPrice");
-            mu = obj.getDouble("mu");
-            sigma = obj.getDouble("sigma");
+            openPrice = obj.getDoubleValue("openPrice");
+            mu = obj.getDoubleValue("mu");
+            sigma = obj.getDoubleValue("sigma");
         } catch (Exception e) {
             log.warn("AI生成参数失败，使用默认值: {}", e.getMessage());
             openPrice = stock.getPrevClose().doubleValue();
@@ -496,7 +496,7 @@ public class MarketDataServiceImpl implements MarketDataService {
     public List<DayTickDTO> getHistoryDayTicks(Long stockId, LocalDate date) {
         String cacheKey = String.format("history-ticks:%d:%s", stockId, date);
         String cached = cacheService.get(cacheKey);
-        if (cached != null) return JSONUtil.toList(cached, DayTickDTO.class);
+        if (cached != null) return JSON.parseArray(cached, DayTickDTO.class);
 
         PriceTickDaily daily = priceTickDailyMapper.selectOne(
             new LambdaQueryWrapper<PriceTickDaily>()
@@ -512,7 +512,7 @@ public class MarketDataServiceImpl implements MarketDataService {
         for (int i = 0; i < prices.size(); i++) {
             result.add(new DayTickDTO(TickTimeUtil.indexToTime(i).toString(), prices.get(i)));
         }
-        cacheService.set(cacheKey, JSONUtil.toJsonStr(result), Duration.ofHours(1));
+        cacheService.set(cacheKey, JSON.toJSONString(result), Duration.ofHours(1));
         return result;
     }
 
@@ -585,16 +585,16 @@ public class MarketDataServiceImpl implements MarketDataService {
         try {
             String response = aiService.chat(prompt);
             String json = response.replaceAll("(?s).*?(\\[.*?]).*", "$1");
-            JSONArray arr = JSONUtil.parseArray(json);
+            JSONArray arr = JSON.parseArray(json);
 
             LocalDateTime baseTime = date.atTime(8, 30);
             for (int i = 0; i < arr.size(); i++) {
                 JSONObject obj = arr.getJSONObject(i);
                 News news = new News();
                 news.setStockCode(stock.getCode());
-                news.setTitle(obj.getStr("title"));
-                news.setContent(obj.getStr("content"));
-                news.setNewsType(obj.getStr("type"));
+                news.setTitle(obj.getString("title"));
+                news.setContent(obj.getString("content"));
+                news.setNewsType(obj.getString("type"));
                 news.setPublishTime(baseTime.plusMinutes(rnd.nextInt(60)));
                 newsMapper.insert(news);
             }

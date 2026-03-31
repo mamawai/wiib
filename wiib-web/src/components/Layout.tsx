@@ -7,6 +7,7 @@ import { cn } from '../lib/utils';
 import {
   Home, Briefcase, LogOut, LogIn, TrendingUp, Sun, Moon,
   BarChart3, User, ChevronDown, List, DollarSign, LineChart,
+  Brain,
 } from 'lucide-react';
 
 interface Props { children: React.ReactNode }
@@ -73,6 +74,7 @@ export function Layout({ children }: Props) {
               <HeaderNavItem to="/portfolio" label="持仓" />
               <HeaderNavItem to="/ranking" label="排行" />
               <HeaderNavItem to="/games" label="游戏" />
+              <HeaderNavItem to="/ai" label="AI" />
             </nav>
 
             {/* Actions */}
@@ -132,6 +134,7 @@ export function Layout({ children }: Props) {
           <BottomNavItem to="/stocks" icon={<BarChart3 className="w-5 h-5" />} label="市场" forceActive={isMarketActive} />
           <BottomNavItem to="/portfolio" icon={<Briefcase className="w-5 h-5" />} label="持仓" />
           <BottomNavItem to="/me" icon={<User className="w-5 h-5" />} label="我的" />
+          <BottomNavItem to="/ai" icon={<Brain className="w-5 h-5" />} label="AI" />
         </div>
       </nav>
     </div>
