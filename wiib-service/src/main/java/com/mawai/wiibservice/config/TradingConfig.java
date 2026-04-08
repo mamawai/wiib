@@ -65,7 +65,7 @@ public class TradingConfig {
         /** 资金费率（默认0.01%/8h） */
         private BigDecimal fundingRate = new BigDecimal("0.0001");
         /** 最大杠杆倍数 */
-        private int maxLeverage = 100;
+        private int maxLeverage = 250;
     }
 
     /** 乐观锁最大重试次数 */

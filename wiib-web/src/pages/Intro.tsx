@@ -84,9 +84,9 @@ export function Intro() {
           <section>
             <h3 className="font-bold mb-1">合约交易</h3>
             <ul className="list-disc list-inside text-muted-foreground space-y-1">
-              <li>支持开多/开空，1-50倍杠杆</li>
+              <li>支持开多/开空，1-250倍杠杆</li>
               <li>实时盈亏计算，爆仓自动平仓</li>
-              <li>手续费：开仓/平仓各0.05%</li>
+              <li>手续费：开仓/平仓各0.04%</li>
             </ul>
           </section>
         </CardContent>

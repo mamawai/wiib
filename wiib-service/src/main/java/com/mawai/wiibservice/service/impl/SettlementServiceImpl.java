@@ -13,6 +13,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.time.DayOfWeek;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -29,7 +30,7 @@ public class SettlementServiceImpl extends ServiceImpl<SettlementMapper, Settlem
         settlement.setUserId(userId);
         settlement.setOrderId(orderId);
         settlement.setAmount(amount);
-        settlement.setSettleTime(LocalDateTime.now().plusDays(1));
+        settlement.setSettleTime(nextTradingDay(LocalDateTime.now()));
         settlement.setStatus("PENDING");
         baseMapper.insert(settlement);
         log.info("创建待结算 userId={} orderId={} amount={} settleTime={}",
@@ -98,5 +99,17 @@ public class SettlementServiceImpl extends ServiceImpl<SettlementMapper, Settlem
         LambdaQueryWrapper<Settlement> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(Settlement::getStatus, "PENDING");
         return baseMapper.selectList(wrapper);
+    }
+
+    private LocalDateTime nextTradingDay(LocalDateTime now) {
+        LocalDateTime settleTime = now.plusDays(1);
+        DayOfWeek dayOfWeek = settleTime.getDayOfWeek();
+        if (dayOfWeek == DayOfWeek.SATURDAY) {
+            return settleTime.plusDays(2);
+        }
+        if (dayOfWeek == DayOfWeek.SUNDAY) {
+            return settleTime.plusDays(1);
+        }
+        return settleTime;
     }
 }

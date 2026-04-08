@@ -246,6 +246,12 @@ export function Portfolio() {
   const futuresMargin = futuresPositions.reduce((s, f) => s + f.margin, 0);
   const futuresProfit = futuresPositions.reduce((s, f) => s + f.unrealizedPnl, 0);
   const futuresTotal = futuresMargin + futuresProfit;
+  const futuresChartRows = Array.from(
+    futuresPositions.reduce((map, f) => {
+      map.set(f.symbol, (map.get(f.symbol) ?? 0) + f.margin + f.unrealizedPnl);
+      return map;
+    }, new Map<string, number>())
+  ).map(([symbol, marketValue]) => ({ symbol, marketValue }));
   const optionTotal = optionPositions.reduce((s, o) => s + o.marketValue, 0);
   const optionProfit = optionPositions.reduce((s, o) => s + o.pnl, 0);
   const hasPrediction = predictionPnl != null && predictionPnl.totalBets > 0;
@@ -368,6 +374,7 @@ export function Portfolio() {
                       <PortfolioChart
                         positions={positions}
                         cryptoPositions={cryptoRows}
+                        futuresRows={futuresChartRows}
                         balance={user.balance}
                         pendingSettlement={user.pendingSettlement}
                       />

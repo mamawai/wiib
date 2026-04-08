@@ -8,14 +8,20 @@ interface CryptoRow {
   marketValue: number;
 }
 
+interface FuturesRow {
+  symbol: string;
+  marketValue: number;
+}
+
 interface Props {
   positions: Position[];
   cryptoPositions?: CryptoRow[];
+  futuresRows?: FuturesRow[];
   balance: number;
   pendingSettlement?: number;
 }
 
-export function PortfolioChart({ positions, cryptoPositions = [], balance, pendingSettlement = 0 }: Props) {
+export function PortfolioChart({ positions, cryptoPositions = [], futuresRows = [], balance, pendingSettlement = 0 }: Props) {
   const chartRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -41,6 +47,16 @@ export function PortfolioChart({ positions, cryptoPositions = [], balance, pendi
           return {
             name: coin.name,
             value: c.marketValue,
+            itemStyle: { color: coin.chartColor },
+          };
+        }),
+      ...futuresRows
+        .filter(f => f.marketValue > 0)
+        .map(f => {
+          const coin = getCoin(f.symbol);
+          return {
+            name: `${coin.name.toLowerCase()} future`,
+            value: f.marketValue,
             itemStyle: { color: coin.chartColor },
           };
         }),
@@ -116,7 +132,7 @@ export function PortfolioChart({ positions, cryptoPositions = [], balance, pendi
       window.removeEventListener('resize', onResize);
       chart.dispose();
     };
-  }, [positions, cryptoPositions, balance, pendingSettlement]);
+  }, [positions, cryptoPositions, futuresRows, balance, pendingSettlement]);
 
   return <div ref={chartRef} className="w-full h-56 sm:h-64 transition-colors duration-300" />;
 }

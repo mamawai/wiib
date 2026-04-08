@@ -20,6 +20,7 @@ import type { CryptoOrder, CryptoPosition, PageResult, UserBuff, FuturesPosition
 interface SLTPRow { price: string; quantity: string }
 
 const COMMISSION_RATE = 0.001;
+const FUTURES_COMMISSION_RATE = 0.0004;
 const POSITION_PCTS = [0.25, 0.5, 0.75, 1];
 interface TabConfig {
   label: string;
@@ -107,7 +108,7 @@ function calcFuturesOpenEstimate(marginQty: number, price: number, leverage: num
   const orderQty = marginQty * leverage;
   const positionValue = roundHalfUp2(price * orderQty);
   const margin = roundCeil2(positionValue / leverage);
-  const commission = roundHalfUp2(positionValue * COMMISSION_RATE);
+  const commission = roundHalfUp2(positionValue * FUTURES_COMMISSION_RATE);
   const fundingFee = roundHalfUp2(positionValue * 0.0001);
   const totalCost = roundHalfUp2(margin + commission);
   return { orderQty, positionValue, margin, commission, fundingFee, totalCost };
@@ -962,7 +963,7 @@ export function Coin({ symbol = DEFAULT_SYMBOL }: { symbol?: string }) {
                   <div className="px-2 py-0.5 rounded bg-primary/10 text-primary text-xs font-bold tabular-nums">{futuresLeverage}x</div>
                 </div>
                 <div className="flex gap-1.5">
-                  {[1, 10, 25, 50, 100].map(lv => (
+                  {[1, 10, 25, 50, 100, 250].map(lv => (
                     <button key={lv} onClick={() => setFuturesLeverage(lv)} className={`flex-1 py-1.5 text-xs font-medium rounded-md transition-all border ${futuresLeverage === lv ? 'bg-primary border-primary text-primary-foreground shadow-sm' : 'bg-transparent border-border/60 text-muted-foreground hover:text-foreground hover:border-border'}`}>
                       {lv}x
                     </button>
@@ -970,7 +971,7 @@ export function Coin({ symbol = DEFAULT_SYMBOL }: { symbol?: string }) {
                 </div>
                 <div className="pt-1">
                   <input
-                    type="range" min={1} max={100}
+                    type="range" min={1} max={250}
                     value={futuresLeverage}
                     onChange={e => setFuturesLeverage(Number(e.target.value))}
                     className="w-full h-1.5 bg-muted rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:bg-primary [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:shadow-md transition-all"
@@ -1030,7 +1031,7 @@ export function Coin({ symbol = DEFAULT_SYMBOL }: { symbol?: string }) {
                       <span className="font-mono">${formatPrice(margin)}</span>
                     </div>
                     <div className="flex justify-between text-xs">
-                      <span className="text-muted-foreground">手续费 (0.1%)</span>
+                      <span className="text-muted-foreground">手续费 (0.04%)</span>
                       <span className="font-mono">${formatPrice(commission)}</span>
                     </div>
                     <div className="flex justify-between text-xs font-medium pt-1.5 border-t border-border/50">
@@ -1364,7 +1365,7 @@ export function Coin({ symbol = DEFAULT_SYMBOL }: { symbol?: string }) {
                             const iq = parseFloat(posIncreaseQty);
                             const val = roundHalfUp2(incPrice * iq);
                             const mg = roundCeil2(val / pos.leverage);
-                            const cm = roundHalfUp2(val * COMMISSION_RATE);
+                            const cm = roundHalfUp2(val * FUTURES_COMMISSION_RATE);
                             return (
                               <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 text-[11px] text-muted-foreground">
                                 <div>杠杆前数量 <span className="text-foreground font-mono">{(iq / pos.leverage).toFixed(8).replace(/0+$/, '').replace(/\.$/, '')}</span></div>
