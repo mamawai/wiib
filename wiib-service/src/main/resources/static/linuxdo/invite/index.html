@@ -471,7 +471,7 @@
                         type="email"
                         class="input"
                         id="emailInput"
-                        placeholder="your@email.com"
+                        placeholder="123456@qq.com"
                         autocomplete="email"
                     >
                 </div>
@@ -494,7 +494,8 @@
             <div class="rules">
                 <div class="rules-title">申请须知</div>
                 <ul class="rules-list">
-                    <li>每个邮箱限领一次，验证链接 30 分钟内有效</li>
+                    <li>仅支持数字 QQ 邮箱，每个邮箱限领一次</li>
+                    <li>验证链接 30 分钟内有效</li>
                     <li>本站规则不代表 Linux Do 社区规则，请以官网为准</li>
                 </ul>
             </div>
@@ -608,8 +609,8 @@
                 return;
             }
 
-            if (!/^[\w.-]+@[\w.-]+\.[a-zA-Z]{2,}$/i.test(email)) {
-                showMessage('error', '邮箱格式不正确');
+            if (!/^\d+@qq\.com$/i.test(email)) {
+                showMessage('error', '仅支持数字QQ邮箱（如 123456@qq.com）');
                 return;
             }
 

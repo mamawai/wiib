@@ -1,7 +1,5 @@
 package com.mawai.wiibservice.invitecode.controller;
 
-import com.mawai.wiibcommon.annotation.RateLimiter;
-import com.mawai.wiibcommon.constant.RateLimiterType;
 import com.mawai.wiibcommon.util.Result;
 import com.mawai.wiibservice.invitecode.dto.LinuxDoInviteRecordsVO;
 import com.mawai.wiibservice.invitecode.service.LinuxDoInviteService;

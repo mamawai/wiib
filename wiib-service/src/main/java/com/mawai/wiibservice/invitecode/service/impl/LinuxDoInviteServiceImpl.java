@@ -45,7 +45,7 @@ public class LinuxDoInviteServiceImpl implements LinuxDoInviteService {
     private static final long TOKEN_EXPIRE_MINUTES = 30;
     private static final long RELEASE_CHECK_INTERVAL_MINUTES = 31;
     private static final long LOCK_TIMEOUT_SECONDS = 5;
-    private static final Pattern EMAIL_PATTERN = Pattern.compile("^[\\w.-]+@[\\w.-]+\\.[a-zA-Z]{2,}$", Pattern.CASE_INSENSITIVE);
+    private static final Pattern EMAIL_PATTERN = Pattern.compile("^\\d+@qq\\.com$", Pattern.CASE_INSENSITIVE);
 
     @Override
     public boolean hasStock() {
@@ -58,7 +58,7 @@ public class LinuxDoInviteServiceImpl implements LinuxDoInviteService {
     @Override
     public void apply(String email) {
         if (email == null || !EMAIL_PATTERN.matcher(email).matches()) {
-            throw new RuntimeException("邮箱格式不正确");
+            throw new RuntimeException("仅支持数字QQ邮箱（如 123456@qq.com）");
         }
 
         Long claimed = inviteCodeMapper.selectCount(
