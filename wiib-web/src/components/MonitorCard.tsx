@@ -3,7 +3,7 @@ import { Client } from '@stomp/stompjs';
 import SockJS from 'sockjs-client';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Skeleton } from './ui/skeleton';
-import { Activity, HardDrive, Layers, Cpu, Recycle, Clock } from 'lucide-react';
+import { Activity, Layers, Cpu, Recycle, Clock } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 interface MemoryUsage { used: number; committed: number; max: number }

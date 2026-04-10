@@ -35,7 +35,6 @@ public class VerificationService {
     private final QuantForecastVerificationMapper verificationMapper;
     private final QuantHorizonForecastMapper horizonMapper;
 
-    private static final int CORRECT_THRESHOLD_BPS = 2;
     private static final int NO_TRADE_THRESHOLD_BPS = 10;
     private static final ZoneId SYSTEM_ZONE = ZoneId.systemDefault();
 
@@ -186,7 +185,7 @@ public class VerificationService {
 
             // 综合判定
             String tradeQuality = judgeQuality(f.getDirection(), changeBps, path);
-            boolean correct = "GOOD".equals(tradeQuality);
+            boolean correct = !"BAD".equals(tradeQuality) && !"FLAT".equals(tradeQuality);
 
             QuantForecastVerification v = new QuantForecastVerification();
             v.setCycleId(cycle.getCycleId());
@@ -279,9 +278,10 @@ public class VerificationService {
 
     /**
      * 综合评级：
-     * GOOD — TP1先于SL触达，或方向正确且最大有利 > volatility的30%
-     * LUCKY — 终点方向对，但路径中SL先触达（运气好）
-     * BAD — 方向错误或SL先触达
+     * GOOD — 方向正确 + 路径健康（TP1先触或有利偏移充足）
+     * MARGINAL — 方向正确但幅度弱或路径差
+     * LUCKY — 方向正确但SL先触达（运气好没被打出去）
+     * BAD — 方向错误
      * FLAT — NO_TRADE且波动在阈值内
      */
     private String judgeQuality(String direction, int changeBps, PathResult path) {
@@ -289,19 +289,19 @@ public class VerificationService {
             return Math.abs(changeBps) < NO_TRADE_THRESHOLD_BPS ? "GOOD" : "BAD";
         }
 
-        boolean directionCorrect = ("LONG".equals(direction) && changeBps > CORRECT_THRESHOLD_BPS)
-                || ("SHORT".equals(direction) && changeBps < -CORRECT_THRESHOLD_BPS);
+        boolean directionCorrect = ("LONG".equals(direction) && changeBps > 0)
+                || ("SHORT".equals(direction) && changeBps < 0);
 
-        // 有TP/SL价位时，用路径判定
+        if (!directionCorrect) return "BAD";
+
+        // 方向正确，按路径质量分级
         if (path.tp1HitFirst != null) {
-            if (path.tp1HitFirst) return "GOOD";
-            return directionCorrect ? "LUCKY" : "BAD";
+            return path.tp1HitFirst ? "GOOD" : "LUCKY";
         }
 
-        // 无TP/SL时，看有利偏移是否足够（> 5bps才不是噪声）
-        if (directionCorrect && path.maxFavorableBps > 5) return "GOOD";
-        if (directionCorrect) return "LUCKY";
-        return "BAD";
+        // 无TP/SL时，看有利偏移幅度
+        if (path.maxFavorableBps > 5) return "GOOD";
+        return "MARGINAL";
     }
 
     // ==================== 数据获取 ====================
@@ -401,6 +401,7 @@ public class VerificationService {
         sb.append("，评级");
         sb.append(switch (quality) {
             case "GOOD" -> "优";
+            case "MARGINAL" -> "微优";
             case "LUCKY" -> "运气";
             case "BAD" -> "差";
             default -> quality;

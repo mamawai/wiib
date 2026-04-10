@@ -6,6 +6,7 @@ import com.mawai.wiibcommon.entity.QuantHorizonForecast;
 import com.mawai.wiibcommon.entity.QuantReflectionMemory;
 import com.mawai.wiibcommon.util.JsonUtils;
 import com.mawai.wiibservice.agent.config.AiAgentRuntimeManager;
+import com.mawai.wiibcommon.constant.QuantConstants;
 import com.mawai.wiibservice.agent.quant.domain.LlmCallMode;
 import com.mawai.wiibservice.agent.quant.memory.VerificationService;
 import com.mawai.wiibservice.mapper.*;
@@ -47,7 +48,7 @@ public class ReflectionTask {
         this.verificationService = verificationService;
     }
 
-    private static final List<String> WATCH_LIST = List.of("BTCUSDT");
+    private static final List<String> WATCH_LIST = QuantConstants.WATCH_SYMBOLS;
 
     /**
      * 每小时执行：批量验证 + LLM反思 + 写入记忆

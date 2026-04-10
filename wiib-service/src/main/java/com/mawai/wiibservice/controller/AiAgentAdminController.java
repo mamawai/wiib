@@ -3,6 +3,7 @@ package com.mawai.wiibservice.controller;
 import cn.dev33.satoken.stp.StpUtil;
 import com.mawai.wiibcommon.entity.AiModelAssignment;
 import com.mawai.wiibcommon.entity.AiRuntimeConfig;
+import com.mawai.wiibcommon.constant.QuantConstants;
 import com.mawai.wiibcommon.util.Result;
 import com.mawai.wiibservice.agent.config.AiAgentRuntimeManager;
 import com.mawai.wiibservice.agent.quant.memory.VerificationService;
@@ -168,18 +169,22 @@ public class AiAgentAdminController {
 
     @PostMapping("/quant/verify/trigger")
     @Operation(summary = "手动触发量化预测验证")
-    public Result<String> triggerQuantVerification(@RequestParam(defaultValue = "BTCUSDT") String symbol) {
+    public Result<String> triggerQuantVerification(@RequestParam(required = false) String symbol) {
         checkAdmin();
-        String normalized = normalizeSymbol(symbol);
-        Thread.startVirtualThread(() -> {
-            try {
-                int verified = verificationService.verifyPendingCycles(normalized, 24);
-                log.info("[Admin] 手动触发预测验证完成 symbol={} verified={}", normalized, verified);
-            } catch (Exception e) {
-                log.error("[Admin] 手动触发预测验证失败 symbol={}", normalized, e);
-            }
-        });
-        return Result.ok("预测验证已触发: " + normalized);
+        List<String> symbols = (symbol == null || symbol.isBlank())
+                ? QuantConstants.WATCH_SYMBOLS
+                : List.of(normalizeSymbol(symbol));
+        for (String s : symbols) {
+            Thread.startVirtualThread(() -> {
+                try {
+                    int verified = verificationService.verifyPendingCycles(s, 24);
+                    log.info("[Admin] 手动触发预测验证完成 symbol={} verified={}", s, verified);
+                } catch (Exception e) {
+                    log.error("[Admin] 手动触发预测验证失败 symbol={}", s, e);
+                }
+            });
+        }
+        return Result.ok("预测验证已触发: " + symbols);
     }
 
     // ========== DTO ==========

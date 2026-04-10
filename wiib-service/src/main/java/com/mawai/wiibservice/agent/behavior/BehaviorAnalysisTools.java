@@ -3,8 +3,10 @@ package com.mawai.wiibservice.agent.behavior;
 import com.alibaba.fastjson2.JSON;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.mawai.wiibcommon.entity.*;
+import com.mawai.wiibcommon.dto.UserDTO;
 import com.mawai.wiibservice.mapper.*;
 import com.mawai.wiibservice.service.CryptoPositionService;
+import com.mawai.wiibservice.service.UserService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
@@ -30,6 +32,7 @@ public class BehaviorAnalysisTools {
     private final BlackjackAccountMapper blackjackAccountMapper;
     private final MinesGameMapper minesGameMapper;
     private final VideoPokerGameMapper videoPokerGameMapper;
+    private final UserService userService;
     private final Consumer<String> onProgress;
 
     private void emitStep(String message) {
@@ -48,6 +51,23 @@ public class BehaviorAnalysisTools {
             public final boolean isBankrupt = user.getIsBankrupt();
             public final Object bankruptAt = user.getBankruptAt();
             public final Object createdAt = user.getCreatedAt();
+        });
+    }
+
+    @Tool(description = "获取用户实时资产概览：总资产、持仓市值、待结算、杠杆负债、盈亏等（精确计算，含实时价格）")
+    public String getPortfolioSummary(@ToolParam(description = "用户ID") Long userId) {
+        emitStep("计算实时资产概览");
+        UserDTO dto = userService.getUserPortfolio(userId);
+        return JSON.toJSONString(new Object() {
+            public final BigDecimal totalAssets = dto.getTotalAssets();
+            public final BigDecimal balance = dto.getBalance();
+            public final BigDecimal frozenBalance = dto.getFrozenBalance();
+            public final BigDecimal positionMarketValue = dto.getPositionMarketValue();
+            public final BigDecimal pendingSettlement = dto.getPendingSettlement();
+            public final BigDecimal marginLoanPrincipal = dto.getMarginLoanPrincipal();
+            public final BigDecimal marginInterestAccrued = dto.getMarginInterestAccrued();
+            public final BigDecimal profit = dto.getProfit();
+            public final BigDecimal profitPct = dto.getProfitPct();
         });
     }
 

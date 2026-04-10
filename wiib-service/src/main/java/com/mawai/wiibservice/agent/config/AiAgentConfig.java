@@ -11,6 +11,7 @@ import com.mawai.wiibservice.config.BinanceRestClient;
 import com.mawai.wiibservice.mapper.*;
 import com.mawai.wiibservice.service.CryptoPositionService;
 import com.mawai.wiibservice.service.ForceOrderService;
+import com.mawai.wiibservice.service.UserService;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.support.ToolCallbacks;
@@ -34,6 +35,7 @@ public class AiAgentConfig {
     private final BlackjackAccountMapper blackjackAccountMapper;
     private final MinesGameMapper minesGameMapper;
     private final VideoPokerGameMapper videoPokerGameMapper;
+    private final UserService userService;
     private final BinanceRestClient binanceRestClient;
     private final MemoryService memoryService;
     private final ForceOrderService forceOrderService;
@@ -51,6 +53,7 @@ public class AiAgentConfig {
                          BlackjackAccountMapper blackjackAccountMapper,
                          MinesGameMapper minesGameMapper,
                          VideoPokerGameMapper videoPokerGameMapper,
+                         UserService userService,
                          BinanceRestClient binanceRestClient,
                          MemoryService memoryService,
                          ForceOrderService forceOrderService) {
@@ -67,6 +70,7 @@ public class AiAgentConfig {
         this.blackjackAccountMapper = blackjackAccountMapper;
         this.minesGameMapper = minesGameMapper;
         this.videoPokerGameMapper = videoPokerGameMapper;
+        this.userService = userService;
         this.binanceRestClient = binanceRestClient;
         this.memoryService = memoryService;
         this.forceOrderService = forceOrderService;
@@ -77,7 +81,8 @@ public class AiAgentConfig {
                 userMapper, snapshotMapper, positionMapper, orderMapper,
                 cryptoOrderMapper, cryptoPositionService, futuresOrderMapper,
                 futuresPositionMapper, optionOrderMapper, predictionBetMapper,
-                blackjackAccountMapper, minesGameMapper, videoPokerGameMapper, onProgress);
+                blackjackAccountMapper, minesGameMapper, videoPokerGameMapper,
+                userService, onProgress);
 
         return ReactAgent.builder()
                 .name("behavior_analyst")
