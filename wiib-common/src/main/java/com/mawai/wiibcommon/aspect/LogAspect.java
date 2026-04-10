@@ -21,7 +21,7 @@ import java.util.Arrays;
 @Order(1)
 public class LogAspect {
 
-    @Around("execution(public * com.mawai..controller.*.*(..))")
+    @Around("execution(public * com.mawai..controller.*.*(..)) && !within(com.mawai..controller.MonitorController)")
     public Object around(ProceedingJoinPoint point) throws Throwable {
         long start = System.currentTimeMillis();
 

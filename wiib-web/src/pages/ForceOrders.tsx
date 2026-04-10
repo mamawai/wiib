@@ -85,17 +85,18 @@ export function ForceOrders() {
         <CardHeader className="relative space-y-4">
           <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
             <div className="space-y-3">
-              <CardTitle className="flex items-center gap-3 text-xl md:text-2xl font-black tracking-tight">
-                <span className="p-2 rounded-2xl bg-red-500/10 text-red-500">
-                  <Flame className="w-5 h-5" />
+              <CardTitle className="flex items-center gap-3 text-lg sm:text-xl md:text-2xl font-black tracking-tight">
+                <span className="p-1.5 sm:p-2 rounded-xl sm:rounded-2xl bg-red-500/10 text-red-500">
+                  <Flame className="w-4 h-4 sm:w-5 sm:h-5" />
                 </span>
                 爆仓记录
               </CardTitle>
-              <div className="max-w-3xl text-sm leading-6 text-muted-foreground">
-                这里展示 Binance 合约市场的最近爆仓记录。`SELL` 代表多头被强平，`BUY` 代表空头被强平。大额连续爆仓通常意味着短时波动和情绪放大，但它不是独立交易信号，最好结合价格、持仓和资金费率一起看。
+              <div className="text-xs sm:text-sm leading-5 sm:leading-6 text-muted-foreground">
+                <span className="hidden sm:inline">Binance 合约市场最近爆仓记录。SELL 代表多头被强平，BUY 代表空头被强平。大额连续爆仓通常意味着短时波动和情绪放大，但不是独立交易信号。</span>
+                <span className="sm:hidden">Binance 合约爆仓记录。SELL=多头强平，BUY=空头强平。</span>
               </div>
             </div>
-            <Button variant="outline" size="sm" className="h-9 w-fit gap-2" onClick={() => fetchOrders(page)}>
+            <Button variant="outline" size="sm" className="h-9 w-fit gap-2 shrink-0" onClick={() => fetchOrders(page)}>
               <RefreshCw className={cn('w-4 h-4', loading && 'animate-spin')} />
               刷新
             </Button>
@@ -127,21 +128,21 @@ export function ForceOrders() {
         <Card>
           <CardContent className="p-4 space-y-1">
             <div className="text-xs font-bold text-muted-foreground">当前页多头爆仓</div>
-            <div className="text-2xl font-black text-red-500 tabular-nums">{stats.longLiquidations}</div>
-            <div className="text-xs text-muted-foreground">对应 `SELL` 强平单</div>
+            <div className="text-xl sm:text-2xl font-black text-red-500 tabular-nums">{stats.longLiquidations}</div>
+            <div className="text-xs text-muted-foreground">对应 SELL 强平单</div>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-4 space-y-1">
             <div className="text-xs font-bold text-muted-foreground">当前页空头爆仓</div>
-            <div className="text-2xl font-black text-green-500 tabular-nums">{stats.shortLiquidations}</div>
-            <div className="text-xs text-muted-foreground">对应 `BUY` 强平单</div>
+            <div className="text-xl sm:text-2xl font-black text-green-500 tabular-nums">{stats.shortLiquidations}</div>
+            <div className="text-xs text-muted-foreground">对应 BUY 强平单</div>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-4 space-y-1">
             <div className="text-xs font-bold text-muted-foreground">当前页总名义金额</div>
-            <div className="text-2xl font-black tabular-nums">${formatAmount(stats.totalAmount)}</div>
+            <div className="text-xl sm:text-2xl font-black tabular-nums">${formatAmount(stats.totalAmount)}</div>
             <div className="text-xs text-muted-foreground">仅统计当前页 {records.length} 条记录</div>
           </CardContent>
         </Card>
@@ -156,8 +157,8 @@ export function ForceOrders() {
                 按成交时间倒序展示，每页 {PAGE_SIZE} 条，当前共 {result.total} 条记录。
               </div>
             </div>
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              <AlertTriangle className="w-3.5 h-3.5 text-red-500" />
+            <div className="hidden sm:flex items-center gap-2 text-xs text-muted-foreground">
+              <AlertTriangle className="w-3.5 h-3.5 text-red-500 shrink-0" />
               爆仓金额大并不等于马上反转，只说明该方向刚经历了强制出清。
             </div>
           </div>
@@ -209,9 +210,9 @@ export function ForceOrders() {
                 </table>
               </div>
 
-              <div className="md:hidden p-3 space-y-3">
+              <div className="md:hidden p-2.5 sm:p-3 space-y-2.5 sm:space-y-3">
                 {records.map(order => (
-                  <div key={order.id} className="rounded-2xl border border-border/50 bg-card p-4 space-y-3 neu-raised-sm">
+                  <div key={order.id} className="rounded-xl sm:rounded-2xl border border-border/50 bg-card p-3 sm:p-4 space-y-2.5 sm:space-y-3 neu-raised-sm">
                     <div className="flex items-start justify-between gap-3">
                       <div className="space-y-1">
                         <div className="text-xs text-muted-foreground font-mono">{formatDateTime(order.tradeTime)}</div>

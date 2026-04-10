@@ -9,6 +9,7 @@ import com.mawai.wiibcommon.constant.RateLimiterType;
 import com.mawai.wiibcommon.enums.ErrorCode;
 import com.mawai.wiibcommon.util.JsonUtils;
 import com.mawai.wiibcommon.util.Result;
+import com.mawai.wiibcommon.constant.QuantConstants;
 import com.mawai.wiibcommon.util.SpringUtils;
 import com.mawai.wiibservice.agent.behavior.BehaviorAnalysisReport;
 import com.mawai.wiibservice.agent.config.AiAgentRuntimeManager;
@@ -308,10 +309,11 @@ public class AiAgentController {
         if (symbol.isBlank()) {
             return "BTCUSDT";
         }
-        if (!symbol.matches("^[A-Z0-9]{2,10}$")) {
-            throw new IllegalArgumentException("symbol格式错误");
+        String normalized = symbol + "USDT";
+        if (!QuantConstants.ALLOWED_SYMBOLS.contains(normalized)) {
+            throw new IllegalArgumentException("仅支持 BTC、ETH、PAXG");
         }
-        return symbol + "USDT";
+        return normalized;
     }
 
     @PostMapping(value = "/chat", produces = MediaType.TEXT_EVENT_STREAM_VALUE)

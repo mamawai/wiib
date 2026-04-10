@@ -16,13 +16,8 @@ type Tab = 'behavior' | 'crypto';
 
 const HORIZON_LABELS: Record<string, string> = { '0_10': '0-10min', '10_20': '10-20min', '20_30': '20-30min' };
 
-function normalizeQuantSymbolInput(value?: string | null) {
-  const raw = (value || '').trim().toUpperCase();
-  if (!raw) return 'BTCUSDT';
-  if (raw.endsWith('USDT')) return raw;
-  if (raw.endsWith('USDC')) return `${raw.slice(0, -4)}USDT`;
-  return `${raw}USDT`;
-}
+const ALLOWED_SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'PAXGUSDT'] as const;
+const SYMBOL_LABELS: Record<string, string> = { BTCUSDT: 'BTC', ETHUSDT: 'ETH', PAXGUSDT: 'PAXG' };
 
 function ConfidenceBar({ confidence }: { confidence: number }) {
   const color = confidence >= 80 ? 'bg-green-500' : confidence >= 60 ? 'bg-amber-500' : 'bg-red-500';
@@ -88,9 +83,9 @@ function SignalCard({ signal }: { signal: QuantLatestSignal }) {
           )}
           <span className="text-xs text-muted-foreground">{decisionText}</span>
         </div>
-        <div className="grid grid-cols-3 gap-2">
+        <div className="grid grid-cols-3 gap-1.5 sm:gap-2">
           {signal.signals.map((s) => (
-            <div key={s.horizon} className="p-2.5 rounded-lg bg-background border text-center">
+            <div key={s.horizon} className="p-2 sm:p-2.5 rounded-lg bg-background border text-center">
               <div className="text-[10px] text-muted-foreground mb-1">{HORIZON_LABELS[s.horizon] || s.horizon}</div>
               <DirectionBadge direction={s.direction} />
               <div className="mt-1.5 text-xs text-muted-foreground">
@@ -156,7 +151,7 @@ export function AiAgent() {
   const [cryptoPending, setCryptoPending] = useState(false);
   const [cryptoPendingMsg, setCryptoPendingMsg] = useState('');
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const [symbol, setSymbol] = useState('');
+  const [symbol, setSymbol] = useState('BTCUSDT');
   const [chatMessages, setChatMessages] = useState<{ role: string; content: string }[]>([]);
   const [chatInput, setChatInput] = useState('');
   const [chatLoading, setChatLoading] = useState(false);
@@ -187,9 +182,10 @@ export function AiAgent() {
   const loadSignalData = useCallback(async (sym?: string) => {
     setSignalLoading(true);
     try {
+      const s = sym || 'BTCUSDT';
       const [signal, forecasts] = await Promise.allSettled([
-        aiAgentApi.latestSignals(sym || undefined),
-        aiAgentApi.forecasts(sym || undefined, 10),
+        aiAgentApi.latestSignals(s),
+        aiAgentApi.forecasts(s, 10),
       ]);
       if (signal.status === 'fulfilled') setLatestSignal(signal.value);
       if (forecasts.status === 'fulfilled') setHistory(forecasts.value);
@@ -249,15 +245,16 @@ export function AiAgent() {
 
   const fetchLatestReport = useCallback(async (sym?: string) => {
     try {
-      const result = await aiAgentApi.latestCryptoReport(sym || undefined);
+      const s = sym || 'BTCUSDT';
+      const result = await aiAgentApi.latestCryptoReport(s);
       if (result.status === 'ready' && result.report) {
         setCryptoReport(result.report);
         setCryptoForecastTime(result.forecastTime || null);
-        setReportSymbol(normalizeQuantSymbolInput(sym));
+        setReportSymbol(s);
         setCryptoPending(false);
         setCryptoPendingMsg('');
         stopPolling();
-        loadSignalData(sym || undefined);
+        loadSignalData(s);
       } else {
         setCryptoPending(true);
         setCryptoPendingMsg(result.message || '分析进行中，请稍候');
@@ -279,16 +276,16 @@ export function AiAgent() {
     stopPolling();
 
     try {
-      const result = await aiAgentApi.latestCryptoReport(symbol || undefined);
+      const result = await aiAgentApi.latestCryptoReport(symbol);
       if (result.status === 'ready' && result.report) {
         setCryptoReport(result.report);
         setCryptoForecastTime(result.forecastTime || null);
-        setReportSymbol(normalizeQuantSymbolInput(symbol));
-        loadSignalData(symbol || undefined);
+        setReportSymbol(symbol);
+        loadSignalData(symbol);
       } else {
         setCryptoPending(true);
         setCryptoPendingMsg(result.message || '分析进行中，请稍候');
-        pollRef.current = setInterval(() => fetchLatestReport(symbol || undefined), 5000);
+        pollRef.current = setInterval(() => fetchLatestReport(symbol), 5000);
       }
     } catch (e) {
       toast((e as Error).message || '获取失败', 'error');
@@ -403,10 +400,10 @@ export function AiAgent() {
         <div className="space-y-4">
           {!behaviorReport || !behaviorReport.overview ? (
             <Card>
-              <CardContent className="p-8 text-center">
+              <CardContent className="p-5 sm:p-8 text-center">
                 {!loading ? (
                   <>
-                    <Brain className="w-12 h-12 mx-auto text-muted-foreground mb-4" />
+                    <Brain className="w-10 h-10 sm:w-12 sm:h-12 mx-auto text-muted-foreground mb-4" />
                     <h2 className="text-lg font-bold mb-2">用户行为分析</h2>
                     <p className="text-sm text-muted-foreground mb-6 max-w-md mx-auto">
                       基于你的全部历史交易数据、游戏记录、风险偏好等维度，全面分析你的投资行为特征
@@ -415,7 +412,7 @@ export function AiAgent() {
                   </>
                 ) : (
                   <>
-                    <Brain className="w-12 h-12 mx-auto text-primary mb-4 animate-pulse" />
+                    <Brain className="w-10 h-10 sm:w-12 sm:h-12 mx-auto text-primary mb-4 animate-pulse" />
                     <h2 className="text-lg font-bold mb-4">正在分析中...</h2>
                     {steps.length > 0 && (
                       <div className="text-left max-w-xs mx-auto space-y-2">
@@ -449,11 +446,11 @@ export function AiAgent() {
                 <CardContent className="space-y-4">
                   <div className="grid grid-cols-2 gap-4">
                     <div className="p-3 rounded-lg bg-muted/50">
-                      <div className="text-2xl font-black tabular-nums">${behaviorReport.overview.totalAssets.toLocaleString()}</div>
+                      <div className="text-xl sm:text-2xl font-black tabular-nums">${behaviorReport.overview.totalAssets.toLocaleString()}</div>
                       <div className="text-xs text-muted-foreground">总资产</div>
                     </div>
                     <div className="p-3 rounded-lg bg-muted/50">
-                      <div className={`text-2xl font-black tabular-nums ${behaviorReport.overview.totalProfitPct >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                      <div className={`text-xl sm:text-2xl font-black tabular-nums ${behaviorReport.overview.totalProfitPct >= 0 ? 'text-green-500' : 'text-red-500'}`}>
                         {behaviorReport.overview.totalProfitPct >= 0 ? '+' : ''}{behaviorReport.overview.totalProfitPct.toFixed(2)}%
                       </div>
                       <div className="text-xs text-muted-foreground">总收益率</div>
@@ -572,7 +569,7 @@ export function AiAgent() {
                   <CardTitle className="text-base">风险画像</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-3 flex-wrap">
                     <Badge variant={behaviorReport.riskProfile.riskLevel === 'HIGH' ? 'destructive' : behaviorReport.riskProfile.riskLevel === 'MEDIUM' ? 'default' : 'outline'}>
                       {behaviorReport.riskProfile.riskLevel}
                     </Badge>
@@ -601,7 +598,7 @@ export function AiAgent() {
                 </Card>
               )}
 
-              <Button variant="outline" onClick={() => setBehaviorReport(null)}>重新分析</Button>
+              <Button variant="outline" onClick={() => setBehaviorReport(null)} className="mb-4">重新分析</Button>
             </>
           )}
         </div>
@@ -632,30 +629,34 @@ export function AiAgent() {
 
           {!cryptoReport || !cryptoReport.keyLevels ? (
             <Card>
-              <CardContent className="p-8 text-center">
+              <CardContent className="p-5 sm:p-8 text-center">
                 {!loading && !cryptoPending ? (
                   <>
-                    <TrendingUp className="w-12 h-12 mx-auto text-muted-foreground mb-4" />
+                    <TrendingUp className="w-10 h-10 sm:w-12 sm:h-12 mx-auto text-muted-foreground mb-4" />
                     <h2 className="text-lg font-bold mb-2">加密货币量化分析</h2>
                     <p className="text-sm text-muted-foreground mb-6 max-w-md mx-auto">
                       后台每30分钟自动生成分析报告，点击获取最新结果
                     </p>
                     <div className="flex items-center justify-center gap-3 max-w-sm mx-auto">
-                      <Input
-                        placeholder="输入币种，如 BTC、ETH（可选）"
-                        value={symbol}
-                        onChange={e => setSymbol(e.target.value.toUpperCase())}
-                        className="flex-1"
-                      />
-                      <Button onClick={handleAnalyzeCrypto} disabled={loading}>
-                        获取分析
-                      </Button>
+                      {ALLOWED_SYMBOLS.map(s => (
+                        <Button
+                          key={s}
+                          variant={symbol === s ? 'default' : 'outline'}
+                          size="sm"
+                          onClick={() => setSymbol(s)}
+                        >
+                          {SYMBOL_LABELS[s]}
+                        </Button>
+                      ))}
                     </div>
-                    <p className="text-xs text-muted-foreground mt-3">不输入则默认分析 BTC</p>
+                    <Button onClick={handleAnalyzeCrypto} disabled={loading} className="mt-3">
+                      获取 {SYMBOL_LABELS[symbol]} 分析
+                    </Button>
+                    <p className="text-xs text-muted-foreground mt-2">选择币种后点击获取</p>
                   </>
                 ) : (
                   <>
-                    <TrendingUp className="w-12 h-12 mx-auto text-primary mb-4 animate-pulse" />
+                    <TrendingUp className="w-10 h-10 sm:w-12 sm:h-12 mx-auto text-primary mb-4 animate-pulse" />
                     <h2 className="text-lg font-bold mb-2">分析进行中</h2>
                     <p className="text-sm text-muted-foreground mb-2">{cryptoPendingMsg || '等待后台生成报告...'}</p>
                     <Loader2 className="w-5 h-5 animate-spin mx-auto text-primary" />
@@ -796,7 +797,7 @@ export function AiAgent() {
                                   style={{ width: `${pct}%` }}
                                 />
                               </div>
-                              <span className="font-mono font-bold tabular-nums min-w-[5rem] text-right">
+                              <span className="font-mono font-bold tabular-nums min-w-[4rem] sm:min-w-[5rem] text-right text-[11px] sm:text-xs">
                                 ${level.price.toLocaleString()}
                               </span>
                             </div>
@@ -857,7 +858,7 @@ export function AiAgent() {
                               {advice.period} {advice.type}
                             </span>
                           </div>
-                          <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+                          <div className="grid grid-cols-2 gap-x-2 sm:gap-x-4 gap-y-1 text-xs">
                             <div>入场: <span className="font-mono font-bold">{advice.entry}</span></div>
                             <div>止损: <span className="font-mono font-bold text-red-500">{advice.stopLoss}</span></div>
                             <div>止盈: <span className="font-mono font-bold text-green-500">{advice.takeProfit}</span></div>
@@ -975,7 +976,7 @@ export function AiAgent() {
                 )}
               </Card>
 
-              <Button variant="outline" onClick={() => { stopChatStream(); setCryptoReport(null); setCryptoForecastTime(null); setChatMessages([]); stopPolling(); }}>重新获取</Button>
+              <Button variant="outline" onClick={() => { stopChatStream(); setCryptoReport(null); setCryptoForecastTime(null); setChatMessages([]); stopPolling(); }} className="mb-4">重新获取</Button>
             </>
           )}
         </div>

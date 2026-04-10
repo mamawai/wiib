@@ -14,7 +14,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
-import java.util.List;
+import com.mawai.wiibcommon.constant.QuantConstants;
+
 import java.util.Map;
 import java.util.Optional;
 
@@ -28,12 +29,10 @@ public class QuantForecastScheduler {
     private final RedisMessageBroadcastService broadcastService;
     private final BinanceRestClient binanceRestClient;
 
-    private static final List<String> WATCH_LIST = List.of("BTCUSDT", "ETHUSDT", "PAXGUSDT");
-
     @Scheduled(cron = "0 */30 * * * *")
     public void rollingForecast() {
         String fearGreedData = fetchFearGreedOnce();
-        for (String symbol : WATCH_LIST) {
+        for (String symbol : QuantConstants.WATCH_SYMBOLS) {
             Thread.startVirtualThread(() -> runForecast(symbol, fearGreedData));
         }
     }

@@ -12,7 +12,7 @@ import { Input } from '../components/ui/input';
 import { Badge } from '../components/ui/badge';
 import { Skeleton } from '../components/ui/skeleton';
 import { FuturesActionButton } from '../components/FuturesActionButton';
-import { TrendingUp, TrendingDown, ChevronLeft, ChevronRight, Loader2, X, RefreshCw, Sparkles, Wallet, Warehouse, Scale, HelpCircle, Plus } from 'lucide-react';
+import { TrendingUp, TrendingDown, ChevronLeft, ChevronRight, Loader2, X, RefreshCw, Sparkles, Wallet, Warehouse, Scale, HelpCircle, Plus, Flame } from 'lucide-react';
 import TradingViewWidget from '../components/TradingViewWidget';
 import { COIN_MAP, getCoin, DEFAULT_SYMBOL } from '../lib/coinConfig';
 import type { CryptoOrder, CryptoPosition, PageResult, UserBuff, FuturesPosition, FuturesOrder, FuturesSLItem, FuturesTPItem } from '../types';
@@ -922,8 +922,9 @@ export function Coin({ symbol = DEFAULT_SYMBOL }: { symbol?: string }) {
           </div>
           <Link
             to="/force-orders"
-            className="px-4 py-2.5 rounded-xl bg-red-500/8 neu-raised text-xs font-black text-red-500 border border-red-500/15 hover:bg-red-500/12 transition-colors"
+            className="px-3 sm:px-4 py-2 sm:py-2.5 rounded-xl bg-red-500/8 neu-raised text-xs font-black text-red-500 border border-red-500/15 hover:bg-red-500/12 transition-colors flex items-center gap-1.5"
           >
+            <Flame className="w-3.5 h-3.5" />
             爆仓
           </Link>
         </div>

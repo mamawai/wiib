@@ -72,9 +72,9 @@ export function Layout({ children }: Props) {
               <HeaderNavItem to="/" label="首页" />
               <MarketDropdown isActive={isMarketActive} />
               <HeaderNavItem to="/portfolio" label="持仓" />
+              <HeaderNavItem to="/ai" label="AI" />
               <HeaderNavItem to="/ranking" label="排行" />
               <HeaderNavItem to="/games" label="游戏" />
-              <HeaderNavItem to="/ai" label="AI" />
             </nav>
 
             {/* Actions */}
