@@ -4,7 +4,6 @@ import com.mawai.wiibcommon.resolver.CurrentUserIdArgumentResolver;
 import com.mawai.wiibcommon.resolver.SymbolArgumentResolver;
 
 import org.springframework.context.annotation.Configuration;
-import org.springframework.lang.NonNull;
 import org.springframework.web.method.support.HandlerMethodArgumentResolver;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
@@ -18,7 +17,7 @@ import java.util.List;
 public class WebConfig implements WebMvcConfigurer {
 
     @Override
-    public void addArgumentResolvers(@NonNull List<HandlerMethodArgumentResolver> resolvers) {
+    public void addArgumentResolvers(List<HandlerMethodArgumentResolver> resolvers) {
         resolvers.add(new CurrentUserIdArgumentResolver());
         resolvers.add(new SymbolArgumentResolver());
     }

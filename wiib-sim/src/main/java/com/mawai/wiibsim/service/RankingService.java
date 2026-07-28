@@ -25,7 +25,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.TimeUnit;
+import java.time.Duration;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -154,7 +154,7 @@ public class RankingService {
             dto.setRank(i + 1);
             ranked.add(dto);
         }
-        cacheService.setObject(RANKING_KEY, ranked, 15, TimeUnit.MINUTES);
+        cacheService.setObject(RANKING_KEY, ranked, Duration.ofMinutes(15));
 
         log.info("排行榜刷新完成，交易过的用户{}人，入榜{}人，耗时{}ms",
                 users.size(), ranked.size(), System.currentTimeMillis() - start);

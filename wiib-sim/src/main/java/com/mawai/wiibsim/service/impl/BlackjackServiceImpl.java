@@ -24,7 +24,7 @@ import java.security.SecureRandom;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.*;
-import java.util.concurrent.TimeUnit;
+import java.time.Duration;
 
 import static com.mawai.wiibcommon.enums.LedgerBizType.BLACKJACK_CONVERT;
 
@@ -1056,7 +1056,7 @@ public class BlackjackServiceImpl implements BlackjackService {
     }
 
     private void ensurePoolKey() {
-        cacheService.setIfAbsent(dailyPoolKey(), String.valueOf(DAILY_POOL), 24, TimeUnit.HOURS);
+        cacheService.setIfAbsent(dailyPoolKey(), String.valueOf(DAILY_POOL), Duration.ofHours(24));
     }
 
     private long getPoolRemaining() {

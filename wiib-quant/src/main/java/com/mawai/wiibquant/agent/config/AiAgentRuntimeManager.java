@@ -67,7 +67,7 @@ public class AiAgentRuntimeManager {
         this.eventPublisher = eventPublisher;
         this.configMapper = configMapper;
         this.assignmentMapper = assignmentMapper;
-        // 与关掉的自动装配同源：ToolCallingManager 仍是独立装配的 bean，手建模型能力等价
+        // 现在只有 ResponsesChatModel 用它：把 toolCallbacks 翻成发给 API 的工具声明
         this.toolCallingManager = toolCallingManager;
         this.observationRegistry = observationRegistry.getIfUnique(() -> ObservationRegistry.NOOP);
     }
@@ -216,10 +216,12 @@ public class AiAgentRuntimeManager {
             options.reasoningEffort(config.getReasoningEffort());
         }
 
+        // 不传 toolCallingManager：该 setter 2.0 起废弃。删了不丢东西——模型层已经不跑工具循环
+        // （循环在 langgraph4j 图里），它在 OpenAiChatModel 内部只剩一件事：把 toolCallbacks
+        // 翻成发给 API 的工具声明。builder 不传就 new 一个默认的，做的事一模一样
         return OpenAiChatModel.builder()
                 .openAiClient(openAiClient)
                 .options(options.build())
-                .toolCallingManager(toolCallingManager)
                 .observationRegistry(observationRegistry)
                 .build();
     }

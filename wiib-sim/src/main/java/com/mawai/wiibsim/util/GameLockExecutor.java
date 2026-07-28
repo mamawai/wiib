@@ -7,7 +7,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.support.TransactionTemplate;
 
-import java.util.concurrent.TimeUnit;
+import java.time.Duration;
 import java.util.function.Supplier;
 
 /**
@@ -68,7 +68,7 @@ public class GameLockExecutor {
     }
 
     public void saveSession(String prefix, Long userId, Object session, long ttlHours) {
-        cacheService.setObject(prefix + userId, session, ttlHours, TimeUnit.HOURS);
+        cacheService.setObject(prefix + userId, session, Duration.ofHours(ttlHours));
     }
 
     public void deleteSession(String prefix, Long userId) {

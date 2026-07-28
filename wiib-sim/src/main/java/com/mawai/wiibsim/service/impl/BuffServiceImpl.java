@@ -24,7 +24,7 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.Objects;
-import java.util.concurrent.TimeUnit;
+import java.time.Duration;
 
 import static com.mawai.wiibcommon.enums.LedgerBizType.BUFF_REWARD;
 
@@ -58,7 +58,7 @@ public class BuffServiceImpl extends ServiceImpl<UserBuffMapper, UserBuff> imple
         dto.setTodayBuff(todayBuff != null ? toDTO(todayBuff) : null);
 
         // 存入缓存，1小时过期
-        cacheService.setObject(cacheKey, dto, 1, TimeUnit.HOURS);
+        cacheService.setObject(cacheKey, dto, Duration.ofHours(1));
 
         return dto;
     }
@@ -120,7 +120,7 @@ public class BuffServiceImpl extends ServiceImpl<UserBuffMapper, UserBuff> imple
         BuffStatusDTO dto = new BuffStatusDTO();
         dto.setCanDraw(false);
         dto.setTodayBuff(toDTO(buff));
-        cacheService.setObject(cacheKey, dto, 1, TimeUnit.HOURS);
+        cacheService.setObject(cacheKey, dto, Duration.ofHours(1));
 
         log.info("用户{}抽奖结果: {} ({})", userId, buffType.getDisplayName(), buffType.getRarity().name());
         return toDTO(buff);

@@ -13,7 +13,6 @@ import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.util.*;
-import java.util.concurrent.TimeUnit;
 
 /**
  * 缓存服务 - 封装Redis操作
@@ -204,12 +203,8 @@ public class CacheService {
         stringRedisTemplate.unlink(key);
     }
 
-    public boolean setIfAbsent(String key, String value, long timeout, TimeUnit unit) {
-        return Boolean.TRUE.equals(stringRedisTemplate.opsForValue().setIfAbsent(key, value, timeout, unit));
-    }
-
-    public void expire(String key, long timeout, TimeUnit unit) {
-        stringRedisTemplate.expire(key, timeout, unit);
+    public boolean setIfAbsent(String key, String value, Duration ttl) {
+        return Boolean.TRUE.equals(stringRedisTemplate.opsForValue().setIfAbsent(key, value, ttl));
     }
 
     public Long increment(String key, long delta) {
@@ -262,8 +257,8 @@ public class CacheService {
 
     // ==================== 对象序列化（使用RedisTemplate） ====================
 
-    public void setObject(String key, Object obj, long timeout, TimeUnit unit) {
-        redisTemplate.opsForValue().set(key, obj, timeout, unit);
+    public void setObject(String key, Object obj, Duration ttl) {
+        redisTemplate.opsForValue().set(key, obj, ttl);
     }
 
     @SuppressWarnings("unchecked")

@@ -9,8 +9,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.http.server.ServerHttpRequest;
 import org.springframework.http.server.ServerHttpResponse;
 import org.springframework.http.server.ServletServerHttpRequest;
-import org.springframework.lang.NonNull;
-import org.springframework.lang.Nullable;
+import org.jspecify.annotations.NonNull;
 import org.springframework.messaging.Message;
 import org.springframework.messaging.MessageChannel;
 import org.springframework.messaging.simp.config.ChannelRegistration;
@@ -104,7 +103,7 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
                     public void afterHandshake(@NonNull ServerHttpRequest request,
                                                @NonNull ServerHttpResponse response,
                                                @NonNull WebSocketHandler wsHandler,
-                                               @Nullable Exception exception) {
+                                               Exception exception) {
                     }
                 })
                 .withSockJS();

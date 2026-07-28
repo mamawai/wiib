@@ -10,9 +10,9 @@ import org.springframework.transaction.TransactionStatus;
 import org.springframework.transaction.support.TransactionCallback;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -48,7 +48,7 @@ class GameLockExecutorTest {
         // 抢锁 = setIfAbsent；放锁 = 跑 Lua 脚本。注意 unlock 里 `result == 1` 会对 Long 拆箱，
         // 这里必须返 1L，返 null 生产代码直接 NPE
         when(redisTemplate.opsForValue()).thenReturn(valueOps);
-        when(valueOps.setIfAbsent(anyString(), anyString(), anyLong(), any(TimeUnit.class)))
+        when(valueOps.setIfAbsent(anyString(), anyString(), any(Duration.class)))
                 .thenAnswer(inv -> {
                     events.add("LOCK");
                     return Boolean.TRUE;
@@ -87,7 +87,7 @@ class GameLockExecutorTest {
         assertThat(events).containsExactly("LOCK", "TX_BEGIN", "BIZ", "TX_COMMIT", "UNLOCK");
 
         InOrder inOrder = inOrder(valueOps, transactionTemplate, redisTemplate);
-        inOrder.verify(valueOps).setIfAbsent(eq("lock:mines:user:7"), anyString(), eq(20L), eq(TimeUnit.SECONDS));
+        inOrder.verify(valueOps).setIfAbsent(eq("lock:mines:user:7"), anyString(), eq(Duration.ofSeconds(20)));
         inOrder.verify(transactionTemplate).execute(any());
         inOrder.verify(redisTemplate).execute(any(RedisScript.class), anyList(), any());
     }

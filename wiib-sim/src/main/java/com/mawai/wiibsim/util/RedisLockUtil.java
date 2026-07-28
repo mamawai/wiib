@@ -6,9 +6,9 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Component;
 
+import java.time.Duration;
 import java.util.Collections;
 import java.util.UUID;
-import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
 /**
@@ -48,7 +48,7 @@ public class RedisLockUtil {
         String lockValue = UUID.randomUUID().toString();
 
         Boolean success = redisTemplate.opsForValue()
-                .setIfAbsent(lockKey, lockValue, timeout, TimeUnit.SECONDS);
+                .setIfAbsent(lockKey, lockValue, Duration.ofSeconds(timeout));
 
         if (Boolean.TRUE.equals(success)) {
             // 常态路径不上INFO：强平巡检等高频调用方每秒抢锁，会刷爆日志
