@@ -23,7 +23,7 @@
     </modules>
 
     <properties>
-        <java.version>21</java.version>
+        <java.version>25</java.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
         <skipTests>true</skipTests>
@@ -32,7 +32,7 @@
         <mybatis.version>3.5.19</mybatis.version>
         <postgresql.version>42.7.3</postgresql.version>
         <sa-token.version>1.45.0</sa-token.version>
-        <lombok.version>1.18.36</lombok.version>
+        <lombok.version>1.18.46</lombok.version>
         <hutool.version>5.8.24</hutool.version>
         <pagehelper-starter.version>4.1.1</pagehelper-starter.version>
         <openapi.version>3.0.3</openapi.version>

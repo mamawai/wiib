@@ -14,10 +14,6 @@
     <description>wiib-sim</description>
     <packaging>jar</packaging>
 
-    <properties>
-        <java.version>21</java.version>
-    </properties>
-
     <dependencies>
         <!-- wiib-common -->
         <dependency>

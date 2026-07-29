@@ -1,6 +1,6 @@
 # quant 量化/AI agent：策略实盘 + Graph 并行 + MCP。三进程最吃内存
 # JDK 非 JRE：保留 jstack/jmap 诊断工具
-FROM eclipse-temurin:21-jdk-alpine
+FROM eclipse-temurin:25-jdk-alpine
 
 WORKDIR /app
 RUN mkdir -p /dumps

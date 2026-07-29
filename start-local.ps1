@@ -18,7 +18,7 @@ if (-not $SkipBuild) {
     if ($LASTEXITCODE -ne 0) { Write-Error "构建失败，未启动服务"; exit 1 }
 }
 
-# 优先 JAVA_HOME（裸 java 可能指向老版本 JRE，跑不了 21 编译的 jar）
+# 优先 JAVA_HOME（裸 java 可能指向老版本 JRE，跑不了 25 编译的 jar）
 $javaExe = if ($env:JAVA_HOME) { Join-Path $env:JAVA_HOME 'bin\java.exe' } else { 'java' }
 
 # Spring Boot 到启动收尾才绑 HTTP 端口，所以"端口能连通"就等于服务真就绪，不需要 actuator
