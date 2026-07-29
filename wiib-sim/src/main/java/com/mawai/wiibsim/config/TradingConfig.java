@@ -8,13 +8,9 @@ import org.springframework.context.annotation.Configuration;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
-import java.time.DayOfWeek;
-import java.time.LocalDate;
-import java.time.LocalTime;
 
 /**
- * 交易配置
- * 包含手续费、滑点保护、交易时段等配置
+ * 交易配置：手续费 / 杠杆融资 / 永续合约参数
  */
 @Data
 @Configuration
@@ -69,46 +65,6 @@ public class TradingConfig {
         private BigDecimal balanceTolerance = new BigDecimal("0.05");
         /** 仓位操作分布式锁超时时间（秒） */
         private int lockTimeoutSeconds = 30;
-    }
-
-    /** 是否启用交易时段限制 */
-    private boolean tradingHoursEnabled = true;
-
-    /** 交易时段配置 */
-    private TradingHours tradingHours = new TradingHours();
-
-    @Data
-    public static class TradingHours {
-        private String morningStart = "09:30";
-        private String morningEnd = "11:30";
-        private String afternoonStart = "13:00";
-        private String afternoonEnd = "15:00";
-    }
-
-    /**
-     * 检查当前是否在交易时段内
-     * 周一至周五 + 上午/下午时段
-     */
-    public boolean isNotInTradingHours() {
-        if (!tradingHoursEnabled) {
-            return false;
-        }
-
-        DayOfWeek day = LocalDate.now().getDayOfWeek();
-        if (day == DayOfWeek.SATURDAY || day == DayOfWeek.SUNDAY) {
-            return true;
-        }
-
-        LocalTime now = LocalTime.now();
-        LocalTime morningStart = LocalTime.parse(tradingHours.getMorningStart());
-        LocalTime morningEnd = LocalTime.parse(tradingHours.getMorningEnd());
-        LocalTime afternoonStart = LocalTime.parse(tradingHours.getAfternoonStart());
-        LocalTime afternoonEnd = LocalTime.parse(tradingHours.getAfternoonEnd());
-
-        boolean inMorning = !now.isBefore(morningStart) && !now.isAfter(morningEnd);
-        boolean inAfternoon = !now.isBefore(afternoonStart) && !now.isAfter(afternoonEnd);
-
-        return !inMorning && !inAfternoon;
     }
 
     /**

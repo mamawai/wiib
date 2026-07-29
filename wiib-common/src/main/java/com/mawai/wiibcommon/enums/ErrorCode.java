@@ -34,7 +34,6 @@ public enum ErrorCode {
     ORDER_PROCESSING(1105, "订单正在处理中，请稍后再试"),
 
     // 交易限制错误码 1200+
-    NOT_IN_TRADING_HOURS(1201, "非交易时段"),
     SLIPPAGE_EXCEEDED(1202, "价格波动过大，请重新下单"),
     RATE_LIMIT_EXCEEDED(1203, "请求过于频繁，请稍后再试"),
     USER_BANKRUPT(1204, "已爆仓，交易已禁用"),

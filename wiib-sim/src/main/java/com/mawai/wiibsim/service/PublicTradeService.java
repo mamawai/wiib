@@ -50,7 +50,7 @@ public class PublicTradeService {
     /** 全站成交分页（匿名）。symbol/kind 传 null 即不筛 */
     public Page<PublicTradeDTO> pageAll(String symbol, String kind, int pageNum, int pageSize) {
         int safeNum = Math.max(pageNum, 1);
-        int safeSize = Math.min(Math.max(pageSize, 1), MAX_PAGE_SIZE);
+        int safeSize = Math.clamp(pageSize, 1, MAX_PAGE_SIZE);
         long total = publicTradeMapper.countAll(symbol, kind);
         List<PublicTradeRow> rows = publicTradeMapper.selectPage(symbol, kind, safeSize, (safeNum - 1) * safeSize);
         return toPage(rows, safeNum, safeSize, total);
@@ -64,7 +64,7 @@ public class PublicTradeService {
      */
     public Page<PublicTradeDTO> pageByUser(Long userId, int pageNum, int pageSize) {
         int safeNum = Math.max(pageNum, 1);
-        int safeSize = Math.min(Math.max(pageSize, 1), MAX_PAGE_SIZE);
+        int safeSize = Math.clamp(pageSize, 1, MAX_PAGE_SIZE);
         long total = publicTradeMapper.countByUser(userId);
         List<PublicTradeRow> rows = publicTradeMapper.selectPageByUser(userId, safeSize, (safeNum - 1) * safeSize);
         return toPage(rows, safeNum, safeSize, total);
