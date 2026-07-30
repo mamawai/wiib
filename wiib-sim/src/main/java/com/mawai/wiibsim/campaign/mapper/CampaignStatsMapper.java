@@ -196,21 +196,29 @@ public interface CampaignStatsMapper {
                               @Param("end") LocalDateTime end);
 
     /**
-     * 参与积分与榜单的用户。
+     * 参与积分与榜单的用户 = linux_do_id 是纯数字的账号，就这一条规则。
      * <p>
-     * 【必须排掉的两类】'internal:%' 是量化机器人账号（UserServiceImpl:92），
-     * 24/7 跑策略，交易任务每一项都会碾压真人；'local-admin' 是管理员/本次活动的出资方
-     * （UserMapper:65-68，id=1）。两者都不上榜、不参与分配。
+     * 【为什么"纯数字"就是全部判据】官方文档 §3.4 写明分发接口的 user_id 必须是<b>数字</b>。
+     * 也就是说 linux_do_id 不是纯数字的账号，物理上就不可能是一个能收款的 LinuxDo 用户 ——
+     * 那么让它算分上榜就只是在污染榜单。一条正则同时挡住量化机器人（'internal:%'，
+     * UserServiceImpl:92）、遗留的 'AI_TRADER'、引导用的 'local-admin'（UserMapper:65-68）
+     * 与邀请码用户（NULL，AuthServiceImpl:220-231 不设该列）。
      * <p>
-     * 【linux_do_id 为 NULL 的留着】邀请码注册用户（AuthServiceImpl:220-231 不设该列），
-     * 算分、上榜，但分发接口的 user_id 必须是 LinuxDo 数字 ID，他们物理上收不到，
-     * 结算时不落 campaign_reward。
+     * 【为什么不写成枚举那几个哨兵值】枚举法只挡得住你当时想得到的那几个。
+     * 真库上它就漏了 'AI_TRADER'：它既不匹配 'internal:%' 也不是 'local-admin'，
+     * 于是堂而皇之进了名单 —— 而这一个号独占 37 个已平仓位里的 32 个，
+     * 上榜就是把真人碾平。下一个新哨兵值出现时，枚举法还会再漏一次，这条正则不会。
+     * <p>
+     * 【邀请码用户就此完全出局】不算分、不上榜、不参与分配。这是刻意的取舍：
+     * 他们收不到 LDC，让他们占着榜位只会挤掉能收款的真人。
+     * <p>
+     * 【出资方不做特殊处理】id=1 按普通参与者对待。若分发时商户号恰好是同一个
+     * LinuxDo 用户，服务端会以「不能转账给自己」拒掉那一笔，届时人工处理，代码里不设分支。
      */
     @Select("""
             SELECT id AS user_id, username AS username, linux_do_id AS linux_do_id
             FROM "user"
-            WHERE linux_do_id IS NULL
-               OR (linux_do_id NOT LIKE 'internal:%' AND linux_do_id <> 'local-admin')
+            WHERE linux_do_id ~ '^[0-9]+$'
             """)
     List<EligibleUserRow> listEligibleUsers();
 }

@@ -101,15 +101,23 @@ class CampaignStatsRealRunTest {
         assertThat(compared).as("一笔都没比到，这次绿灯什么也没证明").isPositive();
     }
 
-    /** 机器人与管理员必须被挡在榜单外，否则真人第一天就被碾平 */
+    /**
+     * 非真人号必须被挡在名单外，否则真人第一天就被碾平 ——
+     * 真库里 AI_TRADER 一个号占了 37 个已平仓位里的 32 个。
+     */
     @Test
-    void 机器人与管理员不进参与名单() {
+    void 只有纯数字LinuxDoID才进参与名单() {
         List<EligibleUserRow> users = statsMapper.listEligibleUsers();
 
         assertThat(users).isNotEmpty();
-        assertThat(users)
-                .noneMatch(u -> u.getLinuxDoId() != null && u.getLinuxDoId().startsWith("internal:"))
-                .noneMatch(u -> "local-admin".equals(u.getLinuxDoId()));
+        assertThat(users).allSatisfy(u ->
+                assertThat(u.getLinuxDoId())
+                        .as("参与名单里混进了非数字 linux_do_id 的账号（机器人/管理员/邀请码用户）")
+                        .matches("\\d+"));
+        // 逐个点名真库里已知的四类非真人号，确保正则不是碰巧过的
+        assertThat(users).extracting(EligibleUserRow::getLinuxDoId)
+                .doesNotContain("AI_TRADER", "local-admin")
+                .noneMatch(id -> id.startsWith("internal:"));
     }
 
     /** 八条 SQL 全都得能真发出去：注解 SQL 写错了只有跑起来才知道 */
