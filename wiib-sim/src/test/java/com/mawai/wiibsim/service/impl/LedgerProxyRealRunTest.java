@@ -1,15 +1,20 @@
 package com.mawai.wiibsim.service.impl;
 
 import com.mawai.wiibcommon.dto.FuturesAddMarginRequest;
+import com.mawai.wiibcommon.entity.CryptoOrder;
 import com.mawai.wiibcommon.entity.FuturesPosition;
 import com.mawai.wiibcommon.entity.User;
 import com.mawai.wiibcommon.entity.UserLedger;
 import com.mawai.wiibcommon.enums.ErrorCode;
 import com.mawai.wiibcommon.enums.LedgerBizType;
 import com.mawai.wiibcommon.enums.LedgerWallet;
+import com.mawai.wiibcommon.enums.OrderSide;
+import com.mawai.wiibcommon.enums.OrderStatus;
+import com.mawai.wiibcommon.enums.OrderType;
 import com.mawai.wiibcommon.exception.BizException;
 import com.mawai.wiibcommon.util.SpringUtils;
 import com.mawai.wiibsim.controller.InternalFuturesTradeController;
+import com.mawai.wiibsim.mapper.CryptoOrderMapper;
 import com.mawai.wiibsim.mapper.FuturesPositionMapper;
 import com.mawai.wiibsim.mapper.UserLedgerMapper;
 import com.mawai.wiibsim.mapper.UserMapper;
@@ -38,11 +43,11 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * 资金费扣仓位保证金）补记得对不对——那几条全靠业务代码显式记，漏了不报错、事后补不回来。
  * <p>
  * 单测和 LedgerPlacementTest 都只能证明"注解没标在明显拦不到的位置"，证不了"真的拦到了"。
- * 而项目里 28 处标注有 14 处落在 <b>protected + SpringUtils.getAopProxy(this).doXxx()</b> 这个形态上
+ * 而项目里的标注有 13 处落在 <b>protected + SpringUtils.getAopProxy(this).doXxx()</b> 这个形态上
  * （私有执行方法是同类自调用，注解只能往这层放）。这条链要是不通，接近一半的标注就是摆设，
  * 而且不报错——流水静默落 UNKNOWN，事后补不回来。所以两种形态各真跑一次。
  * <p>
- * <b>为什么这个测试放在 service.impl 包而不是 ledger 包</b>：要直接打 protected 的 doSettle，
+ * <b>为什么这个测试放在 service.impl 包而不是 ledger 包</b>：要直接打 protected 的 doCancelOrder，
  * 只有同包能编译过。跨包就得上反射，反射写错（打到目标对象而不是代理）会让用例假绿，
  * 恰好把要验的东西验没了。
  * <p>
@@ -69,6 +74,9 @@ class LedgerProxyRealRunTest {
     private CryptoOrderServiceImpl cryptoOrderServiceImpl;
 
     @Autowired
+    private CryptoOrderMapper cryptoOrderMapper;
+
+    @Autowired
     private FuturesPositionMapper positionMapper;
 
     @Autowired
@@ -88,6 +96,7 @@ class LedgerProxyRealRunTest {
 
     private final List<Long> createdUserIds = new ArrayList<>();
     private final List<Long> createdPositionIds = new ArrayList<>();
+    private final List<Long> createdOrderIds = new ArrayList<>();
 
     private Long newUser(String balance) {
         String tag = "ledger-test-" + System.nanoTime();
@@ -108,7 +117,8 @@ class LedgerProxyRealRunTest {
      * 连的是所有者的真实开发库：测试用户会爬进排行榜，跑完必须按 id 清干净。
      * <p>
      * 这几张表都<b>没有 FK</b>，删 user 不会带走它们，得逐张点名：
-     * user_ledger（切面每笔都插）、futures_position（事务验证与资金费用例造的仓位）。
+     * user_ledger（切面每笔都插）、futures_position（事务验证与资金费用例造的仓位）、
+     * crypto_order（撤单用例造的挂单）。
      * 加新用例前先想清楚它会往哪张表落行。
      * <p>
      * 刻意<b>不</b>摘 Redis 触发索引：本类的仓位都是直接 INSERT 造的、从没 registerPositionIndex 过，
@@ -121,6 +131,8 @@ class LedgerProxyRealRunTest {
     void 清掉本次建的测试数据() {
         createdPositionIds.forEach(positionMapper::deleteById);
         createdPositionIds.clear();
+        createdOrderIds.forEach(cryptoOrderMapper::deleteById);
+        createdOrderIds.clear();
         createdUserIds.forEach(ledgerMapper::deleteByUserId);
         createdUserIds.forEach(userMapper::deleteById);
         createdUserIds.clear();
@@ -153,14 +165,13 @@ class LedgerProxyRealRunTest {
     }
 
     /**
-     * 形态二：protected 方法 + getAopProxy 调用（CryptoOrderServiceImpl.doSettle）。
+     * 形态二：protected 方法 + getAopProxy 调用（CryptoOrderServiceImpl.doCancelOrder）。
      * 这是项目绕"同类自调用"的既定范式，也是本次标注最吃重的形态。
      * <p>
-     * 顺带验了第二件事：doSettle 内层调的 marginAccountService.applyCashInflow 刻意<b>没有</b>
-     * @Ledger（它是公共入账口，语义由调用方给）。三行必须全是 SPOT_SETTLE——
-     * 哪天有人"顺手"给 applyCashInflow 补个注解，内层 frame 压栈会盖掉外层，这条就红。
-     * <p>
-     * orderId 传 -1：那句 casUpdateStatus 影响 0 行，不需要真造一张 crypto_order。
+     * 【为什么不是 doSettle】现货卖出取消 5min 延迟后，结算并进了 sell() 的同一个事务，
+     * 那个 protected 的结算入口没了。同形态里 doCancelOrder 最合适：同类、金额完全确定
+     * （解冻多少就是多少，不依赖任何配置项），换成计息那种按利率算的会把"注解生效没有"
+     * 和"利率配成了几"两件事绑在一起，配置一改用例就红得不知所以然。
      * <p>
      * 用 getAopProxy 取代理是<b>冗余保险不是必需</b>：@Autowired 注进来的
      * CryptoOrderServiceImpl 本来就是容器里那个 CGLIB 代理，本用例又与目标类同包
@@ -171,31 +182,44 @@ class LedgerProxyRealRunTest {
     @Test
     void protected方法经代理调用时Ledger真的生效() {
         Long uid = newUser("1000.00");
-        // 先欠上本金和利息，让 applyCashInflow 三列都真动（否则 delta 全 0 也看不出列错没错）
-        assertThat(userMapper.atomicAddMarginLoanPrincipal(uid, new BigDecimal("500.00"))).isNotNull();
-        assertThat(userMapper.atomicAccrueInterest(uid, new BigDecimal("30.00"), java.time.LocalDate.now())).isNotNull();
-        ledgerMapper.deleteByUserId(uid);   // 上面两笔是垫场，清掉免得混进断言
+        // 垫场：先真冻结 500，否则解冻那条 SQL 的 frozen_balance >= 500 条件不满足，返 null 不记账
+        userService.freezeBalance(uid, new BigDecimal("500.00"));
+        Long orderId = newPendingLimitBuyOrder(uid, new BigDecimal("500.00"));
+        ledgerMapper.deleteByUserId(uid);   // 冻结那笔是垫场，清掉免得混进断言
 
-        SpringUtils.getAopProxy(cryptoOrderServiceImpl)
-                .doSettle(uid, -1L, new BigDecimal("1000.00"));
+        SpringUtils.getAopProxy(cryptoOrderServiceImpl).doCancelOrder(uid, orderId);
 
         List<UserLedger> rows = ledgerMapper.selectByCursor(uid, null, null, 10);
-        // 一条 atomicApplyCashInflow 动三列 → 三行（还息、还本、入余额）
-        assertThat(rows).hasSize(3);
+        // 一条 atomicUnfreezeBalance 动两个钱包 → 两行
+        assertThat(rows).hasSize(2);
+        // 没生效就会是 UNKNOWN（切面兜底），这条断言就是"注解生效"的唯一硬证据
         assertThat(rows).allSatisfy(r ->
-                assertThat(r.getBizType()).isEqualTo(LedgerBizType.SPOT_SETTLE));
+                assertThat(r.getBizType()).isEqualTo(LedgerBizType.SPOT_LIMIT_UNFREEZE));
         assertThat(rows).anySatisfy(r -> {
-            assertThat(r.getWallet()).isEqualTo(LedgerWallet.LOAN_INTEREST);
-            assertThat(r.getDelta()).isEqualByComparingTo("-30.00");
-        });
-        assertThat(rows).anySatisfy(r -> {
-            assertThat(r.getWallet()).isEqualTo(LedgerWallet.LOAN_PRINCIPAL);
+            assertThat(r.getWallet()).isEqualTo(LedgerWallet.FROZEN);
             assertThat(r.getDelta()).isEqualByComparingTo("-500.00");
         });
         assertThat(rows).anySatisfy(r -> {
             assertThat(r.getWallet()).isEqualTo(LedgerWallet.BALANCE);
-            assertThat(r.getDelta()).isEqualByComparingTo("470.00");   // 1000 − 30 息 − 500 本
+            assertThat(r.getDelta()).isEqualByComparingTo("500.00");
         });
+    }
+
+    /** 造一张 PENDING 的限价买单，供撤单用例打。frozenAmount 要和调用方真冻结的数一致 */
+    private Long newPendingLimitBuyOrder(Long userId, BigDecimal frozenAmount) {
+        CryptoOrder o = new CryptoOrder();
+        o.setUserId(userId);
+        o.setSymbol("BTCUSDT");
+        o.setOrderSide(OrderSide.BUY.getCode());
+        o.setOrderType(OrderType.LIMIT.getCode());
+        o.setQuantity(new BigDecimal("0.01"));
+        o.setLeverage(1);
+        o.setLimitPrice(new BigDecimal("50000.00"));
+        o.setFrozenAmount(frozenAmount);
+        o.setStatus(OrderStatus.PENDING.getCode());
+        cryptoOrderMapper.insert(o);
+        createdOrderIds.add(o.getId());
+        return o.getId();
     }
 
     // ==================== protected 方法上的 @Transactional 到底生效不生效 ====================
@@ -206,8 +230,11 @@ class LedgerProxyRealRunTest {
             FuturesRiskServiceImpl.class, CryptoOrderServiceImpl.class,
             MarginAccountServiceImpl.class, BuffServiceImpl.class);
 
-    /** 现存 14 个「protected + @Transactional + @Ledger」入口。只作"清单别悄悄缩水"的下限，不是精确台账 */
-    private static final int MIN_PROTECTED_TX_LEDGER = 14;
+    /**
+     * 现存 13 个「protected + @Transactional + @Ledger」入口。只作"清单别悄悄缩水"的下限，不是精确台账。
+     * （原为 14，现货卖出取消 5min 延迟后 CryptoOrderServiceImpl.doSettle 随整套延迟结算一并删除。）
+     */
+    private static final int MIN_PROTECTED_TX_LEDGER = 13;
 
     /**
      * 本次 28 处标注里有 14 处是 {@code protected @Transactional @Ledger doXxx}，全靠 getAopProxy 调进来。

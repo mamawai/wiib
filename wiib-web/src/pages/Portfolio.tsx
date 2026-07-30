@@ -373,7 +373,6 @@ export function Portfolio() {
                         futuresRows={futuresChartRows}
                         balance={user.balance}
                         gameBalance={user.gameBalance}
-                        pendingSettlement={user.pendingSettlement}
                       />
                     </div>
                   ) : (

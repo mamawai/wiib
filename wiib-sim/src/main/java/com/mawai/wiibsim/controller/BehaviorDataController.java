@@ -72,7 +72,6 @@ public class BehaviorDataController {
             public final BigDecimal balance = dto.getBalance();
             public final BigDecimal frozenBalance = dto.getFrozenBalance();
             public final BigDecimal positionMarketValue = dto.getPositionMarketValue();
-            public final BigDecimal pendingSettlement = dto.getPendingSettlement();
             public final BigDecimal marginLoanPrincipal = dto.getMarginLoanPrincipal();
             public final BigDecimal marginInterestAccrued = dto.getMarginInterestAccrued();
             public final BigDecimal profit = dto.getProfit();

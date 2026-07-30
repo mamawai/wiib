@@ -11,7 +11,6 @@ import com.mawai.wiibcommon.enums.LedgerBizType;
 import com.mawai.wiibcommon.enums.LedgerWallet;
 import com.mawai.wiibcommon.exception.BizException;
 import com.mawai.wiibsim.ledger.Ledger;
-import com.mawai.wiibsim.mapper.CryptoOrderMapper;
 import com.mawai.wiibsim.mapper.FuturesPositionMapper;
 import com.mawai.wiibsim.mapper.UserLedgerMapper;
 import com.mawai.wiibsim.mapper.UserMapper;
@@ -39,7 +38,6 @@ import static com.mawai.wiibcommon.enums.LedgerBizType.WALLET_TRANSFER_OUT;
 public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements UserService {
 
     private final CryptoPositionService cryptoPositionService;
-    private final CryptoOrderMapper cryptoOrderMapper;
     private final FuturesPositionMapper futuresPositionMapper;
     private final AssetValuationService assetValuationService;
     private final UserLedgerMapper userLedgerMapper;
@@ -133,9 +131,6 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         BigDecimal marginLoanPrincipal = user.getMarginLoanPrincipal() != null ? user.getMarginLoanPrincipal() : BigDecimal.ZERO;
         BigDecimal marginInterestAccrued = user.getMarginInterestAccrued() != null ? user.getMarginInterestAccrued() : BigDecimal.ZERO;
 
-        // crypto待结算（SETTLING状态；老股 T+1 已退）
-        BigDecimal pendingSettlement = cryptoOrderMapper.sumSettlingAmount(userId);
-
         // 合约仓位: margin + unrealizedPnl（统一口径见 AssetValuationService）
         BigDecimal futuresValue = BigDecimal.ZERO;
         List<FuturesPosition> futuresPositions = futuresPositionMapper.selectList(
@@ -155,19 +150,17 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
                 .add(frozenBalance)
                 .add(gameBalance)
                 .add(marketValue)
-                .add(pendingSettlement)
                 .add(futuresValue)
                 .add(predictionValue)
                 .subtract(marginLoanPrincipal)
                 .subtract(marginInterestAccrued);
 
-        return getUserDTO(totalAssets, user, frozenBalance, marketValue, pendingSettlement, marginLoanPrincipal, marginInterestAccrued);
+        return getUserDTO(totalAssets, user, frozenBalance, marketValue, marginLoanPrincipal, marginInterestAccrued);
     }
 
     private UserDTO getUserDTO(BigDecimal totalAssets, User user,
                                BigDecimal frozenBalance,
                                BigDecimal positionMarketValue,
-                               BigDecimal pendingSettlement,
                                BigDecimal marginLoanPrincipal,
                                BigDecimal marginInterestAccrued) {
         BigDecimal profit = totalAssets.subtract(initialBalance);
@@ -182,7 +175,6 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         dto.setFrozenBalance(frozenBalance);
         dto.setGameBalance(user.getGameBalance() != null ? user.getGameBalance() : BigDecimal.ZERO);
         dto.setPositionMarketValue(positionMarketValue);
-        dto.setPendingSettlement(pendingSettlement);
         dto.setMarginLoanPrincipal(marginLoanPrincipal);
         dto.setMarginInterestAccrued(marginInterestAccrued);
         dto.setBankrupt(Boolean.TRUE.equals(user.getIsBankrupt()));

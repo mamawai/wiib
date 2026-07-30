@@ -30,7 +30,6 @@ import com.mawai.wiibsim.service.MarginAccountService;
 import com.mawai.wiibsim.service.UserService;
 import com.mawai.wiibsim.util.RedisLockUtil;
 import jakarta.annotation.PostConstruct;
-import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -43,10 +42,6 @@ import java.math.RoundingMode;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
 import static com.mawai.wiibcommon.enums.LedgerBizType.*;
@@ -68,25 +63,13 @@ public class CryptoOrderServiceImpl extends ServiceImpl<CryptoOrderMapper, Crypt
     private final BStockService bStockService;
     private final TradeFilterRegistry tradeFilterRegistry;
 
-    private static final String SETTLE_ZSET_KEY = "crypto:settle:pending";
-    private static final long SETTLE_DELAY_MS = 5 * 60 * 1000L; // btc 到账时间 5 minutes
     private static final int TRIGGERED_ORDER_BATCH_SIZE = 200;
     private static final String LIMIT_BUY_ZSET_PREFIX = "crypto:limit:buy:";
     private static final String LIMIT_SELL_ZSET_PREFIX = "crypto:limit:sell:";
 
-    private ScheduledExecutorService settleScheduler;
-    private final AtomicReference<java.util.concurrent.ScheduledFuture<?>> nextSettleTask = new AtomicReference<>();
-
     @PostConstruct
-    void initScheduler() {
-        settleScheduler = Executors.newSingleThreadScheduledExecutor(Thread.ofVirtual().name("crypto-settle-", 0).factory());
-        scheduleFromEarliest();
+    void initLimitOrderZSets() {
         rebuildLimitOrderZSets();
-    }
-
-    @PreDestroy
-    void destroyScheduler() {
-        if (settleScheduler != null) settleScheduler.shutdownNow();
     }
 
     // ==================== 获取实时价格 ====================
@@ -282,37 +265,43 @@ public class CryptoOrderServiceImpl extends ServiceImpl<CryptoOrderMapper, Crypt
         return buildResponse(order);
     }
 
-    // ==================== 市价卖出执行（crypto 5min延迟 / bStock 瞬时到账） ====================
+    // ==================== 市价卖出执行（瞬时到账） ====================
 
     private CryptoOrderResponse executeMarketSell(Long userId, String symbol, BigDecimal quantity,
                                                    BigDecimal price, BigDecimal amount, BigDecimal commission) {
         BigDecimal netAmount = amount.subtract(commission);
         cryptoPositionService.reducePosition(userId, symbol, quantity);
 
-        // bStock（代币化实股）瞬时结算；crypto 沿用 5min 延迟到账
-        boolean instant = bStockService.isBStockSymbol(symbol);
-        String status = instant ? OrderStatus.FILLED.getCode() : OrderStatus.SETTLING.getCode();
-
         CryptoOrder order = buildOrder(userId, symbol, OrderSide.SELL.getCode(), OrderType.MARKET.getCode(),
-                quantity, 1, null, price, amount, commission, null, status);
+                quantity, 1, null, price, amount, commission, null, OrderStatus.FILLED.getCode());
         baseMapper.insert(order);
 
-        if (instant) {
-            // 同一笔事务内立即：先还保证金贷+息、余额入账（订单已 FILLED）
-            // applyCashInflow 是公共入账口、刻意不带语义，所以到账这笔的类型在这儿逐笔给。
-            // 【mark 必须跟着"真会发 SQL"的条件走】applyCashInflow 对 amount ≤ 0 是第一句就 return、
-            // 一条 SQL 都不发，那样 mark 没人消费，会活到下一笔 atomic* 上错标到别人头上。
-            // netAmount ≤ 0 是可达的：commission 无下限，尘埃仓全量卖出时 amount 可能舍入成 0.00。
-            if (netAmount.signum() > 0) {
-                LedgerCtx.mark(BSTOCK_SETTLE, "CRYPTO_ORDER", order.getId());
-            }
-            marginAccountService.applyCashInflow(userId, netAmount, "BSTOCK_SETTLE");
-            log.info("bStock市价卖出 userId={} {} qty={} price={} net={} (瞬时到账)", userId, symbol, quantity, price, netAmount);
-        } else {
-            addSettlement(userId, order.getId(), netAmount);
-            log.info("crypto市价卖出 userId={} {} qty={} price={} net={} (5min到账)", userId, symbol, quantity, price, netAmount);
-        }
+        boolean bStock = settleSellProceeds(userId, symbol, order.getId(), netAmount);
+        log.info("{}市价卖出 userId={} {} qty={} price={} net={}",
+                bStock ? "bStock" : "crypto", userId, symbol, quantity, price, netAmount);
         return buildResponse(order);
+    }
+
+    /**
+     * 卖出所得同事务入账：先还保证金贷+息，剩下进余额。
+     * <p>
+     * applyCashInflow 是公共入账口、刻意不带语义，所以到账这笔的类型在这儿逐笔给
+     * （现货 SPOT_SETTLE / B股 BSTOCK_SETTLE，账单上分得开）。
+     * <p>
+     * 【mark 必须跟着"真会发 SQL"的条件走】applyCashInflow 对 amount ≤ 0 是第一句就 return、
+     * 一条 SQL 都不发，那样 mark 没人消费，会活到下一笔 atomic* 上错标到别人头上——
+     * 限价单那条路是在批处理 for 循环里跑的，漏掉的 mark 会带着 A 单的 refId 安到 B 单（很可能是另一个用户）头上。
+     * netAmount ≤ 0 是可达的：commission 无下限，尘埃仓全量卖出时 amount 可能舍入成 0.00。
+     *
+     * @return 是否 bStock，供调用方打日志区分币种与代币化实股（这里已经查过一次，别让调用方再查）
+     */
+    private boolean settleSellProceeds(Long userId, String symbol, Long orderId, BigDecimal netAmount) {
+        boolean bStock = bStockService.isBStockSymbol(symbol);
+        if (netAmount.signum() > 0) {
+            LedgerCtx.mark(bStock ? BSTOCK_SETTLE : SPOT_SETTLE, "CRYPTO_ORDER", orderId);
+        }
+        marginAccountService.applyCashInflow(userId, netAmount, bStock ? "BSTOCK_SETTLE" : "CRYPTO_SETTLE");
+        return bStock;
     }
 
     // ==================== 限价单创建 ====================
@@ -396,14 +385,10 @@ public class CryptoOrderServiceImpl extends ServiceImpl<CryptoOrderMapper, Crypt
         BigDecimal amount = executePrice.multiply(order.getQuantity()).setScale(2, RoundingMode.HALF_UP);
         BigDecimal commission = tradingConfig.calculateCryptoCommission(amount);
 
-        boolean isSell = OrderSide.SELL.getCode().equals(order.getOrderSide());
-        boolean instant = isSell && bStockService.isBStockSymbol(order.getSymbol());  // bStock 卖出瞬时结算
-        int affected = (isSell && !instant)
-                ? baseMapper.casUpdateToSettling(order.getId(), executePrice, amount, commission)
-                : baseMapper.casUpdateToFilled(order.getId(), executePrice, amount, commission);
+        int affected = baseMapper.casUpdateToFilled(order.getId(), executePrice, amount, commission);
         if (affected == 0) return false;
 
-        // 本方法刻意没有方法级 @Ledger：成交扣冻结、退差额、B股到账三种语义并存，表达不了。
+        // 本方法刻意没有方法级 @Ledger：成交扣冻结、退差额、卖出到账三种语义并存，表达不了。
         // 每笔在动钱之前逐笔 mark，漏标会落 UNKNOWN 并打 WARN——那正是我们要的可见性
         if (OrderSide.BUY.getCode().equals(order.getOrderSide())) {
             BigDecimal frozenAmount = order.getFrozenAmount();
@@ -418,18 +403,7 @@ public class CryptoOrderServiceImpl extends ServiceImpl<CryptoOrderMapper, Crypt
             cryptoPositionService.addPosition(order.getUserId(), order.getSymbol(), order.getQuantity(), executePrice, BigDecimal.ZERO);
         } else {
             cryptoPositionService.deductFrozenPosition(order.getUserId(), order.getSymbol(), order.getQuantity());
-            BigDecimal netAmount = amount.subtract(commission);
-            if (instant) {
-                // 同事务立即到账+还贷。mark 跟着"真会发 SQL"的条件走，理由见 executeMarketSell 同一处。
-                // 这里泄漏更危险：本方法在 executeTriggeredOrders 的 for 批处理循环里跑，
-                // 漏掉的 mark 会带着 A 单的 refId 安到 B 单（很可能是另一个用户）的流水上
-                if (netAmount.signum() > 0) {
-                    LedgerCtx.mark(BSTOCK_SETTLE, "CRYPTO_ORDER", order.getId());
-                }
-                marginAccountService.applyCashInflow(order.getUserId(), netAmount, "BSTOCK_SETTLE");
-            } else {
-                addSettlement(order.getUserId(), order.getId(), netAmount);
-            }
+            settleSellProceeds(order.getUserId(), order.getSymbol(), order.getId(), amount.subtract(commission));
         }
         return true;
     }
@@ -544,76 +518,6 @@ public class CryptoOrderServiceImpl extends ServiceImpl<CryptoOrderMapper, Crypt
             addToLimitZSet(order);
         }
         log.info("重建crypto限价单ZSet索引 共{}个订单", pendingOrders.size());
-    }
-
-    // ==================== Redis ZSet 延迟结算 ====================
-
-    private void addSettlement(Long userId, Long orderId, BigDecimal amount) {
-        long settleAt = System.currentTimeMillis() + SETTLE_DELAY_MS;
-        String member = userId + ":" + orderId + ":" + amount.toPlainString();
-
-        // 检查ZSet是否为空，空则需要调度
-        Long size = stringRedisTemplate.opsForZSet().zCard(SETTLE_ZSET_KEY);
-        stringRedisTemplate.opsForZSet().add(SETTLE_ZSET_KEY, member, settleAt);
-
-        if (size == null || size == 0) {
-            scheduleNextSettle(SETTLE_DELAY_MS);
-        }
-    }
-
-    private void scheduleNextSettle(long delayMs) {
-        var prev = nextSettleTask.get();
-        if (prev != null && !prev.isDone()) prev.cancel(false);
-
-        var task = settleScheduler.schedule(() -> {
-            try { processSettlements(); }
-            catch (Exception e) { log.error("crypto结算处理异常", e); }
-        }, delayMs, TimeUnit.MILLISECONDS);
-        nextSettleTask.set(task);
-    }
-
-    public void processSettlements() {
-        long now = System.currentTimeMillis();
-        Set<String> dueMembers = stringRedisTemplate.opsForZSet().rangeByScore(SETTLE_ZSET_KEY, 0, now);
-        if (dueMembers == null || dueMembers.isEmpty()) {
-            scheduleFromEarliest();
-            return;
-        }
-
-        for (String member : dueMembers) {
-            try {
-                String[] parts = member.split(":", 3);
-                Long userId = Long.parseLong(parts[0]);
-                Long orderId = Long.parseLong(parts[1]);
-                BigDecimal amount = new BigDecimal(parts[2]);
-                SpringUtils.getAopProxy(this).doSettle(userId, orderId, amount);
-                stringRedisTemplate.opsForZSet().remove(SETTLE_ZSET_KEY, member);
-                log.info("crypto卖出到账 userId={} orderId={} amount={}", userId, orderId, amount);
-            } catch (Exception e) {
-                log.error("crypto结算单条处理失败 member={}", member, e);
-            }
-        }
-
-        scheduleFromEarliest();
-    }
-
-    // 必须标在这一层：本方法跑在 settleScheduler 的虚拟线程上，不继承下单请求的 ThreadLocal 上下文，
-    // 语义只能它自己给。protected + 经 getAopProxy 走代理调进来，AOP 拦得到
-    @Transactional(rollbackFor = Exception.class)
-    @Ledger(SPOT_SETTLE)
-    protected void doSettle(Long userId, Long orderId, BigDecimal amount) {
-        marginAccountService.applyCashInflow(userId, amount, "CRYPTO_SETTLE");
-        baseMapper.casUpdateStatus(orderId, OrderStatus.SETTLING.getCode(), OrderStatus.FILLED.getCode());
-    }
-
-    private void scheduleFromEarliest() {
-        Set<ZSetOperations.TypedTuple<String>> earliest = stringRedisTemplate.opsForZSet().rangeWithScores(SETTLE_ZSET_KEY, 0, 0);
-        if (earliest != null && !earliest.isEmpty()) {
-            var first = earliest.iterator().next();
-            long nextSettleAt = Objects.requireNonNull(first.getScore()).longValue();
-            long delay = Math.max(nextSettleAt - System.currentTimeMillis(), 1000);
-            scheduleNextSettle(delay);
-        }
     }
 
     // ==================== 工具方法 ====================
