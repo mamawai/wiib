@@ -24,7 +24,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * campaign_vote</b>。
  * <p>
  * 【这个类要证什么】{@code listUnsettled} / {@code sumScoreByUser} / {@code settle} 是上一任务
- * 加进 mapper 的，加完一次都没真发出去过；{@code sumAllScore} 是本任务新加的。
+ * 加进 mapper 的，加完一次都没真发出去过；{@code sumScoreUpTo} 是本任务新加的。
  * 静态检查最多能排掉列名拼错，下面这几件只有真跑才见分晓：
  * <ol>
  *   <li>{@code LocalDate} ↔ PG {@code DATE} 的绑定 —— 类型映射不对的话 vote_date 条件永远不命中，
@@ -68,9 +68,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 @EnabledIfEnvironmentVariable(named = "WIIB_REAL_RUN", matches = "1")
 class CampaignVoteSettleRealRunTest {
 
-    /** 活动 2026-08 才开赛，这两天真库里不可能有别人的票 */
+    /** 活动 2026-08 才开赛，这几天真库里不可能有别人的票 */
     private static final LocalDate DAY_A = LocalDate.of(2020, 1, 1);
     private static final LocalDate DAY_B = LocalDate.of(2020, 1, 2);
+    private static final LocalDate DAY_C = LocalDate.of(2020, 1, 3);
 
     @Autowired
     private CampaignVoteMapper voteMapper;
@@ -97,12 +98,14 @@ class CampaignVoteSettleRealRunTest {
     @Test
     void 四条SQL在真库上各跑一次并如实干活() {
         Long campaignId = currentCampaignId();
-        BigDecimal allScoreBefore = voteMapper.sumAllScore(campaignId);
-        assertThat(allScoreBefore).as("COALESCE 兜着，一票没有也该是 0 而不是 null").isNotNull();
+        BigDecimal upToABefore = voteMapper.sumScoreUpTo(campaignId, DAY_A);
+        BigDecimal upToCBefore = voteMapper.sumScoreUpTo(campaignId, DAY_C);
+        assertThat(upToABefore).as("COALESCE 兜着，一票没有也该是 0 而不是 null").isNotNull();
 
         insert(winner, DAY_A, CampaignVote.SYMBOL_BTC, CampaignVote.UP);
         insert(winner, DAY_A, CampaignVote.SYMBOL_GOLD, CampaignVote.DOWN);
-        insert(winner, DAY_B, CampaignVote.SYMBOL_BTC, CampaignVote.DOWN);   // 这张一直不结，留着当"未结算"样本
+        insert(winner, DAY_B, CampaignVote.SYMBOL_BTC, CampaignVote.DOWN);
+        insert(winner, DAY_C, CampaignVote.SYMBOL_BTC, CampaignVote.UP);   // 这张一直不结，留着当"未结算"样本
 
         // ---- listUnsettled：认得 LocalDate，也真的只捞 result IS NULL ----
         List<CampaignVote> unsettled = voteMapper.listUnsettled(campaignId, DAY_A);
@@ -135,23 +138,31 @@ class CampaignVoteSettleRealRunTest {
         assertThat(again.getResult()).as("重跑不许改判").isEqualTo(CampaignVote.WIN);
         assertThat(again.getScore()).as("重跑不许改分").isEqualByComparingTo("3.25");
 
+        // 后一天那张也结掉，专门用来验 sumScoreUpTo 的日期上界真的在卡
+        Long dayBId = voteMapper.listUnsettled(campaignId, DAY_B).getFirst().getId();
+        assertThat(voteMapper.settle(dayBId, CampaignVote.WIN, new BigDecimal("1.00"))).isEqualTo(1);
+
         // ---- 结完就不该再被捞出来 ----
         assertThat(voteMapper.listUnsettled(campaignId, DAY_A))
                 .as("两张都结完了，这一天该空了").isEmpty();
-        assertThat(voteMapper.listUnsettled(campaignId, DAY_B))
+        assertThat(voteMapper.listUnsettled(campaignId, DAY_C))
                 .as("另一天那张还没结，不能被顺手带走").hasSize(1);
 
-        // ---- sumAllScore：只涨了实发的那 3.25，LOSE 的 0 与未结算的 NULL 都按 0 计 ----
-        assertThat(voteMapper.sumAllScore(campaignId).subtract(allScoreBefore))
-                .as("COALESCE(score,0) 要把未结算那张折成 0，折不动的话池子会被算小")
+        // ---- sumScoreUpTo：日期上界真的在卡，且 LOSE 的 0 与未结算的 NULL 都按 0 计 ----
+        assertThat(voteMapper.sumScoreUpTo(campaignId, DAY_A).subtract(upToABefore))
+                .as("问到 DAY_A 就只能加到 DAY_A：后一天那 1.00 不许混进来，"
+                        + "混进来的话补结算旧日子时池子会被算小甚至夹到 0")
                 .isEqualByComparingTo("3.25");
+        assertThat(voteMapper.sumScoreUpTo(campaignId, DAY_C).subtract(upToCBefore))
+                .as("问到 DAY_C 就该含 3.25 + 1.00；未结算那张由 COALESCE(score,0) 折成 0")
+                .isEqualByComparingTo("4.25");
 
-        // ---- sumScoreByUser：列标签与强转都对得上 ----
+        // ---- sumScoreByUser：不卡日期（榜单要全场总分），列标签与强转都对得上 ----
         Map<Long, BigDecimal> byUser = voteService.voteScoreByUser(campaignId);
         assertThat(byUser.get(winner))
                 .as("user_id / total 两个 key 或那两个强转对不上，这里不是 null 就是 ClassCastException")
                 .isNotNull()
-                .isEqualByComparingTo("3.25");
+                .isEqualByComparingTo("4.25");
     }
 
     /**

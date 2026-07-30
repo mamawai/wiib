@@ -16,6 +16,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -52,14 +53,23 @@ class CampaignVoteSettleTest {
 
     private static final long CAMPAIGN_ID = 7L;
 
-    /** 活动首日，poolOf 的起算点 */
-    private static final LocalDate DAY1 = LocalDate.of(2026, 8, 3);
-    private static final LocalDate DAY2 = LocalDate.of(2026, 8, 4);
-    private static final LocalDate DAY3 = LocalDate.of(2026, 8, 5);
+    /**
+     * 活动首日，poolOf 的起算点。
+     * <p>
+     * 【为什么按"今天往前推"取而不写死日期】settleDay 只结<b>已经过完</b>的 UTC 日，
+     * 写死一个未来日期（种子活动是 2026-08-03 开赛）会被那道闸直接挡回来，用例全成空跑。
+     * 往前推 30 天，整场 15 个投票日都稳稳落在过去，且日期算术与真实排期完全同构。
+     */
+    private static final LocalDate DAY1 = CampaignVoteService.utcToday().minusDays(30);
+    private static final LocalDate DAY2 = DAY1.plusDays(1);
+    private static final LocalDate DAY3 = DAY1.plusDays(2);
 
-    /** 活动 SGT [08-03 00:00, 08-17 00:00) 换成 UTC 是 [08-02 16:00, 08-16 16:00)，两端各有半天溢出 */
-    private static final LocalDate FIRST_UTC_VOTE_DAY = LocalDate.of(2026, 8, 2);
-    private static final LocalDate LAST_UTC_VOTE_DAY = LocalDate.of(2026, 8, 16);
+    /**
+     * 活动本地窗口 [首日 00:00, 首日+14 00:00) 换成 UTC 是 [首日前一天 16:00, 首日+13 16:00)，
+     * 两端各溢出半天 —— 所以第一个能投票的 UTC 日比 start_at 还早一天，最后一个是 首日+13。
+     */
+    private static final LocalDate FIRST_UTC_VOTE_DAY = DAY1.minusDays(1);
+    private static final LocalDate LAST_UTC_VOTE_DAY = DAY1.plusDays(13);
 
     private static final String BTC = CampaignVote.SYMBOL_BTC;
     private static final String GOLD = CampaignVote.SYMBOL_GOLD;
@@ -87,8 +97,8 @@ class CampaignVoteSettleTest {
         c.setStatus(Campaign.STATUS_RUNNING);
         when(campaignMapper.selectRunning()).thenReturn(c);
 
-        // 默认全场一分没发出去过
-        when(voteMapper.sumAllScore(CAMPAIGN_ID)).thenReturn(BigDecimal.ZERO);
+        // 默认此前一分没发出去过
+        when(voteMapper.sumScoreUpTo(eq(CAMPAIGN_ID), any())).thenReturn(BigDecimal.ZERO);
     }
 
     // ==================== 涨 / 跌 / 平 ====================
@@ -260,7 +270,7 @@ class CampaignVoteSettleTest {
     void 一个人两张赢票分摊后逐票之和等于他应得() {
         upDay(BTC);
         downDay(GOLD);
-        when(voteMapper.sumAllScore(CAMPAIGN_ID)).thenReturn(new BigDecimal("79.96"));
+        when(voteMapper.sumScoreUpTo(eq(CAMPAIGN_ID), any())).thenReturn(new BigDecimal("79.96"));
 
         CampaignVote mineBtc = vote(1L, BTC, CampaignVote.UP);
         CampaignVote mineGold = vote(1L, GOLD, CampaignVote.DOWN);
@@ -292,7 +302,7 @@ class CampaignVoteSettleTest {
     /**
      * 池子靠 {@code 100 × 已过天数 − 全场已发出的分} 反推，不存"顺延余额"。
      * <p>
-     * 同样 40 张赢票：活动首日池 100 → 每票 2.50；次日若首日一分没发出去（sumAllScore 仍是 0），
+     * 同样 40 张赢票：活动首日池 100 → 每票 2.50；次日若首日一分没发出去（截至次日的已发额仍是 0），
      * 池就是 200 → 每票 5.00。这个"翻倍"就是顺延，它不是某一列存下来的，是减出来的。
      */
     @Test
@@ -321,33 +331,26 @@ class CampaignVoteSettleTest {
     /**
      * 休市那天没发出去的池子，一分不少地进次日；次日发光了，第三日就没得顺延。
      * <p>
-     * 这里把 {@code sumAllScore} 换成"按真发出去的分现算"，与真库那条
-     * {@code SUM(COALESCE(score,0))} 同口径 —— 顺延不是某一列存下来的，是减出来的，
-     * 用活的累计值走三天才看得出这一点。
+     * 这里用 {@link #liveLedger()} 把 settle / sumScoreUpTo 换成活的账本 ——
+     * 顺延不是某一列存下来的，是减出来的，走三天才看得出这一点。
      * <pre>
-     *   08-03 黄金休市，当天只有黄金票 → 一分不发，上限 100 原封不动
-     *   08-04 上限 200 − 已发 0   = 池 200 ÷ 40 票 = 每票 5.00   ← 首日那 100 顺延过来了
-     *   08-05 上限 300 − 已发 200 = 池 100 ÷ 40 票 = 每票 2.50   ← 没得顺延就掉回来
+     *   首日   黄金休市，当天只有黄金票 → 一分不发，上限 100 原封不动
+     *   第 2 日 上限 200 − 已发 0   = 池 200 ÷ 40 票 = 每票 5.00   ← 首日那 100 顺延过来了
+     *   第 3 日 上限 300 − 已发 200 = 池 100 ÷ 40 票 = 每票 2.50   ← 没得顺延就掉回来
      * </pre>
      */
     @Test
     void 休市那天没发出去的池子顺延到次日() {
-        BigDecimal[] spent = {BigDecimal.ZERO};
-        when(voteMapper.settle(anyLong(), any(), any())).thenAnswer(inv -> {
-            spent[0] = spent[0].add(inv.getArgument(2));
-            return 1;
-        });
-        when(voteMapper.sumAllScore(CAMPAIGN_ID)).thenAnswer(inv -> spent[0]);
+        Map<Long, LocalDate> ledger = liveLedger();
 
         upDay(BTC);
         closedOn(GOLD, Set.of(DAY1), "100", "110");   // 黄金只在活动首日休市
 
         List<CampaignVote> day1 = List.of(vote(1L, GOLD, CampaignVote.UP),
                 vote(2L, GOLD, CampaignVote.DOWN));
-        List<CampaignVote> day2 = new ArrayList<>();
-        List<CampaignVote> day3 = new ArrayList<>();
-        for (long u = 1; u <= 40; u++) day2.add(vote(u, BTC, CampaignVote.UP));
-        for (long u = 1; u <= 40; u++) day3.add(vote(u, BTC, CampaignVote.UP));
+        day1.forEach(v -> ledger.put(v.getId(), DAY1));
+        List<CampaignVote> day2 = votesOn(DAY2, ledger, 40);
+        List<CampaignVote> day3 = votesOn(DAY3, ledger, 40);
         unsettled(DAY1, day1);
         unsettled(DAY2, day2);
         unsettled(DAY3, day3);
@@ -358,7 +361,6 @@ class CampaignVoteSettleTest {
                     assertThat(r.result()).isEqualTo(CampaignVote.DEFERRED);
                     assertThat(r.score()).isEqualTo("0");
                 });
-        assertThat(spent[0]).as("首日一分都没发出去").isEqualByComparingTo("0");
 
         service.settleDay(DAY2);
         assertThat(settledRows().subList(2, 42))
@@ -372,8 +374,83 @@ class CampaignVoteSettleTest {
     }
 
     /**
-     * 活动 SGT 08-03 00:00 开赛 = UTC 08-02 16:00，所以第一个能投票的 UTC 日是 <b>08-02</b>
-     * ——比 start_at 那天还早一天。它算出 days=0，靠 {@code Math.max(days,1)} 抬成 1，
+     * <b>补结算</b>：先把后面的日子结了，再回头补前面漏掉的那天 ——
+     * 那天的赢家必须拿到它<b>应得</b>的池，不能因为"后面几天已经把分发出去了"就集体归零。
+     * <p>
+     * 【减的若是"全场已发"会怎样】补结首日时后面两天的 300 分已经计进来了，
+     * {@code 100 − 300} 是负数、被夹到 0 —— 那天所有猜对的人拿 0.00，而 CAS 让这事不可逆，
+     * {@code settleDay} 头上"漏结算了隔天补跑即可"那句承诺就是假的。
+     * 卡上 {@code vote_date <= 那天} 之后，每天的池只跟它自己和它之前的日子有关。
+     * <p>
+     * 【样本刻意拉开】应得 2.50 vs 归零 0.00，回归了一眼看得出，不是小数点后的差别。
+     */
+    @Test
+    void 补结算漏掉的那天仍拿到它应得的池() {
+        Map<Long, LocalDate> ledger = liveLedger();
+        upDay(BTC);
+        downDay(GOLD);
+
+        List<CampaignVote> day1 = votesOn(DAY1, ledger, 40);   // id 1-40，漏结的那天
+        List<CampaignVote> day2 = votesOn(DAY2, ledger, 40);
+        List<CampaignVote> day3 = votesOn(DAY3, ledger, 40);
+        unsettled(DAY1, day1);
+        unsettled(DAY2, day2);
+        unsettled(DAY3, day3);
+
+        // 首日漏跑，后面两天照常结
+        service.settleDay(DAY2);
+        service.settleDay(DAY3);
+        // 隔几天才回头补首日
+        service.settleDay(DAY1);
+
+        List<Settled> rows = settledRows();
+        assertThat(rows).filteredOn(r -> r.id() <= 40)
+                .as("补结的首日：池 100 ÷ 40 票 = 2.50；减全场已发的话这里全是 0.00")
+                .hasSize(40)
+                .allSatisfy(r -> assertThat(r.score()).isEqualTo("2.50"));
+        assertThat(rows).filteredOn(r -> r.id() > 40 && r.id() <= 80)
+                .as("第 2 日：上限 200 − 0 = 池 200 ÷ 40 票").hasSize(40)
+                .allSatisfy(r -> assertThat(r.score()).isEqualTo("5.00"));
+        assertThat(rows).filteredOn(r -> r.id() > 80)
+                .as("第 3 日：上限 300 − 200 = 池 100 ÷ 40 票").hasSize(40)
+                .allSatisfy(r -> assertThat(r.score()).isEqualTo("2.50"));
+    }
+
+    /**
+     * <b>顺序结算的happy path 一分没变</b>：卡日期这个改动只影响乱序补结，
+     * 正常按天推进时逐位相同（后面的日子还没结，本来就没分可加）。这条把三天的每票分值钉死，
+     * 免得日后有人以为"加了个 WHERE 总归改了点什么"。
+     * <pre>
+     *   首日   上限 100 − 0   = 池 100 ÷ 40 票 = 每票 2.50，发掉 100
+     *   第 2 日 上限 200 − 100 = 池 100 ÷ 25 票 = 每票 4.00，发掉 100
+     *   第 3 日 上限 300 − 200 = 池 100 ÷ 20 票 = 每票 5.00
+     * </pre>
+     * 票数逐日变少、每票分值逐日变高，三个数各不相同 —— 池子算错一天就对不上。
+     */
+    @Test
+    void 顺序结算三天的每票分值逐日推进() {
+        Map<Long, LocalDate> ledger = liveLedger();
+        upDay(BTC);
+        downDay(GOLD);
+
+        unsettled(DAY1, votesOn(DAY1, ledger, 40));
+        unsettled(DAY2, votesOn(DAY2, ledger, 25));
+        unsettled(DAY3, votesOn(DAY3, ledger, 20));
+
+        service.settleDay(DAY1);
+        service.settleDay(DAY2);
+        service.settleDay(DAY3);
+
+        List<Settled> rows = settledRows();
+        assertThat(rows).hasSize(85);
+        assertThat(rows.subList(0, 40)).allSatisfy(r -> assertThat(r.score()).isEqualTo("2.50"));
+        assertThat(rows.subList(40, 65)).allSatisfy(r -> assertThat(r.score()).isEqualTo("4.00"));
+        assertThat(rows.subList(65, 85)).allSatisfy(r -> assertThat(r.score()).isEqualTo("5.00"));
+    }
+
+    /**
+     * 活动首日本地 00:00 开赛 = UTC 前一天 16:00，所以第一个能投票的 UTC 日比 start_at 那天还早一天。
+     * 它算出 days=0，靠 {@code Math.max(days,1)} 抬成 1，
      * 上限仍是 100，那 8 小时里投的票照常有分可拿。去掉那个 max，这 40 张票全发 0.00。
      */
     @Test
@@ -403,7 +480,7 @@ class CampaignVoteSettleTest {
     void 末个UTC投票日的累计上限正好是十四天份() {
         upDay(BTC);
         downDay(GOLD);
-        when(voteMapper.sumAllScore(CAMPAIGN_ID)).thenReturn(new BigDecimal("1394.00"));
+        when(voteMapper.sumScoreUpTo(eq(CAMPAIGN_ID), any())).thenReturn(new BigDecimal("1394.00"));
 
         List<CampaignVote> votes = new ArrayList<>();
         for (long u = 1; u <= 40; u++) votes.add(vote(u, BTC, CampaignVote.UP));
@@ -447,6 +524,32 @@ class CampaignVoteSettleTest {
 
         service.settleDay(DAY1);
 
+        verify(voteMapper, never()).listUnsettled(any(), any());
+        verify(binance, never()).getFuturesKlinesLight(any(), any(), anyInt(), anyLong());
+    }
+
+    /**
+     * 还没过完的 UTC 日一律不结：今天、明天都一行不写、一个字节的行情都不取。
+     * <p>
+     * 【为什么 openTime 那道核对拦不住"今天"】今天那根日线在 UTC 0 点整就开出来了，
+     * openTime 恰好等于当日 0 点 —— 核对是过的，可它只是<b>半根还在长的蜡烛</b>；
+     * 而且 UTC 0 点前都还能投票，票根本没截止。拿半根蜡烛去结一批没截止的票，
+     * CAS 一落就改不回来。所以这道闸必须单独有，不能指望上面那道。
+     * <p>
+     * 目前唯一的调用方只传昨天，但 settleDay 是 public 的，Task 10 还会调它。
+     */
+    @Test
+    void 今天与未来的日子一律不结() {
+        upDay(BTC);
+        downDay(GOLD);
+        LocalDate today = CampaignVoteService.utcToday();
+        unsettled(today, List.of(vote(1L, BTC, CampaignVote.UP)));
+        unsettled(today.plusDays(1), List.of(vote(2L, BTC, CampaignVote.UP)));
+
+        service.settleDay(today);
+        service.settleDay(today.plusDays(1));
+
+        verify(voteMapper, never()).settle(anyLong(), any(), any());
         verify(voteMapper, never()).listUnsettled(any(), any());
         verify(binance, never()).getFuturesKlinesLight(any(), any(), anyInt(), anyLong());
     }
@@ -503,6 +606,44 @@ class CampaignVoteSettleTest {
 
     private void unsettled(LocalDate day, List<CampaignVote> votes) {
         when(voteMapper.listUnsettled(CAMPAIGN_ID, day)).thenReturn(votes);
+    }
+
+    /**
+     * 把 settle / sumScoreUpTo 换成一对活账本：settle 按票所属的投票日记账，
+     * sumScoreUpTo 只加"不晚于问的那天"的桶 —— 与真库 {@code SUM(...) WHERE vote_date <= ?} 同口径。
+     * <p>
+     * 默认那个死值 stub 看不出乱序补结的区别（它不管问的是哪天都回同一个数），
+     * 而"补结的那天该拿多少"恰恰只在日期分桶下才谈得上。
+     *
+     * @return voteId → 投票日 的登记表，手搓票时往里登记（{@link #votesOn} 会自动登记）
+     */
+    private Map<Long, LocalDate> liveLedger() {
+        Map<Long, LocalDate> dayOfVote = new HashMap<>();
+        Map<LocalDate, BigDecimal> spentByDay = new HashMap<>();
+
+        when(voteMapper.settle(anyLong(), any(), any())).thenAnswer(inv -> {
+            spentByDay.merge(dayOfVote.get((Long) inv.getArgument(0)), inv.getArgument(2), BigDecimal::add);
+            return 1;
+        });
+        when(voteMapper.sumScoreUpTo(eq(CAMPAIGN_ID), any())).thenAnswer(inv -> {
+            LocalDate upTo = inv.getArgument(1);
+            return spentByDay.entrySet().stream()
+                    .filter(e -> !e.getKey().isAfter(upTo))
+                    .map(Map.Entry::getValue)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+        });
+        return dayOfVote;
+    }
+
+    /** 某日 n 张看涨 BTC 的票，顺手登记进账本 */
+    private List<CampaignVote> votesOn(LocalDate day, Map<Long, LocalDate> ledger, int n) {
+        List<CampaignVote> out = new ArrayList<>(n);
+        for (long u = 1; u <= n; u++) {
+            CampaignVote v = vote(u, BTC, CampaignVote.UP);
+            ledger.put(v.getId(), day);
+            out.add(v);
+        }
+        return out;
     }
 
     private CampaignVote vote(long userId, String symbol, String direction) {

@@ -117,8 +117,16 @@ public class CampaignVoteService {
      * <p>
      * 【这里用 current() 不用 requireRunning()】结算跑在 UTC 00:05、结的是<b>前一天</b>，
      * 活动最后一天的票要在 endAt 之后才结得上；判了窗口最后一天的票永远发不出分。
+     * <p>
+     * 【只结已经过完的 UTC 日】当天那根日线还在长，而且 UTC 0 点前都还能投票 ——
+     * 拿半根蜡烛去结一批没截止的票，CAS 一落就改不回来了。
      */
     public void settleDay(LocalDate utcDay) {
+        if (!utcDay.isBefore(utcToday())) {
+            log.info("活动投票结算：{} 还没过完，不结", utcDay);
+            return;
+        }
+
         Campaign c = campaignService.current();
         if (c == null) return;
 
@@ -146,6 +154,10 @@ public class CampaignVoteService {
         List<CampaignVote> deferred = new ArrayList<>();
 
         for (CampaignVote v : votes) {
+            // 库里出了 SYMBOLS 之外的 symbol 时这里 NPE —— 是有意留响的。
+            // vote() 已把 symbol 白名单校验过，唯一入口不产生这种行；真出现了（手工塞库）
+            // 宁可炸出来记进日志，也不能用 Objects.equals 把它悄悄判成 LOSE 并标成已结算 ——
+            // CAS 之后就再也纠不回来了。别"顺手修"成 Objects.equals。
             String o = outcome.get(v.getSymbol());
             if (CampaignVote.DEFERRED.equals(o)) {
                 deferred.add(v);
@@ -178,7 +190,21 @@ public class CampaignVoteService {
     }
 
     /**
-     * 当日可分池 = 100 × 已过天数 − 全场已发出的分；下限 0。
+     * 当日可分池 = 100 × 已过天数 − <b>截至这一天</b>已发出的分；下限 0。
+     * <p>
+     * 【减的是"截至这天"而不是"全场"】不卡日期的话这个式子只在按日期顺序结算时才成立。
+     * 举个真会发生的例子：08-05 那次 00:05 没跑成（宿主重启 / 发版窗口），
+     * 08-06、08-07 照常结完、累计已发到了 400，这时才回头补 08-05 ——
+     * {@code 300 − 400} 是负数，被夹到 0，那天所有猜对的人集体拿 0 分，而 CAS 让这事不可逆。
+     * 卡上日期后，每天的池只跟它自己和它之前的日子有关，隔多久补跑结果都一样，
+     * 方法头上"漏结算了隔天补跑即可"这句话才是真的。顺序结算时两种写法逐位相同
+     * （后面的日子还没结，本来就没分可加），所以正常链路上这个改动是零影响的。
+     * <p>
+     * 【乱序结算会让总额略微超发，这是有意的取舍】还是上面那个例子：08-06 结算时看到的顺延
+     * 里含着本该属于 08-05 的那份，它已经花掉了；08-05 补结时按自己的额度又发一次，
+     * 两边加起来会超过 100×天数。但另一个选择是让补结的那天全员 0 分 ——
+     * 宁可总额略超，也不能凭"谁先跑"决定用户有没有分。真正的防线是别让它乱序：
+     * {@link com.mawai.wiibsim.campaign.CampaignTask} 每次从最老的一天往回扫，漏一天下一轮就自己补上了。
      * <p>
      * 【start_at 是本地日、utcDay 是 UTC 日，为什么不换算就直接减】口径确实不同：
      * start_at 存的是服务器本地墙上时间（{@link CampaignService#requireRunning()} 拿
@@ -193,7 +219,7 @@ public class CampaignVoteService {
      *   …
      *   08-16（最后一个能投票的 UTC 日）           days=14           → 上限 1400 = 14 × 100
      * </pre>
-     * 08-03 算池时 sumAllScore 已经含了 08-02 发掉的部分，所以两天加起来最多发 100；
+     * 08-03 算池时"截至 08-03 已发出的分"已经含了 08-02 发掉的部分，所以两天加起来最多发 100；
      * 末日上限正好 1400，一分不多、也没有剩在池里没人拿。边界只会把预算在相邻两天之间挪，
      * 不会凭空造出预算 —— 这正是"靠反推不存状态"换来的好处。{@code Math.max(days, 1)} 是承重的：
      * 去掉它 08-02 的上限就是 0，那 8 小时里投的票全发 0 分。
@@ -205,7 +231,7 @@ public class CampaignVoteService {
     private BigDecimal poolOf(Campaign c, LocalDate utcDay) {
         long days = ChronoUnit.DAYS.between(c.getStartAt().toLocalDate(), utcDay) + 1;
         BigDecimal entitled = ScoreRules.VOTE_DAILY_POOL.multiply(BigDecimal.valueOf(Math.max(days, 1)));
-        return entitled.subtract(voteMapper.sumAllScore(c.getId())).max(BigDecimal.ZERO);
+        return entitled.subtract(voteMapper.sumScoreUpTo(c.getId(), utcDay)).max(BigDecimal.ZERO);
     }
 
     /**
