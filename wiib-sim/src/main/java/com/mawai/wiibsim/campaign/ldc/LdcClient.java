@@ -100,18 +100,9 @@ public class LdcClient {
 
         String lastError = null;
         for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+            HttpResponse<String> resp;
             try {
-                HttpResponse<String> resp = http.send(request, HttpResponse.BodyHandlers.ofString());
-
-                if (resp.statusCode() == 307) {
-                    // 前端误路由，后端没收到，重试绝对安全
-                    lastError = "307 被误路由到前端，重试 " + attempt + "/" + MAX_ATTEMPTS;
-                    log.warn("LDC 分发 {}: {}", outTradeNo, lastError);
-                    if (attempt < MAX_ATTEMPTS) sleepBackoff(attempt);
-                    continue;
-                }
-                return judge(resp.statusCode(), resp.body(), outTradeNo);
-
+                resp = http.send(request, HttpResponse.BodyHandlers.ofString());
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 return LdcResult.fail("发放被中断");
@@ -121,14 +112,27 @@ public class LdcClient {
                 lastError = e.getClass().getSimpleName() + ": " + e.getMessage();
                 log.warn("LDC 分发 {} 第 {} 次异常: {}", outTradeNo, attempt, lastError);
                 if (attempt < MAX_ATTEMPTS) sleepBackoff(attempt);
+                continue;
             }
+
+            // judge 必须在 try 外面调：那个 catch 的语义是"没发出去，重发"。
+            // 服务端已经给出裁决的响应，无论如何都不能再触发一次发送——
+            // 今天 judge 不抛异常，但把它留在 try 里，将来谁在里面加个会抛的解析就变成重复发放
+            if (resp.statusCode() == 307) {
+                // 前端误路由，后端没收到，重试绝对安全
+                lastError = "307 被误路由到前端，重试 " + attempt + "/" + MAX_ATTEMPTS;
+                log.warn("LDC 分发 {}: {}", outTradeNo, lastError);
+                if (attempt < MAX_ATTEMPTS) sleepBackoff(attempt);
+                continue;
+            }
+            return judge(resp.statusCode(), resp.body(), outTradeNo);
         }
         return LdcResult.fail(lastError);
     }
 
     /**
      * 判定表（设计文档 §6.3）：
-     * 200 且 trade_no 非空 → 成功；非 200 且含 duplicate key / 23505 → 此前已发放，也算成功；
+     * 200 且 trade_no 非空 → 成功；非 200 且含 {@code duplicate key} → 此前已发放，也算成功；
      * 其余 → 失败，记原文不重试。
      * <p>
      * 【顺序不能反，别"顺手简化"成先扫 duplicate key】那个扫描是对整个响应体做子串匹配的，
@@ -137,6 +141,16 @@ public class LdcClient {
      * campaign_reward 于是记下 SUCCESS 却没有 external_ref：
      * 唯一对不上 LinuxDo 侧账的那笔，恰恰是钱真发出去了的那笔。
      * 幂等报错实测恒为 HTTP 400，只在非 200 分支查它不是取巧，就是接口契约本身。
+     * <p>
+     * 【判据只认 duplicate key，别再"顺手加回" || 23505】两种误判的代价根本不对称：
+     * <ul>
+     *   <li>漏判（真幂等判成 FAILED）安全 —— 同单号重发照样撞唯一索引，服务端保证不会重复发</li>
+     *   <li>误判（没发成功却判成 alreadySent）不可恢复 —— 落库是 SUCCESS + external_ref=NULL，
+     *       与真幂等命中逐字节一致，对账时分不出来，用户就这么静悄悄地少拿一份</li>
+     * </ul>
+     * 所以判据只能往窄了收。裸 "23505" 是五个字符的子串，网关错误页的 ray id、时间戳
+     * 都可能撞上；而 {@code duplicate key} 是 PostgreSQL 自己的报错原文，真幂等响应两者都含
+     * （见 LdcClientTest 的桩），删掉后一个不改变任何已知场景。
      */
     private LdcResult judge(int status, String body, String outTradeNo) {
         String raw = body == null ? "" : body;
@@ -156,7 +170,7 @@ public class LdcClient {
             return LdcResult.fail("HTTP 200 但没有 trade_no: " + raw);
         }
 
-        if (raw.contains("duplicate key") || raw.contains("23505")) {
+        if (raw.contains("duplicate key")) {
             log.info("LDC 分发 {} 命中单号幂等，此前已发放成功", outTradeNo);
             return LdcResult.alreadySent();
         }

@@ -133,6 +133,10 @@ class LdcClientTest {
         assertThat(r.success()).isTrue();
         assertThat(r.tradeNo()).isEqualTo("999");
         assertThat(hits).hasValue(4);
+        // 全类最要紧的不变量：重试只许原样重发。单号一变就等于另开一笔订单，
+        // 幂等锚点当场失效，"重试安全"这个前提也跟着塌了
+        assertThat(requestBodies).hasSize(4);
+        assertThat(requestBodies).containsOnly(requestBodies.getFirst());
     }
 
     /** 绝不能自己跟着 307 跑：跟过去拿到的是登录页 HTML，成败就分不清了 */
@@ -181,6 +185,27 @@ class LdcClientTest {
 
         assertThat(r.success()).isTrue();
         assertThat(r.tradeNo()).isEqualTo("87597927423505256");
+    }
+
+    /**
+     * 失败响应里恰好蹦出个 "23505"（网关错误页的 ray id、时间戳都可能）不等于幂等命中。
+     * <p>
+     * 【为什么判据必须窄】误判成"上次已发放"是不可恢复的：Task 10 会写下
+     * SUCCESS + external_ref=NULL，与真幂等命中在库里逐字节一样，对账时谁也分不出来，
+     * 而钱压根没发出去，用户就这么静悄悄地少拿一份。
+     * 反过来漏判（判 FAILED）是安全的：同单号重发照样撞唯一索引，服务端保证不会重复发。
+     * 两边代价不对称，判据就只能往窄了收。
+     */
+    @Test
+    void 错误页里恰好含23505不算幂等命中() {
+        plan = n -> new int[]{400};
+        body = "{\"error_msg\":\"gateway error, ray=8f23505ab\",\"data\":null}";
+
+        LdcResult r = call();
+
+        assertThat(r.success()).isFalse();
+        assertThat(r.errorMsg()).contains("23505");
+        assertThat(hits).hasValue(1);
     }
 
     /** 其他 4xx 是真失败，记原因、不重试 */
