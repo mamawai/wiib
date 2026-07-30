@@ -1,5 +1,6 @@
 package com.mawai.wiibsim.campaign;
 
+import com.mawai.wiibcommon.exception.BizException;
 import com.mawai.wiibsim.campaign.entity.Campaign;
 import com.mawai.wiibsim.campaign.mapper.CampaignMapper;
 import com.mawai.wiibsim.campaign.service.CampaignService;
@@ -9,8 +10,10 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * 活动模块地基验收（非单测）：起完整 Spring 上下文、真连本地 PG。
@@ -80,14 +83,30 @@ class CampaignBootstrapRealRunTest {
         assertThat(c.getId()).isNotNull();
     }
 
-    /** Service 层薄封装，但它是后续所有任务拿活动窗口的入口，钉一下它和 mapper 取到的是同一行 */
+    /**
+     * Service 层薄封装，但它是后续所有任务拿活动窗口的入口，钉一下它和 mapper 取到的是同一行。
+     * <p>
+     * 【为什么要按窗口分叉】requireRunning 现在除了 status 还判时间窗（半开 [startAt, endAt)，
+     * Task 5 补的，理由见 CampaignService）。种子活动的排期是 2026-08-03 ~ 2026-08-17，
+     * 而 status 早就是 RUNNING —— 排期外的日子跑本类，requireRunning 就该抛。
+     * 直接断言"不抛"会让这个类在开赛前后必红，而那恰恰是正确行为。
+     */
     @Test
-    void current与requireRunning都返回同一场活动() {
+    void current不判窗口而requireRunning按排期放行或拦截() {
         Campaign viaService = campaignService.current();
+
+        // current 是读路径：不管排期到没到，活动页都得能拿到这行来展示
         assertThat(viaService).isNotNull();
         assertThat(viaService.getCode()).isEqualTo(SEED_CODE);
 
-        // 有 RUNNING 活动时 requireRunning 不该抛，且拿到的是同一行
-        assertThat(campaignService.requireRunning().getId()).isEqualTo(viaService.getId());
+        LocalDateTime now = LocalDateTime.now();
+        boolean inWindow = !now.isBefore(viaService.getStartAt()) && now.isBefore(viaService.getEndAt());
+        if (inWindow) {
+            assertThat(campaignService.requireRunning().getId()).isEqualTo(viaService.getId());
+        } else {
+            assertThatThrownBy(campaignService::requireRunning)
+                    .as("排期外 requireRunning 必须挡住所有写操作")
+                    .isInstanceOf(BizException.class);
+        }
     }
 }

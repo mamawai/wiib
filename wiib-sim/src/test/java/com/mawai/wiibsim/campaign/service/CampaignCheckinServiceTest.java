@@ -4,6 +4,7 @@ import com.mawai.wiibcommon.exception.BizException;
 import com.mawai.wiibsim.campaign.entity.Campaign;
 import com.mawai.wiibsim.campaign.entity.CampaignCheckin;
 import com.mawai.wiibsim.campaign.mapper.CampaignCheckinMapper;
+import com.mawai.wiibsim.campaign.mapper.CampaignMapper;
 import com.mawai.wiibsim.campaign.mapper.CampaignStatsMapper;
 import com.mawai.wiibsim.campaign.model.ScoreItem;
 import org.junit.jupiter.api.BeforeEach;
@@ -29,12 +30,17 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * 签到写入与日常积分组装。不起 Spring、不连库，mapper 全 mock。
+ * 签到写入与日常积分组装。不起 Spring、不连库。
+ * <p>
+ * 【为什么 CampaignService 用真的、只 mock 它底下的 CampaignMapper】签到的时间窗闸门就在
+ * {@link CampaignService#requireRunning()} 里，mock 掉它等于把被测的那道闸一起 mock 掉，
+ * "活动没开始也能签"这种 bug 会照绿。它只依赖一个 mapper，真造一个的成本约等于零。
+ * 顺带这也把"时钟"变得可控：不动系统时间，改喂进去那场活动的窗口就行。
  * <p>
  * 【这里能测什么、不能测什么】"一天只能签一次"这条铁律真正的执行者是数据库的
  * uk_campaign_checkin 唯一索引，mock 的 mapper 证不了它 —— 那条由
  * {@link com.mawai.wiibsim.campaign.CampaignCheckinRealRunTest} 在真库上钉。
- * 本类管的是 Java 这一侧：插的行对不对、DuplicateKeyException 有没有被翻成人话、
+ * 本类管的是 Java 这一侧：闸门放不放行、插的行对不对、DuplicateKeyException 有没有被翻成人话、
  * 以及积分怎么从签到日算出来。
  * <p>
  * 【连续段的取值全在边界上】longestStreak 本身由 ScoreRulesTest 管，本类只钉
@@ -44,8 +50,6 @@ import static org.mockito.Mockito.when;
 class CampaignCheckinServiceTest {
 
     private static final long CAMPAIGN_ID = 7L;
-    private static final LocalDateTime START = LocalDateTime.of(2026, 8, 3, 0, 0);
-    private static final LocalDateTime END = LocalDateTime.of(2026, 8, 17, 0, 0);
 
     private static final long ME = 1L;      // 签到主角
     private static final long OTHER = 2L;   // 陪跑：证明按用户切分组、不串号
@@ -53,18 +57,89 @@ class CampaignCheckinServiceTest {
 
     private CampaignCheckinMapper checkinMapper;
     private CampaignStatsMapper statsMapper;
-    private CampaignService campaignService;
+    private CampaignMapper campaignMapper;
     private CampaignCheckinService service;
 
     @BeforeEach
     void setUp() {
         checkinMapper = mock(CampaignCheckinMapper.class);
         statsMapper = mock(CampaignStatsMapper.class);
-        campaignService = mock(CampaignService.class);
-        service = new CampaignCheckinService(checkinMapper, statsMapper, campaignService);
+        campaignMapper = mock(CampaignMapper.class);
+        service = new CampaignCheckinService(checkinMapper, statsMapper, new CampaignService(campaignMapper));
 
-        when(campaignService.requireRunning()).thenReturn(campaign());
+        // 默认给一场"此刻正开着"的活动，个别用例再按需换窗口
+        running(LocalDateTime.now().minusDays(1), LocalDateTime.now().plusDays(13));
         when(statsMapper.listCommenters(any(), any())).thenReturn(List.of());
+    }
+
+    // ==================== 时间窗闸门 ====================
+
+    /*
+     * 【时钟这件事说清楚】requireRunning 比的是真实的 LocalDateTime.now()，用例只能挪活动窗口。
+     * 所以"开始前 / 结束后 / 窗口内"这三条是完全确定的（差着小时量级），
+     * 而"恰好等于 startAt / endAt 那一纳秒"在真实时钟下测不出来 —— 真要测得给
+     * CampaignService 注入 Clock，为这点收益给 Task 1 的类加个构造参数不划算。
+     * 下面两条边界用例把窗口边界压到"此刻"，能咬住的是"两端都不许有宽限期"
+     * （比如误把 endAt 当天整天都算上）；半开区间的日界口径则由 scoreAll 那几条日期用例
+     * 精确钉死 —— 那边不碰时钟，窗口和签到日全是写死的字面量。
+     */
+
+    /** 活动开始前：闸门必须挡住，且一行都不许插 */
+    @Test
+    void 活动开始前签到被拦下且一行都不插() {
+        running(LocalDateTime.now().plusHours(1), LocalDateTime.now().plusDays(14));
+
+        assertThatThrownBy(() -> service.checkin(ME))
+                .isInstanceOf(BizException.class)
+                .hasMessage("活动尚未开始");
+
+        verify(checkinMapper, never()).insert(any(CampaignCheckin.class));
+    }
+
+    /** 活动结束后：同上，且报的是"已结束"而不是笼统一句 —— 用户看一眼就知道不用再点了 */
+    @Test
+    void 活动结束后签到被拦下且一行都不插() {
+        running(LocalDateTime.now().minusDays(14), LocalDateTime.now().minusHours(1));
+
+        assertThatThrownBy(() -> service.checkin(ME))
+                .isInstanceOf(BizException.class)
+                .hasMessage("活动已结束");
+
+        verify(checkinMapper, never()).insert(any(CampaignCheckin.class));
+    }
+
+    /** 下界含 startAt：活动"此刻"开赛，这一刻就该能签，不用等下一个 tick */
+    @Test
+    void 开始那一刻就算在窗口内() {
+        running(LocalDateTime.now(), LocalDateTime.now().plusDays(14));
+        stubRows(row(ME, LocalDate.now()));
+
+        assertThat(service.checkin(ME)).isEqualTo(1);
+        verify(checkinMapper).insert(any(CampaignCheckin.class));
+    }
+
+    /** 上界不含 endAt：活动"此刻"收摊，这一刻起就签不了了，没有宽限期 */
+    @Test
+    void 结束那一刻起就签不了了() {
+        running(LocalDateTime.now().minusDays(14), LocalDateTime.now());
+
+        assertThatThrownBy(() -> service.checkin(ME))
+                .isInstanceOf(BizException.class)
+                .hasMessage("活动已结束");
+
+        verify(checkinMapper, never()).insert(any(CampaignCheckin.class));
+    }
+
+    /** 压根没有 RUNNING 活动时也是一行都不插 */
+    @Test
+    void 没有进行中的活动时签到直接被拦下() {
+        when(campaignMapper.selectRunning()).thenReturn(null);
+
+        assertThatThrownBy(() -> service.checkin(ME))
+                .isInstanceOf(BizException.class)
+                .hasMessage("活动未开始或已结束");
+
+        verify(checkinMapper, never()).insert(any(CampaignCheckin.class));
     }
 
     // ==================== 签到写入 ====================
@@ -78,7 +153,7 @@ class CampaignCheckinServiceTest {
     @Test
     void 签到插入本场活动我今天的记录() {
         LocalDate today = LocalDate.now();
-        when(checkinMapper.listByCampaign(CAMPAIGN_ID)).thenReturn(List.of(row(ME, today)));
+        stubRows(row(ME, today));
 
         service.checkin(ME);
 
@@ -101,13 +176,32 @@ class CampaignCheckinServiceTest {
     @Test
     void 签到后返回我自己的最长连续天数() {
         LocalDate today = LocalDate.now();
-        when(checkinMapper.listByCampaign(CAMPAIGN_ID)).thenReturn(List.of(
-                row(OTHER, today.minusDays(2)),
+        stubRows(row(OTHER, today.minusDays(2)),
                 row(ME, today.minusDays(1)),
                 row(ME, today),
-                row(OTHER, today.plusDays(1))));
+                row(OTHER, today.plusDays(1)));
 
         assertThat(service.checkin(ME)).isEqualTo(2);
+    }
+
+    /**
+     * 签到后返回的连续天数与 scoreAll 计分用的是同一份筛选口径 —— 窗口外的老签到不算数。
+     * <p>
+     * 活动窗口从"前天"开始，而库里还留着"大前天"那行（运营改过 start_at 就会出现这种行）。
+     * myDates 不筛的话用户会看到"已连续 4 天"，结算时按 3 天发分，当场对不上。
+     */
+    @Test
+    void 签到返回的连续天数不含窗口外的老签到() {
+        LocalDate today = LocalDate.now();
+        running(today.minusDays(2).atStartOfDay(), today.plusDays(5).atStartOfDay());
+        stubRows(row(ME, today.minusDays(3)),   // 窗口外，且紧贴着窗口内那三天
+                row(ME, today.minusDays(2)),
+                row(ME, today.minusDays(1)),
+                row(ME, today));
+
+        assertThat(service.checkin(ME))
+                .as("窗口外那天要是被算进来就是 4")
+                .isEqualTo(3);
     }
 
     /**
@@ -130,18 +224,6 @@ class CampaignCheckinServiceTest {
         verify(checkinMapper, never()).listByCampaign(anyLong());
     }
 
-    /** 没有进行中的活动时连插都不该插 —— requireRunning 是所有写操作的第一道闸 */
-    @Test
-    void 活动没开时签到直接被拦下() {
-        when(campaignService.requireRunning()).thenThrow(new BizException("活动未开始或已结束"));
-
-        assertThatThrownBy(() -> service.checkin(ME))
-                .isInstanceOf(BizException.class)
-                .hasMessage("活动未开始或已结束");
-
-        verify(checkinMapper, never()).insert(any(CampaignCheckin.class));
-    }
-
     /** checkedToday 问的是"今天"这一天，日期参数不能拿别的日子凑 */
     @Test
     void checkedToday按今天的本地日去查() {
@@ -153,6 +235,15 @@ class CampaignCheckinServiceTest {
 
     // ==================== 日常积分 ====================
 
+    /*
+     * 下面这些用例把活动窗口写死成 2026-08-03 ~ 2026-08-17（种子活动的真实排期），
+     * 签到日也全是字面量：scoreAll 不碰时钟，所以半开区间的日界能钉得死死的。
+     */
+
+    private static final LocalDateTime START = LocalDateTime.of(2026, 8, 3, 0, 0);
+    private static final LocalDateTime END = LocalDateTime.of(2026, 8, 17, 0, 0);
+    private static final LocalDate D1 = START.toLocalDate();   // 8-3，活动首日
+
     /**
      * 签到分 = 去重后的天数 × 1；连续奖励按最长段发，且只在够档时才产出这一条。
      * <p>
@@ -161,13 +252,12 @@ class CampaignCheckinServiceTest {
      */
     @Test
     void 签到与连续奖励按天数和最长段分别计分() {
-        LocalDate d = START.toLocalDate();
-        when(checkinMapper.listByCampaign(CAMPAIGN_ID)).thenReturn(List.of(
-                row(ME, d), row(ME, d.plusDays(1)), row(ME, d.plusDays(2)),
-                row(ME, d.plusDays(4)), row(ME, d.plusDays(5)), row(ME, d.plusDays(6)),
-                row(OTHER, d), row(OTHER, d.plusDays(3))));
+        fixedWindow();
+        stubRows(row(ME, D1), row(ME, D1.plusDays(1)), row(ME, D1.plusDays(2)),
+                row(ME, D1.plusDays(4)), row(ME, D1.plusDays(5)), row(ME, D1.plusDays(6)),
+                row(OTHER, D1), row(OTHER, D1.plusDays(3)));
 
-        Map<Long, List<ScoreItem>> result = service.scoreAll(campaign());
+        Map<Long, List<ScoreItem>> result = service.scoreAll(fixedCampaign());
 
         assertThat(result.get(ME))
                 .extracting(ScoreItem::code, ScoreItem::count, ScoreItem::score)
@@ -188,12 +278,11 @@ class CampaignCheckinServiceTest {
      */
     @Test
     void 断段的连续奖励只按最长段发一次不累加() {
-        LocalDate d = START.toLocalDate();
-        when(checkinMapper.listByCampaign(CAMPAIGN_ID)).thenReturn(List.of(
-                row(ME, d), row(ME, d.plusDays(1)), row(ME, d.plusDays(2)),
-                row(ME, d.plusDays(4)), row(ME, d.plusDays(5)), row(ME, d.plusDays(6))));
+        fixedWindow();
+        stubRows(row(ME, D1), row(ME, D1.plusDays(1)), row(ME, D1.plusDays(2)),
+                row(ME, D1.plusDays(4)), row(ME, D1.plusDays(5)), row(ME, D1.plusDays(6)));
 
-        ScoreItem streak = item(service.scoreAll(campaign()).get(ME), "STREAK");
+        ScoreItem streak = item(service.scoreAll(fixedCampaign()).get(ME), "STREAK");
 
         assertThat(streak.score())
                 .as("两段各 3 天各发一个 +5 就是 10，这条正是要挡住那种算法")
@@ -201,12 +290,66 @@ class CampaignCheckinServiceTest {
         assertThat(streak.count()).as("count 报的是最长段，不是总天数").isEqualTo(3);
     }
 
+    /**
+     * ★ 窗口外的签到行不计分，天数和连续段<b>同时</b>把它们排除 ★
+     * <p>
+     * 【为什么窗口外还会有行】campaign 表刻意可运行时改，运营挪一下 start_at/end_at，
+     * 当初合法签下的行就落到窗口外了 —— 只在写入口卡窗口是堵不住的。
+     * <p>
+     * 【样本是怎么设计的】两个越界日（8-2 开赛前、8-17 结束那天）都紧贴着窗口内的日子，
+     * 于是"只筛天数不筛连续段"的实现会当场露馅：
+     * <ul>
+     *   <li>ME 窗口内是 8-3、8-4 与 8-15、8-16 两段各 2 天 → 最长 2 → 不够 3 天档 →
+     *       <b>根本不该有 STREAK 这条</b>；漏筛的话 8-2/8-3/8-4 和 8-15/8-16/8-17
+     *       都成了 3 连，凭空多出一条 +5。</li>
+     *   <li>OTHER 窗口内 8-3~8-7 共 5 天 → STREAK 的 count 是 5；漏筛的话 8-2 接上去变成 6。</li>
+     * </ul>
+     * 8-17 这一天的取舍就是半开区间的含义：活动结束在 8-17 00:00:00，那一整天已经在窗外。
+     */
+    @Test
+    void 窗口外的签到不进天数也不进连续段() {
+        fixedWindow();
+        stubRows(
+                // ME：越界两头夹，窗口内只剩两段各 2 天
+                row(ME, D1.minusDays(1)),                            // 8-2，开赛前一天
+                row(ME, D1), row(ME, D1.plusDays(1)),                // 8-3、8-4
+                row(ME, D1.plusDays(12)), row(ME, D1.plusDays(13)),  // 8-15、8-16
+                row(ME, D1.plusDays(14)),                            // 8-17，endAt 那一天
+                // OTHER：开赛前一天 + 窗口内连 5 天
+                row(OTHER, D1.minusDays(1)),
+                row(OTHER, D1), row(OTHER, D1.plusDays(1)), row(OTHER, D1.plusDays(2)),
+                row(OTHER, D1.plusDays(3)), row(OTHER, D1.plusDays(4)));
+
+        Map<Long, List<ScoreItem>> result = service.scoreAll(fixedCampaign());
+
+        assertThat(result.get(ME))
+                .as("越界的 8-2 与 8-17 既不该进天数（应为 4），也不该把连续段撑到 3 天档")
+                .extracting(ScoreItem::code, ScoreItem::count, ScoreItem::score)
+                .containsExactly(tuple("CHECKIN", 4, BigDecimal.valueOf(4)));
+        assertThat(result.get(OTHER))
+                .as("STREAK 的 count 必须是窗口内的 5，不是把 8-2 接上去的 6")
+                .extracting(ScoreItem::code, ScoreItem::count, ScoreItem::score)
+                .containsExactly(
+                        tuple("CHECKIN", 5, BigDecimal.valueOf(5)),
+                        tuple("STREAK", 5, BigDecimal.valueOf(5)));
+    }
+
+    /** 全部签到都在窗口外的人直接不进结果，而不是留一条 0 分的空明细 */
+    @Test
+    void 签到全在窗口外的人不进结果() {
+        fixedWindow();
+        stubRows(row(ME, D1), row(OTHER, D1.minusDays(1)), row(OTHER, D1.plusDays(14)));
+
+        assertThat(service.scoreAll(fixedCampaign())).containsOnlyKeys(ME);
+    }
+
     /** 一天没签的人不出现在结果里（没评论的话） */
     @Test
     void 一天没签也没评论的人不进结果() {
-        when(checkinMapper.listByCampaign(CAMPAIGN_ID)).thenReturn(List.of(row(ME, START.toLocalDate())));
+        fixedWindow();
+        stubRows(row(ME, D1));
 
-        assertThat(service.scoreAll(campaign())).containsOnlyKeys(ME);
+        assertThat(service.scoreAll(fixedCampaign())).containsOnlyKeys(ME);
     }
 
     /**
@@ -215,10 +358,11 @@ class CampaignCheckinServiceTest {
      */
     @Test
     void 首次评论每人一条一分且按活动窗口取人() {
-        when(checkinMapper.listByCampaign(CAMPAIGN_ID)).thenReturn(List.of(row(ME, START.toLocalDate())));
+        fixedWindow();
+        stubRows(row(ME, D1));
         when(statsMapper.listCommenters(START, END)).thenReturn(List.of(ME));
 
-        Map<Long, List<ScoreItem>> result = service.scoreAll(campaign());
+        Map<Long, List<ScoreItem>> result = service.scoreAll(fixedCampaign());
 
         assertThat(result.get(ME))
                 .extracting(ScoreItem::code, ScoreItem::count, ScoreItem::score)
@@ -234,10 +378,11 @@ class CampaignCheckinServiceTest {
      */
     @Test
     void 只评论没签到的人也拿到首次评论分() {
-        when(checkinMapper.listByCampaign(CAMPAIGN_ID)).thenReturn(List.of(row(ME, START.toLocalDate())));
+        fixedWindow();
+        stubRows(row(ME, D1));
         when(statsMapper.listCommenters(START, END)).thenReturn(List.of(TALKER));
 
-        Map<Long, List<ScoreItem>> result = service.scoreAll(campaign());
+        Map<Long, List<ScoreItem>> result = service.scoreAll(fixedCampaign());
 
         assertThat(result).containsOnlyKeys(ME, TALKER);
         assertThat(result.get(TALKER))
@@ -247,13 +392,31 @@ class CampaignCheckinServiceTest {
 
     // ==================== 手搓行 ====================
 
-    private static Campaign campaign() {
+    /** 喂给真 CampaignService 的那场 RUNNING 活动，窗口由用例指定 */
+    private void running(LocalDateTime startAt, LocalDateTime endAt) {
+        when(campaignMapper.selectRunning()).thenReturn(campaign(startAt, endAt));
+    }
+
+    /** 积分用例的固定窗口：与种子活动同排期，日界全是写死的字面量 */
+    private void fixedWindow() {
+        running(START, END);
+    }
+
+    private static Campaign fixedCampaign() {
+        return campaign(START, END);
+    }
+
+    private static Campaign campaign(LocalDateTime startAt, LocalDateTime endAt) {
         Campaign c = new Campaign();
         c.setId(CAMPAIGN_ID);
-        c.setStartAt(START);
-        c.setEndAt(END);
+        c.setStartAt(startAt);
+        c.setEndAt(endAt);
         c.setStatus(Campaign.STATUS_RUNNING);
         return c;
+    }
+
+    private void stubRows(CampaignCheckin... rows) {
+        when(checkinMapper.listByCampaign(CAMPAIGN_ID)).thenReturn(List.of(rows));
     }
 
     private static CampaignCheckin row(long userId, LocalDate date) {
