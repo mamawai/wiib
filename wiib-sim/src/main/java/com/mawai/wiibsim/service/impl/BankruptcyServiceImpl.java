@@ -136,14 +136,11 @@ public class BankruptcyServiceImpl implements BankruptcyService {
 
         // 预测按立刻卖出价估值, 无bid视为不可变现
         marketValue = marketValue.add(assetValuationService.predictionMarketValue(userId));
-        // crypto待结算（老股 T+1 已退）
-        BigDecimal pendingSettlement = cryptoOrderMapper.sumSettlingAmount(userId);
 
         // 游戏钱包刻意不计入：破产判定只看交易侧净资产，游戏钱包既救不了你、破产时也会被清空
         BigDecimal netAssets = balance
                 .add(frozen)
                 .add(marketValue)
-                .add(pendingSettlement)
                 .subtract(principal)
                 .subtract(interest);
 

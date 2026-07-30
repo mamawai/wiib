@@ -140,6 +140,36 @@ class LedgerRowMappingTest {
     }
 
     /**
+     * 没借过钱的用户卖出到账：还息、还本两列纹丝没动，只该有余额一行。
+     * 删掉 rowsOf 里那个 filter 会让本用例变回三行——账单上就是一排 0.00 占位。
+     */
+    @Test
+    void 现金流入不记没变动的列() {
+        var rows = LedgerRowMapping.rowsOf("atomicApplyCashInflow",
+                new Object[]{UID, BigDecimal.ZERO, BigDecimal.ZERO, new BigDecimal("2938.91")},
+                new UserMapper.CashInflow(BigDecimal.ZERO, BigDecimal.ZERO, new BigDecimal("15655.71")));
+
+        assertThat(rows).hasSize(1);
+        assertThat(rows.getFirst().wallet()).isEqualTo(BALANCE);
+        assertThat(rows.getFirst().delta()).isEqualByComparingTo("2938.91");
+        assertThat(rows.getFirst().balanceAfter()).isEqualByComparingTo("15655.71");
+    }
+
+    /** 只还了息、没够着本金：中间那列没动，剩下两行 */
+    @Test
+    void 现金流入只记真正变动的列() {
+        var rows = LedgerRowMapping.rowsOf("atomicApplyCashInflow",
+                new Object[]{UID, new BigDecimal("10"), BigDecimal.ZERO, new BigDecimal("40")},
+                new UserMapper.CashInflow(new BigDecimal("0"), new BigDecimal("500"), new BigDecimal("1040")));
+
+        assertThat(rows).hasSize(2);
+        assertThat(rows.get(0).wallet()).isEqualTo(LOAN_INTEREST);
+        assertThat(rows.get(0).delta()).isEqualByComparingTo("-10");
+        assertThat(rows.get(1).wallet()).isEqualTo(BALANCE);
+        assertThat(rows.get(1).delta()).isEqualByComparingTo("40");
+    }
+
+    /**
      * 守卫：给 UserMapper 加了 atomic* 方法就必须补映射，否则那笔钱静默不入账。
      * <p>
      * 漏一个方法是双重静默——rowsOf 返空 List、切面 isEmpty 直接 return，日志里连 WARN 都没有。

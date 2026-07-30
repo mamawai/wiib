@@ -30,9 +30,6 @@ public class UserDTO {
     /** 持仓总市值 */
     private BigDecimal positionMarketValue;
 
-    /** 待结算金额 */
-    private BigDecimal pendingSettlement;
-
     /** 杠杆借款本金 */
     private BigDecimal marginLoanPrincipal;
 

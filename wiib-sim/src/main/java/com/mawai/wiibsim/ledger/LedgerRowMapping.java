@@ -7,6 +7,7 @@ import java.math.BigDecimal;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
+import java.util.stream.Stream;
 
 import static com.mawai.wiibcommon.enums.LedgerWallet.*;
 
@@ -103,15 +104,22 @@ public final class LedgerRowMapping {
                               new Row(BALANCE, net, r.balance()));
             }
 
-            // 现金流入：一条 SQL 动三列 → 三行
+            // 现金流入：一条 SQL 最多动三列 → 最多三行。
+            // 这条 SQL 的语义是"先还息、再还本、剩下入余额"，没欠债时前两步是 no-op，
+            // 记进去就是一排 0.00 占着账单（没借过钱的用户每次卖出到账都白得两行）。
+            // 过滤掉 delta=0 不违反上面那条铁律——"没动这一列"本来就不该有这一列的行。
+            // 三行不会同时为 0：调用方 applyCashInflow 已挡掉 amount<=0，
+            // 而三个 delta 之和恒等于 amount，必有一行非 0。
             case "atomicApplyCashInflow" -> {
                 var r = (UserMapper.CashInflow) ret;
                 BigDecimal paidInterest = (BigDecimal) args[1];
                 BigDecimal paidPrincipal = (BigDecimal) args[2];
                 BigDecimal credited = (BigDecimal) args[3];
-                yield List.of(new Row(LOAN_INTEREST, paidInterest.negate(), r.marginInterestAccrued()),
-                              new Row(LOAN_PRINCIPAL, paidPrincipal.negate(), r.marginLoanPrincipal()),
-                              new Row(BALANCE, credited, r.balance()));
+                yield Stream.of(new Row(LOAN_INTEREST, paidInterest.negate(), r.marginInterestAccrued()),
+                                new Row(LOAN_PRINCIPAL, paidPrincipal.negate(), r.marginLoanPrincipal()),
+                                new Row(BALANCE, credited, r.balance()))
+                        .filter(row -> row.delta().signum() != 0)
+                        .toList();
             }
 
             // 名字进了 HANDLED_METHODS 却没写 case：静默返空就是钱动了账不记，必须炸

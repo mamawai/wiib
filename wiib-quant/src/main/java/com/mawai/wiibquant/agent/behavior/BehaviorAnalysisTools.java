@@ -28,7 +28,7 @@ public class BehaviorAnalysisTools {
         return fetch("查询用户基础信息", userId, "user-profile");
     }
 
-    @Tool(description = "获取用户实时资产概览：总资产、持仓市值、待结算、杠杆负债、盈亏等（精确计算，含实时价格）")
+    @Tool(description = "获取用户实时资产概览：总资产、持仓市值、杠杆负债、盈亏等（精确计算，含实时价格）")
     public String getPortfolioSummary(@ToolParam(description = "用户ID") Long userId) {
         return fetch("计算实时资产概览", userId, "portfolio-summary");
     }

@@ -7,7 +7,6 @@ export interface User {
   gameBalance: number;
   frozenBalance: number;
   positionMarketValue: number;
-  pendingSettlement: number;
   marginLoanPrincipal: number;
   marginInterestAccrued: number;
   bankrupt: boolean;

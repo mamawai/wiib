@@ -311,9 +311,6 @@ public class AssetSnapshotServiceImpl implements AssetSnapshotService {
         BigDecimal cryptoProfit = cryptoSpotProfit.add(bucket(futFloating, "crypto")).add(bucket(futRealized, "crypto"));
         BigDecimal commodityProfit = commoditySpotProfit.add(bucket(futFloating, "commodity")).add(bucket(futRealized, "commodity"));
 
-        // crypto待结算（老股 T+1 已退）
-        BigDecimal pendingSettlement = cryptoOrderMapper.sumSettlingAmount(userId);
-
         BigDecimal predictionProfit = predictionBetMapper.sumRealizedProfit(userId);
 
         BigDecimal gameProfit = minesGameMapper.sumNetProfit(userId)
@@ -331,7 +328,6 @@ public class AssetSnapshotServiceImpl implements AssetSnapshotService {
                 .add(frozenBalance)
                 .add(gameBalance)
                 .add(cryptoMarketValue)
-                .add(pendingSettlement)
                 .add(futuresValue)
                 .add(predictionValue)
                 .subtract(marginLoan)

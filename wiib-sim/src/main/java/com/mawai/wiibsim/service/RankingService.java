@@ -93,10 +93,7 @@ public class RankingService {
         Map<String, BigDecimal> cryptoPriceMap = cryptoPositionService.fetchCryptoPriceMap();
         Map<String, BigDecimal> futuresMarkPriceMap = buildFuturesMarkPriceMap(allFuturesPositions);
 
-        // ────── 3. 待结算金额按用户聚合（crypto settling；老股 T+1 已退） ──────
-        Map<Long, BigDecimal> cryptoSettlingMap = toUserAmountMap(cryptoOrderMapper.sumAllSettlingAmounts());
-
-        // 预测持仓可变现价值(bid×contracts)，与资产页/快照/破产判定同口径
+        // ────── 3. 预测持仓可变现价值(bid×contracts)，与资产页/快照/破产判定同口径 ──────
         Map<Long, List<PredictionBet>> activeBetMap = predictionBetMapper.selectList(
                         new LambdaQueryWrapper<PredictionBet>().eq(PredictionBet::getStatus, "ACTIVE")).stream()
                 .collect(Collectors.groupingBy(PredictionBet::getUserId));
@@ -107,7 +104,7 @@ public class RankingService {
         Map<Long, BigDecimal> futuresFundingFeeMap = toUserAmountMap(futuresPositionMapper.sumFundingFeeTotalAll());
         Map<Long, BigDecimal> predictionRealizedMap = toUserAmountMap(predictionBetMapper.sumRealizedProfitAfterBuyFeeAll());
         Map<Long, BigDecimal> cryptoBuyMap = toUserAmountMap(cryptoOrderMapper.sumBuyFilledAmountAll());
-        Map<Long, BigDecimal> cryptoSellMap = toUserAmountMap(cryptoOrderMapper.sumSellFilledOrSettlingAmountAll());
+        Map<Long, BigDecimal> cryptoSellMap = toUserAmountMap(cryptoOrderMapper.sumSellFilledAmountAll());
         Map<Long, BigDecimal> cryptoDiscountMap = toUserAmountMap(cryptoOrderMapper.sumBuyDiscountAll());
 
         // ────── 5. 逐用户聚合 ──────
@@ -123,11 +120,10 @@ public class RankingService {
             BigDecimal cryptoMarketValue = cryptoMarketValue(cryptoPositionMap.get(uid), cryptoPriceMap);
             FuturesPnL futures = futuresPnL(futuresPositionMap.get(uid), futuresMarkPriceMap);
 
-            BigDecimal pendingSettlement = nz(cryptoSettlingMap.get(uid));
             BigDecimal predictionValue = assetValuationService.predictionMarketValue(activeBetMap.get(uid), predictionBidCache);
 
             BigDecimal totalAssets = balance.add(frozen).add(nz(user.getGameBalance()))
-                    .add(cryptoMarketValue).add(pendingSettlement)
+                    .add(cryptoMarketValue)
                     .add(futures.value()).add(predictionValue)
                     .subtract(loanPrincipal).subtract(loanInterest);
 

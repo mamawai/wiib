@@ -78,7 +78,7 @@ public class BuffServiceImpl extends ServiceImpl<UserBuffMapper, UserBuff> imple
     // 只有手工 new 的无参实例才是 true），别把两件事当成一个结论。
     //
     // 覆盖情况别记混：@Transactional 这半边，本方法在 LedgerProxyRealRunTest 那条反射清单里，被钉住；
-    // @Ledger 这半边真跑打的是同形态的 doSettle，不是本方法——本方法只有 LedgerPlacementTest
+    // @Ledger 这半边真跑打的是同形态的 doCancelOrder，不是本方法——本方法只有 LedgerPlacementTest
     // 的可见性守卫。想让本方法的派奖语义也有真跑覆盖，得先解决 BuffDrawUtil.drawBuff() 随机
     // （抽不中 CASH 就不动钱），那是另一件事。
     @Transactional(rollbackFor = Exception.class)

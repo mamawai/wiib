@@ -15,7 +15,6 @@ import org.springframework.stereotype.Service;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.util.List;
-import java.util.Set;
 
 /**
  * 账户重置：清空全部交易与游戏数据，账户回到初始状态。
@@ -29,7 +28,6 @@ import java.util.Set;
 @RequiredArgsConstructor
 public class AccountResetService {
 
-    private static final String SETTLE_ZSET_KEY = "crypto:settle:pending";
     private static final String LIMIT_BUY_PREFIX = "crypto:limit:buy:";
     private static final String LIMIT_SELL_PREFIX = "crypto:limit:sell:";
     private static final String RESET_LOCK_PREFIX = "user:reset:";
@@ -96,7 +94,7 @@ public class AccountResetService {
         log.info("[AccountReset] 账户已重置 userId={} 清理仓位数={}", userId, openPositions.size());
     }
 
-    /** 清掉本用户挂在 Redis 上的三类触发索引：合约 LIQ/SL/TP、现货限价单、待结算队列 */
+    /** 清掉本用户挂在 Redis 上的两类触发索引：合约 LIQ/SL/TP、现货限价单 */
     private void unregisterIndexes(long userId, List<FuturesPosition> openPositions) {
         for (FuturesPosition p : openPositions) {
             indexService.unregisterAll(p);
@@ -109,15 +107,6 @@ public class AccountResetService {
         for (CryptoOrder o : pending) {
             String prefix = "BUY".equals(o.getOrderSide()) ? LIMIT_BUY_PREFIX : LIMIT_SELL_PREFIX;
             redis.opsForZSet().remove(prefix + o.getSymbol(), String.valueOf(o.getId()));
-        }
-
-        // member 格式是 "userId:orderId:amount"（见 CryptoOrderServiceImpl 的拼接与 split(":", 3)），
-        // userId 在最前面，必须带冒号做前缀匹配——否则 userId=7 会误伤 77、700
-        Set<String> settling = redis.opsForZSet().range(SETTLE_ZSET_KEY, 0, -1);
-        if (settling != null) {
-            String prefix = userId + ":";
-            settling.stream().filter(m -> m.startsWith(prefix))
-                    .forEach(m -> redis.opsForZSet().remove(SETTLE_ZSET_KEY, m));
         }
 
         // 进行中的牌局。库表行被 purge 删了、游戏钱包也归零了，这一局要是留着，

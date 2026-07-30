@@ -27,10 +27,9 @@ interface Props {
   futuresRows?: FuturesRow[];
   balance: number;
   gameBalance?: number;
-  pendingSettlement?: number;
 }
 
-export function PortfolioChart({ cryptoPositions = [], bstockRows = [], futuresRows = [], balance, gameBalance = 0, pendingSettlement = 0 }: Props) {
+export function PortfolioChart({ cryptoPositions = [], bstockRows = [], futuresRows = [], balance, gameBalance = 0 }: Props) {
   const chartRef = useRef<HTMLDivElement>(null);
   const isDark = useIsDark();
 
@@ -67,8 +66,7 @@ export function PortfolioChart({ cryptoPositions = [], bstockRows = [], futuresR
           };
         }),
       { name: '余额钱包', value: balance, itemStyle: { color: '#22c55e' } },
-      ...(gameBalance > 0 ? [{ name: '游戏钱包', value: gameBalance, itemStyle: { color: '#d946ef' } }] : []),
-      ...(pendingSettlement > 0 ? [{ name: '待结算', value: pendingSettlement, itemStyle: { color: '#a855f7' } }] : [])
+      ...(gameBalance > 0 ? [{ name: '游戏钱包', value: gameBalance, itemStyle: { color: '#d946ef' } }] : [])
     ];
 
     const textColor = isDark ? '#878b96' : '#71737b'; // muted-foreground token
@@ -142,7 +140,7 @@ export function PortfolioChart({ cryptoPositions = [], bstockRows = [], futuresR
       window.removeEventListener('resize', onResize);
       chart.dispose();
     };
-  }, [cryptoPositions, bstockRows, futuresRows, balance, gameBalance, pendingSettlement, isDark]);
+  }, [cryptoPositions, bstockRows, futuresRows, balance, gameBalance, isDark]);
 
   return <div ref={chartRef} className="w-full h-56 sm:h-64 transition-colors duration-300" />;
 }

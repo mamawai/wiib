@@ -14,14 +14,6 @@ import java.util.Map;
 @Mapper
 public interface CryptoOrderMapper extends BaseMapper<CryptoOrder> {
 
-    @Select("SELECT COALESCE(SUM(filled_amount - commission), 0) FROM crypto_order " +
-            "WHERE user_id = #{userId} AND status = 'SETTLING'")
-    BigDecimal sumSettlingAmount(@Param("userId") Long userId);
-
-    @Select("SELECT user_id, COALESCE(SUM(filled_amount - commission), 0) AS amount " +
-            "FROM crypto_order WHERE status = 'SETTLING' GROUP BY user_id")
-    List<Map<String, Object>> sumAllSettlingAmounts();
-
     @Update("UPDATE crypto_order SET status = #{newStatus}, updated_at = NOW() " +
             "WHERE id = #{orderId} AND status = #{expectedStatus}")
     int casUpdateStatus(@Param("orderId") Long orderId,
@@ -41,14 +33,6 @@ public interface CryptoOrderMapper extends BaseMapper<CryptoOrder> {
                           @Param("filledPrice") BigDecimal filledPrice,
                           @Param("filledAmount") BigDecimal filledAmount,
                           @Param("commission") BigDecimal commission);
-
-    @Update("UPDATE crypto_order SET status = 'SETTLING', filled_price = #{filledPrice}, " +
-            "filled_amount = #{filledAmount}, commission = #{commission}, updated_at = NOW() " +
-            "WHERE id = #{orderId} AND status = 'TRIGGERED'")
-    int casUpdateToSettling(@Param("orderId") Long orderId,
-                            @Param("filledPrice") BigDecimal filledPrice,
-                            @Param("filledAmount") BigDecimal filledAmount,
-                            @Param("commission") BigDecimal commission);
 
     @Update("UPDATE crypto_order SET status = 'CANCELLED', updated_at = NOW() " +
             "WHERE user_id = #{userId} AND status IN ('PENDING', 'TRIGGERED')")
@@ -80,10 +64,10 @@ public interface CryptoOrderMapper extends BaseMapper<CryptoOrder> {
             "FROM crypto_order WHERE order_side = 'BUY' AND status = 'FILLED' GROUP BY user_id")
     List<Map<String, Object>> sumBuyFilledAmountAll();
 
-    /** 排行榜交易盈利：卖出已成交或待到账都算已脱手现金流，避免SETTLING窗口少算 */
+    /** 排行榜交易盈利：全部用户的现货卖出总收入（已扣手续费） */
     @Select("SELECT user_id, COALESCE(SUM(filled_amount - COALESCE(commission, 0)), 0) AS amount " +
-            "FROM crypto_order WHERE order_side = 'SELL' AND status IN ('FILLED', 'SETTLING') GROUP BY user_id")
-    List<Map<String, Object>> sumSellFilledOrSettlingAmountAll();
+            "FROM crypto_order WHERE order_side = 'SELL' AND status = 'FILLED' GROUP BY user_id")
+    List<Map<String, Object>> sumSellFilledAmountAll();
 
     /** 排行榜交易盈利：从历史买单反推优惠券节省金额，避免持仓清零后折扣记录丢失 */
     @Select("""
