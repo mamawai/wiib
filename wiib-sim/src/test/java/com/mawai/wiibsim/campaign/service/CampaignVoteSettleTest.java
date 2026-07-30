@@ -11,12 +11,14 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.tuple;
@@ -53,6 +55,11 @@ class CampaignVoteSettleTest {
     /** 活动首日，poolOf 的起算点 */
     private static final LocalDate DAY1 = LocalDate.of(2026, 8, 3);
     private static final LocalDate DAY2 = LocalDate.of(2026, 8, 4);
+    private static final LocalDate DAY3 = LocalDate.of(2026, 8, 5);
+
+    /** 活动 SGT [08-03 00:00, 08-17 00:00) 换成 UTC 是 [08-02 16:00, 08-16 16:00)，两端各有半天溢出 */
+    private static final LocalDate FIRST_UTC_VOTE_DAY = LocalDate.of(2026, 8, 2);
+    private static final LocalDate LAST_UTC_VOTE_DAY = LocalDate.of(2026, 8, 16);
 
     private static final String BTC = CampaignVote.SYMBOL_BTC;
     private static final String GOLD = CampaignVote.SYMBOL_GOLD;
@@ -150,7 +157,48 @@ class CampaignVoteSettleTest {
                         tuple(goldUp.getId(), CampaignVote.WIN, "6.00"));
     }
 
+    /**
+     * 该标的这天压根没开市（黄金的周末）：它的票全判 DEFERRED、0 分，
+     * 而<b>另一个标的在同一次结算里照常发分</b> —— 这是本条用例的要害。
+     * <p>
+     * 【不核对 openTime 会怎样】Binance 回的是 endTime <b>之前</b>的最后几根，不是"这天的"。
+     * 黄金周六没开市时最后一根是周五的，照着算就成了"拿周五的涨跌判周六"，
+     * 而周日再结一次还是那根周五 —— 同一次行情让看涨的人赢两回。
+     * 这里黄金给的正是"上一个交易日 100→110（涨）"，不核对 openTime 的话
+     * goldUp 会变成赢票，分母也从 1 变 2，四行断言一起红。
+     * <p>
+     * 【为什么是 DEFERRED 而不是 null】没开市是市场的真实状态，不是"我没拿到数据"。
+     * 返 null 的话整天都不结算，BTC 那两张票会被黄金的周末一直拖着发不出分。
+     */
+    @Test
+    void 该日无日线的标的判顺延另一标的照常结算() {
+        upDay(BTC);
+        closedOn(GOLD, Set.of(DAY1), "100", "110");
+
+        CampaignVote btcWin = vote(1L, BTC, CampaignVote.UP);
+        CampaignVote btcLose = vote(2L, BTC, CampaignVote.DOWN);
+        CampaignVote goldUp = vote(3L, GOLD, CampaignVote.UP);
+        CampaignVote goldDown = vote(4L, GOLD, CampaignVote.DOWN);
+
+        unsettled(DAY1, List.of(btcWin, btcLose, goldUp, goldDown));
+        service.settleDay(DAY1);
+
+        assertThat(settledRows()).extracting(Settled::id, Settled::result, Settled::score)
+                .containsExactlyInAnyOrder(
+                        // BTC 只有一张赢票，独吞整池 100 → 拿到封顶的 6.00（分母是 1，黄金那两张没进来）
+                        tuple(btcWin.getId(), CampaignVote.WIN, "6.00"),
+                        tuple(btcLose.getId(), CampaignVote.LOSE, "0"),
+                        tuple(goldUp.getId(), CampaignVote.DEFERRED, "0"),
+                        tuple(goldDown.getId(), CampaignVote.DEFERRED, "0"));
+    }
+
     // ==================== 拿不到价 ====================
+
+    /*
+     * 下面三条是 DEFERRED 的对照组：拿不到数据时必须"整天一行都不写"，
+     * 不能顺手退化成"全判 DEFERRED"。两者一旦合并，一次网络抖动就把全天的票判成平盘落库，
+     * 而 CAS 让这事再也纠不回来。
+     */
 
     /**
      * 取行情抛异常：整天一行都不写 —— 连价拿得到的那个标的的票也不许结。
@@ -175,7 +223,7 @@ class CampaignVoteSettleTest {
     void 日线不足两根时整天一行都不写() {
         upDay(BTC);
         when(binance.getFuturesKlinesLight(eq(GOLD), any(), anyInt(), anyLong()))
-                .thenReturn(klines("100"));
+                .thenReturn(klines(DAY1, "100"));
 
         unsettled(DAY1, List.of(vote(1L, BTC, CampaignVote.UP), vote(2L, GOLD, CampaignVote.UP)));
         service.settleDay(DAY1);
@@ -268,6 +316,103 @@ class CampaignVoteSettleTest {
         assertThat(both).hasSize(80);
         assertThat(both.subList(40, 80)).as("次日：池 200 ÷ 40 票，首日那 100 顺延了过来")
                 .allSatisfy(r -> assertThat(r.score()).isEqualTo("5.00"));
+    }
+
+    /**
+     * 休市那天没发出去的池子，一分不少地进次日；次日发光了，第三日就没得顺延。
+     * <p>
+     * 这里把 {@code sumAllScore} 换成"按真发出去的分现算"，与真库那条
+     * {@code SUM(COALESCE(score,0))} 同口径 —— 顺延不是某一列存下来的，是减出来的，
+     * 用活的累计值走三天才看得出这一点。
+     * <pre>
+     *   08-03 黄金休市，当天只有黄金票 → 一分不发，上限 100 原封不动
+     *   08-04 上限 200 − 已发 0   = 池 200 ÷ 40 票 = 每票 5.00   ← 首日那 100 顺延过来了
+     *   08-05 上限 300 − 已发 200 = 池 100 ÷ 40 票 = 每票 2.50   ← 没得顺延就掉回来
+     * </pre>
+     */
+    @Test
+    void 休市那天没发出去的池子顺延到次日() {
+        BigDecimal[] spent = {BigDecimal.ZERO};
+        when(voteMapper.settle(anyLong(), any(), any())).thenAnswer(inv -> {
+            spent[0] = spent[0].add(inv.getArgument(2));
+            return 1;
+        });
+        when(voteMapper.sumAllScore(CAMPAIGN_ID)).thenAnswer(inv -> spent[0]);
+
+        upDay(BTC);
+        closedOn(GOLD, Set.of(DAY1), "100", "110");   // 黄金只在活动首日休市
+
+        List<CampaignVote> day1 = List.of(vote(1L, GOLD, CampaignVote.UP),
+                vote(2L, GOLD, CampaignVote.DOWN));
+        List<CampaignVote> day2 = new ArrayList<>();
+        List<CampaignVote> day3 = new ArrayList<>();
+        for (long u = 1; u <= 40; u++) day2.add(vote(u, BTC, CampaignVote.UP));
+        for (long u = 1; u <= 40; u++) day3.add(vote(u, BTC, CampaignVote.UP));
+        unsettled(DAY1, day1);
+        unsettled(DAY2, day2);
+        unsettled(DAY3, day3);
+
+        service.settleDay(DAY1);
+        assertThat(settledRows()).as("黄金休市：两张票都判顺延").hasSize(2)
+                .allSatisfy(r -> {
+                    assertThat(r.result()).isEqualTo(CampaignVote.DEFERRED);
+                    assertThat(r.score()).isEqualTo("0");
+                });
+        assertThat(spent[0]).as("首日一分都没发出去").isEqualByComparingTo("0");
+
+        service.settleDay(DAY2);
+        assertThat(settledRows().subList(2, 42))
+                .as("次日池 200：首日那 100 顺延了过来").hasSize(40)
+                .allSatisfy(r -> assertThat(r.score()).isEqualTo("5.00"));
+
+        service.settleDay(DAY3);
+        assertThat(settledRows().subList(42, 82))
+                .as("第三日池 100：上一日发光了，没得顺延").hasSize(40)
+                .allSatisfy(r -> assertThat(r.score()).isEqualTo("2.50"));
+    }
+
+    /**
+     * 活动 SGT 08-03 00:00 开赛 = UTC 08-02 16:00，所以第一个能投票的 UTC 日是 <b>08-02</b>
+     * ——比 start_at 那天还早一天。它算出 days=0，靠 {@code Math.max(days,1)} 抬成 1，
+     * 上限仍是 100，那 8 小时里投的票照常有分可拿。去掉那个 max，这 40 张票全发 0.00。
+     */
+    @Test
+    void 首个UTC投票日的池子上限被抬到一天份() {
+        upDay(BTC);
+        downDay(GOLD);
+
+        List<CampaignVote> votes = new ArrayList<>();
+        for (long u = 1; u <= 40; u++) votes.add(vote(u, BTC, CampaignVote.UP));
+        unsettled(FIRST_UTC_VOTE_DAY, votes);
+
+        service.settleDay(FIRST_UTC_VOTE_DAY);
+
+        assertThat(settledRows()).as("池 100 ÷ 40 票").hasSize(40)
+                .allSatisfy(r -> assertThat(r.score()).isEqualTo("2.50"));
+    }
+
+    /**
+     * 最后一个能投票的 UTC 日是 08-16（活动 SGT 08-17 00:00 收摊 = UTC 08-16 16:00）。
+     * 它算出 days=14 → 累计上限正好 1400 = 14 天 × 100，不多不少。
+     * <p>
+     * 【为什么用 1394 这个数】剩 6.00 分给 40 张赢票，每票 0.15。
+     * 上限要是错算成 1500（比如按"15 个 UTC 投票日各一份"算），剩的就是 106、每票 2.65 ——
+     * 差得足够远，一眼分得开。
+     */
+    @Test
+    void 末个UTC投票日的累计上限正好是十四天份() {
+        upDay(BTC);
+        downDay(GOLD);
+        when(voteMapper.sumAllScore(CAMPAIGN_ID)).thenReturn(new BigDecimal("1394.00"));
+
+        List<CampaignVote> votes = new ArrayList<>();
+        for (long u = 1; u <= 40; u++) votes.add(vote(u, BTC, CampaignVote.UP));
+        unsettled(LAST_UTC_VOTE_DAY, votes);
+
+        service.settleDay(LAST_UTC_VOTE_DAY);
+
+        assertThat(settledRows()).as("池 = 1400 − 1394 = 6.00，÷ 40 票").hasSize(40)
+                .allSatisfy(r -> assertThat(r.score()).isEqualTo("0.15"));
     }
 
     // ==================== 取价的边界 ====================
@@ -371,39 +516,70 @@ class CampaignVoteSettleTest {
     }
 
     private void upDay(String symbol) {
-        stubKlines(symbol, "100", "110");
+        tradesEveryDay(symbol, "100", "110");
     }
 
     private void downDay(String symbol) {
-        stubKlines(symbol, "100", "90");
+        tradesEveryDay(symbol, "100", "90");
     }
 
     private void flatDay(String symbol) {
-        stubKlines(symbol, "100", "100");
-    }
-
-    /** 首行是根用不着的旧日线：实现必须取<b>最后两根</b>，取头两根的话涨跌就反了 */
-    private void stubKlines(String symbol, String prevClose, String close) {
-        when(binance.getFuturesKlinesLight(eq(symbol), eq("1d"), anyInt(), anyLong()))
-                .thenReturn(klines("999", prevClose, close));
+        tradesEveryDay(symbol, "100", "100");
     }
 
     /**
-     * 仿 {@code getFuturesKlinesLight} 的返回：每行 8 个元素、收盘价在下标 4。
-     * open/high/low 填成与 close 无关的常量 —— 实现读错下标的话，各行就一模一样，涨跌塌成平盘。
+     * 仿 24×7 品种（BTC）：请求哪个 UTC 日，最后一根日线的 openTime 就是那一日 0 点。
+     * <p>
+     * 【为什么按 endTime 现算而不是回定值】Binance 返回的是 endTime <b>之前</b>的最后几根，
+     * 是不是"请求的那天"得看那天开没开市 —— 这个 stub 就照这个语义写，
+     * 同一个 stub 才能服务同一条用例里结算的好几天。
      */
-    private static String klines(String... closes) {
+    private void tradesEveryDay(String symbol, String prevClose, String close) {
+        when(binance.getFuturesKlinesLight(eq(symbol), eq("1d"), anyInt(), anyLong()))
+                .thenAnswer(inv -> klines(utcDayOf(inv.getArgument(3)), "999", prevClose, close));
+    }
+
+    /**
+     * 仿非 24 小时品种休市（黄金的周末）：closedDays 那几天没有日线，
+     * 返回的最后一根停在前一天 —— 也就是"上一个交易日"。
+     */
+    private void closedOn(String symbol, Set<LocalDate> closedDays, String prevClose, String close) {
+        when(binance.getFuturesKlinesLight(eq(symbol), eq("1d"), anyInt(), anyLong()))
+                .thenAnswer(inv -> {
+                    LocalDate asked = utcDayOf(inv.getArgument(3));
+                    LocalDate last = closedDays.contains(asked) ? asked.minusDays(1) : asked;
+                    return klines(last, "999", prevClose, close);
+                });
+    }
+
+    private static LocalDate utcDayOf(long epochMs) {
+        return Instant.ofEpochMilli(epochMs).atZone(ZoneOffset.UTC).toLocalDate();
+    }
+
+    private static long utcStartMs(LocalDate day) {
+        return day.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli();
+    }
+
+    /**
+     * 仿 {@code getFuturesKlinesLight} 的返回：每行 8 个元素、openTime 在下标 0、收盘价在下标 4。
+     * 最后一根落在 lastDay，往前每根退一天；首行是根用不着的旧日线 ——
+     * 实现必须取<b>最后两根</b>，取头两根的话涨跌就反了。
+     * <p>
+     * open/high/low 填成与 close 无关的常量：实现读错收盘价下标的话，各行就一模一样，涨跌塌成平盘。
+     */
+    private static String klines(LocalDate lastDay, String... closes) {
         JSONArray rows = new JSONArray();
         for (int i = 0; i < closes.length; i++) {
+            LocalDate day = lastDay.minusDays(closes.length - 1L - i);
             JSONArray r = new JSONArray();
-            r.add(1_000L * i);        // 0 openTime
-            r.add("1");               // 1 open
-            r.add("99999");           // 2 high
-            r.add("0.01");            // 3 low
-            r.add(closes[i]);         // 4 close ← 唯一被读的位
-            r.add("0");               // 5 volume
-            r.add(1_000L * i + 999);  // 6 closeTime
-            r.add("0");               // 7 quoteVolume
+            r.add(utcStartMs(day));                    // 0 openTime ← 用来核对"是不是我要的那天"
+            r.add("1");                                // 1 open
+            r.add("99999");                            // 2 high
+            r.add("0.01");                             // 3 low
+            r.add(closes[i]);                          // 4 close ← 判涨跌的那位
+            r.add("0");                                // 5 volume
+            r.add(utcStartMs(day.plusDays(1)) - 1);    // 6 closeTime
+            r.add("0");                                // 7 quoteVolume
             rows.add(r);
         }
         return rows.toJSONString();

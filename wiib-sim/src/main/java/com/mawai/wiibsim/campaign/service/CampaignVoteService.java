@@ -177,7 +177,31 @@ public class CampaignVoteService {
         log.info("活动投票结算完成 {}：池={} 赢家={}人 顺延={}", utcDay, pool, winners.size(), tally.carryOver());
     }
 
-    /** 当日可分池 = 100 × 已过天数 − 全场已发出的分；下限 0 */
+    /**
+     * 当日可分池 = 100 × 已过天数 − 全场已发出的分；下限 0。
+     * <p>
+     * 【start_at 是本地日、utcDay 是 UTC 日，为什么不换算就直接减】口径确实不同：
+     * start_at 存的是服务器本地墙上时间（{@link CampaignService#requireRunning()} 拿
+     * {@code LocalDateTime.now()} 跟它比就是证据），容器 TZ 是 Asia/Singapore(+8)。
+     * 种子活动 [SGT 08-03 00:00, SGT 08-17 00:00) 换成 UTC 是 [08-02 16:00, 08-16 16:00)，
+     * 而投票日盖的是 UTC 日戳 —— 于是能投票的 UTC 日有 <b>15</b> 个（08-02 ~ 08-16），
+     * 比 14 天的活动多一个。看着像会多发 100，实际不会，因为本式给的不是"这天的额度"，
+     * 而是"到这天为止的累计额度 − 累计已发"，天数只抬上限、不发钱：
+     * <pre>
+     *   08-02（只有 SGT 首日 00:00-08:00 那 8 小时）days=0 → 被 max 抬成 1 → 上限 100
+     *   08-03                                     days=1            → 上限 100  ← 与 08-02 共用这 100
+     *   …
+     *   08-16（最后一个能投票的 UTC 日）           days=14           → 上限 1400 = 14 × 100
+     * </pre>
+     * 08-03 算池时 sumAllScore 已经含了 08-02 发掉的部分，所以两天加起来最多发 100；
+     * 末日上限正好 1400，一分不多、也没有剩在池里没人拿。边界只会把预算在相邻两天之间挪，
+     * 不会凭空造出预算 —— 这正是"靠反推不存状态"换来的好处。{@code Math.max(days, 1)} 是承重的：
+     * 去掉它 08-02 的上限就是 0，那 8 小时里投的票全发 0 分。
+     * <p>
+     * 【但这个"恰好没事"依赖 UTC 正偏移】若挪到负偏移时区（如 UTC-5），
+     * 活动尾巴会溢到 UTC 08-17，末日算出 days=15 → 上限 1500，真会多发 100。
+     * 迁时区的话这里得先把 start_at 按部署时区折成 UTC 日再减。
+     */
     private BigDecimal poolOf(Campaign c, LocalDate utcDay) {
         long days = ChronoUnit.DAYS.between(c.getStartAt().toLocalDate(), utcDay) + 1;
         BigDecimal entitled = ScoreRules.VOTE_DAILY_POOL.multiply(BigDecimal.valueOf(Math.max(days, 1)));
@@ -185,19 +209,44 @@ public class CampaignVoteService {
     }
 
     /**
-     * 该 UTC 日的涨跌：日线收盘 vs 前日收盘。平盘返回 DEFERRED；取不到价返回 null。
+     * 该 UTC 日的涨跌：日线收盘 vs 前日收盘。平盘、或该标的这天压根没开市，返回 DEFERRED；
+     * 取不到价返回 null。
      * <p>
      * 【为什么走 Binance 而不是库里的 kline_history】那张表只落 5m（quant 回测用），
      * 且不覆盖 XAUUSDT。Binance 的 1d K 线本身就是 UTC 日切，与投票日同一时区，边界不会错位；
      * 而且它是不变的历史数据，隔几天补结算也拿得到同样的值。
+     * <p>
+     * 【拿到的必须是"我要的那天"】Binance 返回的是 endTime <b>之前</b>的最后几根，不是"这天的"。
+     * 黄金这种非 24 小时品种当天没开市（周末）时，最后一根会是上一个交易日的 ——
+     * 照着算等于拿上一交易日的涨跌判这一天，而且周六周日会共用周五那同一根，
+     * 一次行情能让同一个方向赢两回。所以拿 openTime（下标 0，1d 线就是该 UTC 日 0 点）
+     * 跟请求日对一次，对不上就说明这天没这个标的的交易日。
+     * <p>
+     * 【DEFERRED 与 null 是两回事，别合并】
+     * DEFERRED = "这个标的这天没结果"，是市场的真实状态：该标的的票判平、不计分、不进当日分母，
+     * 而<b>另一个标的照常结算</b>（BTC 是 24×7 的，不该被黄金休市拖住）。
+     * null = "我没拿到数据"（网络挂了、返回的不是 K 线），此时哪个标的的输赢都不可信，
+     * 调用方会整天不结算、等下次任务重跑。合并这两者是对称的两种错：
+     * 把 DEFERRED 当 null，黄金一休市 BTC 的票就跟着永远发不出分；
+     * 把 null 当 DEFERRED，一次网络抖动就把全天的票判成平盘落库，CAS 之后再也纠不回来。
      */
     private String resolveOutcome(String symbol, LocalDate utcDay) {
         try {
+            long dayStartMs = utcDay.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli();
             long endMs = utcDay.plusDays(1).atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli() - 1;
             JSONArray rows = JSON.parseArray(binanceRestClient.getFuturesKlinesLight(symbol, "1d", 3, endMs));
             if (rows == null || rows.size() < 2) return null;
 
-            BigDecimal close = closeOf(rows.getJSONArray(rows.size() - 1));
+            JSONArray lastRow = rows.getJSONArray(rows.size() - 1);
+            Long openTime = openTimeOf(lastRow);
+            if (openTime == null) return null;
+            if (openTime.longValue() != dayStartMs) {
+                log.info("活动投票结算：{} {} 当日无日线（最后一根 openTime={}），该标的判顺延",
+                        symbol, utcDay, openTime);
+                return CampaignVote.DEFERRED;
+            }
+
+            BigDecimal close = closeOf(lastRow);
             BigDecimal prevClose = closeOf(rows.getJSONArray(rows.size() - 2));
             if (close == null || prevClose == null) return null;
 
@@ -224,6 +273,11 @@ public class CampaignVoteService {
      */
     private static BigDecimal closeOf(JSONArray row) {
         return (row == null || row.size() < 5) ? null : row.getBigDecimal(4);
+    }
+
+    /** openTime 在下标 0（同样是 Binance 原始下标，见 {@link #closeOf}）；1d 线的它就是该 UTC 日 0 点 */
+    private static Long openTimeOf(JSONArray row) {
+        return (row == null || row.isEmpty()) ? null : row.getLong(0);
     }
 
     /** 全场投票分：userId → 累计得分 */
