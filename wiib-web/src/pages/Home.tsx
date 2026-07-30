@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import NumberFlow from '@number-flow/react';
-import { buffApi, cryptoOrderApi, futuresApi, userApi, quantApi } from '../api';
+import { buffApi, cryptoOrderApi, futuresApi, userApi } from '../api';
 import { HomeMarketSection } from '../components/HomeMarketSection';
 import { DailyBuffModal } from '../components/DailyBuffCard';
 import { LatestTradesCard } from '../components/LatestTradesCard';
@@ -14,14 +14,17 @@ import { Button } from '../components/ui/button';
 import { useToast } from '../components/ui/use-toast';
 import { SpotlightCard } from '../components/fx/SpotlightCard';
 import { DecryptedText } from '../components/fx/DecryptedText';
-import { ArcGauge } from '../components/fx/ArcGauge';
 import { Sparkline } from '../components/fx/Sparkline';
+import { AnimNum } from '../components/fx/AnimNum';
+import { DailyGrid } from '../components/DailyGrid';
+import { DayDetailModal } from '../components/DayDetailModal';
+import { HelpTip } from '../components/HelpTip';
 import {
   RefreshCcw, Bell, Gamepad2, List, DollarSign, ArrowRight, Target, Brain, Gift,
 } from 'lucide-react';
-import type { BuffStatus, AssetSnapshot, QuantSnapshotView } from '../types';
+import type { BuffStatus, AssetSnapshot } from '../types';
 import { useUserStore } from '../stores/userStore';
-import { cn, fmtMoney } from '../lib/utils';
+import { cn, fmtDate, fmtMoney } from '../lib/utils';
 import { orderSideView } from '../lib/orderSide';
 
 const HIDE_NOTICE_KEY = 'wiib-notice-hide-date';
@@ -34,13 +37,6 @@ function greeting(): string {
   if (h < 13) return '中午好';
   if (h < 18) return '下午好';
   return '晚上好';
-}
-
-/** volLegsJson 里的单腿：percentile 可能是 0-1 或 0-100，展示前归一 */
-interface VolLeg { sigmaBps?: number; percentile?: number; tier?: string; volState?: string }
-function legPct(leg: VolLeg | undefined): number {
-  const p = leg?.percentile ?? 0;
-  return Math.max(0, Math.min(100, p <= 1 ? p * 100 : p));
 }
 
 export function Home() {
@@ -59,10 +55,12 @@ export function Home() {
   const [tradesLoadedNonce, setTradesLoadedNonce] = useState(-1);
   const tradesLoading = tradesLoadedNonce !== refreshNonce;
 
-  // 驾驶舱数据：资产曲线(30d) + 实时快照(今日盈亏) + BTC 量化快照(AI 波动画像)
+  // 驾驶舱数据：资产曲线(30d) + 实时快照(今日盈亏) + 月度网格(逐日快照)
   const [history, setHistory] = useState<AssetSnapshot[]>([]);
   const [realtime, setRealtime] = useState<AssetSnapshot | null>(null);
-  const [quantSnap, setQuantSnap] = useState<QuantSnapshotView | null>(null);
+  const [monthCells, setMonthCells] = useState<AssetSnapshot[]>([]);
+  const [gridMonth, setGridMonth] = useState(() => fmtDate().slice(0, 7));
+  const [selectedDate, setSelectedDate] = useState<string | null>(null);
 
   useEffect(() => { if (shouldShowNotice()) navigate('/intro', { replace: true }); }, [navigate]);
 
@@ -76,9 +74,15 @@ export function Home() {
     userApi.assetRealtime().then(setRealtime).catch(() => {});
   }, [ready, refreshNonce]);
 
+  // 网格按月拉：翻月就再问一次。旧月数据先留着不清，避免切月时整片格子闪白
   useEffect(() => {
-    quantApi.latestSnapshot('BTCUSDT').then(setQuantSnap).catch(() => {});
-  }, [refreshNonce]);
+    if (!ready) return;
+    let cancelled = false;
+    userApi.assetDaily(gridMonth)
+      .then(rows => { if (!cancelled) setMonthCells(rows); })
+      .catch(() => { if (!cancelled) setMonthCells([]); });
+    return () => { cancelled = true; };
+  }, [ready, gridMonth, refreshNonce]);
 
   useEffect(() => {
     Promise.all([cryptoOrderApi.live().catch(() => []), futuresApi.live().catch(() => [])])
@@ -96,9 +100,11 @@ export function Home() {
     : [];
   const todayProfit = realtime?.dailyProfit ?? null;
   const todayUp = (todayProfit ?? 0) >= 0;
-  const volLegs: Record<string, VolLeg> | null = (() => {
-    try { return quantSnap ? JSON.parse(quantSnap.volLegsJson) : null; } catch { return null; }
-  })();
+  // 切月时 monthCells 还是上个月的，先按当前月份筛一道，合计和格子才不会串月
+  const monthRows = monthCells.filter(s => s.date.slice(0, 7) === gridMonth);
+  const gridCells = monthRows.map(s => ({ date: s.date, pnl: s.dailyProfit }));
+  const monthTotal = monthRows.reduce((sum, s) => sum + s.dailyProfit, 0);
+  const selectedSnapshot = monthRows.find(s => s.date === selectedDate) ?? null;
   const dateStr = new Date().toLocaleDateString('zh-CN', { month: 'long', day: 'numeric', weekday: 'long' });
 
   return (
@@ -121,34 +127,46 @@ export function Home() {
 
           {/* ====== 驾驶舱主行：总资产曲线 + 今日盈亏/AI 画像 ====== */}
           <div className="grid lg:grid-cols-[1.7fr_1fr] gap-4 items-stretch">
-            <SpotlightCard className="p-4 flex flex-col">
+            <SpotlightCard className="p-5 flex flex-col">
               <div className="flex items-center gap-2">
-                <span className="microlabel font-semibold">总资产 · USD</span>
+                <span className="microlabel font-semibold text-xs">总资产 · USD</span>
                 <span className={cn(
-                  'ml-auto num text-[11px] font-bold px-2 py-0.5 rounded-full',
+                  'ml-auto num text-xs font-bold px-2.5 py-1 rounded-full',
                   isProfit ? 'bg-gain/10 text-gain' : 'bg-loss/10 text-loss',
                 )}>
                   {isProfit ? '▲ +' : '▼ '}{user!.profitPct.toFixed(2)}%
                 </span>
               </div>
-              <div className="mt-1.5 flex items-baseline gap-1">
-                <span className="num text-lg text-muted-foreground">$</span>
+              <div className="mt-4 flex items-baseline gap-1.5">
+                <span className="num text-2xl text-muted-foreground">$</span>
                 <NumberFlow
                   value={user!.totalAssets}
                   format={{ minimumFractionDigits: 2, maximumFractionDigits: 2 }}
-                  className="num text-3xl sm:text-4xl font-bold tracking-tight"
+                  className="num text-5xl sm:text-6xl font-bold tracking-tighter"
                 />
               </div>
-              <div className="mt-1 text-xs text-muted-foreground">
-                可用 <span className="num font-semibold text-foreground">${fmtMoney(user!.balance)}</span>
-                <span className={cn('num font-semibold ml-3', isProfit ? 'text-gain' : 'text-loss')}>
-                  {isProfit ? '+' : ''}${fmtMoney(user!.profit)}
-                </span>
-                <span className="ml-1">总盈亏</span>
+              {/* 两个次级指标拆成独立数据块：一行挤三段文字读起来费劲，也撑不住卡的高度 */}
+              <div className="mt-5 pt-4 grid grid-cols-2 gap-4 border-t border-border/50">
+                <div>
+                  <div className="microlabel font-semibold">可用余额</div>
+                  {/* 走 fmtNum 千分位不走 fmtMoney 的"万"缩写：滚动数字得逐位可比才有看头 */}
+                  <div className="num text-xl font-bold mt-1">
+                    <AnimNum value={user!.balance} prefix="$" fromZero />
+                  </div>
+                </div>
+                <div>
+                  <div className="microlabel font-semibold">总盈亏</div>
+                  {/* 负号写在 $ 前面：拿 '$'+fmtNum 拼会得到 $-1750 那种货币符号在负号后面的怪东西 */}
+                  <div className={cn('num text-xl font-bold mt-1', isProfit ? 'text-gain' : 'text-loss')}>
+                    <AnimNum value={Math.abs(user!.profit)} prefix={isProfit ? '+$' : '-$'} fromZero />
+                  </div>
+                </div>
               </div>
-              <div className="mt-3 h-20 flex-1 min-h-16">
+              <div className="mt-5 flex-1 min-h-16 max-h-40">
                 {equityCurve.length > 1 && (
                   <Sparkline
+                    /* key 随数据变 → 刷新后 path 重建，描线动画重跑一遍 */
+                    key={`${equityCurve.length}:${equityCurve[equityCurve.length - 1]}`}
                     data={equityCurve}
                     stroke={isProfit ? 'var(--color-gain)' : 'var(--color-loss)'}
                     dot={false}
@@ -177,37 +195,33 @@ export function Home() {
                 </CardContent>
               </Card>
 
+              {/* 月度盈亏网格：今天不在里头（快照只写到昨天），今天的数在上面那张卡 */}
               <Card className="flex-1">
-                <CardContent className="pt-4 pb-4 flex items-center gap-4">
-                  <ArcGauge
-                    value={quantSnap?.fragilityScore ?? 0}
-                    display={quantSnap ? undefined : '—'}
-                    label="FRAGILITY"
-                    className="w-28 shrink-0"
-                  />
-                  <div className="min-w-0 flex-1 space-y-2.5">
-                    <button
-                      onClick={() => navigate('/ai')}
-                      className="microlabel font-semibold hover:text-primary transition-colors cursor-pointer"
-                    >
-                      AI 波动画像 · BTC →
-                    </button>
-                    {volLegs ? (
-                      ['H6', 'H24'].map(h => (
-                        <div key={h}>
-                          <div className="flex items-center justify-between text-[11px]">
-                            <span className="text-muted-foreground">{h} 波动</span>
-                            <span className="num font-semibold">{volLegs[h]?.volState ?? '—'}</span>
-                          </div>
-                          <div className="h-1 rounded-full bg-secondary overflow-hidden mt-1">
-                            <div className="h-full rounded-full bg-primary transition-[width] duration-500" style={{ width: `${legPct(volLegs[h])}%` }} />
-                          </div>
-                        </div>
-                      ))
+                <CardContent className="pt-4 pb-4">
+                  <div className="flex items-baseline justify-between mb-2">
+                    <span className="microlabel font-semibold inline-flex items-center gap-1">
+                      月度盈亏
+                      <HelpTip
+                        iconClassName="w-3 h-3"
+                        text={'格子里的数来自每天 0 点的资产快照，含股票/币/合约/预测/游戏全部品类的浮盈浮亏。\n\n服务没运行的日子不会留下快照。日盈亏是拿当天快照减前一天快照算的，所以缺一天会让那天和它后一天都算不出来，格子一并空着。\n\n仅供参考，可能不全。当天的实时盈亏看上面的今日盈亏。'}
+                      />
+                    </span>
+                    {/* 整月一格都没有时给"—"不给 +0.00——0 会被读成"这个月不赚不亏" */}
+                    {monthRows.length === 0 ? (
+                      <span className="num text-xs text-muted-foreground">—</span>
                     ) : (
-                      <div className="text-[11px] text-muted-foreground">暂无量化快照</div>
+                      <span className={cn('num text-xs font-bold', monthTotal >= 0 ? 'text-gain' : 'text-loss')}>
+                        {monthTotal >= 0 ? '+' : ''}{fmtMoney(monthTotal)}
+                      </span>
                     )}
                   </div>
+                  <DailyGrid
+                    cells={gridCells}
+                    month={gridMonth}
+                    onMonthChange={setGridMonth}
+                    selectedDate={selectedDate ?? undefined}
+                    onSelectDate={setSelectedDate}
+                  />
                 </CardContent>
               </Card>
             </div>
@@ -300,6 +314,13 @@ export function Home() {
           <HomeFaq />
         </div>
       </div>
+
+      {/* 网格点某一天的下钻：当日五分类拆解 + 当天已平的合约仓位 */}
+      <DayDetailModal
+        date={selectedDate}
+        snapshot={selectedSnapshot}
+        onClose={() => setSelectedDate(null)}
+      />
 
       {/* 每日福利弹窗（快捷入口触发） */}
       {ready && (

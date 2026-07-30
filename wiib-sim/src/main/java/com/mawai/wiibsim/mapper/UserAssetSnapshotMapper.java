@@ -16,6 +16,12 @@ public interface UserAssetSnapshotMapper extends BaseMapper<UserAssetSnapshot> {
     @Select("SELECT * FROM user_asset_snapshot WHERE user_id = #{userId} AND snapshot_date >= #{startDate} ORDER BY snapshot_date ASC")
     List<UserAssetSnapshot> listByUserAndDateRange(@Param("userId") Long userId, @Param("startDate") LocalDate startDate);
 
+    @Select("SELECT * FROM user_asset_snapshot WHERE user_id = #{userId} "
+            + "AND snapshot_date BETWEEN #{start} AND #{end} ORDER BY snapshot_date ASC")
+    List<UserAssetSnapshot> listByUserAndDateBetween(@Param("userId") Long userId,
+                                                     @Param("start") LocalDate start,
+                                                     @Param("end") LocalDate end);
+
     @Select("SELECT * FROM user_asset_snapshot WHERE user_id = #{userId} AND snapshot_date = #{date}")
     UserAssetSnapshot selectByUserAndDate(@Param("userId") Long userId, @Param("date") LocalDate date);
 

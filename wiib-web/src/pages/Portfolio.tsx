@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useUserStore } from '../stores/userStore';
 import { userApi, cryptoOrderApi, cryptoApi, futuresApi, predictionApi, bstockApi } from '../api';
@@ -15,6 +15,7 @@ import { FuturesPositionsCard } from '../components/coin/FuturesPositionsCard';
 import { ProfitChart } from '../components/ProfitChart';
 import { RadarChart } from '../components/RadarChart';
 import { ProfilePublicToggle } from '../components/ProfilePublicToggle';
+import { AnimNum } from '../components/fx/AnimNum';
 import type { WalletAsset } from '../components/PortfolioWallet';
 import { cn, fmtNum } from '../lib/utils';
 import { EmptyState } from '../components/EmptyState';
@@ -47,38 +48,6 @@ interface CryptoRow extends CryptoPosition {
 interface BStockRow extends CryptoRow {
   name: string;
   ticker: string;
-}
-
-function AnimNum({ value, prefix = '', suffix = '', duration = 600 }: { value: number; prefix?: string; suffix?: string; duration?: number }) {
-  const ref = useRef<HTMLSpanElement>(null);
-  const prev = useRef(value);
-  const mounted = useRef(false);
-  useEffect(() => {
-    if (!mounted.current) {
-      mounted.current = true;
-      if (ref.current) ref.current.textContent = prefix + fmtNum(value) + suffix;
-      return;
-    }
-    const from = prev.current;
-    const to = value;
-    prev.current = to;
-    if (from === to) {
-      if (ref.current) ref.current.textContent = prefix + fmtNum(to) + suffix;
-      return;
-    }
-    const start = performance.now();
-    let raf = 0;
-    const tick = (now: number) => {
-      const t = Math.min((now - start) / duration, 1);
-      const ease = 1 - (1 - t) ** 3;
-      const v = from + (to - from) * ease;
-      if (ref.current) ref.current.textContent = prefix + fmtNum(v) + suffix;
-      if (t < 1) raf = requestAnimationFrame(tick);
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, [value, prefix, suffix, duration]);
-  return <span ref={ref} />;
 }
 
 export function Portfolio() {

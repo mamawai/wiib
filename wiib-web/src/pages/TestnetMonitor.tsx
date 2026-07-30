@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo, type ElementType, type React
 import { testnetApi } from '../api';
 import { useToast } from '../components/ui/use-toast';
 import { useUserStore } from '../stores/userStore';
-import { cn, fmtDateTime, fmtNum } from '../lib/utils';
+import { cn, fmtDate, fmtDateTime, fmtNum } from '../lib/utils';
 import { formatCoinPrice } from '../lib/coinConfig';
 import { EquityChart } from '../components/EquityChart';
 import { DailyGrid } from '../components/DailyGrid';
@@ -309,6 +309,8 @@ export function TestnetMonitor() {
   const [loading, setLoading] = useState(true);
   const [symbol, setSymbol] = useState<string>('ALL');
   const [selectedDate, setSelectedDate] = useState<string | undefined>();
+  // 网格月份受控。用户没翻过就跟着数据走（落在最新有成交的那个月），翻过就听用户的
+  const [pickedMonth, setPickedMonth] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -339,6 +341,12 @@ export function TestnetMonitor() {
   const winRate = closed.length ? (wins / closed.length) * 100 : 0;
   const fillRatePct = fill ? fill.fillRate * 100 : 0;
   const equityNow = overview?.account.marginBalance;
+
+  const gridMonth = useMemo(() => {
+    if (pickedMonth) return pickedMonth;
+    const months = daily.map((c) => c.date.slice(0, 7)).sort();
+    return months.length ? months[months.length - 1] : fmtDate().slice(0, 7);
+  }, [pickedMonth, daily]);
 
   // 选中某天的成交（东八区切日，与网格一致）
   const dayTrades = useMemo(
@@ -429,7 +437,8 @@ export function TestnetMonitor() {
       {/* 日交易网格 + 下钻 */}
       <div className="space-y-2">
         <SectionTitle icon={Layers} title="日交易网格" hint="点格子看当天成交" />
-        <DailyGrid cells={daily} selectedDate={selectedDate} onSelectDate={setSelectedDate} />
+        <DailyGrid cells={daily} month={gridMonth} onMonthChange={setPickedMonth}
+          selectedDate={selectedDate} onSelectDate={setSelectedDate} className="pt-card rounded-lg p-4" />
         {selectedDate && (
           <div className="border border-border bg-card-2 rounded-lg p-3 space-y-2">
             <div className="flex items-center justify-between">

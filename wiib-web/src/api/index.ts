@@ -69,6 +69,8 @@ export const userApi = {
   portfolio: () => api.get<unknown, User>('/user/portfolio'),
   assetHistory: (days = 30) => api.get<unknown, AssetSnapshot[]>('/user/asset-history', { params: { days } }),
   assetRealtime: () => api.get<unknown, AssetSnapshot>('/user/asset-realtime'),
+  /** 指定月份逐日快照（首页月度盈亏网格）。month 形如 2026-07；快照只写到昨天，返回里没有今天 */
+  assetDaily: (month: string) => api.get<unknown, AssetSnapshot[]>('/user/asset-daily', { params: { month } }),
   categoryAverages: (days = 30) => api.get<unknown, CategoryAverages>('/user/category-averages', { params: { days } }),
   // 重置账户：清空交易与游戏数据回到初始资金，每周一次，需逐字输入用户名确认
   resetAccount: (confirmUsername: string) =>

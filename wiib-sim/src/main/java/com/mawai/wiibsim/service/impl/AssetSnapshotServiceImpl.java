@@ -18,6 +18,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.YearMonth;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -152,6 +153,33 @@ public class AssetSnapshotServiceImpl implements AssetSnapshotService {
             UserAssetSnapshot cur = snapshots.get(i);
             if (cur.getSnapshotDate().isBefore(startDate)) continue;
             UserAssetSnapshot prev = (i > 0) ? snapshots.get(i - 1) : null;
+            result.add(toDTO(cur, prev));
+        }
+        return result;
+    }
+
+    /**
+     * 按月取逐日快照。多查月初前一天那条：月初的日盈亏得跟上月最后一天比。
+     * <p>
+     * 【只认紧挨着的前一天】快照是定时任务写的，服务停过就断档。断档处必须整天丢掉：
+     * 拿隔了几天的上一条去算差，得到的是那几天的累计；而 {@link #toDTO} 在没有前值时
+     * 会退回"当天累计盈亏"兜底（那个兜底是给资产曲线首点用的），落到网格上就是
+     * 凭空一个几万块的假绿格。宁可格子空着，也不能画一个骗人的数。
+     */
+    @Override
+    public List<AssetSnapshotDTO> getMonthly(Long userId, YearMonth month) {
+        LocalDate first = month.atDay(1);
+        List<UserAssetSnapshot> snapshots =
+                snapshotMapper.listByUserAndDateBetween(userId, first.minusDays(1), month.atEndOfMonth());
+        Map<LocalDate, UserAssetSnapshot> byDate = new HashMap<>();
+        snapshots.forEach(s -> byDate.put(s.getSnapshotDate(), s));
+
+        List<AssetSnapshotDTO> result = new ArrayList<>();
+        for (UserAssetSnapshot cur : snapshots) {
+            LocalDate date = cur.getSnapshotDate();
+            if (date.isBefore(first)) continue; // 垫脚那条只参与算差，不出现在结果里
+            UserAssetSnapshot prev = byDate.get(date.minusDays(1));
+            if (prev == null) continue;
             result.add(toDTO(cur, prev));
         }
         return result;
