@@ -17,6 +17,7 @@ import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.YearMonth;
 import java.util.List;
 
 /**
@@ -65,6 +66,13 @@ public class UserController {
     @Operation(summary = "获取用户资产历史快照(含日收益)")
     public Result<List<AssetSnapshotDTO>> getAssetHistory(@CurrentUserId Long userId, @RequestParam(defaultValue = "30") int days) {
         return Result.ok(assetSnapshotService.getHistory(userId, days));
+    }
+
+    /** 首页月度盈亏网格：一次拿一个月，翻月就再问一次，不用为了看三月去换算 days */
+    @GetMapping("/asset-daily")
+    @Operation(summary = "获取用户指定月份的逐日资产快照(含日收益)")
+    public Result<List<AssetSnapshotDTO>> getAssetDaily(@CurrentUserId Long userId, @RequestParam String month) {
+        return Result.ok(assetSnapshotService.getMonthly(userId, YearMonth.parse(month)));
     }
 
     @GetMapping("/category-averages")
