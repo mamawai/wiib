@@ -111,6 +111,15 @@ feed:
   internal:
     base-url: ${FEED_INTERNAL_BASE_URL:http://localhost:8081}
 
+# LDC 瓜分活动的分发接口。不配凭证或 enabled=false 则整个发放功能关闭，
+# 活动页照常显示积分，只是领取按钮不可用——本地开发与他人 clone 不会因缺配置起不来
+ldc:
+  base-url: ${LDC_BASE_URL:https://credit.linux.do}
+  client-id: ${LDC_CLIENT_ID:}
+  client-secret: ${LDC_CLIENT_SECRET:}
+  enabled: ${LDC_ENABLED:false}
+  claim-days: ${LDC_CLAIM_DAYS:7}
+
 ---
 # 哨兵模式(线上高可用，配合 redis-compose.yml)：.env 里 SPRING_PROFILES_ACTIVE=sentinel 启用，
 # 经哨兵发现主库、故障自动切换。生效后上面的 REDIS_HOST/PORT 被忽略，REDIS_PASSWORD/DB 照常
