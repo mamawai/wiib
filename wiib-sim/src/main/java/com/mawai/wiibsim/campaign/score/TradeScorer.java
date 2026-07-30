@@ -102,8 +102,8 @@ public class TradeScorer {
             // 门槛判的是累计投入保证金，不是仓位表那个被部分平仓减过的残值
             if (r.getInvestedMargin() == null
                     || r.getInvestedMargin().compareTo(ScoreRules.MIN_MARGIN) < 0) continue;
+            // 过了上面那关就一定 investedMargin >= 500 > 0，roi() 只在 <= 0 时给 null，这里不会为空
             BigDecimal roi = r.roi();
-            if (roi == null) continue;
 
             if (roi.compareTo(ScoreRules.ROI_50) >= 0) {
                 s50 += ScoreRules.roi50Tier(++n50);
@@ -149,17 +149,29 @@ public class TradeScorer {
         return "crypto";
     }
 
-    /** userId → (symbol → 在持市值)。缺价的标的按 0 计，不整仓丢弃 */
+    /**
+     * userId → (symbol → 在持市值)。缺价的标的按 0 计，不整仓丢弃。
+     * <p>
+     * 【缺价要留痕】按 0 计会压低该标的的整体收益率，能把一个本该达标的现货任务压到不达标 ——
+     * 那是真金白银的 LDC 差额。逐条 debug 太细看不见，故末尾按标的数汇总 warn 一条，
+     * 运营看日志能立刻知道"这轮有几个标的是瞎算的"。
+     */
     private Map<Long, Map<String, BigDecimal>> loadHeldValue() {
         Map<Long, Map<String, BigDecimal>> out = new HashMap<>();
+        Set<String> missingPrice = new HashSet<>();
         for (HeldPositionRow h : statsMapper.listHeldPositions()) {
             BigDecimal price = cacheService.getCryptoPrice(h.getSymbol());
             if (price == null) {
                 log.debug("活动积分：{} 缺现价，在持市值按 0 计", h.getSymbol());
+                missingPrice.add(h.getSymbol());
                 continue;
             }
             out.computeIfAbsent(h.getUserId(), k -> new HashMap<>())
                     .merge(h.getSymbol(), price.multiply(h.getQty()), BigDecimal::add);
+        }
+        if (!missingPrice.isEmpty()) {
+            log.warn("活动积分：{} 个标的缺现价，在持市值按 0 计，现货任务可能被低估：{}",
+                    missingPrice.size(), missingPrice);
         }
         return out;
     }
