@@ -50,7 +50,7 @@ public class CampaignScoreService {
     private final CacheService cacheService;
 
     /**
-     * 全站积分表，按最终分降序。缓存 60 秒。
+     * 全站积分表，按最终分降序。缓存 60 秒。<b>展示用</b>；发钱之前请改用 {@link #freshBoard()}。
      * <p>
      * 【为什么不落进度表】~100 人的量级不值得维护一张会写坏、会与真实数据漂移的进度表。
      * 唯一真相永远是业务表，每次现扫现算，缓存只挡住 60 秒内的重复请求。
@@ -62,14 +62,36 @@ public class CampaignScoreService {
         Campaign c = campaignService.current();
         if (c == null) return List.of();
 
-        String key = BOARD_KEY + c.getId();
-        String cached = cacheService.get(key);
+        String cached = cacheService.get(BOARD_KEY + c.getId());
         if (cached != null) {
             return JSON.parseArray(cached, CampaignScore.class);
         }
+        return computeAndCache(c);
+    }
 
+    /**
+     * 无视缓存重算一份，并把新结果写回缓存。<b>结算必须走这个，不能走 {@link #scoreBoard()}。</b>
+     * <p>
+     * 【为什么结算不能吃缓存】投票结算跑在 UTC 00:05，预测市场的 WON 也是结算时才写的 ——
+     * 最后一批分落库的那一刻，缓存里很可能躺着一份 60 秒前算的榜，它<b>不含</b>这批分。
+     * 拿它去分池子，等于按少算的权重把 LDC 发出去，而发放是 CAS 幂等的，发完就纠不回来了。
+     * 更糟的是这事完全不响：那份陈旧的榜内部是自洽的，每个数看着都对。
+     * {@link #computeBoard} 头上"活动进行中的分只是下限"那段说的就是这件事，
+     * 它撞上缓存的时刻正好是最要命的时刻。
+     * <p>
+     * 【为什么是覆写而不是先删再算】先删会留下一个"键不在"的空窗，正好落在结算这种
+     * 全站扫表的耗时操作上，期间进来的读请求会各自触发一次全表扫。直接用新结果覆盖同一个键，
+     * 失效的效果一样，还顺带让结算后用户看到的榜与真正发出去的钱是同一份。
+     */
+    public List<CampaignScore> freshBoard() {
+        Campaign c = campaignService.current();
+        if (c == null) return List.of();
+        return computeAndCache(c);
+    }
+
+    private List<CampaignScore> computeAndCache(Campaign c) {
         List<CampaignScore> board = computeBoard(c);
-        cacheService.set(key, JSON.toJSONString(board), BOARD_TTL);
+        cacheService.set(BOARD_KEY + c.getId(), JSON.toJSONString(board), BOARD_TTL);
         return board;
     }
 
@@ -95,10 +117,13 @@ public class CampaignScoreService {
             List<ScoreItem> dailyItems = daily.getOrDefault(u.getUserId(), List.of());
             BigDecimal voteScore = vote.getOrDefault(u.getUserId(), BigDecimal.ZERO);
 
-            // 罚分单独拎出来：正分与扣分分开存，出争议时能直接回答"为什么是这个分"
+            // 罚分单独拎出来：正分与扣分分开存，出争议时能直接回答"为什么是这个分"。
+            // 两路的负分都要收：今天罚分只出自交易侧，但 items 是把两路拼在一起给前端看的，
+            // 只收交易侧的话，将来日常侧一旦加一条扣分规则，明细里会多出一条总分不认的负数，
+            // 而面板解释不了那个差额。收全了这条不变量就是结构上成立的，不靠"碰巧没有"
             int tradeScore = sumPositive(tradeItems);
-            int penalty = sumNegative(tradeItems);
             int dailyScore = sumPositive(dailyItems);
+            int penalty = sumNegative(tradeItems) + sumNegative(dailyItems);
 
             BigDecimal raw = BigDecimal.valueOf(tradeScore + dailyScore + penalty).add(voteScore);
             BigDecimal finalScore = raw.max(BigDecimal.ZERO).setScale(2, RoundingMode.HALF_UP);
@@ -135,6 +160,10 @@ public class CampaignScoreService {
     /**
      * 参与 LDC 分配的权重：能领取且分数为正的人。分母只算这些人。
      * <p>
+     * <b>【结算前必须先拿一份新的榜】</b>喂进来的 board 请来自 {@link #freshBoard()}，
+     * 不要用 {@link #scoreBoard()} —— 缓存里的榜可能早于最后一批投票 / 预测结算，
+     * 按它分池子就是拿少算的权重把钱发出去，而发放是 CAS 幂等的，发完纠不回来。
+     * <p>
      * 用 LinkedHashMap 保住榜单顺序 —— 结算侧要按名次逐个发放，顺序稳定才能对着日志核账。
      */
     public Map<Long, BigDecimal> eligibleWeights(List<CampaignScore> board) {
@@ -164,6 +193,11 @@ public class CampaignScoreService {
         if (c == null) return null;
 
         List<CampaignScore> board = scoreBoard();
+        // 兜底行里的 username 与 claimable 是占位，不是事实：没上榜的人有两种，
+        // 一种是在参与名单里但一分没挣（claimable 真该是 true），另一种压根不在名单里
+        // —— 邀请码用户（linux_do_id 为 NULL）照样能登录、能调 /me，对他们 false 才是对的。
+        // 这里分不出是哪种，就取保守的那个；反正兜底行永远进不了 eligibleWeights，
+        // 这两个字段对发钱没有任何影响，前端也不该据此分支
         CampaignScore me = board.stream().filter(s -> s.userId().equals(userId)).findFirst()
                 .orElse(new CampaignScore(userId, null, false, 0, 0, BigDecimal.ZERO, 0,
                         BigDecimal.ZERO, List.of()));

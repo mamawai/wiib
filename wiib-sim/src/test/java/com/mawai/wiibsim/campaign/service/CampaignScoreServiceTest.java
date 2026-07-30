@@ -172,6 +172,30 @@ class CampaignScoreServiceTest {
                 .containsExactly("ROI50", "LIQ_CROSS");
     }
 
+    /**
+     * 日常侧的负分也要计进 penalty —— 明细里出现的每一个负数，总分都得认。
+     * <p>
+     * 【今天没有这种规则，为什么还要测】items 是把交易和日常两路拼在一起给前端看的。
+     * penalty 只收交易侧的话，将来日常侧一旦加一条扣分规则（比如"删评论倒扣"），
+     * 明细上会多出一条总分不认的负数，前端面板解释不了那个差额，而用户只会看到
+     * "上面写着 −3，下面的总分却没扣"。这条把"明细之和 == 总分"钉成结构性的，
+     * 不靠"碰巧日常侧全是正分"。
+     */
+    @Test
+    void 日常侧的负分也计进罚分() {
+        when(checkinService.scoreAll(any(Campaign.class))).thenReturn(Map.of(
+                MID, List.of(ScoreItem.of("CHECKIN", "每日签到", 6, 6),
+                        ScoreItem.of("DAILY_PENALTY", "假想的日常扣分", 1, -3))));
+
+        CampaignScore mid = pick(service.scoreBoard(), MID);
+
+        assertThat(mid.dailyScore()).as("日常正分不含那 −3").isEqualTo(6);
+        assertThat(mid.penalty()).as("日常侧的负分要收进 penalty，否则总分不认它").isEqualTo(-3);
+        assertThat(mid.finalScore())
+                .as("只收交易侧负分的话这里会是 6.00，而明细上明明挂着 −3")
+                .isEqualByComparingTo(new BigDecimal("3.00"));
+    }
+
     // ==================== 谁上榜、怎么排 ====================
 
     /** 榜单按最终分降序，同分按 userId 升序（MID=2 排在 TIE=5 前面，尽管名单里 5 在前） */
@@ -277,6 +301,20 @@ class CampaignScoreServiceTest {
         assertThat(view.startAt()).isEqualTo(START.toString());
         assertThat(view.endAt()).isEqualTo(END.toString());
         assertThat(view.voteBoard()).extracting(VoteBoard::symbol).containsExactly("BTCUSDT");
+    }
+
+    /**
+     * 「我的积分」就是榜上那一行，不是另算一遍。
+     * <p>
+     * 这是整个任务的立身之本：三个视图同源。哪天有人图省事给 myView 单独写一套查询，
+     * 这条会红 —— 而线上的表现是"我的积分 37、榜上写 36"，用户会来问，而且没法解释。
+     */
+    @Test
+    void 我的视图里的me就是榜上那一行() {
+        List<CampaignScore> board = service.scoreBoard();
+
+        assertThat(service.myView(ACE).me()).isEqualTo(pick(board, ACE));
+        assertThat(service.myView(REKT).me()).isEqualTo(pick(board, REKT));
     }
 
     /** 分数兜到 0 的人在榜上有名次，但预估是 0 —— 他不在分母里 */
@@ -395,6 +433,44 @@ class CampaignScoreServiceTest {
         verify(statsMapper, never()).listEligibleUsers();
         verify(tradeScorer, never()).scoreAll(any(), any());
         verify(cacheService, never()).set(any(), any(), any());
+    }
+
+    /**
+     * ★ 结算走的 freshBoard 无视缓存重算，而展示走的 scoreBoard 照样吃缓存 ★
+     * <p>
+     * 【这条护的是真金白银】投票结算在 UTC 00:05 落最后一批分，缓存里可能正躺着一份 60 秒前
+     * 算的榜。结算若吃到它，就是按少算的权重把 LDC 发出去，而发放是 CAS 幂等的，发完纠不回来；
+     * 且那份陈旧的榜内部自洽，每个数看着都对，出了事都查不出来。
+     * <p>
+     * 用例把缓存喂成一份"只有 ACE、999 分"的假榜（真算出来是四个人），两条路径的返回一比就分得清
+     * 谁吃了缓存谁没吃 —— 这比 verify 调用次数更能说明问题。
+     */
+    @Test
+    void 结算用的freshBoard无视缓存重算而展示路径照样吃缓存() {
+        when(cacheService.get(BOARD_KEY)).thenReturn(JSON.toJSONString(
+                List.of(score(ACE, true, new BigDecimal("999.00")))));
+
+        assertThat(service.freshBoard())
+                .as("freshBoard 必须是真算出来的四个人，不是缓存里那份")
+                .extracting(CampaignScore::userId).containsExactly(ACE, MID, TIE, REKT);
+        verify(cacheService, never()).get(BOARD_KEY);
+        verify(tradeScorer, times(1)).scoreAll(START, END);
+        // 算完把新结果写回同一个键：结算之后用户看到的榜与真正发出去的钱是同一份
+        verify(cacheService).set(eq(BOARD_KEY), any(String.class), eq(Duration.ofSeconds(60)));
+
+        assertThat(service.scoreBoard())
+                .as("展示路径不受影响，照样直接吃缓存")
+                .extracting(CampaignScore::userId).containsExactly(ACE);
+        verify(tradeScorer, times(1)).scoreAll(START, END);
+    }
+
+    /** 没有活动时 freshBoard 也是空的，不去扫库 */
+    @Test
+    void 没有活动时freshBoard也为空() {
+        when(campaignMapper.selectRunning()).thenReturn(null);
+
+        assertThat(service.freshBoard()).isEmpty();
+        verify(statsMapper, never()).listEligibleUsers();
     }
 
     // ---- 手搓行 ----

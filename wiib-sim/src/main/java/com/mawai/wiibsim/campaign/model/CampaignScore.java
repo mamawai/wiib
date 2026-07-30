@@ -8,7 +8,9 @@ import java.util.List;
  *
  * @param claimable  能否领 LDC。参与名单已按"纯数字 linux_do_id"筛过（见
  *                   {@link com.mawai.wiibsim.campaign.mapper.CampaignStatsMapper#listEligibleUsers()}），
- *                   故在现行规则下<b>恒为 true</b>；保留只作分配侧的防御闸，前端不必据此分支
+ *                   故<b>榜上的行在现行规则下恒为 true</b>；保留只作分配侧的防御闸，前端不必据此分支。
+ *                   例外只有一处：{@code CampaignScoreService.myView} 给未上榜用户造的兜底行，
+ *                   那一行的 claimable 与 username 都是占位而非事实（详见该方法内注释）
  * @param penalty    强平扣分，负数
  * @param finalScore max(0, trade + daily + vote + penalty)。个人总分下限为 0，
  *                   强平扣分不会导致负数，也就不会影响别人的分配比例
