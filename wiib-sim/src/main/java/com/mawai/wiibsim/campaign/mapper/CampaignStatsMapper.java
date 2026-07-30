@@ -3,6 +3,7 @@ package com.mawai.wiibsim.campaign.mapper;
 import com.mawai.wiibsim.campaign.model.ClosedPositionRow;
 import com.mawai.wiibsim.campaign.model.CountRow;
 import com.mawai.wiibsim.campaign.model.EligibleUserRow;
+import com.mawai.wiibsim.campaign.model.HeldPositionRow;
 import com.mawai.wiibsim.campaign.model.SpotSymbolRow;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
@@ -221,4 +222,20 @@ public interface CampaignStatsMapper {
             WHERE linux_do_id ~ '^[0-9]+$'
             """)
     List<EligibleUserRow> listEligibleUsers();
+
+    /**
+     * 全站现货在持数量。现货标的整体收益 =（卖出总额 − 买入总额 + 剩余持仓市值）÷ 买入总额，
+     * 这条提供"剩余持仓"那一项；市值在 Java 侧乘当前价（价在 Redis，SQL 拿不到）。
+     * <p>
+     * 数量取 quantity + frozen_quantity：冻结的是挂单锁住的量，仍算这个人的持仓，
+     * 与 AssetSnapshotServiceImpl:305 的口径一致。
+     */
+    @Select("""
+            SELECT user_id AS user_id,
+                   symbol  AS symbol,
+                   quantity + COALESCE(frozen_quantity, 0) AS qty
+            FROM crypto_position
+            WHERE quantity + COALESCE(frozen_quantity, 0) > 0
+            """)
+    List<HeldPositionRow> listHeldPositions();
 }
