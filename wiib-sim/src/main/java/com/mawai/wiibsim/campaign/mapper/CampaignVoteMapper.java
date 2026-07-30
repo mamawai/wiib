@@ -35,10 +35,19 @@ public interface CampaignVoteMapper extends BaseMapper<CampaignVote> {
     List<CampaignVote> listUnsettled(@Param("campaignId") Long campaignId,
                                      @Param("date") LocalDate date);
 
-    /** 全场已结算的票，算总投票分用 */
+    /**
+     * 按用户汇总投票得分，未结算的票按 0 计。
+     * <p>
+     * 【别拿它当参与名单】这里不筛 result IS NOT NULL，只投过票还没结算的人也会出一行、total=0。
+     * 总分是对的，但"出现在结果里"不等于"拿过分"。
+     */
     @Select("SELECT user_id, COALESCE(SUM(COALESCE(score, 0)), 0) AS total " +
             "FROM campaign_vote WHERE campaign_id = #{campaignId} GROUP BY user_id")
     List<Map<String, Object>> sumScoreByUser(@Param("campaignId") Long campaignId);
+
+    /** 全场已发出的投票分总额，用于反推当日可分池 */
+    @Select("SELECT COALESCE(SUM(COALESCE(score, 0)), 0) FROM campaign_vote WHERE campaign_id = #{campaignId}")
+    BigDecimal sumAllScore(@Param("campaignId") Long campaignId);
 
     /** CAS 回填结算结果：只改还没结算过的那些，重复结算不会覆盖已发的分 */
     @Update("UPDATE campaign_vote SET result = #{result}, score = #{score}, updated_at = NOW() " +

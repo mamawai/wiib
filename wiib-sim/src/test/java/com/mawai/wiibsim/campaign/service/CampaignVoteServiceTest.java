@@ -1,6 +1,7 @@
 package com.mawai.wiibsim.campaign.service;
 
 import com.mawai.wiibcommon.exception.BizException;
+import com.mawai.wiibcommon.market.BinanceRestClient;
 import com.mawai.wiibsim.campaign.entity.Campaign;
 import com.mawai.wiibsim.campaign.entity.CampaignVote;
 import com.mawai.wiibsim.campaign.mapper.CampaignMapper;
@@ -59,7 +60,10 @@ class CampaignVoteServiceTest {
     void setUp() {
         voteMapper = mock(CampaignVoteMapper.class);
         campaignMapper = mock(CampaignMapper.class);
-        service = new CampaignVoteService(voteMapper, new CampaignService(campaignMapper));
+        // 行情客户端只在结算路径上用，下票/看板一次都不该碰它 —— 给个 mock 占位即可，
+        // 结算那半边由 CampaignVoteSettleTest 单独钉
+        service = new CampaignVoteService(voteMapper, new CampaignService(campaignMapper),
+                mock(BinanceRestClient.class));
 
         // 默认给一场"此刻正开着"的活动，个别用例再按需换窗口
         running(LocalDateTime.now().minusDays(1), LocalDateTime.now().plusDays(13));
