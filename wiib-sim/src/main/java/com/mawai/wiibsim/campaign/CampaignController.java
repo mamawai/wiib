@@ -3,8 +3,11 @@ package com.mawai.wiibsim.campaign;
 import com.mawai.wiibcommon.annotation.CurrentUserId;
 import com.mawai.wiibcommon.util.Result;
 import com.mawai.wiibsim.campaign.entity.Campaign;
+import com.mawai.wiibsim.campaign.model.CampaignScore;
+import com.mawai.wiibsim.campaign.model.MyCampaignView;
 import com.mawai.wiibsim.campaign.model.VoteBoard;
 import com.mawai.wiibsim.campaign.service.CampaignCheckinService;
+import com.mawai.wiibsim.campaign.service.CampaignScoreService;
 import com.mawai.wiibsim.campaign.service.CampaignService;
 import com.mawai.wiibsim.campaign.service.CampaignVoteService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -30,6 +33,7 @@ import java.util.List;
 public class CampaignController {
 
     private final CampaignService campaignService;
+    private final CampaignScoreService scoreService;
     private final CampaignCheckinService checkinService;
     private final CampaignVoteService voteService;
 
@@ -64,5 +68,17 @@ public class CampaignController {
     @Operation(summary = "今日投票看板（双方票数 + 我的票）")
     public Result<List<VoteBoard>> voteBoard(@CurrentUserId Long userId) {
         return Result.ok(voteService.board(userId));
+    }
+
+    @GetMapping("/me")
+    @Operation(summary = "我的活动数据（积分明细 + 排名 + 预估 LDC + 今日投票）")
+    public Result<MyCampaignView> me(@CurrentUserId Long userId) {
+        return Result.ok(scoreService.myView(userId));
+    }
+
+    @GetMapping("/board")
+    @Operation(summary = "活动积分榜")
+    public Result<List<CampaignScore>> board() {
+        return Result.ok(scoreService.scoreBoard());
     }
 }
