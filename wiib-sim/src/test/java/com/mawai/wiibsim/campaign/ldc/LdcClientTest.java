@@ -164,6 +164,25 @@ class LdcClientTest {
         assertThat(hits).hasValue(1);       // 不重试
     }
 
+    /**
+     * 200 只认 data.trade_no，绝不去扫 duplicate key / 23505。
+     * <p>
+     * trade_no 是 17 位雪花数，正常流水号里就可能含 "23505" 这个子串。
+     * 判定顺序一反，这笔真发成功的钱会被判成 alreadySent()（tradeNo=null），
+     * 于是 campaign_reward 记下 SUCCESS 却没有 external_ref——
+     * 唯一对不上 LinuxDo 侧账的那笔，恰恰是真发出去了的那笔。
+     */
+    @Test
+    void 流水号里含23505仍按成功带回流水号() {
+        plan = n -> new int[]{200};
+        body = "{\"error_msg\":\"\",\"data\":{\"trade_no\":\"87597927423505256\"}}";
+
+        LdcResult r = call();
+
+        assertThat(r.success()).isTrue();
+        assertThat(r.tradeNo()).isEqualTo("87597927423505256");
+    }
+
     /** 其他 4xx 是真失败，记原因、不重试 */
     @Test
     void 收款人不存在直接失败不重试() {

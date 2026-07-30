@@ -128,16 +128,18 @@ public class LdcClient {
 
     /**
      * 判定表（设计文档 §6.3）：
-     * 200 且 trade_no 非空 → 成功；含 duplicate key / 23505 → 此前已发放，也算成功；
+     * 200 且 trade_no 非空 → 成功；非 200 且含 duplicate key / 23505 → 此前已发放，也算成功；
      * 其余 → 失败，记原文不重试。
+     * <p>
+     * 【顺序不能反，别"顺手简化"成先扫 duplicate key】那个扫描是对整个响应体做子串匹配的，
+     * 而 trade_no 是 17 位雪花数，正常流水号里本就可能含 "23505"（约 0.013%/次）。
+     * 先扫就会把一笔真发成功的判成 alreadySent()——它的 tradeNo 是 null，
+     * campaign_reward 于是记下 SUCCESS 却没有 external_ref：
+     * 唯一对不上 LinuxDo 侧账的那笔，恰恰是钱真发出去了的那笔。
+     * 幂等报错实测恒为 HTTP 400，只在非 200 分支查它不是取巧，就是接口契约本身。
      */
     private LdcResult judge(int status, String body, String outTradeNo) {
         String raw = body == null ? "" : body;
-
-        if (raw.contains("duplicate key") || raw.contains("23505")) {
-            log.info("LDC 分发 {} 命中单号幂等，此前已发放成功", outTradeNo);
-            return LdcResult.alreadySent();
-        }
 
         if (status == 200) {
             try {
@@ -152,6 +154,11 @@ public class LdcClient {
                 return LdcResult.fail("响应解析失败: " + raw);
             }
             return LdcResult.fail("HTTP 200 但没有 trade_no: " + raw);
+        }
+
+        if (raw.contains("duplicate key") || raw.contains("23505")) {
+            log.info("LDC 分发 {} 命中单号幂等，此前已发放成功", outTradeNo);
+            return LdcResult.alreadySent();
         }
 
         return LdcResult.fail("HTTP " + status + " " + raw);
