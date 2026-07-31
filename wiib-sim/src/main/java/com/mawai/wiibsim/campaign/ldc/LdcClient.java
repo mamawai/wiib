@@ -5,6 +5,7 @@ import com.alibaba.fastjson2.JSONObject;
 import com.mawai.wiibsim.campaign.LdcProperties;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -29,7 +30,7 @@ import java.util.Base64;
  */
 @Slf4j
 @RequiredArgsConstructor
-@org.springframework.stereotype.Component
+@Component
 public class LdcClient {
 
     /** 分发备注，收款人在自己的积分流水里看到的说明。写死即可，本活动只有一场 */
