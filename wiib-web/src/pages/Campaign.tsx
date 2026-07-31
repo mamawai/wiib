@@ -10,7 +10,7 @@ import { EmptyState } from '../components/EmptyState';
 import { useToast } from '../components/ui/use-toast';
 import { cn, fmtDateTime, fmtNum } from '../lib/utils';
 import {
-  Gift, CalendarCheck, Trophy, TrendingUp, TrendingDown, Check, Loader2, TriangleAlert,
+  Gift, CalendarCheck, Trophy, TrendingUp, TrendingDown, Check, Loader2, TriangleAlert, RefreshCw,
 } from 'lucide-react';
 import type {
   CampaignInfo, CampaignReward, CampaignScore, CampaignScoreItem, MyCampaignView,
@@ -152,6 +152,16 @@ function ScoreCell({ label, value }: { label: string; value: number }) {
   );
 }
 
+/**
+ * 把一次请求收成 [值, 是否失败]。
+ * <p>拉失败与"确实是空"必须分开：合成同一个 null 的话，一次 500 就变成
+ * 「当前没有进行中的活动」——活动进行中后端抖一下，页面就对着用户否认活动的存在，
+ * 而这是一个真发钱的页面。
+ */
+function tryLoad<T>(p: Promise<T>, fallback: T): Promise<[T, boolean]> {
+  return p.then(v => [v, false] as [T, boolean]).catch(() => [fallback, true]);
+}
+
 export function Campaign() {
   const { toast } = useToast();
   const { user } = useUserStore();
@@ -160,6 +170,11 @@ export function Campaign() {
   const [info, setInfo] = useState<CampaignInfo | null>(null);
   const [reward, setReward] = useState<CampaignReward | null>(null);
   const [board, setBoard] = useState<CampaignScore[]>([]);
+  // "没拉到"标记。/current 没有对应的标记位：它只用来判结算态，拉不到时 settled=false，
+  // 页面退回"结算后在这里领取"这句永远为真的话，没有说错话的空间
+  const [viewFailed, setViewFailed] = useState(false);
+  const [rewardFailed, setRewardFailed] = useState(false);
+  const [boardFailed, setBoardFailed] = useState(false);
 
   const [nonce, setNonce] = useState(0);
   // loading 由"已加载 nonce 是否追上请求 nonce"派生：在 effect 里同步 setLoading(true)
@@ -175,16 +190,21 @@ export function Campaign() {
   useEffect(() => {
     let cancelled = false;
     Promise.all([
-      campaignApi.me().catch(() => null),
-      campaignApi.current().catch(() => null),
-      campaignApi.reward().catch(() => null),
-      campaignApi.board().catch(() => [] as CampaignScore[]),
-    ]).then(([me, cur, rw, bd]) => {
+      tryLoad(campaignApi.me(), null as MyCampaignView | null),
+      tryLoad(campaignApi.current(), null as CampaignInfo | null),
+      tryLoad(campaignApi.reward(), null as CampaignReward | null),
+      tryLoad(campaignApi.board(), [] as CampaignScore[]),
+    ]).then(([[me, meErr], [cur, curErr], [rw, rwErr], [bd, bdErr]]) => {
       if (cancelled) return;
-      setView(me);
-      setInfo(cur);
-      setReward(rw);
-      setBoard(bd);
+      // 只在成功时覆盖：签到/投票之后走的是同一条刷新链路，网络抖一下不该把
+      // 已经看到的内容清成空白，更不该把"有活动"翻成"没活动"
+      if (!meErr) setView(me);
+      if (!curErr) setInfo(cur);
+      if (!rwErr) setReward(rw);
+      if (!bdErr) setBoard(bd);
+      setViewFailed(meErr);
+      setRewardFailed(rwErr);
+      setBoardFailed(bdErr);
       setLoadedNonce(nonce);
     });
     return () => { cancelled = true; };
@@ -284,20 +304,52 @@ export function Campaign() {
         </div>
       </div>
 
-      {loading ? (
+      {/* 骨架只在首屏出（loading && !view）。签到/投票之后走的是同一条刷新链路，
+          在这儿只判 loading 的话，每天必点一次的签到会把整页连同滚动位置掀掉一遍 */}
+      {loading && !view ? (
         <div className="space-y-4">
           <Skeleton className="h-24 w-full rounded-lg" />
           <Skeleton className="h-40 w-full rounded-lg" />
           <Skeleton className="h-64 w-full rounded-lg" />
         </div>
       ) : !view ? (
+        // 拉失败与"确实没有活动"必须分开说：合成一句"当前没有进行中的活动"，
+        // 活动期间后端抖一下就是对着用户否认活动的存在
         <Card>
           <CardContent className="p-0">
-            <EmptyState icon={<Gift />} text="当前没有进行中的活动，下一场开始后这里会自动亮起来" />
+            {viewFailed ? (
+              <>
+                <EmptyState icon={<TriangleAlert />} text="活动数据加载失败，请刷新重试" />
+                <div className="pb-8 flex justify-center">
+                  <Button variant="outline" size="sm" onClick={reload} disabled={loading}>
+                    {loading
+                      ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      : <RefreshCw className="w-3.5 h-3.5" />}
+                    重试
+                  </Button>
+                </div>
+              </>
+            ) : (
+              <EmptyState icon={<Gift />} text="当前没有进行中的活动，下一场开始后这里会自动亮起来" />
+            )}
           </CardContent>
         </Card>
       ) : (
         <>
+          {/* 手里有数据、但最近一次刷新没成：不清屏，明说这是上一次的结果 */}
+          {viewFailed && (
+            <div className="pt-card rounded-lg px-3 py-2 flex items-center gap-2 text-[11px]">
+              <TriangleAlert className="w-3.5 h-3.5 shrink-0 text-warning" />
+              <span className="text-muted-foreground">数据刷新失败，下面显示的是上一次的结果</span>
+              <Button variant="ghost" size="sm" className="ml-auto h-7" onClick={reload} disabled={loading}>
+                {loading
+                  ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  : <RefreshCw className="w-3.5 h-3.5" />}
+                重试
+              </Button>
+            </div>
+          )}
+
           {/* ===== 活动头 ===== */}
           <Card>
             <CardContent className="pt-4 pb-4">
@@ -357,26 +409,34 @@ export function Campaign() {
               </CardContent>
             </Card>
 
+            {/* 结算后一律以 /reward 为准：预估是除法，真实分配走最大余额法补零头，两者能差一分。
+                标题与文案也要跟着结算态走 —— 已结算又没有奖励行的人，
+                否则会在"本次结算你没有分到 LDC"正上方读到一句"预估到手 X LDC" */}
             <Card>
               <CardHeader className="pb-2">
-                <CardTitle>{reward ? '实际到手' : '预估到手'}</CardTitle>
+                <CardTitle>{reward || settled ? '实际到手' : '预估到手'}</CardTitle>
               </CardHeader>
               <CardContent className="pb-4">
-                {/* 结算后一律以 /reward 为准：预估是除法，真实分配走最大余额法补零头，两者能差一分 */}
                 <div className="flex items-baseline gap-1.5">
                   <span className="num text-3xl font-bold tracking-tighter tabular-nums text-primary">
-                    {fmtNum(reward ? reward.ldcAmount : view.estimatedLdc)}
+                    {fmtNum(reward ? reward.ldcAmount : settled ? 0 : view.estimatedLdc)}
                   </span>
                   <span className="text-sm font-bold text-muted-foreground">LDC</span>
                 </div>
                 <p className="mt-2 text-[10px] text-muted-foreground leading-relaxed">
                   {reward
                     ? '结算已完成，这是按最大余额法分到你名下的实发金额。'
-                    : '随参与人数变动，以结算为准。'}
+                    : settled
+                      ? '结算已完成，本次没有分到 LDC。'
+                      : '随参与人数变动，以结算为准。'}
                 </p>
-                <p className="mt-2 num text-[10px] text-muted-foreground">
-                  {fmtNum(view.prizePool)} × {fmtScore(view.me.finalScore)} ÷ {fmtScore(view.eligibleTotal)}
-                </p>
+                {/* 算式只在"还有得算"的时候给：没结算、还没拿到奖励行、且分母为正。
+                    不判分母的话开赛第一天全站 0 分，这里会渲染成 500.00 × 0 ÷ 0 */}
+                {!reward && !settled && view.eligibleTotal > 0 && (
+                  <p className="mt-2 num text-[10px] text-muted-foreground">
+                    {fmtNum(view.prizePool)} × {fmtScore(view.me.finalScore)} ÷ {fmtScore(view.eligibleTotal)}
+                  </p>
+                )}
               </CardContent>
             </Card>
           </div>
@@ -426,6 +486,14 @@ export function Campaign() {
                     </Button>
                   </div>
                 )
+              ) : rewardFailed ? (
+                // 没拉到奖励行 ≠ 没分到钱。这一支要是漏了，一次超时就会告诉一个真有钱的人他没分到
+                <div className="space-y-1">
+                  <div className="text-sm font-bold">奖励信息加载失败</div>
+                  <p className="text-[11px] text-muted-foreground leading-relaxed">
+                    这不代表你没有奖励，刷新页面重试即可。
+                  </p>
+                </div>
               ) : settled ? (
                 // 0.00 不落行（见 CampaignSettleService），所以真参与了也可能查不到奖励行 ——
                 // 这跟"你不在名单里"是两回事，别写成后者
@@ -448,10 +516,12 @@ export function Campaign() {
             <Card>
               <CardHeader className="pb-2"><CardTitle>每日签到</CardTitle></CardHeader>
               <CardContent className="pb-4 space-y-3">
+                {/* disabled 里带 loading：页面不再清屏了，刷新那零点几秒里 checkedToday 还是旧的 false，
+                    不锁的话手快的人能再点一次，换回一句"今天已经签到过了" */}
                 <Button
                   className="w-full"
                   variant={view.checkedToday ? 'outline' : 'default'}
-                  disabled={view.checkedToday || acting || !canAct}
+                  disabled={view.checkedToday || acting || loading || !canAct}
                   onClick={handleCheckin}
                 >
                   {acting ? <Loader2 className="w-4 h-4 animate-spin" /> : <CalendarCheck className="w-4 h-4" />}
@@ -474,14 +544,14 @@ export function Campaign() {
                       dir="UP"
                       count={v.upCount}
                       mine={v.myDirection}
-                      disabled={acting || !canAct || v.myDirection !== null}
+                      disabled={acting || loading || !canAct || v.myDirection !== null}
                       onClick={() => handleVote(v.symbol, 'UP')}
                     />
                     <VoteSide
                       dir="DOWN"
                       count={v.downCount}
                       mine={v.myDirection}
-                      disabled={acting || !canAct || v.myDirection !== null}
+                      disabled={acting || loading || !canAct || v.myDirection !== null}
                       onClick={() => handleVote(v.symbol, 'DOWN')}
                     />
                   </div>
@@ -523,7 +593,10 @@ export function Campaign() {
             </CardHeader>
             <CardContent className="p-0">
               {board.length === 0 ? (
-                <EmptyState icon={<Trophy />} text="还没有人上榜，先去挣第一分" />
+                <EmptyState
+                  icon={boardFailed ? <TriangleAlert /> : <Trophy />}
+                  text={boardFailed ? '榜单加载失败，请刷新重试' : '还没有人上榜，先去挣第一分'}
+                />
               ) : (
                 board.slice(0, 20).map((s, i) => (
                   <div
