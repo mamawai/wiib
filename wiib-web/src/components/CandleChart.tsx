@@ -350,6 +350,9 @@ const MAX_BARS = 5000;
 const SCROLL_OPTS: DeepPartial<HandleScrollOptions> =
   { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false };
 
+/** 触屏设备判定：竖屏全屏的"转横屏"提示只该出现在真能转的设备上（桌面竖屏显示器转不了） */
+const IS_TOUCH = window.matchMedia('(pointer: coarse)').matches;
+
 /** 画线工具条按钮。null=选择模式（可选中/拖拽已有图形，图表照常平移缩放） */
 const TOOL_BTNS: { k: Tool; icon: ReactNode; title: string }[] = [
   { k: null, icon: <MousePointer2 className="w-3.5 h-3.5" />, title: '选择/拖拽（Esc 取消选中，Del 删除）' },
@@ -395,6 +398,17 @@ export function CandleChart({ symbol, interval, limit = 300, visibleBars = 110, 
     attach: attachDrawings, tool, setTool, magnet, setMagnet,
     selected: hasSelection, count: drawCount, trash, textEdit, commitText, cancelText,
   } = useDrawings();
+
+  // 竖屏全屏会把 K 线纵向拉成细长条（画布 ~390×800，价格轴自动铺满高度）。
+  // Android 在 useFullscreen 里直接锁横屏；iOS 没有 lock API，只能提示用户自己转 ——
+  // matchMedia 自带监听，转过去提示自动消失，图表随既有的 ResizeObserver 重排
+  const [portrait, setPortrait] = useState(() => window.matchMedia('(orientation: portrait)').matches);
+  useEffect(() => {
+    const mq = window.matchMedia('(orientation: portrait)');
+    const onChange = (e: MediaQueryListEvent) => setPortrait(e.matches);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
 
   // 三个 span 的当前节点。读数高频刷新，走 DOM 直改而不是 setState，免得鼠标一动就整树重渲染
   const legendRefs = useCallback(() => ({
@@ -809,6 +823,13 @@ export function CandleChart({ symbol, interval, limit = 300, visibleBars = 110, 
                    background: 'rgba(16,18,24,.94)', border: '1px solid #2962ff', color: '#e6e8ee',
                    font: '600 11px/1.5 ui-monospace, Consolas, monospace',
                  }} />
+        )}
+        {/* 竖屏全屏的形状提示：Android 会被 orientation.lock 直接转过去（这条最多闪一下），
+            iOS 靠它请用户动手。转到横屏 matchMedia 翻面，提示自动消失 */}
+        {fs.active && portrait && IS_TOUCH && (
+          <div className="absolute left-1/2 top-2 -translate-x-1/2 z-[5] px-2.5 py-1 rounded-md border border-border bg-background/90 text-[11px] font-semibold text-muted-foreground pointer-events-none whitespace-nowrap">
+            旋转手机横屏查看
+          </div>
         )}
         {/* 翻历史提示（载入中 / 到底）。主图 pane 左上角是空的：叠加指标的读数条在图表外的工具条上 */}
         <div ref={hintRef} style={{

@@ -13,6 +13,8 @@ import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
 /** Safari 老前缀；类型上开个洞比到处 as any 干净 */
 interface WebkitEl extends HTMLElement { webkitRequestFullscreen?: () => Promise<void> | void; }
 interface WebkitDoc extends Document { webkitFullscreenElement?: Element | null; webkitExitFullscreen?: () => Promise<void> | void; }
+/** orientation.lock 各家支持参差（iOS 至今没有），同样开洞不 as any */
+interface OrientationLock { lock?: (o: string) => Promise<void>; unlock?: () => void; }
 
 export function useFullscreen(ref: RefObject<HTMLElement | null>) {
   const [native, setNative] = useState(false);
@@ -24,7 +26,19 @@ export function useFullscreen(ref: RefObject<HTMLElement | null>) {
   useEffect(() => {
     const sync = () => {
       const d = document as WebkitDoc;
-      setNative((d.fullscreenElement ?? d.webkitFullscreenElement) === ref.current);
+      const ours = (d.fullscreenElement ?? d.webkitFullscreenElement) === ref.current;
+      setNative(ours);
+      // 手机竖屏进原生全屏顺手锁成横屏：竖屏视口会把 K 线纵向拉成细长条，横屏才是看图的形状。
+      // lock 只在全屏态内被允许（Android Chrome 这条路）；iOS 没有 lock，静默落空，
+      // 由 CandleChart 的"旋转横屏"提示兜底。退出全屏浏览器会自动恢复方向，unlock 只是兜底
+      const so = screen.orientation as unknown as OrientationLock | undefined;
+      try {
+        if (ours && window.matchMedia('(orientation: portrait)').matches) {
+          so?.lock?.('landscape')?.catch(() => {});
+        } else if (!ours) {
+          so?.unlock?.();
+        }
+      } catch { /* 不支持就保持现状 */ }
     };
     document.addEventListener('fullscreenchange', sync);
     document.addEventListener('webkitfullscreenchange', sync);
