@@ -38,7 +38,7 @@ const TASKS: TaskDef[] = [
   { code: 'ROI50', label: '单仓位 ROI ≥ 50%', hint: '保证金 ≥ 500；前 5 笔各 +5，之后各 +1', group: '交易' },
   { code: 'ROI100', label: '单仓位 ROI ≥ 100%', hint: '保证金 ≥ 500；首笔 +15，第 2-3 笔各 +5，之后各 +1', group: '交易' },
   { code: 'GODLY', label: '单笔封神：ROI ≥ 300%', hint: '保证金 ≥ 500；一次性 +20', group: '交易' },
-  { code: 'SPOT', label: '现货标的整体收益 ≥ 10%', hint: '活动期该标的累计买入 ≥ 1000；前 3 个各 +5，之后各 +1', group: '交易' },
+  { code: 'SPOT', label: '现货标的整体收益 ≥ 10%', hint: '按币种累计（不限单笔）：活动期买入 ≥ 1000；前 3 个达标标的各 +5，之后各 +1', group: '交易' },
   { code: 'PREDICTION', label: '预测市场持有到结算且猜中', hint: '单次额度 ≥ 50；每次 +5', group: '交易' },
   { code: 'TRIPLE', label: '三市通吃', hint: '加密合约 / 黄金原油 / 美股永续 各拿下一笔 ROI ≥ 50%；一次性 +15', group: '交易' },
   { code: 'STOP_LOSS_HERO', label: '止损英雄', hint: '挂过止损并被触发；一次性 +3', group: '交易' },
@@ -664,6 +664,63 @@ export function Campaign() {
                   {g.rows.map(r => <TaskRow key={r.def.code} def={r.def} item={r.item} />)}
                 </div>
               ))}
+            </CardContent>
+          </Card>
+
+          {/* ===== 计分细则：两个收益率的口径 ===== */}
+          {/* 文案与后端同源：合约 = CampaignStatsMapper.listClosedPositions（与仓位历史页同口径），
+              现货 = TradeScorer.scoreSpot。改口径时两边一起改，别让页面变成过期承诺 */}
+          <Card>
+            <CardHeader className="pb-3"><CardTitle>收益率怎么算</CardTitle></CardHeader>
+            <CardContent className="pb-4 space-y-4 text-[11px] leading-relaxed text-muted-foreground">
+              <div className="space-y-1.5">
+                <div className="microlabel font-bold text-foreground">合约仓位 ROI</div>
+                <div className="num rounded-md bg-card-2 px-2.5 py-1.5 text-foreground">
+                  ROI = 已实现净盈亏 ÷ 累计投入保证金
+                </div>
+                <p>
+                  已实现净盈亏 = 每次平仓结出的已实现盈亏之和 − 开仓与平仓的全部手续费 − 资金费净额；
+                  累计投入保证金 = 开仓与加仓投入之和（不是部分平仓后剩下的残值）。
+                  与「仓位历史」页显示的 ROI 同一口径。
+                </p>
+                <p>
+                  仓位要<strong className="font-bold text-foreground">完全平掉</strong>（含被强平）才计入，
+                  持仓浮盈不算；部分平仓的每一段都记在整个仓位的账上，等最后一段平掉一起算。
+                  计入哪一天看完全平掉的时刻 —— 活动开始前就开着的老仓位，活动期内平掉照样算。
+                </p>
+                <p className="text-foreground/80">
+                  例：投入保证金 600 开多 BTC，先平一半赚 200，再全平赚 150，开平手续费共 20，资金费付 10
+                  → 净盈亏 = 200 + 150 − 20 − 10 = 320，ROI = 320 ÷ 600 ≈ 53.3%
+                  → 保证金门槛（600 ≥ 500）与「ROI ≥ 50%」档双双达标。
+                </p>
+              </div>
+              <div className="space-y-1.5">
+                <div className="microlabel font-bold text-foreground">现货标的整体收益率</div>
+                <div className="num rounded-md bg-card-2 px-2.5 py-1.5 text-foreground">
+                  收益率 = (卖出净得 − 买入总付 + 在持市值) ÷ 买入总付
+                </div>
+                <p>
+                  现货没有仓位概念，按<strong className="font-bold text-foreground">标的</strong>算：
+                  「活动期内累计买入 ≥ 1000」是该标的活动期内所有买单的累计，
+                  <strong className="font-bold text-foreground">不要求单笔 ≥ 1000</strong>；
+                  收益率则按该标的<strong className="font-bold text-foreground">全部历史</strong>逐项累计 ——
+                  买入总付含手续费、卖出净得已扣手续费、没卖的部分按当前价折成市值。每个达标标的只计一次。
+                </p>
+                <p>
+                  用折扣券的买单按<strong className="font-bold text-foreground">折后实付</strong>记账，两头一致：
+                  省下的钱做低了成本、会抬高收益率；但门槛进度同样按实付累计，
+                  九五折买 800 只按 760 计入「≥ 1000」，所以还需要买入 240。
+                </p>
+                <p className="text-foreground/80">
+                  例：BTC 现货历史累计买入花 2000（含手续费），累计卖出到手 1500，在持部分按现价值 750
+                  → (1500 − 2000 + 750) ÷ 2000 = 12.5% ≥ 10% 达标；
+                  若活动期内该标的买入不足 1000，则不参与判定。
+                </p>
+              </div>
+              <p>
+                成交时间一律按<strong className="font-bold text-foreground">实际成交时刻</strong>算
+                （限价单挂单早、成交晚，以成交那一刻为准）。
+              </p>
             </CardContent>
           </Card>
 
