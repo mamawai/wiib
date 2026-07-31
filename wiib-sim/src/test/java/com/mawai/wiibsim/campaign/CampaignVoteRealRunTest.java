@@ -92,7 +92,9 @@ class CampaignVoteRealRunTest {
     @Test
     void 同日同标的重复投票被唯一索引挡住换标的则放行() {
         Long campaignId = currentCampaignId();
-        LocalDate today = CampaignVoteService.utcToday();
+        // 用 votingDate()（明天）而不是 utcToday()：与真实链路落进同一个日期桶，
+        // 约束卡的是哪一列跟具体日期无关，但同桶更贴近线上的样子
+        LocalDate today = CampaignVoteService.votingDate();
 
         assertThat(voteMapper.insert(row(campaignId, today, CampaignVote.SYMBOL_BTC, CampaignVote.UP)))
                 .isEqualTo(1);
@@ -124,7 +126,9 @@ class CampaignVoteRealRunTest {
     @Test
     void 看板按真SQL统计票数并带上我的票() {
         Long campaignId = currentCampaignId();
-        LocalDate today = CampaignVoteService.utcToday();
+        // ★ 必须是 votingDate()（明天）：看板读的就是这一天。塞 utcToday() 的话
+        // 插进去的行落在另一个日期桶里，board 一条都捞不到，增量断言全成 0
+        LocalDate today = CampaignVoteService.votingDate();
 
         VoteBoard btcBefore = pick(voteService.board(userId), CampaignVote.SYMBOL_BTC);
         VoteBoard goldBefore = pick(voteService.board(userId), CampaignVote.SYMBOL_GOLD);

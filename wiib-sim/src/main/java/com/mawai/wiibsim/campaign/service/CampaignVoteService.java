@@ -18,7 +18,9 @@ import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.Instant;
 import java.time.LocalDate;
+import java.time.LocalTime;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
@@ -28,9 +30,16 @@ import java.util.*;
  * <p>
  * 【为什么固定 BTC + 黄金】两者常反向，有讨论价值；标的固定也让"明天投什么"能提前一晚开始聊。
  * <p>
- * 【为什么用 UTC 日】规则是"UTC 0 点前投票，按日线收盘 vs 前日收盘结算"，
- * 而 Binance 的 1d K 线就是 UTC 日切。投票日与结算依据必须同一个时区，否则边界那一票永远对不上。
+ * 【为什么用 UTC 日】规则是"按日线收盘 vs 前日收盘结算"，而 Binance 的 1d K 线就是 UTC 日切。
+ * 投票日与结算依据必须同一个时区，否则边界那一票永远对不上。
  * 这与签到刻意不同 —— 签到日是服务器本地日（见 {@link CampaignCheckinService}），两个口径别混。
+ * <p>
+ * <b>【投的是明天，不是今天】</b>票盖的戳是 {@code utcToday() + 1}（见 {@link #votingDate()}）。
+ * 投当天是没得玩的：结算比的是<b>当日</b>收盘 vs 前日收盘，而当日 K 线在平台自己的图上就看得见，
+ * UTC 23:55 才投的人等于照着答案填，稳赢。投明天则收票在这一天开始之前就截止了
+ * （末班车 UTC 23:55，见 {@link #requireNotLocked}），一点前瞻信息都没有，
+ * §2.3 那套"共享池反向赔率"——扎堆那边分薄、冷门那边猜对分多——才谈得上成立。
+ * 设计文档 §8 那句「让人前一晚就开始讨论明天投什么」说的正是这个玩法。
  */
 @Slf4j
 @Service
@@ -47,47 +56,105 @@ public class CampaignVoteService {
     private final CampaignService campaignService;
     private final BinanceRestClient binanceRestClient;
 
+    /** 结算锁盘窗口的两端（UTC 时刻），半开区间 [23:55, 00:05) */
+    private static final LocalTime LOCK_FROM = LocalTime.of(23, 55);
+    private static final LocalTime LOCK_UNTIL = LocalTime.of(0, 5);
+
     /** 当前 UTC 交易日 */
     public static LocalDate utcToday() {
         return LocalDate.now(ZoneOffset.UTC);
     }
 
     /**
+     * 此刻投出的票落在哪个 UTC 交易日 —— <b>明天</b>。
+     * <p>
+     * 下票与看板必须共用这一个式子：两边各写各的，看板显示的票况就不是你正要投的那天的，
+     * "我投了没"和"两边多少票"会各说各话。
+     */
+    public static LocalDate votingDate() {
+        return votingDate(Instant.now());
+    }
+
+    /** 同上，时刻由调用方给 —— 测试用它把日界钉死，不必等到真的跨 UTC 0 点 */
+    static LocalDate votingDate(Instant now) {
+        return LocalDate.ofInstant(now, ZoneOffset.UTC).plusDays(1);
+    }
+
+    /**
      * 投票。多空二选一由唯一索引 (campaign,user,date,symbol) 保证 —— 选了多就插不进空。
      */
     public void vote(Long userId, String symbol, String direction) {
+        vote(userId, symbol, direction, Instant.now());
+    }
+
+    /**
+     * 同上，时刻由调用方给。<b>只有测试该调这个重载</b>，生产走上面那个三参的。
+     * <p>
+     * 【为什么值得多这一个参数】本方法有两处行为直接由"现在几点"决定：票落在哪个 UTC 日、
+     * 以及是不是撞在锁盘窗口上。拿真时钟测的话，边界那几秒要么测不到，要么整套用例
+     * 每天有 10 分钟必红（UTC 23:55-00:05 正是 SGT 早上 07:55-08:05，人最可能跑测试的时候）。
+     * 把时刻从参数递进来比给类加 Clock 字段轻，且不牵动 Spring 的构造注入。
+     */
+    void vote(Long userId, String symbol, String direction, Instant now) {
         Campaign c = campaignService.requireRunning();
         if (!SYMBOLS.containsKey(symbol)) throw new BizException("不支持的投票标的");
         if (!CampaignVote.UP.equals(direction) && !CampaignVote.DOWN.equals(direction)) {
             throw new BizException("方向只能是 UP 或 DOWN");
         }
+        requireNotLocked(now);
 
+        LocalDate day = votingDate(now);
         CampaignVote v = new CampaignVote();
         v.setCampaignId(c.getId());
         v.setUserId(userId);
-        v.setVoteDate(utcToday());
+        v.setVoteDate(day);
         v.setSymbol(symbol);
         v.setDirection(direction);
         try {
             voteMapper.insert(v);
         } catch (DuplicateKeyException e) {
-            throw new BizException("今天已经投过 " + SYMBOLS.get(symbol) + " 了，多空二选一");
+            // 带上日期：投的是明天，用户点下去的那一刻和那一票管的那一天不是同一天，
+            // 只说"今天已经投过了"会让人以为自己投的是当天
+            throw new BizException("UTC " + day + " 的 " + SYMBOLS.get(symbol) + " 已经投过了，多空二选一");
         }
     }
 
     /**
-     * 今日票况：两个标的各一条。
+     * 锁盘：UTC 23:55 - 00:05 这 10 分钟不收票。
+     * <p>
+     * 【为什么要锁这一段】UTC 0 点整那一刻日线在切、{@link com.mawai.wiibsim.campaign.CampaignTask}
+     * 的回扫在 00:05 开跑并往 campaign_vote 上写结果（CAS 一落就改不回来）。
+     * 更要紧的是这 10 分钟正好横跨"票落在哪一天"的翻页点：23:55 投的算明天、00:06 投的也算明天，
+     * 可这两个"明天"差了一整天。把翻页点前后各封 5 分钟，谁也不会在读完页面、点下按钮的那几秒里
+     * 被悄悄换掉目标日。1440 分钟里让出 10 分钟，换掉一整类"我投的到底是哪天"的争议，很划算。
+     * <p>
+     * 【顺带确认了"投明天没有前瞻"】UTC 日 D 的收票期是 D−1 的 00:05 至 23:55 ——
+     * 全程在 D 开始<b>之前</b>，末班车离 D 的第一根 K 线还差 5 分钟。
+     */
+    private static void requireNotLocked(Instant now) {
+        LocalTime t = now.atZone(ZoneOffset.UTC).toLocalTime();
+        if (!t.isBefore(LOCK_FROM) || t.isBefore(LOCK_UNTIL)) {
+            throw new BizException("结算锁盘中：UTC 23:55-00:05 日线在切换、投票结算在写结果，这 10 分钟不收票，稍后再投");
+        }
+    }
+
+    /**
+     * 明日票况：两个标的各一条。看的是 {@link #votingDate()} 那一天，也就是正要投的那天。
      * <p>
      * 【这里用 current() 不用 requireRunning()】看板是读路径，开赛前要能展示"两边都是 0 票"、
      * 收摊后要能展示最后一天的票况；判了窗口这两段时间前端就只剩报错。
+     * <p>
+     * 【锁盘那 10 分钟不特殊处理】看板只是照实报那一天的票况：23:55-24:00 报的是刚截止的那天
+     * （你的票已经在里面了，是实话），00:00-00:05 报的是新开的那天（0 票，也是实话）。
+     * 拦投票的闸在 {@link #vote} 那一侧，读路径没必要跟着抛。
      */
     public List<VoteBoard> board(Long userId) {
         Campaign c = campaignService.current();
         if (c == null) return List.of();
-        LocalDate today = utcToday();
+        LocalDate day = votingDate();
 
         Map<String, String> mine = new HashMap<>();
-        for (CampaignVote v : voteMapper.listMine(c.getId(), userId, today)) {
+        for (CampaignVote v : voteMapper.listMine(c.getId(), userId, day)) {
             mine.put(v.getSymbol(), v.getDirection());
         }
 
@@ -96,7 +163,7 @@ public class CampaignVoteService {
             String symbol = e.getKey();
             // GROUP BY 最多两行，某方向一票没有就压根不出行 —— 所以起手是 0，不是等 SQL 给
             long up = 0, down = 0;
-            for (Map<String, Object> row : voteMapper.countByDirection(c.getId(), today, symbol)) {
+            for (Map<String, Object> row : voteMapper.countByDirection(c.getId(), day, symbol)) {
                 long cnt = ((Number) row.get("cnt")).longValue();
                 // 两个方向各判一次而不是 else 兜底：手工塞库塞出第三种方向时，宁可这票不显示，
                 // 也不能把它算到看跌那一栏上去
@@ -114,16 +181,18 @@ public class CampaignVoteService {
      * 结算某个 UTC 交易日的投票。幂等：回填走 CAS（result IS NULL），重跑不会覆盖已发的分，
      * 也不会重复发放。任何一天漏结算了，隔天补跑即可。
      * <p>
-     * 【可分池靠反推不靠存状态】pool = 100 × (从活动首日到该日的天数) − <b>截至该日</b>已发出的分。
+     * 【可分池靠反推不靠存状态】pool = 100 × (从活动首日到<b>投出这批票那天</b>的天数) − <b>截至该日</b>已发出的分。
      * 平盘顺延、没人猜对、封顶剩下的，全都自动包含在这个差里 ——
      * 不必额外存一个"顺延余额"，也就不存在那个数被 Redis 清掉或与真值漂移的问题。
      * 减数为什么必须卡在"截至该日"而不是全场，见 {@link #poolOf} 的注释：不卡的话补跑漏结的那天会全员 0 分。
      * <p>
      * 【这里用 current() 不用 requireRunning()】结算跑在 UTC 00:05、结的是<b>前一天</b>，
-     * 活动最后一天的票要在 endAt 之后才结得上；判了窗口最后一天的票永远发不出分。
+     * 而票投的是明天 —— 最后一张票管的那个 UTC 日整个落在 endAt 之后，
+     * 要等活动结束<b>次日</b>的那次回扫才结得上（TZ=+8 时约 32 小时，账算在
+     * {@link CampaignSettleService} 的 requireVotesSettled 头上）。判了窗口这些票永远发不出分。
      * <p>
-     * 【只结已经过完的 UTC 日】当天那根日线还在长，而且 UTC 0 点前都还能投票 ——
-     * 拿半根蜡烛去结一批没截止的票，CAS 一落就改不回来了。
+     * 【只结已经过完的 UTC 日】当天那根日线还在长 —— 拿半根蜡烛发分，CAS 一落就改不回来了。
+     * 票倒是早就截止了（投明天，收票在这一天开始前就停了），这道闸现在只为日线而设。
      */
     public void settleDay(LocalDate utcDay) {
         if (!utcDay.isBefore(utcToday())) {
@@ -210,36 +279,49 @@ public class CampaignVoteService {
      * 宁可总额略超，也不能凭"谁先跑"决定用户有没有分。真正的防线是别让它乱序：
      * {@link com.mawai.wiibsim.campaign.CampaignTask} 每次从最老的一天往回扫，漏一天下一轮就自己补上了。
      * <p>
-     * 【start_at 是本地日、utcDay 是 UTC 日，为什么不换算就直接减】口径确实不同：
+     * 【天数按"票是哪天投出来的"算，不是按投票日本身】投票日 = 投出那天 + 1（见 {@link #votingDate()}），
+     * 所以 utcDay 这批票是 {@code utcDay.minusDays(1)} 那天投出来的。额度是"活动开了几天"给的，
+     * 得跟着投出的那天走 —— 跟着 utcDay 走的话整条链会整体多算一天，末日上限变成 1500，真会多发 100。
+     * 这个 {@code minusDays(1)} 是"投明天"这条规则在钱这一侧唯一的落点。
+     * <p>
+     * 【start_at 是本地日、投出日是 UTC 日，为什么不换算就直接减】口径确实不同：
      * start_at 存的是服务器本地墙上时间（{@link CampaignService#requireRunning()} 拿
      * {@code LocalDateTime.now()} 跟它比就是证据），容器 TZ 是 Asia/Singapore(+8)。
      * 种子活动 [SGT 08-03 00:00, SGT 08-17 00:00) 换成 UTC 是 [08-02 16:00, 08-16 16:00)，
-     * 而投票日盖的是 UTC 日戳 —— 于是能投票的 UTC 日有 <b>15</b> 个（08-02 ~ 08-16），
-     * 比 14 天的活动多一个。看着像会多发 100，实际不会，因为本式给的不是"这天的额度"，
+     * 能<b>投票</b>的 UTC 日是 08-02 ~ 08-16 共 15 个；票盖的是次日的戳，于是能落到 vote_date 上的
+     * UTC 日是 <b>08-03 ~ 08-17</b>，同样 <b>15</b> 个，比 14 天的活动多一个
+     * （锁盘那 10 分钟不改变这个集合：首日 08-02 16:00-23:55 还投得着，末日 08-16 00:05-16:00 也还投得着）。
+     * 看着像会多发 100，实际不会，因为本式给的不是"这天的额度"，
      * 而是"到这天为止的累计额度 − 累计已发"，天数只抬上限、不发钱：
      * <pre>
-     *   08-02（只有 SGT 首日 00:00-08:00 那 8 小时）days=0 → 被 max 抬成 1 → 上限 100
-     *   08-03                                     days=1            → 上限 100  ← 与 08-02 共用这 100
+     *   投票日 08-03（票投在 UTC 08-02 16:00-23:55，不到 8 小时）days=0 → 被 max 抬成 1 → 上限 100
+     *   投票日 08-04（票投在 UTC 08-03 一整天）                   days=1            → 上限 100  ← 与 08-03 共用这 100
      *   …
-     *   08-16（最后一个能投票的 UTC 日）           days=14           → 上限 1400 = 14 × 100
+     *   投票日 08-17（票投在 UTC 08-16 00:05-16:00，活动最后一段）days=14           → 上限 1400 = 14 × 100
      * </pre>
-     * 08-03 算池时"截至 08-03 已发出的分"已经含了 08-02 发掉的部分，所以两天加起来最多发 100；
+     * 08-04 算池时"截至 08-04 已发出的分"已经含了 08-03 发掉的部分，所以两天加起来最多发 100；
      * 末日上限正好 1400，一分不多、也没有剩在池里没人拿。边界只会把预算在相邻两天之间挪，
-     * 不会凭空造出预算 —— 这正是"靠反推不存状态"换来的好处。{@code Math.max(days, 1)} 是承重的：
-     * 去掉它 08-02 的上限就是 0，那 8 小时里投的票全发 0 分。
+     * 不会凭空造出预算 —— 这正是"靠反推不存状态"换来的好处。{@code Math.max(days, 1)} 仍是承重的：
+     * 去掉它，投票日 08-03 的上限就是 0，UTC 08-02 那不到 8 小时里投的票全发 0 分。
+     * （承重点从"活动前一天"挪到了"活动首日"，但一样是那批 8 小时的票，一样只有 max 兜得住。）
      * <p>
-     * 【顺带一提：单人上限是 90 不是设计文档说的 84】总额那 1400 不受多出来的这天影响，但
-     * {@link ScoreRules#VOTE_DAILY_CAP} 是按<b>天</b>封顶的，15 个可投票 UTC 日就是 6 × 15 = <b>90</b>，
+     * 【15 个投票日全在 [1, 14] 这个天数区间里】低端 08-03 靠 max 兜到 1，高端 08-17 正好 14 ——
+     * 没有哪个能投出来的日子算得出 0 上限，也就不存在"投得进去却永远发不出分"的票。
+     * <p>
+     * 【顺带一提：单人上限是 90 不是设计文档说的 84】投票日的<b>个数</b>没变（还是 15，只是整体后移一天），
+     * 所以这笔账原样成立：总额那 1400 不受多出来的这天影响，但
+     * {@link ScoreRules#VOTE_DAILY_CAP} 是按<b>天</b>封顶的，15 个投票日就是 6 × 15 = <b>90</b>，
      * 而设计文档给封顶找的理由写的是「两周投票最多贡献 84 分」(6 × 14)。
      * 差的这 6 分没人在代码里校验、也不影响总额守恒（池子始终只有 1400），
      * 写在这儿只是免得下一个人以为 84 是被强制执行的。
      * <p>
-     * 【但这个"恰好没事"依赖 UTC 正偏移】若挪到负偏移时区（如 UTC-5），
-     * 活动尾巴会溢到 UTC 08-17，末日算出 days=15 → 上限 1500，真会多发 100。
-     * 迁时区的话这里得先把 start_at 按部署时区折成 UTC 日再减。
+     * 【但这个"恰好没事"依赖 UTC 正偏移】若挪到负偏移时区（如 UTC-5），活动窗口在 UTC 上整体后移，
+     * 能投票的 UTC 日变成 08-03 ~ 08-17、投票日变成 08-04 ~ 08-18，末日算出 days=15 → 上限 1500，
+     * 真会多发 100。迁时区的话这里得先把 start_at 按部署时区折成 UTC 日再减。
      */
     private BigDecimal poolOf(Campaign c, LocalDate utcDay) {
-        long days = ChronoUnit.DAYS.between(c.getStartAt().toLocalDate(), utcDay) + 1;
+        // minusDays(1)：这批票是投票日的前一个 UTC 日投出来的，额度按投出那天算
+        long days = ChronoUnit.DAYS.between(c.getStartAt().toLocalDate(), utcDay.minusDays(1)) + 1;
         BigDecimal entitled = ScoreRules.VOTE_DAILY_POOL.multiply(BigDecimal.valueOf(Math.max(days, 1)));
         return entitled.subtract(voteMapper.sumScoreUpTo(c.getId(), utcDay)).max(BigDecimal.ZERO);
     }

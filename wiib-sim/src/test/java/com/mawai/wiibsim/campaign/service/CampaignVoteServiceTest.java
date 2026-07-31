@@ -40,8 +40,14 @@ import static org.mockito.Mockito.when;
  * 【这里能测什么、不能测什么】"多空二选一"这条铁律真正的执行者是数据库的 uk_campaign_vote
  * 唯一索引，mock 的 mapper 证不了它 —— 那条由
  * {@link com.mawai.wiibsim.campaign.CampaignVoteRealRunTest} 在真库上钉。
- * 本类管 Java 这一侧：闸门放不放行、插的行对不对（尤其投票日是不是 UTC 日）、
- * DuplicateKeyException 有没有被翻成人话、看板怎么把两条 SQL 的结果拼起来。
+ * 本类管 Java 这一侧：闸门放不放行、插的行对不对（尤其投票日是不是<b>明天</b>的 UTC 日）、
+ * 锁盘窗口卡在哪两端、DuplicateKeyException 有没有被翻成人话、看板怎么把两条 SQL 的结果拼起来。
+ * <p>
+ * 【时刻从参数递进去】下票那几条走 {@code vote(..., Instant)} 这个包内重载：
+ * 投票日与锁盘都由"现在几点"决定，拿真时钟测的话边界那几秒根本摸不到，
+ * 而且 UTC 23:55-00:05 是 SGT 早上 07:55-08:05 —— 真在那时候跑一次全套，好几条会集体变红。
+ * 活动时间窗那道闸仍然吃真时钟（{@link CampaignService#requireRunning()} 用
+ * {@code LocalDateTime.now()}），所以喂进去的 Instant 与活动窗口无关，两者互不干涉。
  */
 class CampaignVoteServiceTest {
 
@@ -72,21 +78,23 @@ class CampaignVoteServiceTest {
     // ==================== 下票 ====================
 
     /**
-     * 插的行必须是"本场活动 + 我 + <b>UTC</b> 今天 + 标的 + 方向"。
+     * ★ 插的行必须是"本场活动 + 我 + <b>明天</b>的 UTC 日 + 标的 + 方向"。★
+     * <p>
+     * 【为什么是明天不是今天】结算比的是<b>该投票日</b>的日线收盘 vs 前日收盘。
+     * 盖今天的戳，那根 K 线在平台自己的图上就看得见 —— UTC 23:55 才投的人照着答案填，稳赢，
+     * §2.3 那套共享池反向赔率也就不存在了。盖明天的戳，收票在这一天开始之前就截止了，
+     * 谁都没有前瞻信息。
      * <p>
      * 【voteDate 为什么必须是 UTC 日】结算按 Binance 的 1d K 线走，那条线就是 UTC 日切；
-     * 投票日跟着服务器本地日（Asia/Singapore）的话，UTC 16:00 之后投的票会被记成"明天"，
-     * 永远对不上当日收盘。
+     * 跟着服务器本地日（Asia/Singapore）盖戳的话，边界那批票永远对不上当日收盘。
      * <p>
-     * 【这条用例的射程】断言比的是测试自己独立算出来的 UTC 日期，不是回头调
-     * {@code utcToday()}（那样是同义反复）。但本地日与 UTC 日只在 UTC 16:00-24:00
-     * 这一段才不同（+8 区），所以实现要是写成 {@code LocalDate.now()}，
-     * 也只有那一段时间跑才咬得住 —— 要全天候咬死得给 service 注入 Clock，
-     * 为一个静态工具方法加构造参数不划算。口径本身由类注释和 DDL 注释两处钉着。
+     * 【这条用例的射程】时刻是喂进去的，期望值是测试自己按 UTC 算的 —— 与实现无关，
+     * 也不挑跑测试的时辰。实现写成 {@code LocalDate.now()}（本地日）或忘了 {@code plusDays(1)}，
+     * 这里当场红。
      */
     @Test
-    void 投票插入本场活动我今天UTC日的记录() {
-        service.vote(ME, BTC, CampaignVote.UP);
+    void 投票插入本场活动我明天UTC日的记录() {
+        service.vote(ME, BTC, CampaignVote.UP, Instant.parse("2026-08-05T09:30:00Z"));
 
         ArgumentCaptor<CampaignVote> captor = ArgumentCaptor.forClass(CampaignVote.class);
         verify(voteMapper).insert(captor.capture());
@@ -96,21 +104,111 @@ class CampaignVoteServiceTest {
                         CampaignVote::getVoteDate,
                         CampaignVote::getSymbol,
                         CampaignVote::getDirection)
-                .containsExactly(CAMPAIGN_ID, ME,
-                        LocalDate.ofInstant(Instant.now(), ZoneOffset.UTC),
-                        BTC, CampaignVote.UP);
+                .containsExactly(CAMPAIGN_ID, ME, LocalDate.of(2026, 8, 6), BTC, CampaignVote.UP);
+    }
+
+    /**
+     * 本地日与 UTC 日不同的那一段（+8 区的 UTC 16:00-24:00）照样盖 UTC 明天的戳。
+     * <p>
+     * 这一段是"本地 8 月 6 日上午、UTC 还是 8 月 5 日"：跟着本地日走会盖成 08-07，
+     * 差一整天，那票永远对不上它该对的那根日线。上一条用的 09:30Z 落在两个口径相同的时段里，
+     * 单靠它咬不住这种写法。
+     */
+    @Test
+    void 本地日已翻页而UTC没翻时仍按UTC算() {
+        service.vote(ME, BTC, CampaignVote.UP, Instant.parse("2026-08-05T20:00:00Z"));   // SGT 08-06 04:00
+
+        ArgumentCaptor<CampaignVote> captor = ArgumentCaptor.forClass(CampaignVote.class);
+        verify(voteMapper).insert(captor.capture());
+        assertThat(captor.getValue().getVoteDate()).isEqualTo(LocalDate.of(2026, 8, 6));
+    }
+
+    /**
+     * 三参的公开入口（控制器走的就是它）真的把系统时刻递了下去。
+     * <p>
+     * 期望值由测试独立按 UTC 算。若这一刻正撞在锁盘那 10 分钟里，抛出来的异常同样证明了
+     * "系统时刻确实传下去了"—— 所以那支也算通过，不必为了这条用例去挑跑测试的时辰。
+     */
+    @Test
+    void 公开入口用的是系统时刻() {
+        LocalDate expected = LocalDate.ofInstant(Instant.now(), ZoneOffset.UTC).plusDays(1);
+        try {
+            service.vote(ME, BTC, CampaignVote.UP);
+        } catch (BizException e) {
+            assertThat(e).hasMessageContaining("结算锁盘中");
+            return;
+        }
+
+        ArgumentCaptor<CampaignVote> captor = ArgumentCaptor.forClass(CampaignVote.class);
+        verify(voteMapper).insert(captor.capture());
+        assertThat(captor.getValue().getVoteDate()).isEqualTo(expected);
     }
 
     /** 黄金也能投，且方向 DOWN 原样落库 —— 免得实现里把标的或方向写死成 BTC/UP */
     @Test
     void 黄金看跌也能投且原样落库() {
-        service.vote(ME, GOLD, CampaignVote.DOWN);
+        service.vote(ME, GOLD, CampaignVote.DOWN, Instant.parse("2026-08-05T09:30:00Z"));
 
         ArgumentCaptor<CampaignVote> captor = ArgumentCaptor.forClass(CampaignVote.class);
         verify(voteMapper).insert(captor.capture());
         assertThat(captor.getValue())
                 .extracting(CampaignVote::getSymbol, CampaignVote::getDirection)
                 .containsExactly(GOLD, CampaignVote.DOWN);
+    }
+
+    // ==================== 结算锁盘（UTC 23:55 - 00:05） ====================
+
+    /*
+     * 这 10 分钟横跨"票落在哪一天"的翻页点，同时也是日线切换 + 00:05 那次结算回扫在写库的时候。
+     * 边界一律半开区间 [23:55, 00:05)：两端各钉"锁的第一刻"与"解锁的第一刻"，
+     * 实现里写成闭区间或把 00:05 也锁上，都会有一侧变红。
+     */
+
+    /** 23:55:00.000 起就不收票了 —— 而 23:54:59.999 还收 */
+    @Test
+    void 锁盘起点那一刻起拒收票() {
+        assertThatThrownBy(() -> service.vote(ME, BTC, CampaignVote.UP,
+                Instant.parse("2026-08-05T23:55:00Z")))
+                .isInstanceOf(BizException.class)
+                .hasMessageContaining("结算锁盘中")
+                .hasMessageContaining("23:55-00:05");
+
+        verify(voteMapper, never()).insert(any(CampaignVote.class));
+    }
+
+    /** UTC 0 点整、以及 00:04:59.999 都还在锁里 —— 跨过 0 点不等于解锁 */
+    @Test
+    void 零点与解锁前最后一毫秒都拒收票() {
+        assertThatThrownBy(() -> service.vote(ME, BTC, CampaignVote.UP,
+                Instant.parse("2026-08-06T00:00:00Z")))
+                .isInstanceOf(BizException.class)
+                .hasMessageContaining("结算锁盘中");
+        assertThatThrownBy(() -> service.vote(ME, BTC, CampaignVote.UP,
+                Instant.parse("2026-08-06T00:04:59.999Z")))
+                .isInstanceOf(BizException.class)
+                .hasMessageContaining("结算锁盘中");
+
+        verify(voteMapper, never()).insert(any(CampaignVote.class));
+    }
+
+    /**
+     * ★ 窗口两侧紧挨着的那一刻都照常收票，且各自落在用户预期的那一天。★
+     * <p>
+     * 23:54:59.999（锁盘前最后一毫秒，UTC 08-05）→ 08-06，也就是 5 分钟后就要开始的那一天，
+     * 这是投 08-06 的末班车；
+     * 00:05:00（解锁那一刻，UTC 已经是 08-06）→ 08-07。
+     * 两个时刻只差 10 分零 1 毫秒，目标日却差一整天 —— 这正是中间那 10 分钟要封起来的理由：
+     * 谁也不会在读完页面、点下按钮的那几秒里被悄悄换掉目标日。
+     */
+    @Test
+    void 锁盘两侧紧挨着的时刻照常收票且各投各的那一天() {
+        service.vote(ME, BTC, CampaignVote.UP, Instant.parse("2026-08-05T23:54:59.999Z"));
+        service.vote(ME, GOLD, CampaignVote.DOWN, Instant.parse("2026-08-06T00:05:00Z"));
+
+        ArgumentCaptor<CampaignVote> captor = ArgumentCaptor.forClass(CampaignVote.class);
+        verify(voteMapper, times(2)).insert(captor.capture());
+        assertThat(captor.getAllValues()).extracting(CampaignVote::getVoteDate)
+                .containsExactly(LocalDate.of(2026, 8, 6), LocalDate.of(2026, 8, 7));
     }
 
     /** 不在 SYMBOLS 里的标的：直接拒，且一行都不许插（否则脏数据结算时无价可比） */
@@ -140,6 +238,9 @@ class CampaignVoteServiceTest {
      * 同一标的投第二次：唯一索引顶回来的 DuplicateKeyException 翻成人话，
      * 且提示里带的是展示名（"BTC" / "黄金"）不是 symbol，用户不认识 XAUUSDT。
      * <p>
+     * 【为什么提示里要带日期】投的是明天，点按钮的那一刻和这票管的那一天不是同一天；
+     * 只说"今天已经投过了"，UTC 16:00 之后（本地已经翻页）的人会以为自己投的是别的日子。
+     * <p>
      * 这里若退回"先查后插"或捕获后重试，双击就能把多空各投一票、白拿一份投票分。
      */
     @Test
@@ -147,9 +248,10 @@ class CampaignVoteServiceTest {
         when(voteMapper.insert(any(CampaignVote.class)))
                 .thenThrow(new DuplicateKeyException("uk_campaign_vote"));
 
-        assertThatThrownBy(() -> service.vote(ME, GOLD, CampaignVote.DOWN))
+        assertThatThrownBy(() -> service.vote(ME, GOLD, CampaignVote.DOWN,
+                Instant.parse("2026-08-05T09:30:00Z")))
                 .isInstanceOf(BizException.class)
-                .hasMessage("今天已经投过 黄金 了，多空二选一");
+                .hasMessage("UTC 2026-08-06 的 黄金 已经投过了，多空二选一");
 
         verify(voteMapper, times(1)).insert(any(CampaignVote.class));
     }
@@ -192,13 +294,17 @@ class CampaignVoteServiceTest {
      * 看板按 SYMBOLS 的顺序一标的一条（顺序即前端卡片顺序），票数各取各标的的行，
      * myDirection 只在我投过的标的上有值。
      * <p>
+     * 【顺带钉住"看板读的是明天"】三条 stub 全按 {@link #tomorrowUtc()} 挂 ——
+     * 实现里还读今天的话，一条都命中不了，票数全成 0、myDirection 全成 null，这条当场红。
+     * 下票与看板必须是同一天，否则"我投了没"和"两边多少票"会各说各话。
+     * <p>
      * 【样本怎么设计的】BTC 与 GOLD 的票数刻意全不相同（3/1 与 2/5），
      * 实现里把 symbol 传串了、或把两个标的的结果混在一起，数就对不上。
      * 我只投了 BTC 的 UP：GOLD 那条的 myDirection 必须是 null 而不是 ""、也不是跟着 BTC 走。
      */
     @Test
     void 看板每标的一条并带上我的票() {
-        LocalDate today = CampaignVoteService.utcToday();
+        LocalDate today = tomorrowUtc();
         when(voteMapper.listMine(CAMPAIGN_ID, ME, today))
                 .thenReturn(List.of(voteRow(BTC, CampaignVote.UP)));
         when(voteMapper.countByDirection(CAMPAIGN_ID, today, BTC))
@@ -220,7 +326,7 @@ class CampaignVoteServiceTest {
      */
     @Test
     void 一票没有时票数是零而不是空() {
-        LocalDate today = CampaignVoteService.utcToday();
+        LocalDate today = tomorrowUtc();
         // BTC 只有 UP 那一行，GOLD 一行都没有
         when(voteMapper.countByDirection(CAMPAIGN_ID, today, BTC))
                 .thenReturn(List.of(countRow(CampaignVote.UP, 4)));
@@ -236,7 +342,7 @@ class CampaignVoteServiceTest {
     /** listMine 认人：别人的票只进总票数，不进我的 myDirection */
     @Test
     void 别人的票不进我的myDirection() {
-        LocalDate today = CampaignVoteService.utcToday();
+        LocalDate today = tomorrowUtc();
         when(voteMapper.listMine(CAMPAIGN_ID, OTHER, today))
                 .thenReturn(List.of(voteRow(BTC, CampaignVote.DOWN)));
         when(voteMapper.countByDirection(CAMPAIGN_ID, today, BTC))
@@ -278,6 +384,16 @@ class CampaignVoteServiceTest {
     }
 
     // ==================== 手搓行 ====================
+
+    /**
+     * 看板该读的那一天：明天的 UTC 日。
+     * <p>
+     * 刻意<b>不</b>回头调 {@code CampaignVoteService.votingDate()} —— 那是同义反复，
+     * 实现把 plusDays(1) 删了 stub 也跟着删，用例照绿。这里自己按 UTC 算一遍。
+     */
+    private static LocalDate tomorrowUtc() {
+        return LocalDate.ofInstant(Instant.now(), ZoneOffset.UTC).plusDays(1);
+    }
 
     /** 喂给真 CampaignService 的那场 RUNNING 活动，窗口由用例指定 */
     private void running(LocalDateTime startAt, LocalDateTime endAt) {

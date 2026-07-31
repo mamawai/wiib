@@ -104,6 +104,27 @@ function TaskRow({ def, item }: { def: TaskDef; item: CampaignScoreItem | null }
   );
 }
 
+/**
+ * 票盖的是<b>明天</b>的 UTC 日戳（后端 CampaignVoteService.votingDate 就是这么算的）。
+ * 投当天没得玩：结算比的是当日收盘 vs 前日收盘，而那根 K 线在本站自己的图上就看得见，
+ * 临收盘才投等于照着答案填。投明天则收票在这一天开始之前就截止了，谁都没有前瞻。
+ * 这里独立算一遍只为把目标日显示出来 —— 不显示的话"投的是明天"这件事在界面上完全看不出来。
+ */
+function tomorrowUtc(now: Date): string {
+  return new Date(now.getTime() + 86400_000).toISOString().slice(0, 10);
+}
+
+/**
+ * 结算锁盘窗口 UTC [23:55, 00:05)：日线在切、00:05 那次投票结算在往库里写结果，
+ * 而且这 10 分钟正好横跨"票落在哪一天"的翻页点。
+ * 说了算的是后端那道闸（CampaignVoteService.requireNotLocked），这里只为提前把按钮压灰 ——
+ * 让人点下去才被顶回来，比灰着并写明原因难受得多。
+ */
+function inSettleLock(now: Date): boolean {
+  const minutes = now.getUTCHours() * 60 + now.getUTCMinutes();
+  return minutes >= 23 * 60 + 55 || minutes < 5;
+}
+
 function VoteSide({ dir, count, mine, disabled, onClick }: {
   dir: 'UP' | 'DOWN';
   count: number;
@@ -215,6 +236,15 @@ export function Campaign() {
     return () => { cancelled = true; };
   }, [nonce]);
 
+  // 锁盘状态得自己走一步：页面别处的时间都是每次渲染现取的，不刷新就不动 ——
+  // 别处不动只是显示旧了，这里不动却会把按钮一直灰着，人就投不成票了。30 秒一跳，
+  // 两端最多差半分钟：起点那半分钟点下去后端会顶回来（有 toast），终点那半分钟等一下就好
+  const [voteLocked, setVoteLocked] = useState(() => inSettleLock(new Date()));
+  useEffect(() => {
+    const timer = setInterval(() => setVoteLocked(inSettleLock(new Date())), 30_000);
+    return () => clearInterval(timer);
+  }, []);
+
   const handleCheckin = async () => {
     setActing(true);
     try {
@@ -269,6 +299,8 @@ export function Campaign() {
   }, [view]);
 
   const now = Date.now();
+  /** 这一票管的是哪天。跨过 UTC 0 点后页面若一直没动过，这里连同看板票数都还是上一天的 —— 刷一下就对了 */
+  const voteDay = tomorrowUtc(new Date(now));
   const startMs = view ? new Date(view.startAt).getTime() : 0;
   const endMs = view ? new Date(view.endAt).getTime() : 0;
   const notStarted = view != null && now < startMs;
@@ -540,7 +572,7 @@ export function Campaign() {
             </CardContent>
           </Card>
 
-          {/* ===== ③ 今日投票 + 签到 ===== */}
+          {/* ===== ③ 明日投票 + 签到 ===== */}
           <div className="grid md:grid-cols-3 gap-4">
             <Card>
               <CardHeader className="pb-2"><CardTitle>每日签到</CardTitle></CardHeader>
@@ -565,7 +597,13 @@ export function Campaign() {
             {view.voteBoard.map(v => (
               <Card key={v.symbol}>
                 <CardHeader className="pb-2">
-                  <CardTitle>今日多空 · {v.label}</CardTitle>
+                  {/* 目标日必须摆在标题上：投的是明天，不写出来是哪天，用户只会当成今天 */}
+                  <CardTitle className="flex items-baseline justify-between gap-2">
+                    <span>明日多空 · {v.label}</span>
+                    <span className="num text-[10px] tracking-normal normal-case tabular-nums">
+                      UTC {voteDay}
+                    </span>
+                  </CardTitle>
                 </CardHeader>
                 <CardContent className="pb-4 space-y-2">
                   <div className="grid grid-cols-2 gap-2">
@@ -573,21 +611,24 @@ export function Campaign() {
                       dir="UP"
                       count={v.upCount}
                       mine={v.myDirection}
-                      disabled={acting || loading || !canAct || v.myDirection !== null}
+                      disabled={acting || loading || !canAct || voteLocked || v.myDirection !== null}
                       onClick={() => handleVote(v.symbol, 'UP')}
                     />
                     <VoteSide
                       dir="DOWN"
                       count={v.downCount}
                       mine={v.myDirection}
-                      disabled={acting || loading || !canAct || v.myDirection !== null}
+                      disabled={acting || loading || !canAct || voteLocked || v.myDirection !== null}
                       onClick={() => handleVote(v.symbol, 'DOWN')}
                     />
                   </div>
+                  {/* 锁盘那句排在最前：按钮灰着的时候，人第一件想知道的事是"为什么点不了" */}
                   <p className="text-[10px] text-muted-foreground leading-relaxed">
-                    {v.myDirection
-                      ? `今日已投${v.myDirection === 'UP' ? '看涨' : '看跌'}，多空二选一，明天再来。`
-                      : 'UTC 0 点前有效，按日线收盘 vs 前日收盘结算，平盘顺延到次日奖池。'}
+                    {voteLocked
+                      ? 'UTC 23:55-00:05 结算锁盘：日线在切换、上一日的票在结算，这 10 分钟不收票。'
+                      : v.myDirection
+                        ? `UTC ${voteDay} 的${v.myDirection === 'UP' ? '看涨' : '看跌'}已投，多空二选一，明天再来。`
+                        : `投的是 UTC ${voteDay} 这一天，收票到 UTC 23:55 止（那时这天还没开始）。按该日日线收盘 vs 前日收盘结算，平盘顺延到次日奖池。`}
                   </p>
                 </CardContent>
               </Card>

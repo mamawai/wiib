@@ -44,8 +44,9 @@ public interface CampaignVoteMapper extends BaseMapper<CampaignVote> {
      * <p>
      * 【为什么按天返回而不是只给个数】
      * {@link com.mawai.wiibsim.campaign.service.CampaignVoteService#settleDay} 只结<b>已经过完</b>的
-     * UTC 日：TZ=+8 时活动在 UTC 末日的 16:00 收摊，那天要再等 8 小时（或下一次 00:05 回扫）
-     * 才结得上。运营看到具体是哪几天没结，才知道是"再等等"还是"某天一直取不到日线，得去查"。
+     * UTC 日，而票投的是<b>明天</b>：最后一批票盖的是活动结束当天的 UTC 日戳，那一天要到 endAt
+     * 之后才过得完 —— TZ=+8 时得等到活动结束<b>次日</b>的 UTC 00:05 那次回扫，约 32 小时。
+     * 运营看到具体是哪几天没结，才知道是"再等等"还是"某天一直取不到日线，得去查"。
      */
     @Select("SELECT vote_date FROM campaign_vote " +
             "WHERE campaign_id = #{campaignId} AND result IS NULL " +

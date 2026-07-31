@@ -65,20 +65,20 @@ public class CampaignController {
     }
 
     @PostMapping("/vote")
-    @Operation(summary = "每日多空投票（每标的多空二选一，UTC 0 点前）")
+    @Operation(summary = "每日多空投票（投的是明天那个 UTC 日，每标的多空二选一；UTC 23:55-00:05 锁盘不收票）")
     public Result<Void> vote(@CurrentUserId Long userId, @RequestBody VoteRequest req) {
         voteService.vote(userId, req.getSymbol(), req.getDirection());
         return Result.ok(null);
     }
 
     @GetMapping("/vote/board")
-    @Operation(summary = "今日投票看板（双方票数 + 我的票）")
+    @Operation(summary = "明日投票看板（双方票数 + 我的票）")
     public Result<List<VoteBoard>> voteBoard(@CurrentUserId Long userId) {
         return Result.ok(voteService.board(userId));
     }
 
     @GetMapping("/me")
-    @Operation(summary = "我的活动数据（积分明细 + 排名 + 预估 LDC + 今日投票）")
+    @Operation(summary = "我的活动数据（积分明细 + 排名 + 预估 LDC + 明日投票）")
     public Result<MyCampaignView> me(@CurrentUserId Long userId) {
         return Result.ok(scoreService.myView(userId));
     }

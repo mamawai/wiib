@@ -30,7 +30,10 @@ import static org.mockito.Mockito.verify;
  */
 class CampaignTaskTest {
 
-    /** 与 CampaignTask.SWEEP_DAYS 对齐：活动 14 天，UTC 口径 15 个投票日 */
+    /**
+     * 与 CampaignTask.SWEEP_DAYS 对齐：活动 14 天，能落到 vote_date 上的 UTC 日有 15 个
+     * （票投的是明天，种子活动是 08-03 ~ 08-17）。活动结束次日那次回扫正好覆盖这 15 天。
+     */
     private static final int SWEEP_DAYS = 15;
 
     private CampaignVoteService voteService;

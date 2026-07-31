@@ -283,20 +283,22 @@ class CampaignSettleServiceTest {
      * 【为什么这条最容易踩】未结算的票 score 是 NULL，榜单按 0 计。所以"票没结完"不报错、不少人，
      * 只让那几个人的 vote_score 悄悄少一截，然后按少算的权重把钱发出去 —— 一次性、不可逆、无声。
      * <p>
-     * 【为什么活动刚结束往往就是没结完的】settleDay 只结已经过完的 UTC 日；TZ=+8 时活动在
-     * UTC 末日 16:00 收摊，那天还得再等 8 小时（或下一次 00:05 回扫）才结得上。
+     * 【为什么活动刚结束往往就是没结完的】票投的是<b>明天</b>，最后一批票盖的是活动结束当天的
+     * UTC 日戳（种子活动 = 08-17），那一天要等 endAt 之后才过得完；而 settleDay 只结已经过完的 UTC 日。
+     * TZ=+8 时得等到 UTC 08-18 00:05（SGT 08-18 08:05）那次回扫，距 endAt 约 32 小时。
+     * 用例里那个 08-17 取的就是这一天。
      * <p>
-     * 报错里必须带上具体是哪几天，运营才分得清"再等一晚"还是"某天一直取不到日线得去查"。
+     * 报错里必须带上具体是哪几天，运营才分得清"再等一天"还是"某天一直取不到日线得去查"。
      */
     @Test
     void 投票没结完拒绝结算并报出是哪几天() {
-        LocalDate lastDay = LocalDate.of(2026, 8, 16);
+        LocalDate lastDay = LocalDate.of(2026, 8, 17);
         when(voteMapper.listUnsettledDates(CAMPAIGN_ID)).thenReturn(List.of(lastDay));
 
         assertThatThrownBy(() -> service.settle())
                 .isInstanceOf(BizException.class)
                 .hasMessageContaining("还有投票没结算")
-                .hasMessageContaining("2026-08-16");
+                .hasMessageContaining("2026-08-17");
 
         assertNothingWritten();
     }

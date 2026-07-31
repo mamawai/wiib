@@ -19,7 +19,7 @@ import java.util.stream.Collectors;
  * 签到与日常积分。
  * <p>
  * 【签到日用服务器本地日】容器 TZ 统一 Asia/Singapore，与前端展示、与"今天"的直觉一致。
- * 投票那边才用 UTC 日（规则要求 UTC 0 点前投票，见 CampaignVoteService）。
+ * 投票那边才用 UTC 日（结算按 UTC 日切的日线走，且投的是明天，见 CampaignVoteService）。
  * <p>
  * 【计分前先按活动窗口筛一道】写入侧有 requireRunning 把关，但 campaign 表的时间是可以
  * 运行时改的：运营把 start_at/end_at 一挪，当初合法签下的行就落到新窗口外面去了。

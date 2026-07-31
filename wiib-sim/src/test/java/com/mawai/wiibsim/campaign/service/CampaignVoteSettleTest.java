@@ -54,22 +54,35 @@ class CampaignVoteSettleTest {
     private static final long CAMPAIGN_ID = 7L;
 
     /**
-     * 活动首日，poolOf 的起算点。
+     * 活动首日（服务器本地日），poolOf 的起算点。
      * <p>
      * 【为什么按"今天往前推"取而不写死日期】settleDay 只结<b>已经过完</b>的 UTC 日，
      * 写死一个未来日期（种子活动是 2026-08-03 开赛）会被那道闸直接挡回来，用例全成空跑。
-     * 往前推 30 天，整场 15 个投票日都稳稳落在过去，且日期算术与真实排期完全同构。
+     * 往前推 31 天，整场 15 个投票日都稳稳落在过去，且日期算术与真实排期完全同构。
      */
-    private static final LocalDate DAY1 = CampaignVoteService.utcToday().minusDays(30);
-    private static final LocalDate DAY2 = DAY1.plusDays(1);
-    private static final LocalDate DAY3 = DAY1.plusDays(2);
+    private static final LocalDate START = CampaignVoteService.utcToday().minusDays(31);
 
     /**
+     * 能落到 vote_date 上的第一个与最后一个 UTC 日。
+     * <p>
      * 活动本地窗口 [首日 00:00, 首日+14 00:00) 换成 UTC 是 [首日前一天 16:00, 首日+13 16:00)，
-     * 两端各溢出半天 —— 所以第一个能投票的 UTC 日比 start_at 还早一天，最后一个是 首日+13。
+     * 所以<b>投得出票</b>的 UTC 日是 首日−1 ~ 首日+13；而票盖的是<b>次日</b>的戳，
+     * 于是 vote_date 的取值范围整体后移一天：<b>首日 ~ 首日+14</b>，仍是 15 个。
+     * 首日那批是 UTC 首日−1 的 16:00-23:55 投出来的（不到 8 小时），
+     * 末日那批是 UTC 首日+13 的 00:05-16:00 投出来的。
      */
-    private static final LocalDate FIRST_UTC_VOTE_DAY = DAY1.minusDays(1);
-    private static final LocalDate LAST_UTC_VOTE_DAY = DAY1.plusDays(13);
+    private static final LocalDate FIRST_UTC_VOTE_DAY = START;
+    private static final LocalDate LAST_UTC_VOTE_DAY = START.plusDays(14);
+
+    /**
+     * 中段三个连着的投票日。取 首日+1 起头是有讲究的：{@code poolOf} 的天数按"票是哪天投出来的"
+     * （= 投票日−1）算，首日+1 这批投在 UTC 首日那天，累计上限正好是 1×100 ——
+     * 于是这三天的上限是干净的 100 / 200 / 300，下面所有中段用例的算术都建在这上面。
+     * 首日那批（投在活动开始前的那几小时）是另一回事，由两条边界用例单独钉。
+     */
+    private static final LocalDate DAY1 = START.plusDays(1);
+    private static final LocalDate DAY2 = DAY1.plusDays(1);
+    private static final LocalDate DAY3 = DAY1.plusDays(2);
 
     private static final String BTC = CampaignVote.SYMBOL_BTC;
     private static final String GOLD = CampaignVote.SYMBOL_GOLD;
@@ -92,8 +105,8 @@ class CampaignVoteSettleTest {
 
         Campaign c = new Campaign();
         c.setId(CAMPAIGN_ID);
-        c.setStartAt(DAY1.atStartOfDay());
-        c.setEndAt(DAY1.plusDays(14).atStartOfDay());
+        c.setStartAt(START.atStartOfDay());
+        c.setEndAt(START.plusDays(14).atStartOfDay());
         c.setStatus(Campaign.STATUS_RUNNING);
         when(campaignMapper.selectActive()).thenReturn(c);
 
@@ -449,9 +462,10 @@ class CampaignVoteSettleTest {
     }
 
     /**
-     * 活动首日本地 00:00 开赛 = UTC 前一天 16:00，所以第一个能投票的 UTC 日比 start_at 那天还早一天。
-     * 它算出 days=0，靠 {@code Math.max(days,1)} 抬成 1，
-     * 上限仍是 100，那 8 小时里投的票照常有分可拿。去掉那个 max，这 40 张票全发 0.00。
+     * 第一个能落到 vote_date 上的 UTC 日就是活动首日本身（票投在活动开赛后的头几小时：
+     * 本地 00:00 开赛 = UTC 前一天 16:00，那批票盖的是次日 = 首日的戳）。
+     * 它按"投出那天"算得 days=0，靠 {@code Math.max(days,1)} 抬成 1，
+     * 上限仍是 100，那不到 8 小时里投的票照常有分可拿。去掉那个 max，这 40 张票全发 0.00。
      */
     @Test
     void 首个UTC投票日的池子上限被抬到一天份() {
@@ -469,11 +483,44 @@ class CampaignVoteSettleTest {
     }
 
     /**
-     * 最后一个能投票的 UTC 日是 08-16（活动 SGT 08-17 00:00 收摊 = UTC 08-16 16:00）。
-     * 它算出 days=14 → 累计上限正好 1400 = 14 天 × 100，不多不少。
+     * ★ 头两个投票日<b>共用</b>一份 100，不是各拿一份。★
+     * <p>
+     * 首日被 max 抬到上限 100、发光；次日按"投出那天"算 days=1，上限还是 100，
+     * 减掉截至次日已发的 100 → 池 0 → 每票 0.00。这 15 个投票日比活动天数多出来的那一个，
+     * 就是这么被吸收掉的：边界只把预算在相邻两天之间挪，不凭空造预算。
+     * <p>
+     * 【这条为什么单写】上一条只证了"首日拿得到 100"，没证"这 100 不是白送的"。
+     * 天数若跟着投票日本身算（忘了 minusDays(1)），两天各得一份 100，次日这 40 张票
+     * 会从 0.00 变成 2.50 —— 全场总额也跟着从 1400 涨到 1500。
+     */
+    @Test
+    void 头两个投票日共用一份一百() {
+        Map<Long, LocalDate> ledger = liveLedger();
+        upDay(BTC);
+        downDay(GOLD);
+
+        LocalDate second = FIRST_UTC_VOTE_DAY.plusDays(1);
+        unsettled(FIRST_UTC_VOTE_DAY, votesOn(FIRST_UTC_VOTE_DAY, ledger, 40));
+        unsettled(second, votesOn(second, ledger, 40));
+
+        service.settleDay(FIRST_UTC_VOTE_DAY);
+        service.settleDay(second);
+
+        List<Settled> rows = settledRows();
+        assertThat(rows).hasSize(80);
+        assertThat(rows.subList(0, 40)).as("首日：上限 100 − 0 = 池 100 ÷ 40 票")
+                .allSatisfy(r -> assertThat(r.score()).isEqualTo("2.50"));
+        assertThat(rows.subList(40, 80)).as("次日：上限还是 100，已发也是 100 → 池 0")
+                .allSatisfy(r -> assertThat(r.score()).isEqualTo("0.00"));
+    }
+
+    /**
+     * 最后一个能落到 vote_date 上的 UTC 日是 08-17（活动 SGT 08-17 00:00 收摊 = UTC 08-16 16:00，
+     * 那天最后一批票盖的是次日 08-17 的戳）。它按"投出那天"（08-16）算得 days=14 →
+     * 累计上限正好 1400 = 14 天 × 100，不多不少 —— 与设计文档"每天 100 分总池、活动 14 天"对得上。
      * <p>
      * 【为什么用 1394 这个数】剩 6.00 分给 40 张赢票，每票 0.15。
-     * 上限要是错算成 1500（比如按"15 个 UTC 投票日各一份"算），剩的就是 106、每票 2.65 ——
+     * 上限要是错算成 1500（天数跟着投票日本身算、忘了 minusDays(1)），剩的就是 106、每票 2.65 ——
      * 差得足够远，一眼分得开。
      */
     @Test
