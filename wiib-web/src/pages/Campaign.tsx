@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { campaignApi } from '../api';
 import { buildAuthorizeUrl, CLAIM_STATE_PREFIX, OAUTH_STATE_KEY } from './Login';
 import { useUserStore } from '../stores/userStore';
@@ -240,10 +240,20 @@ export function Campaign() {
   // 别处不动只是显示旧了，这里不动却会把按钮一直灰着，人就投不成票了。30 秒一跳，
   // 两端最多差半分钟：起点那半分钟点下去后端会顶回来（有 toast），终点那半分钟等一下就好
   const [voteLocked, setVoteLocked] = useState(() => inSettleLock(new Date()));
+  // 上一跳的锁盘状态。用 ref 不用 state：只为认出"解锁那一跳"，进 effect 依赖会把 30 秒的计时器重置掉
+  const lockedRef = useRef(voteLocked);
   useEffect(() => {
-    const timer = setInterval(() => setVoteLocked(inSettleLock(new Date())), 30_000);
+    const timer = setInterval(() => {
+      const locked = inSettleLock(new Date());
+      // true→false 这一跳只可能发生在 UTC 00:05：中间刚跨过 0 点，voteDay 已经翻页，
+      // 可票数和"我投了没"还是上一天那份 —— 不重拉的话，昨天投过的人会看着新日期被告知
+      // "UTC xx-xx 的看涨已投"，而那天他一票没投。只在这一跳拉，不做轮询
+      if (lockedRef.current && !locked) reload();
+      lockedRef.current = locked;
+      setVoteLocked(locked);
+    }, 30_000);
     return () => clearInterval(timer);
-  }, []);
+  }, [reload]);
 
   const handleCheckin = async () => {
     setActing(true);
@@ -299,7 +309,10 @@ export function Campaign() {
   }, [view]);
 
   const now = Date.now();
-  /** 这一票管的是哪天。跨过 UTC 0 点后页面若一直没动过，这里连同看板票数都还是上一天的 —— 刷一下就对了 */
+  /**
+   * 这一票管的是哪天。跨 UTC 0 点那次翻页由上面锁盘计时器的"解锁那一跳"带着 reload 一起走，
+   * 所以页面挂一整晚也不会出现"日期是新的、票况是旧的"
+   */
   const voteDay = tomorrowUtc(new Date(now));
   const startMs = view ? new Date(view.startAt).getTime() : 0;
   const endMs = view ? new Date(view.endAt).getTime() : 0;

@@ -31,10 +31,11 @@ import static org.mockito.Mockito.verify;
 class CampaignTaskTest {
 
     /**
-     * 与 CampaignTask.SWEEP_DAYS 对齐：活动 14 天，能落到 vote_date 上的 UTC 日有 15 个
-     * （票投的是明天，种子活动是 08-03 ~ 08-17）。活动结束次日那次回扫正好覆盖这 15 天。
+     * 与 CampaignTask.SWEEP_DAYS 对齐：要盖住的投票日有 15 个
+     * （票投的是明天，活动 14 天，种子活动是 08-03 ~ 08-17），
+     * 而 17 是给"一轮补齐整场"留的余量 —— 08-18/19/20 三晚里哪晚跑通都够，不必卡死在 08-18 那一晚。
      */
-    private static final int SWEEP_DAYS = 15;
+    private static final int SWEEP_DAYS = 17;
 
     private CampaignVoteService voteService;
     private CampaignTask task;
@@ -46,16 +47,16 @@ class CampaignTaskTest {
     }
 
     /**
-     * 一次回扫覆盖昨天往回数的 15 个 UTC 日，<b>从最老的一天开始</b>，且绝不碰今天。
+     * 一次回扫覆盖昨天往回数的 {@value #SWEEP_DAYS} 个 UTC 日，<b>从最老的一天开始</b>，且绝不碰今天。
      * <p>
      * 【顺序为什么要紧】poolOf 减的是"截至这天已发出的分"，按日期顺序结算时每天拿到的池
      * 才与设计一致；从老到新扫，前几天漏掉的那些自然排在后面几天前头，顺序自己就回来了。
      * <p>
-     * 【为什么必须止步于昨天】今天那天还没过完，日线是半根还在长的蜡烛，票也没截止 ——
+     * 【为什么必须止步于昨天】今天那天还没过完，日线是半根还在长的蜡烛 ——
      * settleDay 自己也有一道闸，但任务这边压根就不该把今天递进去。
      */
     @Test
-    void 每轮从最老的一天回扫十五天且不碰今天() {
+    void 每轮从最老的一天回扫满窗口且不碰今天() {
         task.settleVotes();
 
         ArgumentCaptor<LocalDate> days = ArgumentCaptor.forClass(LocalDate.class);
@@ -66,7 +67,7 @@ class CampaignTaskTest {
         for (int back = SWEEP_DAYS; back >= 1; back--) expected.add(today.minusDays(back));
 
         assertThat(days.getAllValues())
-                .as("从 今天-15 一路扫到昨天，一天不多一天不少，且严格由老到新")
+                .as("从 今天-" + SWEEP_DAYS + " 一路扫到昨天，一天不多一天不少，且严格由老到新")
                 .containsExactlyElementsOf(expected);
         assertThat(days.getAllValues()).doesNotContain(today, today.plusDays(1));
     }
