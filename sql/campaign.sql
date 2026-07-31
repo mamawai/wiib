@@ -102,7 +102,7 @@ COMMENT ON COLUMN campaign_reward.linux_do_id  IS '领取时二次 OAuth 拿到�
 COMMENT ON COLUMN campaign_reward.username     IS '同上，分发接口拿它做二次校验';
 COMMENT ON COLUMN campaign_reward.penalty      IS '强平扣分，负数';
 COMMENT ON COLUMN campaign_reward.final_score  IS 'max(0, trade+daily+vote+penalty)；带小数因投票是均分制';
-COMMENT ON COLUMN campaign_reward.status       IS 'PENDING 待领取 / CLAIMED 已授权待发 / SUCCESS 已到账 / FAILED 发放失败';
+COMMENT ON COLUMN campaign_reward.status       IS 'PENDING 待领取 / CLAIMED 已授权待发 / SUCCESS 已到账 / FAILED 发放失败。【卡在 CLAIMED 怎么救】发放最坏耗时约 2 分钟，其间进程重启/发版，或收尾的 markSuccess/markFailed 失败，行会永远停在 CLAIMED，用户只看得到"上一次领取正在处理中"且无法自愈。手工重置：UPDATE campaign_reward SET status=''FAILED'', error_msg=''人工重置：上次领取中断'' WHERE id=? AND status=''CLAIMED''; —— FAILED 可重领，且 out_trade_no 不变，那次中断若其实已发成功，重领会撞唯一索引被判 SUCCESS，绝不会重复付款。切记别另起新单号补发，那才是真会双倍付款的操作';
 COMMENT ON COLUMN campaign_reward.out_trade_no IS 'WIIB_{campaignCode}_{userId}，固定可重算，整套幂等的基石。人工补发必须原样复用本列的值：换新单号会绕过服务端唯一索引，而 FAILED 里混着"其实已发成功、只是没读到响应"的，那就是双倍付款';
 COMMENT ON COLUMN campaign_reward.external_ref IS 'LDC 返回的 trade_no';
 

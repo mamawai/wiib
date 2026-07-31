@@ -41,6 +41,26 @@ public class CampaignReward {
 
     private BigDecimal ldcAmount;
 
+    /**
+     * PENDING 待领取 / CLAIMED 已授权待发 / SUCCESS 已到账 / FAILED 发放失败。
+     * <p>
+     * <b>【运维：卡在 CLAIMED 的行怎么救】</b>CLAIMED 是"已经抢到领取权、发放请求在飞"的中间态。
+     * 发放最坏要 ~2 分钟（8 次重试 × 15s 超时），这段时间里进程被重启 / 发版 / 杀掉，
+     * 或者收尾那条 markSuccess / markFailed 自己失败了，这一行就会永远停在 CLAIMED ——
+     * 而 casClaim 只收 PENDING 与 FAILED，claim() 又直接拒 CLAIMED，
+     * 用户从此只看得到"上一次领取正在处理中，请稍后再看"，没有超时、没有自愈、点多少次都一样。
+     * 手工重置成 FAILED 即可（FAILED 是可重领的）：
+     * <pre>
+     * UPDATE campaign_reward SET status='FAILED', error_msg='人工重置：上次领取中断'
+     * WHERE id = ? AND status='CLAIMED';
+     * </pre>
+     * <b>【为什么这么做不会重复付款】</b>out_trade_no 一个字都没动。那次中断的请求如果其实已经
+     * 发成功了，用户重领时同一单号会撞上服务端的唯一索引、被判成"此前已发放成功"（SUCCESS），
+     * 钱不会出去第二遍。所以重置只会让人重新走一遍流程，不会多花钱。
+     * <p>
+     * <b>【唯一不许做的事】</b>别为人工补发另起一个新的 out_trade_no —— 那是全套流程里
+     * 唯一真会双倍付款的操作，理由见下面 {@link #outTradeNo} 那段。
+     */
     private String status;
 
     /**

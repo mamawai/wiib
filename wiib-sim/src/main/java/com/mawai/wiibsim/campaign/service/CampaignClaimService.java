@@ -110,6 +110,9 @@ public class CampaignClaimService {
         CampaignReward reward = rewardMapper.selectMine(c.getId(), userId);
         if (reward == null) throw new BizException("你没有可领取的奖励");
         if (CampaignReward.SUCCESS.equals(reward.getStatus())) throw new BizException("已经领取过了");
+        // 【这句会不会永远卡住】会。发放中途进程被重启，或收尾的 markSuccess/markFailed 自己失败，
+        // 行就停在 CLAIMED 再也出不来（casClaim 只收 PENDING/FAILED）。没有超时也没有自愈，
+        // 得人工重置成 FAILED —— 具体 SQL 与"为什么不会重复付款"写在 CampaignReward.status 的注释里
         if (CampaignReward.CLAIMED.equals(reward.getStatus())) throw new BizException("上一次领取正在处理中，请稍后再看");
         if (reward.getCreatedAt().plusDays(ldcProperties.getClaimDays()).isBefore(LocalDateTime.now())) {
             throw new BizException("领取期限已过，请联系管理员");

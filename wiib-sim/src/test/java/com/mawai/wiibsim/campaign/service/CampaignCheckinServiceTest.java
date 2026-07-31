@@ -130,6 +130,31 @@ class CampaignCheckinServiceTest {
         verify(checkinMapper, never()).insert(any(CampaignCheckin.class));
     }
 
+    /**
+     * ★ 已经开始发钱的活动，就算被挪回窗口内也不许再签到 ★
+     * <p>
+     * 【这个场面怎么来的】结算会把活动翻成 SETTLING，而 {@code selectActive()} 现在把 SETTLING
+     * 也算 active（结算后活动页还得显示榜单与领取入口）。正常排期下 SETTLING 必然在 endAt 之后、
+     * 被时间窗挡掉；但 campaign 表刻意做成可运行时改的，运营把 end_at 往后挪一下，
+     * 一场<b>奖池已经分完</b>的活动就重新落回窗口内了。
+     * <p>
+     * 【为什么必须挡】此时再签到、再投票挣到的分，永远兑不成 LDC —— 钱是按结算那一刻的分数
+     * 定格发出去的，不会因为你后来又签了几天而重算。让用户白挣一场比直接告诉他"结束了"糟得多。
+     * <p>
+     * 所以这里的窗口刻意造成<b>窗口内</b>（昨天开赛、13 天后收摊）：只有 status 那道判定挡得住它，
+     * 时间窗是放行的。
+     */
+    @Test
+    void 活动进入结算后即使还在窗口内也不许签到() {
+        settling(LocalDateTime.now().minusDays(1), LocalDateTime.now().plusDays(13));
+
+        assertThatThrownBy(() -> service.checkin(ME))
+                .isInstanceOf(BizException.class)
+                .hasMessage("活动已进入结算，不能再参与");
+
+        verify(checkinMapper, never()).insert(any(CampaignCheckin.class));
+    }
+
     /** 压根没有 RUNNING 活动时也是一行都不插 */
     @Test
     void 没有进行中的活动时签到直接被拦下() {
@@ -395,6 +420,13 @@ class CampaignCheckinServiceTest {
     /** 喂给真 CampaignService 的那场 RUNNING 活动，窗口由用例指定 */
     private void running(LocalDateTime startAt, LocalDateTime endAt) {
         when(campaignMapper.selectActive()).thenReturn(campaign(startAt, endAt));
+    }
+
+    /** 同上，但活动已经翻成 SETTLING —— 运营挪过 end_at 之后就是这个样子 */
+    private void settling(LocalDateTime startAt, LocalDateTime endAt) {
+        Campaign c = campaign(startAt, endAt);
+        c.setStatus(Campaign.STATUS_SETTLING);
+        when(campaignMapper.selectActive()).thenReturn(c);
     }
 
     /** 积分用例的固定窗口：与种子活动同排期，日界全是写死的字面量 */
