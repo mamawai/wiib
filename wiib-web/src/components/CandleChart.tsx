@@ -1,14 +1,19 @@
-import { fmtNum, fmtDateTime } from '../lib/utils';
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { cn, fmtNum, fmtDateTime } from '../lib/utils';
+import { useEffect, useRef, useState, useCallback, type ReactNode } from 'react';
 import {
   createChart, CrosshairMode, CandlestickSeries, HistogramSeries, LineSeries, LineStyle,
   type IChartApi, type ISeriesApi, type UTCTimestamp, type MouseEventParams,
+  type DeepPartial, type HandleScrollOptions,
 } from 'lightweight-charts';
+import { Magnet, Maximize2, Minimize2, Minus, MousePointer2, Slash, Trash2, Type } from 'lucide-react';
 import { futuresApi } from '../api';
 import { useKlineStream } from '../hooks/useKlineStream';
 import { useIsDark } from '../hooks/useIsDark';
+import { useFullscreen } from '../hooks/useFullscreen';
 import { getCoinPriceDecimals } from '../lib/coinConfig';
 import { bollSeries, emaSeries, macdSeries, maSeries, rsiSeries } from '../lib/indicators';
+import type { ChartCtx } from '../lib/chartDrawings';
+import { useDrawings, type Tool } from './chart/useDrawings';
 
 /** 一根 K：series 只用 OHLC，量/额留给气泡和成交量柱。 */
 interface Bar { time: number; openMs: number; open: number; high: number; low: number; close: number; volume: number; quote: number; }
@@ -338,8 +343,25 @@ const LOAD_THRESHOLD = 100;
  */
 const MAX_BARS = 5000;
 
+/**
+ * 手机纵向滑动交还给页面滚动（否则想下滑页面却在拖图表）；横向平移/捏合缩放保留。
+ * 提到模块级是因为画线拖拽期间要临时把 handleScroll 整个关掉，松手后得原样恢复这一份。
+ */
+const SCROLL_OPTS: DeepPartial<HandleScrollOptions> =
+  { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false };
+
+/** 画线工具条按钮。null=选择模式（可选中/拖拽已有图形，图表照常平移缩放） */
+const TOOL_BTNS: { k: Tool; icon: ReactNode; title: string }[] = [
+  { k: null, icon: <MousePointer2 className="w-3.5 h-3.5" />, title: '选择/拖拽（Esc 取消选中，Del 删除）' },
+  { k: 'trend', icon: <Slash className="w-3.5 h-3.5" />, title: '趋势线：点两下定两端' },
+  { k: 'hline', icon: <Minus className="w-3.5 h-3.5" />, title: '水平线：点一下即成' },
+  { k: 'fib', icon: <span className="text-[10px] font-extrabold leading-none tracking-tight">FIB</span>, title: '斐波那契回撤：点两下定 0/1 两端' },
+  { k: 'text', icon: <Type className="w-3.5 h-3.5" />, title: '文字标注：点一下再输入' },
+];
+
 export function CandleChart({ symbol, interval, limit = 300, visibleBars = 110, klinesFn = futuresApi.klines, streamLive = true, tick = null, indicators = false }: { symbol: string; interval: Interval; limit?: number; visibleBars?: number; klinesFn?: (symbol: string, interval: string, limit: number, endTime?: number) => Promise<number[][]>; streamLive?: boolean; tick?: { price: number; ts: number } | null; indicators?: boolean }) {
   const isDark = useIsDark();
+  const rootRef = useRef<HTMLDivElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const chartDivRef = useRef<HTMLDivElement>(null);
   const tipRef = useRef<HTMLDivElement>(null);
@@ -368,6 +390,11 @@ export function CandleChart({ symbol, interval, limit = 300, visibleBars = 110, 
   const base = symbol.replace('USDT', '');
 
   const live = useKlineStream(symbol, interval);
+  const fs = useFullscreen(rootRef);
+  const {
+    attach: attachDrawings, tool, setTool, magnet, setMagnet,
+    selected: hasSelection, count: drawCount, trash, textEdit, commitText, cancelText,
+  } = useDrawings();
 
   // 三个 span 的当前节点。读数高频刷新，走 DOM 直改而不是 setState，免得鼠标一动就整树重渲染
   const legendRefs = useCallback(() => ({
@@ -409,8 +436,7 @@ export function CandleChart({ symbol, interval, limit = 300, visibleBars = 110, 
       },
       grid: { vertLines: { color: grid }, horzLines: { color: grid } },
       crosshair: { mode: CrosshairMode.Normal },
-      // 手机纵向滑动交还给页面滚动（否则想下滑页面却在拖图表）；横向平移/捏合缩放保留
-      handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false },
+      handleScroll: SCROLL_OPTS,
       // 读数条已移到图表外的工具条，顶部只留常规呼吸空间
       rightPriceScale: { borderColor: border, scaleMargins: { top: 0.06, bottom: 0.26 } },
       timeScale: { borderColor: border, timeVisible: true, secondsVisible: false, rightOffset: 5 },
@@ -427,6 +453,23 @@ export function CandleChart({ symbol, interval, limit = 300, visibleBars = 110, 
     const vol = chart.addSeries(HistogramSeries, { priceScaleId: '', priceFormat: { type: 'volume' }, lastValueVisible: false, priceLineVisible: false });
     vol.priceScale().applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });   // 量柱压底部 18%
     volRef.current = vol;
+
+    // 画线图层。挂蜡烛 series 而不是 pane —— 只有 series primitive 有
+    // priceAxisViews/timeAxisViews，水平线的价格轴标签、趋势线端点的时间标签白拿。
+    // attach/detach 必须在本 effect 内成对做：若另开同依赖的 effect，React 会先跑
+    // 这里的 cleanup(chart.remove())、再跑那边的，那时 series 已死，detachPrimitive 要炸。
+    // bars/idx 走 getter：图层活得比任何一帧都久，实时 tick 和翻历史都会换掉 ref 里的数组。
+    const detachDrawings = attachDrawings({
+      chart, series: candle, host, symbol, decimals, scrollOpts: SCROLL_OPTS,
+      ctx: {
+        bars: () => barsRef.current,
+        idx: () => idxRef.current,
+        bucketSec: BUCKET_MS[interval] / 1000,
+        timeScale: chart.timeScale(),
+        series: candle,
+      } satisfies ChartCtx,
+      fmtTime: t => fmtBarTime(barDate(t), interval),
+    });
 
     // 主图叠加：MA / EMA / BOLL 都挂 pane 0，跟蜡烛共用价格轴。
     // 三组一律建出来，显不显示走 visible，切换时不用重建 series 重灌数据
@@ -584,13 +627,14 @@ export function CandleChart({ symbol, interval, limit = 300, visibleBars = 110, 
       // hint 是 JSX 节点、不随图表销毁重建：切 symbol/interval 时若正挂着"载入历史…"，
       // 在飞的请求会因 disposed 直接 return 而走不到 hideHint，不在这里收就永远留在新图上
       disposed = true; hideHint();
+      detachDrawings();                    // 必须赶在 chart.remove() 前面
       ro.disconnect(); chart.remove();
       chartRef.current = null; candleRef.current = null; volRef.current = null;
       indRef.current = null; ovRef.current = null;
       readyRef.current = false; barsRef.current = []; idxRef.current = new Map();
       loadingRef.current = false; exhaustedRef.current = false;
     };
-  }, [symbol, interval, limit, visibleBars, decimals, klinesFn, indicators, legendRefs]);
+  }, [symbol, interval, limit, visibleBars, decimals, klinesFn, indicators, legendRefs, attachDrawings]);
 
   // 指标开关：只切 visible，不重建 series；切完立刻刷读数（展开的组要马上有值）
   useEffect(() => {
@@ -684,31 +728,88 @@ export function CandleChart({ symbol, interval, limit = 300, visibleBars = 110, 
     `px-2.5 py-1 text-[11px] font-semibold transition-colors cursor-pointer ${
       on ? 'bg-card-2 text-foreground shadow-[inset_0_2px_0_var(--color-primary)]'
          : 'text-muted-foreground hover:bg-surface-hover hover:text-foreground'}`;
+  /** 同一套视觉的图标版，画线/磁吸/删除/全屏共用 */
+  const iconCls = (on: boolean) =>
+    `px-2 py-1.5 flex items-center justify-center transition-colors cursor-pointer ${
+      on ? 'bg-card-2 text-foreground shadow-[inset_0_2px_0_var(--color-primary)]'
+         : 'text-muted-foreground hover:bg-surface-hover hover:text-foreground'}`;
+  const group = 'flex rounded-md border border-border overflow-hidden divide-x divide-border';
 
   return (
-    <div className="w-full h-full flex flex-col">
-      {/* 指标工具条（图表外）：MA/EMA/BOLL 开关 + 开启组的读数。
+    // 全屏用的是这一层：原生模式靠 :fullscreen 的 UA 样式铺满，iPhone Safari 没有元素级
+    // 全屏则退成 fixed。两种都只改类名不改 DOM 结构，图表不会被 React 卸载重建。
+    <div ref={rootRef} className={cn(
+      'w-full h-full flex flex-col',
+      fs.active && 'bg-background p-2',
+      fs.cssMode && 'fixed inset-0 z-50',
+    )}>
+      {/* 工具条（图表外）。整条常显：代币化美股页不开 indicators，但画线和全屏照样要能用，
+          所以只有 MA/EMA/BOLL 那组和读数跟着 indicators 走。
           读数 span 由 renderOverlayLegend 走 DOM 直改（悬停跟随十字线），高频刷新不过 React */}
-      {indicators && (
-        <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 px-2 md:px-1 pb-1.5">
-          <div className="flex rounded-md border border-border overflow-hidden divide-x divide-border">
+      <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 px-2 md:px-1 pb-1.5">
+        {indicators && (
+          <div className={group}>
             {(['ma', 'ema', 'boll'] as OverlayKey[]).map(k => (
               <button key={k} type="button" onClick={() => toggle(k)} className={chipCls(overlays[k])}>
                 {k.toUpperCase()}
               </button>
             ))}
           </div>
+        )}
+
+        <div className={group}>
+          {TOOL_BTNS.map(b => (
+            <button key={b.k ?? 'pick'} type="button" title={b.title}
+                    onClick={() => setTool(b.k)} className={iconCls(tool === b.k)}>
+              {b.icon}
+            </button>
+          ))}
+        </div>
+
+        <div className={group}>
+          <button type="button" onClick={() => setMagnet(!magnet)} className={iconCls(magnet)}
+                  title={magnet ? '磁吸开：端点自动贴住最近的开/高/低/收' : '磁吸关：自由落点'}>
+            <Magnet className="w-3.5 h-3.5" />
+          </button>
+          <button type="button" onClick={trash} disabled={!hasSelection && !drawCount}
+                  title={hasSelection ? '删除选中（Del）' : '清空本币种全部画线'}
+                  className={`${iconCls(false)} disabled:opacity-30 disabled:cursor-default disabled:hover:bg-transparent disabled:hover:text-muted-foreground`}>
+            <Trash2 className="w-3.5 h-3.5" />
+          </button>
+        </div>
+
+        {indicators && (
           <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5"
                style={{ font: '700 11px/1.6 ui-monospace, Consolas, monospace' }}>
             <span ref={maLegendRef} />
             <span ref={emaLegendRef} />
             <span ref={bollLegendRef} />
           </div>
-        </div>
-      )}
+        )}
+
+        <button type="button" onClick={fs.toggle} title={fs.active ? '退出全屏（Esc）' : '全屏'}
+                className={`ml-auto rounded-md border border-border ${iconCls(false)}`}>
+          {fs.active ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
+        </button>
+      </div>
 
       <div ref={wrapRef} className="relative w-full flex-1 min-h-0">
         <div ref={chartDivRef} className="absolute inset-0" />
+        {/* 文字标注输入。Esc 会先把锚点清掉，所以随后 unmount 触发的 blur→commit 是空转 */}
+        {textEdit && (
+          <input autoFocus placeholder="标注文字，回车确认"
+                 onKeyDown={e => {
+                   if (e.key === 'Enter') commitText(e.currentTarget.value);
+                   else if (e.key === 'Escape') cancelText();
+                 }}
+                 onBlur={e => commitText(e.currentTarget.value)}
+                 style={{
+                   position: 'absolute', left: textEdit.x, top: textEdit.y - 12, zIndex: 6, width: 170,
+                   padding: '3px 7px', borderRadius: 6, outline: 'none',
+                   background: 'rgba(16,18,24,.94)', border: '1px solid #2962ff', color: '#e6e8ee',
+                   font: '600 11px/1.5 ui-monospace, Consolas, monospace',
+                 }} />
+        )}
         {/* 翻历史提示（载入中 / 到底）。主图 pane 左上角是空的：叠加指标的读数条在图表外的工具条上 */}
         <div ref={hintRef} style={{
           position: 'absolute', left: 10, top: 6, display: 'none', pointerEvents: 'none', zIndex: 4,
