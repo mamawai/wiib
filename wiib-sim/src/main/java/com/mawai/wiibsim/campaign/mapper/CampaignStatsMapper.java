@@ -238,4 +238,14 @@ public interface CampaignStatsMapper {
             WHERE quantity + COALESCE(frozen_quantity, 0) > 0
             """)
     List<HeldPositionRow> listHeldPositions();
+
+    /**
+     * 平台侧记录的 LinuxDo ID。领取时用来校验"这次授权的是不是本人的号"。
+     * <p>
+     * 【只核 id 不核 username】username 会过期（LinuxDo 侧改名撞上本地已有用户名时，
+     * 平台保留旧名照常登录，AuthServiceImpl:134），而 linux_do_id 是 OAuth 的登录主键、从不变。
+     * 拿它核对，能把"授权错了账号"变成一个明确的报错，而不是把钱静默发到别人那儿。
+     */
+    @Select("SELECT linux_do_id FROM \"user\" WHERE id = #{userId}")
+    String selectLinuxDoId(@Param("userId") Long userId);
 }

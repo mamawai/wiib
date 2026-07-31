@@ -8,6 +8,7 @@ import com.mawai.wiibsim.campaign.model.CampaignScore;
 import com.mawai.wiibsim.campaign.model.EligibleUserRow;
 import com.mawai.wiibsim.campaign.model.MyCampaignView;
 import com.mawai.wiibsim.campaign.model.ScoreItem;
+import com.mawai.wiibsim.campaign.model.SettlementBasis;
 import com.mawai.wiibsim.campaign.score.TradeScorer;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -160,9 +161,11 @@ public class CampaignScoreService {
     /**
      * 参与 LDC 分配的权重：能领取且分数为正的人。分母只算这些人。
      * <p>
-     * <b>【结算前必须先拿一份新的榜】</b>喂进来的 board 请来自 {@link #freshBoard()}，
-     * 不要用 {@link #scoreBoard()} —— 缓存里的榜可能早于最后一批投票 / 预测结算，
+     * <b>【结算别直接调这个，调 {@link #settlementBasis()}】</b>喂进来的 board 若来自
+     * 缓存的 {@link #scoreBoard()}，那份榜可能早于最后一批投票 / 预测结算，
      * 按它分池子就是拿少算的权重把钱发出去，而发放是 CAS 幂等的，发完纠不回来。
+     * settlementBasis() 把"现算的榜"与"从它筛出的权重"绑成一个返回值，这种误用就没地方发生了。
+     * 本方法保持公开只为 {@link #myView} 那条读路径（它要的正是缓存榜的分母）。
      * <p>
      * 用 LinkedHashMap 保住榜单顺序 —— 结算侧要按名次逐个发放，顺序稳定才能对着日志核账。
      */
@@ -172,6 +175,24 @@ public class CampaignScoreService {
             if (s.claimable() && s.finalScore().signum() > 0) weights.put(s.userId(), s.finalScore());
         }
         return weights;
+    }
+
+    /**
+     * 结算专用：现算一份榜 + 从它筛出权重，一次给全。<b>结算只许走这个入口。</b>
+     * <p>
+     * 【为什么要有这个方法】{@link #freshBoard()} 与 {@link #eligibleWeights} 分开摆着，
+     * 结算侧就有两种静默错法：榜取成了缓存的 {@link #scoreBoard()}（少算最后一批投票分），
+     * 或者榜与权重取自两次不同的计算（明细与实发金额对不上账）。合成一个方法之后，
+     * 这两种误用在类型上就不可表达了 —— 调用方拿不到拆开的机会。
+     * <p>
+     * 【顺序：先算榜，再翻活动状态】{@link #freshBoard()} 经 {@link CampaignService#current()}
+     * 走到 {@code CampaignMapper.selectActive()}，那条 SQL 现在 {@code status IN ('RUNNING','SETTLING')}，
+     * 所以先翻 SETTLING 再算榜也查得到活动。但结算侧仍然坚持先算后翻：这条 SQL 的
+     * WHERE 是别人可以改的，而"翻了状态就再也算不出榜、于是谁也拿不到钱"这个失败是完全无声的。
+     */
+    public SettlementBasis settlementBasis() {
+        List<CampaignScore> board = freshBoard();
+        return new SettlementBasis(board, eligibleWeights(board));
     }
 
     /**

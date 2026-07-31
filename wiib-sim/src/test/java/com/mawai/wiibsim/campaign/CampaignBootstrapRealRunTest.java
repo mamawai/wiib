@@ -64,7 +64,7 @@ class CampaignBootstrapRealRunTest {
     /** 直查 mapper：证 bean 在、SQL 能发出去、种子行映射得回来 */
     @Test
     void 包内MapperScan生效且能查到种子活动() {
-        Campaign c = campaignMapper.selectRunning();
+        Campaign c = campaignMapper.selectActive();
 
         assertThat(c).as("库里应有一行 RUNNING 活动，先跑 sql/campaign.sql").isNotNull();
         assertThat(c.getCode()).isEqualTo(SEED_CODE);

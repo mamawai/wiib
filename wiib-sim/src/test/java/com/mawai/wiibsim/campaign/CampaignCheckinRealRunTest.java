@@ -36,7 +36,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * 【为什么不走 checkin 而是直接调 mapper 插】requireRunning 现在带时间窗
  * [startAt, endAt)，而种子活动的排期是 2026-08-03 ~ 2026-08-17 —— 排期外的日子跑本类，
  * checkin 会先被闸门挡住，根本走不到唯一索引那一步。
- * 想让 checkin 跑通就得另插一场覆盖"此刻"的活动，但 {@code selectRunning} 是
+ * 想让 checkin 跑通就得另插一场覆盖"此刻"的活动，但 {@code selectActive} 是
  * {@code ORDER BY start_at DESC LIMIT 1}：要压过种子行，新活动的 start_at 必须晚于
  * 2026-08-03，而要覆盖此刻又必须早于此刻 —— 排期未到时这两个条件互斥，做不到；
  * 硬塞一场 RUNNING 活动还会顺带改掉真库上 {@code current()} 的答案，风险换不来收益。

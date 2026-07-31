@@ -95,7 +95,7 @@ class CampaignVoteSettleTest {
         c.setStartAt(DAY1.atStartOfDay());
         c.setEndAt(DAY1.plusDays(14).atStartOfDay());
         c.setStatus(Campaign.STATUS_RUNNING);
-        when(campaignMapper.selectRunning()).thenReturn(c);
+        when(campaignMapper.selectActive()).thenReturn(c);
 
         // 默认此前一分没发出去过
         when(voteMapper.sumScoreUpTo(eq(CAMPAIGN_ID), any())).thenReturn(BigDecimal.ZERO);
@@ -520,7 +520,7 @@ class CampaignVoteSettleTest {
     /** 没有活动：票都不查，行情更不该取（白白挨一次 451） */
     @Test
     void 没有活动时不查票也不取行情() {
-        when(campaignMapper.selectRunning()).thenReturn(null);
+        when(campaignMapper.selectActive()).thenReturn(null);
 
         service.settleDay(DAY1);
 

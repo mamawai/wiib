@@ -133,7 +133,7 @@ class CampaignCheckinServiceTest {
     /** 压根没有 RUNNING 活动时也是一行都不插 */
     @Test
     void 没有进行中的活动时签到直接被拦下() {
-        when(campaignMapper.selectRunning()).thenReturn(null);
+        when(campaignMapper.selectActive()).thenReturn(null);
 
         assertThatThrownBy(() -> service.checkin(ME))
                 .isInstanceOf(BizException.class)
@@ -394,7 +394,7 @@ class CampaignCheckinServiceTest {
 
     /** 喂给真 CampaignService 的那场 RUNNING 活动，窗口由用例指定 */
     private void running(LocalDateTime startAt, LocalDateTime endAt) {
-        when(campaignMapper.selectRunning()).thenReturn(campaign(startAt, endAt));
+        when(campaignMapper.selectActive()).thenReturn(campaign(startAt, endAt));
     }
 
     /** 积分用例的固定窗口：与种子活动同排期，日界全是写死的字面量 */

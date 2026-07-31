@@ -1,14 +1,18 @@
 package com.mawai.wiibsim.campaign;
 
 import com.mawai.wiibcommon.annotation.CurrentUserId;
+import com.mawai.wiibcommon.annotation.RequireAdmin;
 import com.mawai.wiibcommon.util.Result;
 import com.mawai.wiibsim.campaign.entity.Campaign;
+import com.mawai.wiibsim.campaign.entity.CampaignReward;
 import com.mawai.wiibsim.campaign.model.CampaignScore;
 import com.mawai.wiibsim.campaign.model.MyCampaignView;
 import com.mawai.wiibsim.campaign.model.VoteBoard;
 import com.mawai.wiibsim.campaign.service.CampaignCheckinService;
+import com.mawai.wiibsim.campaign.service.CampaignClaimService;
 import com.mawai.wiibsim.campaign.service.CampaignScoreService;
 import com.mawai.wiibsim.campaign.service.CampaignService;
+import com.mawai.wiibsim.campaign.service.CampaignSettleService;
 import com.mawai.wiibsim.campaign.service.CampaignVoteService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -18,6 +22,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
@@ -36,6 +41,8 @@ public class CampaignController {
     private final CampaignScoreService scoreService;
     private final CampaignCheckinService checkinService;
     private final CampaignVoteService voteService;
+    private final CampaignClaimService claimService;
+    private final CampaignSettleService settleService;
 
     @Data
     public static class VoteRequest {
@@ -80,5 +87,24 @@ public class CampaignController {
     @Operation(summary = "活动积分榜")
     public Result<List<CampaignScore>> board() {
         return Result.ok(scoreService.scoreBoard());
+    }
+
+    @GetMapping("/reward")
+    @Operation(summary = "我的奖励（未结算返回 null）")
+    public Result<CampaignReward> reward(@CurrentUserId Long userId) {
+        return Result.ok(claimService.myReward(userId));
+    }
+
+    @PostMapping("/claim")
+    @Operation(summary = "领取奖励（携带 LinuxDo 二次授权 code）")
+    public Result<CampaignReward> claim(@CurrentUserId Long userId, @RequestParam String code) {
+        return Result.ok(claimService.claim(userId, code));
+    }
+
+    @PostMapping("/settle")
+    @RequireAdmin
+    @Operation(summary = "结算活动并生成奖励名单（管理员，幂等）")
+    public Result<Integer> settle() {
+        return Result.ok(settleService.settle());
     }
 }

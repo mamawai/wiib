@@ -36,6 +36,23 @@ public interface CampaignVoteMapper extends BaseMapper<CampaignVote> {
                                      @Param("date") LocalDate date);
 
     /**
+     * 全场还没结算的投票日，升序去重。<b>结算前的放行条件就是它返回空。</b>
+     * <p>
+     * 【为什么结算必须等它空】未结算的票 score 为 NULL，按 0 计入榜单
+     * （{@link #sumScoreByUser}）—— 拿这份榜去分池子，那些人的 vote_score 被永久少算，
+     * 而发放是 CAS 幂等的，发完纠不回来。
+     * <p>
+     * 【为什么按天返回而不是只给个数】
+     * {@link com.mawai.wiibsim.campaign.service.CampaignVoteService#settleDay} 只结<b>已经过完</b>的
+     * UTC 日：TZ=+8 时活动在 UTC 末日的 16:00 收摊，那天要再等 8 小时（或下一次 00:05 回扫）
+     * 才结得上。运营看到具体是哪几天没结，才知道是"再等等"还是"某天一直取不到日线，得去查"。
+     */
+    @Select("SELECT vote_date FROM campaign_vote " +
+            "WHERE campaign_id = #{campaignId} AND result IS NULL " +
+            "GROUP BY vote_date ORDER BY vote_date")
+    List<LocalDate> listUnsettledDates(@Param("campaignId") Long campaignId);
+
+    /**
      * 按用户汇总投票得分，未结算的票按 0 计。<b>不卡日期</b> —— 榜单要的是全场总分。
      * <p>
      * 【别拿它当参与名单】这里不筛 result IS NOT NULL，只投过票还没结算的人也会出一行、total=0。

@@ -17,7 +17,10 @@ public class Campaign {
     @TableId(type = IdType.AUTO)
     private Long id;
 
-    /** 活动码，out_trade_no 的组成部分，发放开始后不可变更 */
+    /**
+     * 活动码，out_trade_no 的组成部分，<b>发放开始后不可变更</b>：改了就重算不出已发那批的单号，
+     * 补发时只能另起新单号，而新单号绕过服务端的唯一索引 = 双倍付款。
+     */
     private String code;
 
     private String name;

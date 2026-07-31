@@ -43,7 +43,16 @@ public class CampaignReward {
 
     private String status;
 
-    /** WIIB_{campaignCode}_{userId}，固定可重算 */
+    /**
+     * WIIB_{campaignCode}_{userId}，固定可重算（生成器见
+     * {@link com.mawai.wiibsim.campaign.service.CampaignSettleService#outTradeNo}）。
+     * <p>
+     * <b>【人工补发必须原样复用这一列的值，绝不能另起新单号】</b>防重复发放整个架在
+     * 服务端对这个单号的唯一索引上：同一单号重发会撞唯一索引、被判成"此前已发放成功"，
+     * 钱不会出去第二遍。换个新单号就绕过了这道锁 —— 而 FAILED 里恰恰混着
+     * "其实已经发成功、只是响应没读到"的那些（LdcClient.judge 的判据是往窄了收的，
+     * 宁可把真幂等漏判成 FAILED），对它们用新单号补发就是双倍付款。
+     */
     private String outTradeNo;
 
     /** LDC 返回的 trade_no */

@@ -177,7 +177,7 @@ class CampaignVoteServiceTest {
     /** 压根没有 RUNNING 活动时也是一行都不插 */
     @Test
     void 没有进行中的活动时投票直接被拦下() {
-        when(campaignMapper.selectRunning()).thenReturn(null);
+        when(campaignMapper.selectActive()).thenReturn(null);
 
         assertThatThrownBy(() -> service.vote(ME, BTC, CampaignVote.UP))
                 .isInstanceOf(BizException.class)
@@ -257,7 +257,7 @@ class CampaignVoteServiceTest {
      */
     @Test
     void 没有活动时看板返回空列表() {
-        when(campaignMapper.selectRunning()).thenReturn(null);
+        when(campaignMapper.selectActive()).thenReturn(null);
 
         assertThat(service.board(ME)).isEmpty();
         verify(voteMapper, never()).listMine(any(), any(), any());
@@ -286,7 +286,7 @@ class CampaignVoteServiceTest {
         c.setStartAt(startAt);
         c.setEndAt(endAt);
         c.setStatus(Campaign.STATUS_RUNNING);
-        when(campaignMapper.selectRunning()).thenReturn(c);
+        when(campaignMapper.selectActive()).thenReturn(c);
     }
 
     private static CampaignVote voteRow(String symbol, String direction) {

@@ -103,7 +103,7 @@ COMMENT ON COLUMN campaign_reward.username     IS '同上，分发接口拿它�
 COMMENT ON COLUMN campaign_reward.penalty      IS '强平扣分，负数';
 COMMENT ON COLUMN campaign_reward.final_score  IS 'max(0, trade+daily+vote+penalty)；带小数因投票是均分制';
 COMMENT ON COLUMN campaign_reward.status       IS 'PENDING 待领取 / CLAIMED 已授权待发 / SUCCESS 已到账 / FAILED 发放失败';
-COMMENT ON COLUMN campaign_reward.out_trade_no IS 'WIIB_{campaignCode}_{userId}，固定可重算，整套幂等的基石';
+COMMENT ON COLUMN campaign_reward.out_trade_no IS 'WIIB_{campaignCode}_{userId}，固定可重算，整套幂等的基石。人工补发必须原样复用本列的值：换新单号会绕过服务端唯一索引，而 FAILED 里混着"其实已发成功、只是没读到响应"的，那就是双倍付款';
 COMMENT ON COLUMN campaign_reward.external_ref IS 'LDC 返回的 trade_no';
 
 CREATE INDEX IF NOT EXISTS idx_campaign_reward_status

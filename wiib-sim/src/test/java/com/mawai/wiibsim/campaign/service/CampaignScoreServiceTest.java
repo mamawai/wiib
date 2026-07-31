@@ -358,7 +358,7 @@ class CampaignScoreServiceTest {
     /** 没有进行中的活动：榜是空的、myView 是 null，且一次都不去扫业务表 */
     @Test
     void 没有活动时榜为空myView为null且不扫库() {
-        when(campaignMapper.selectRunning()).thenReturn(null);
+        when(campaignMapper.selectActive()).thenReturn(null);
 
         assertThat(service.scoreBoard()).isEmpty();
         assertThat(service.myView(ACE)).isNull();
@@ -467,7 +467,7 @@ class CampaignScoreServiceTest {
     /** 没有活动时 freshBoard 也是空的，不去扫库 */
     @Test
     void 没有活动时freshBoard也为空() {
-        when(campaignMapper.selectRunning()).thenReturn(null);
+        when(campaignMapper.selectActive()).thenReturn(null);
 
         assertThat(service.freshBoard()).isEmpty();
         verify(statsMapper, never()).listEligibleUsers();
@@ -483,7 +483,7 @@ class CampaignScoreServiceTest {
         c.setEndAt(endAt);
         c.setPrizePool(POOL);
         c.setStatus(Campaign.STATUS_RUNNING);
-        when(campaignMapper.selectRunning()).thenReturn(c);
+        when(campaignMapper.selectActive()).thenReturn(c);
     }
 
     private static EligibleUserRow user(long userId, String username) {
