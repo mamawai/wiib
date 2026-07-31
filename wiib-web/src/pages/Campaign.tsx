@@ -170,9 +170,13 @@ export function Campaign() {
   const [info, setInfo] = useState<CampaignInfo | null>(null);
   const [reward, setReward] = useState<CampaignReward | null>(null);
   const [board, setBoard] = useState<CampaignScore[]>([]);
-  // "没拉到"标记。/current 没有对应的标记位：它只用来判结算态，拉不到时 settled=false，
-  // 页面退回"结算后在这里领取"这句永远为真的话，没有说错话的空间
+  // 四个"没拉到"标记，一个都不省。/current 的这个曾经被我判成"不需要"，理由是它只喂
+  // 领取卡那句永远为真的兜底话 —— 那句理由是错的：settled 同时还喂着 canAct、状态徽标
+  // 和预估卡。首屏就把 /current 拉挂、而活动其实已结算的话，徽标会写成"已结束 · 待结算"，
+  // 预估卡会退回"预估到手"。都不是关于钱的假话（领取仍走 reward 那支，照常能领），
+  // 但确实是错的状态，所以宁可挂一条"没拉全"的提示，也别假装页面是准的
   const [viewFailed, setViewFailed] = useState(false);
+  const [currentFailed, setCurrentFailed] = useState(false);
   const [rewardFailed, setRewardFailed] = useState(false);
   const [boardFailed, setBoardFailed] = useState(false);
 
@@ -203,6 +207,7 @@ export function Campaign() {
       if (!rwErr) setReward(rw);
       if (!bdErr) setBoard(bd);
       setViewFailed(meErr);
+      setCurrentFailed(curErr);
       setRewardFailed(rwErr);
       setBoardFailed(bdErr);
       setLoadedNonce(nonce);
@@ -274,6 +279,17 @@ export function Campaign() {
   // 真不该点后端会拿准确的时间窗顶回来，总好过一次网络抖动把活动页锁死
   const canAct = view != null && !notStarted && !ended && !settled;
 
+  /**
+   * "有没有分到钱这件事，现在说不准"。预估卡与领取卡共用这一个判断。
+   * <p>【为什么必须共用】上一轮就是两张卡各判各的翻的车：领取卡挡住了 rewardFailed，
+   * 预估卡只看 reward 与 settled，于是 /reward 单独 500 时，一个真分到钱的人会在
+   * "奖励信息加载失败"正上方读到"实际到手 0.00 · 本次没有分到 LDC"。
+   * 两张卡的分支顺序从此都是 reward → rewardUnknown → settled → 兜底，一致性是构造出来的。
+   * <p>【为什么带 settled】结算前 /reward 本来就返回 null，它失败没有信息量，
+   * 没必要在活动进行中因为一次抖动就把预估数字换成一个"说不准"。
+   */
+  const rewardUnknown = rewardFailed && !reward && settled;
+
   const statusBadge = notStarted
     ? { text: '未开始', variant: 'warning' as const }
     : settled
@@ -336,11 +352,16 @@ export function Campaign() {
         </Card>
       ) : (
         <>
-          {/* 手里有数据、但最近一次刷新没成：不清屏，明说这是上一次的结果 */}
-          {viewFailed && (
+          {/* 手里有数据、但这一轮有请求没拉到：不清屏，明说页面可能不准。
+              /current 挂掉也要报 —— 它喂着状态徽标与预估卡，首屏挂掉时页面是错的但看不出来 */}
+          {(viewFailed || currentFailed) && (
             <div className="pt-card rounded-lg px-3 py-2 flex items-center gap-2 text-[11px]">
               <TriangleAlert className="w-3.5 h-3.5 shrink-0 text-warning" />
-              <span className="text-muted-foreground">数据刷新失败，下面显示的是上一次的结果</span>
+              <span className="text-muted-foreground">
+                {viewFailed
+                  ? '数据刷新失败，下面显示的是上一次的结果'
+                  : '活动状态没拉到，结算状态与到手金额可能不是最新的'}
+              </span>
               <Button variant="ghost" size="sm" className="ml-auto h-7" onClick={reload} disabled={loading}>
                 {loading
                   ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -410,29 +431,36 @@ export function Campaign() {
             </Card>
 
             {/* 结算后一律以 /reward 为准：预估是除法，真实分配走最大余额法补零头，两者能差一分。
-                标题与文案也要跟着结算态走 —— 已结算又没有奖励行的人，
-                否则会在"本次结算你没有分到 LDC"正上方读到一句"预估到手 X LDC" */}
+                标题、数字、说明三处必须同源同序（reward → rewardUnknown → settled → 兜底），
+                各判各的就会拼出"实际到手 0.00"配"奖励信息加载失败"这种自相矛盾的一屏 */}
             <Card>
               <CardHeader className="pb-2">
-                <CardTitle>{reward || settled ? '实际到手' : '预估到手'}</CardTitle>
+                <CardTitle>
+                  {reward ? '实际到手' : rewardUnknown ? '到手金额' : settled ? '实际到手' : '预估到手'}
+                </CardTitle>
               </CardHeader>
               <CardContent className="pb-4">
                 <div className="flex items-baseline gap-1.5">
                   <span className="num text-3xl font-bold tracking-tighter tabular-nums text-primary">
-                    {fmtNum(reward ? reward.ldcAmount : settled ? 0 : view.estimatedLdc)}
+                    {/* 说不准的时候就给"—"。这一格宁可什么都不说，也不能报一个关于别人钱的数字 */}
+                    {reward
+                      ? fmtNum(reward.ldcAmount)
+                      : rewardUnknown ? '—' : fmtNum(settled ? 0 : view.estimatedLdc)}
                   </span>
                   <span className="text-sm font-bold text-muted-foreground">LDC</span>
                 </div>
                 <p className="mt-2 text-[10px] text-muted-foreground leading-relaxed">
                   {reward
                     ? '结算已完成，这是按最大余额法分到你名下的实发金额。'
-                    : settled
-                      ? '结算已完成，本次没有分到 LDC。'
-                      : '随参与人数变动，以结算为准。'}
+                    : rewardUnknown
+                      ? '结算已完成，但奖励信息没拉到，暂时算不出你的到手金额，刷新后重试。'
+                      : settled
+                        ? '结算已完成，本次没有分到 LDC。'
+                        : '随参与人数变动，以结算为准。'}
                 </p>
-                {/* 算式只在"还有得算"的时候给：没结算、还没拿到奖励行、且分母为正。
+                {/* 算式只在"还有得算"的时候给：没结算、没拿到奖励行、不在说不准的状态、且分母为正。
                     不判分母的话开赛第一天全站 0 分，这里会渲染成 500.00 × 0 ÷ 0 */}
-                {!reward && !settled && view.eligibleTotal > 0 && (
+                {!reward && !rewardUnknown && !settled && view.eligibleTotal > 0 && (
                   <p className="mt-2 num text-[10px] text-muted-foreground">
                     {fmtNum(view.prizePool)} × {fmtScore(view.me.finalScore)} ÷ {fmtScore(view.eligibleTotal)}
                   </p>
@@ -486,8 +514,9 @@ export function Campaign() {
                     </Button>
                   </div>
                 )
-              ) : rewardFailed ? (
-                // 没拉到奖励行 ≠ 没分到钱。这一支要是漏了，一次超时就会告诉一个真有钱的人他没分到
+              ) : rewardUnknown ? (
+                // 没拉到奖励行 ≠ 没分到钱。这一支要是漏了，一次超时就会告诉一个真有钱的人他没分到。
+                // 判据与上面预估卡同一个 rewardUnknown，两张卡不会各说各的
                 <div className="space-y-1">
                   <div className="text-sm font-bold">奖励信息加载失败</div>
                   <p className="text-[11px] text-muted-foreground leading-relaxed">
