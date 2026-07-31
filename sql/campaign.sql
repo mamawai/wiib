@@ -1,8 +1,18 @@
 -- ============================================================
 -- LDC 瓜分活动（五维交易赛）：活动定义 / 签到 / 多空投票 / 结算发放
--- 与业务表零耦合：活动只读业务表，只写本文件这四张。活动结束整包移除：
---   DROP TABLE IF EXISTS campaign_reward, campaign_vote, campaign_checkin, campaign;
---   再删 wiib-sim 的 campaign 包与本文件，业务代码无感。
+-- 与业务表零耦合：活动只读业务表，只写本文件这四张。活动结束整包移除，三步：
+--   ① 删表：DROP TABLE IF EXISTS campaign_reward, campaign_vote, campaign_checkin, campaign;
+--   ② 删代码（整目录/整文件）：
+--        wiib-sim/src/main/java/com/mawai/wiibsim/campaign/
+--        wiib-sim/src/test/java/com/mawai/wiibsim/campaign/   ← 别漏，留着编译不过
+--        wiib-web/src/pages/Campaign.tsx
+--        sql/campaign.sql（本文件）
+--   ③ 拆挂载点（活动往外伸出去的就这几处，别处一行没有）：
+--        wiib-sim/src/main/resources/application.yml 的 ldc: 段
+--        .env.example 的 LDC_* 几行
+--        wiib-web/src/ 六个文件：api/index.ts、types/index.ts、App.tsx、
+--                                components/Layout.tsx、pages/Me.tsx、pages/Login.tsx
+--   做完这三步业务代码无感。
 -- 落库（psql 不在宿主 PATH 上，走容器）：
 --   docker exec -i postgres-db psql -U mawai -d wiib -f - < sql/campaign.sql
 -- IF NOT EXISTS + ON CONFLICT 幂等，整个文件可重跑
@@ -102,8 +112,18 @@ COMMENT ON COLUMN campaign_reward.linux_do_id  IS '领取时二次 OAuth 拿到�
 COMMENT ON COLUMN campaign_reward.username     IS '同上，分发接口拿它做二次校验';
 COMMENT ON COLUMN campaign_reward.penalty      IS '强平扣分，负数';
 COMMENT ON COLUMN campaign_reward.final_score  IS 'max(0, trade+daily+vote+penalty)；带小数因投票是均分制';
-COMMENT ON COLUMN campaign_reward.status       IS 'PENDING 待领取 / CLAIMED 已授权待发 / SUCCESS 已到账 / FAILED 发放失败。【卡在 CLAIMED 怎么救】发放最坏耗时约 2 分钟，其间进程重启/发版，或收尾的 markSuccess/markFailed 失败，行会永远停在 CLAIMED，用户只看得到"上一次领取正在处理中"且无法自愈。手工重置：UPDATE campaign_reward SET status=''FAILED'', error_msg=''人工重置：上次领取中断'' WHERE id=? AND status=''CLAIMED''; —— FAILED 可重领，且 out_trade_no 不变，那次中断若其实已发成功，重领会撞唯一索引被判 SUCCESS，绝不会重复付款。切记别另起新单号补发，那才是真会双倍付款的操作';
-COMMENT ON COLUMN campaign_reward.out_trade_no IS 'WIIB_{campaignCode}_{userId}，固定可重算，整套幂等的基石。人工补发必须原样复用本列的值：换新单号会绕过服务端唯一索引，而 FAILED 里混着"其实已发成功、只是没读到响应"的，那就是双倍付款';
+-- status 的运维说明用 $$ 引号：正文里带单引号的 SQL 要能从本文件直接复制去执行，
+-- 用 '...' 就得把里面每个单引号写成两个，粘出来是语法错的
+COMMENT ON COLUMN campaign_reward.status       IS $$PENDING 待领取 / CLAIMED 已授权待发 / SUCCESS 已到账 / FAILED 发放失败。
+【卡在 CLAIMED 怎么救】发放最坏耗时约 2 分钟，其间进程重启/发版，或收尾的 markSuccess/markFailed 失败，行会永远停在 CLAIMED，用户只看得到"上一次领取正在处理中"且无法自愈。手工重置：
+    UPDATE campaign_reward SET status='FAILED', error_msg='人工重置：上次领取中断' WHERE id=? AND status='CLAIMED';
+FAILED 可重领，且 out_trade_no 不变，那次中断若其实已发成功，重领会撞唯一索引被判 SUCCESS，绝不会重复付款。
+【重置完还得过两道闸，否则用户点下去仍是死路】claim() 在看状态之前先判两件事：① 活动必须还是 SETTLING（翻成 DONE 就报"活动尚未结算，暂不可领取"）；② created_at + ldc.claim-days（默认 7 天）不能过（过了报"领取期限已过，请联系管理员"，第 8 天才重置必撞这句，得先把 ldc.claim-days 调大或改 created_at）。重置前先 SELECT 一眼这两个值：
+    SELECT r.status, r.created_at, c.status FROM campaign_reward r JOIN campaign c ON c.id = r.campaign_id WHERE r.id = ?;
+切记别另起新单号补发，那才是真会双倍付款的操作。$$;
+COMMENT ON COLUMN campaign_reward.out_trade_no IS $$WIIB_{campaignCode}_{userId}，固定可重算，整套幂等的基石。
+人工补发必须原样复用本列的值：换新单号会绕过服务端唯一索引，而 FAILED 里混着"其实已发成功、只是没读到响应"的，那就是双倍付款。
+同理，只要出现过 SUCCESS 就绝不许 DELETE 掉 reward 行重新结算：单号只由活动码 + userId 决定，重结算出来的是同一批单号，每个已到账的人重领都会撞 duplicate key 被判"已发放"，页面告诉他已到账，而服务端付的是上一轮那个金额、与新的 ldc_amount 无关。真要重算得先换 campaign.code（新单号 = 新账），并且认清那等于重新发一整轮钱。$$;
 COMMENT ON COLUMN campaign_reward.external_ref IS 'LDC 返回的 trade_no';
 
 CREATE INDEX IF NOT EXISTS idx_campaign_reward_status

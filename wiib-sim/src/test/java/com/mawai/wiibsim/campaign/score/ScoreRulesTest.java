@@ -115,20 +115,30 @@ class ScoreRulesTest {
         assertThat(got.values()).allSatisfy(v -> assertThat(v.scale()).isEqualTo(2));
     }
 
-    /** 三个人平分 100：33.33 除不尽，余 1 分必须补给某一个，总额仍是 100.00 */
+    /**
+     * 三个人平分 100：33.33 除不尽，余 1 分必须补给某一个，总额仍是 100.00。
+     * <p>
+     * 【多出的那 0.01 归谁：钉的是 userId 最小的那个】喂进去的顺序刻意排成 3,1,2，
+     * 余数三家逐位相同 —— 靠 {@code .thenComparing(Share::userId)} 才轮得到 userId=1。
+     * 删了那句 tie-break 的话，List.sort 的稳定性会让 0.01 落到排在最前的 userId=3 头上，
+     * 这条当场红。用 containsExactly 而不是 InAnyOrder 也正是为此：
+     * "谁多拿了一分钱"是用户真会来问的问题，答案必须是可复现的，不能随喂入顺序漂。
+     */
     @Test
-    void 除不尽时余数补足不留零头() {
+    void 除不尽时余数补给userId最小的那个() {
         Map<Long, BigDecimal> weights = new LinkedHashMap<>();
+        weights.put(3L, BigDecimal.ONE);
         weights.put(1L, BigDecimal.ONE);
         weights.put(2L, BigDecimal.ONE);
-        weights.put(3L, BigDecimal.ONE);
 
         Map<Long, BigDecimal> got = ScoreRules.largestRemainder(new BigDecimal("100"), weights);
 
         assertThat(got.values().stream().reduce(BigDecimal.ZERO, BigDecimal::add))
                 .isEqualByComparingTo("100.00");
-        assertThat(got.values()).containsExactlyInAnyOrder(
-                new BigDecimal("33.34"), new BigDecimal("33.33"), new BigDecimal("33.33"));
+        assertThat(got).containsExactly(
+                Map.entry(1L, new BigDecimal("33.34")),
+                Map.entry(2L, new BigDecimal("33.33")),
+                Map.entry(3L, new BigDecimal("33.33")));
     }
 
     /** 结果必须可重算：同样的输入跑两次必须一模一样，否则争议时无法复现 */

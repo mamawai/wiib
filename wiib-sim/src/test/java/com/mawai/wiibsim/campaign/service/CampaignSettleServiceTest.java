@@ -56,7 +56,8 @@ import static org.mockito.Mockito.when;
  * 但<b>删掉 {@code largestRemainder} 里的 .thenComparing(Share::userId) 本类照绿</b>（实测过）：
  * List.sort 是稳定排序，而喂进去的顺序本就是榜序 1,2,5，两条路答案一样。
  * 也就是说这条断言证的是"当前实现给出这个结果"，不是"tie-break 那句在承重"。
- * 后者是 {@code ScoreRulesTest} 的活（Task 2 评审已把它记成待补的 minor），别在这儿假装覆盖了。
+ * 后者是 {@code ScoreRulesTest.除不尽时余数补给userId最小的那个} 的活（它把喂入顺序刻意打乱，
+ * 删掉 tie-break 就红），别在这儿假装覆盖了。
  * <p>
  * 【TINY 那 0.00 是承重的】最大余额法在权重悬殊时会给末位分到 0.00，落一行就是给用户一个
  * 点了必然失败的领取按钮。本类钉住它不落行，且不落行不影响总额对账。

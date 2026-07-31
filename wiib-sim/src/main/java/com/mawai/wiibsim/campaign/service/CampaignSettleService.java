@@ -111,6 +111,16 @@ public class CampaignSettleService {
             n++;
         }
 
+        // 【落表总额必须逐分等于奖池，否则整笔回滚】今天这条是结构上成立的：largestRemainder
+        // 保证各份之和恰好是奖池，而 amounts 的 key 全都出自 basis.weights()、后者又是从 board 筛的，
+        // 所以这个循环不会漏掉任何一份（跳过的都是 0.00）。留这道闸是给以后改动用的 ——
+        // 谁哪天动了筛选条件或分配算法，这里当场炸并回滚整个事务，而不是把错的金额发出去。
+        // 它还顺带挡住"奖池带了分以下的位数"（NUMERIC(18,4) 存得下 500.0050，但分不到 0.01 上）
+        if (sum.compareTo(c.getPrizePool()) != 0) {
+            throw new BizException("结算总额 " + sum + " 与奖池 " + c.getPrizePool()
+                    + " 不符，已回滚。奖池若带分以下的位数请先改成两位小数");
+        }
+
         c.setStatus(Campaign.STATUS_SETTLING);
         campaignMapper.updateById(c);
 

@@ -132,8 +132,21 @@ public class CampaignClaimService {
             throw new BizException("领取状态已变化，请刷新后重试");
         }
 
-        LdcResult result = ldcClient.distribute(
-                authorizedId, info.getUsername(), reward.getLdcAmount(), reward.getOutTradeNo());
+        // 【为什么这里要兜异常】distribute 只把 http.send 包在 try 里，之前那段是裸的：
+        // LDC_BASE_URL 拼不成 URI、URI 不是绝对地址、凭证里混进控制字符，都会当场抛
+        // IllegalArgumentException —— 最可能发生在 LDC_ENABLED 第一次打开的那次发版。
+        // 不接住的话，这一行永远停在 CLAIMED（casClaim 只收 PENDING/FAILED），只能人工改库。
+        // 落 FAILED 是安全的：单号一个字没动，就算请求其实到了服务端，重领撞唯一索引即判 SUCCESS，
+        // 钱不会出去第二遍
+        LdcResult result;
+        try {
+            result = ldcClient.distribute(
+                    authorizedId, info.getUsername(), reward.getLdcAmount(), reward.getOutTradeNo());
+        } catch (RuntimeException e) {
+            rewardMapper.markFailed(reward.getId(), "发放异常：" + e);
+            log.error("活动奖励发放异常 userId={} out_trade_no={}", userId, reward.getOutTradeNo(), e);
+            throw new BizException("发放异常，请稍后重试");
+        }
 
         if (result.success()) {
             // tradeNo 为 null 是"命中单号幂等、此前已发放成功"（LdcResult.alreadySent），

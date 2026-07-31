@@ -28,7 +28,16 @@ public class LdcProperties {
 
     private boolean enabled = false;
 
-    /** 领取期限（天），过期保持 CLAIMED，后台可手动补发或作废 */
+    /**
+     * 领取期限（天），从 campaign_reward.created_at 起算，过期后 claim() 直接拒。
+     * <p>
+     * 【过期的行是什么状态：PENDING 或 FAILED，绝不会是 CLAIMED】期限这道闸在
+     * {@link com.mawai.wiibsim.campaign.service.CampaignClaimService#claim} 里排在任何状态变更之前，
+     * 抛出去时那一行一个字都还没动。所以排查"卡在 CLAIMED"时别往过期上想，那是两回事
+     * （CLAIMED 的成因与解法见 {@link com.mawai.wiibsim.campaign.entity.CampaignReward} 里 status 那一列的注释）。
+     * <p>
+     * 过期后要补发，得先把这个值调大（或改 created_at），光重置状态不够 —— 这道闸还在。
+     */
     private int claimDays = 7;
 
     /** 开关开着且凭证齐全才算真启用 */

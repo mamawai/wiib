@@ -13,6 +13,7 @@ import com.mawai.wiibsim.config.LinuxDoConfig;
 import com.mawai.wiibsim.dto.LinuxDoUserInfo;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpMethod;
@@ -168,6 +169,33 @@ class CampaignClaimServiceTest {
                 .hasMessageContaining("收款用户不存在");
 
         verify(rewardMapper).markFailed(REWARD_ID, "HTTP 400 {\"error_msg\":\"收款用户不存在\"}");
+        verify(rewardMapper, never()).markSuccess(anyLong(), anyString());
+    }
+
+    /**
+     * ★★ 发放整个抛异常时也必须落 FAILED，不能把行扔在 CLAIMED ★★
+     * <p>
+     * 【什么时候真会抛】distribute 只把 http.send 包在 try 里，之前那截是裸的：
+     * LDC_BASE_URL 拼不成 URI、URI 不是绝对地址、凭证里混进控制字符，都在那儿抛
+     * IllegalArgumentException。最可能撞上的时刻是 LDC_ENABLED 第一次打开的那次发版
+     * —— 那几个环境变量当时是新的，而这窗口里每个点"领取"的人都会被永久钉在 CLAIMED
+     * （casClaim 只收 PENDING/FAILED，claim() 直接拒 CLAIMED，没超时也没自愈，只能人工改库）。
+     * <p>
+     * 落 FAILED 是无条件安全的：单号一个字没动，请求就算真到了服务端，
+     * 重领时同一单号会撞唯一索引被判 SUCCESS，不会重复付款。
+     */
+    @Test
+    void 发放抛异常也落FAILED而不是卡在CLAIMED() {
+        when(ldcClient.distribute(anyString(), anyString(), any(), anyString()))
+                .thenThrow(new IllegalArgumentException("URI with undefined scheme"));
+
+        assertThatThrownBy(() -> service.claim(ME, CODE))
+                .isInstanceOf(BizException.class)
+                .hasMessage("发放异常，请稍后重试");
+
+        ArgumentCaptor<String> msg = ArgumentCaptor.forClass(String.class);
+        verify(rewardMapper).markFailed(eq(REWARD_ID), msg.capture());
+        assertThat(msg.getValue()).contains("URI with undefined scheme");
         verify(rewardMapper, never()).markSuccess(anyLong(), anyString());
     }
 

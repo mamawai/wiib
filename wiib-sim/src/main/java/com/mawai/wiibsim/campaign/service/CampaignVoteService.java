@@ -98,7 +98,10 @@ public class CampaignVoteService {
             long up = 0, down = 0;
             for (Map<String, Object> row : voteMapper.countByDirection(c.getId(), today, symbol)) {
                 long cnt = ((Number) row.get("cnt")).longValue();
-                if (CampaignVote.UP.equals(row.get("direction"))) up = cnt; else down = cnt;
+                // 两个方向各判一次而不是 else 兜底：手工塞库塞出第三种方向时，宁可这票不显示，
+                // 也不能把它算到看跌那一栏上去
+                if (CampaignVote.UP.equals(row.get("direction"))) up = cnt;
+                else if (CampaignVote.DOWN.equals(row.get("direction"))) down = cnt;
             }
             out.add(new VoteBoard(symbol, e.getValue(), up, down, mine.get(symbol)));
         }
@@ -111,9 +114,10 @@ public class CampaignVoteService {
      * 结算某个 UTC 交易日的投票。幂等：回填走 CAS（result IS NULL），重跑不会覆盖已发的分，
      * 也不会重复发放。任何一天漏结算了，隔天补跑即可。
      * <p>
-     * 【可分池靠反推不靠存状态】pool = 100 × (从活动首日到该日的天数) − 全场已发出的分。
+     * 【可分池靠反推不靠存状态】pool = 100 × (从活动首日到该日的天数) − <b>截至该日</b>已发出的分。
      * 平盘顺延、没人猜对、封顶剩下的，全都自动包含在这个差里 ——
      * 不必额外存一个"顺延余额"，也就不存在那个数被 Redis 清掉或与真值漂移的问题。
+     * 减数为什么必须卡在"截至该日"而不是全场，见 {@link #poolOf} 的注释：不卡的话补跑漏结的那天会全员 0 分。
      * <p>
      * 【这里用 current() 不用 requireRunning()】结算跑在 UTC 00:05、结的是<b>前一天</b>，
      * 活动最后一天的票要在 endAt 之后才结得上；判了窗口最后一天的票永远发不出分。
@@ -223,6 +227,12 @@ public class CampaignVoteService {
      * 末日上限正好 1400，一分不多、也没有剩在池里没人拿。边界只会把预算在相邻两天之间挪，
      * 不会凭空造出预算 —— 这正是"靠反推不存状态"换来的好处。{@code Math.max(days, 1)} 是承重的：
      * 去掉它 08-02 的上限就是 0，那 8 小时里投的票全发 0 分。
+     * <p>
+     * 【顺带一提：单人上限是 90 不是设计文档说的 84】总额那 1400 不受多出来的这天影响，但
+     * {@link ScoreRules#VOTE_DAILY_CAP} 是按<b>天</b>封顶的，15 个可投票 UTC 日就是 6 × 15 = <b>90</b>，
+     * 而设计文档给封顶找的理由写的是「两周投票最多贡献 84 分」(6 × 14)。
+     * 差的这 6 分没人在代码里校验、也不影响总额守恒（池子始终只有 1400），
+     * 写在这儿只是免得下一个人以为 84 是被强制执行的。
      * <p>
      * 【但这个"恰好没事"依赖 UTC 正偏移】若挪到负偏移时区（如 UTC-5），
      * 活动尾巴会溢到 UTC 08-17，末日算出 days=15 → 上限 1500，真会多发 100。

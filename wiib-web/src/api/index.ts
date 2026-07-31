@@ -516,7 +516,15 @@ export const campaignApi = {
     api.post<unknown, void>('/campaign/vote', { symbol, direction }),
   /** 我的奖励；未结算、或结算了但分配额为 0（不落行）都返回 null */
   reward: () => api.get<unknown, CampaignReward | null>('/campaign/reward'),
-  /** 携带 LinuxDo 二次授权 code 领取，见 Login.tsx 的 state 分流。最坏要等 ~2 分钟（服务端重试） */
+  /**
+   * 携带 LinuxDo 二次授权 code 领取，见 Login.tsx 的 state 分流。
+   *
+   * 【别给它加超时】这一个接口最坏要等 ~2 分钟：服务端对 LDC 分发接口最多重试 8 次 × 15s 超时
+   * （那边约一半请求会被误路由成 307，重试是必须的）。上面那个 axios 实例**刻意没有 timeout**——
+   * 加个全局 30s 之类的值，这里就会在服务端还在重试时被前端掐断：
+   * 用户看到"网络错误"，而库里那一行停在 CLAIMED、钱可能已经发出去了。
+   * 真要限时只能单独给这一个调用设，别往 axios.create 里塞全局值。
+   */
   claim: (code: string) => api.post<unknown, CampaignReward>('/campaign/claim', null, { params: { code } }),
 };
 
