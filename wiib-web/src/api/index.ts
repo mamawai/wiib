@@ -2,6 +2,7 @@ import axios from 'axios';
 import type { TnOverview, TnTrade, TnDailyCell, TnEquityPoint, TnFillStats, TnManualOrderReq, TnOrderResult, TnAck } from '../types/testnet';
 import type { BacktestStrategyMeta, BacktestTaskStatus, BacktestEventsPage, BacktestKlinesPage, BacktestResultPayload } from '../types';
 import type { LedgerEntry, LedgerBizTypeOption, PublicTrade, UserProfile, PositionHistoryItem, RankingSort } from '../types';
+import type { CampaignInfo, CampaignReward, CampaignScore, MyCampaignView } from '../types';
 import type { User, PageResult, RankingItem, CommentItem, NotificationItem, BuffStatus, UserBuff, BlackjackStatus, GameState, ConvertResult, MinesStatus, MinesGameState, VideoPokerStatus, VideoPokerGameState, CryptoPrice, CryptoOrderRequest, CryptoOrder, CryptoPosition, BStock, FuturesOpenRequest, FuturesCloseRequest, FuturesAddMarginRequest, FuturesReduceMarginRequest, FuturesStopLossRequest, FuturesTakeProfitRequest, FuturesAdjustLeverageRequest, FuturesCrossAccount, WalletTransferPreview, FuturesPosition, FuturesOrder, FuturesBracket, TradeFilterMap, PredictionRound, PredictionBet, PredictionBuyRequest, PredictionBetLive, PredictionPnl, AssetSnapshot, CategoryAverages, BehaviorAnalysisReport, ForceOrder, AiKeyConfig, AiModelAssignment, InviteCode, WorkbenchEvent, QuantSnapshotView, QuantSnapshotSeriesPoint, QuantDeepAnalysisView, Scorecard, StrategyAccountView, StrategySignalState, FeedStreamHealth, WorkbenchSessionSummary, WorkbenchChatMessage, NewsFlashItem } from '../types';
 
 const api = axios.create({
@@ -500,5 +501,22 @@ export const backtestApi = {
     api.get<unknown, BacktestKlinesPage>(`/ai/backtest/tasks/${taskId}/klines`, { params: { offset, limit } }),
   result: (taskId: string) =>
     api.get<unknown, BacktestResultPayload>(`/ai/backtest/tasks/${taskId}/result`),
+};
+
+// ========== LDC 瓜分活动 ==========
+export const campaignApi = {
+  /** 当前活动（RUNNING/SETTLING）；没有则 null。活动页靠 status 分"未结算"与"结算了没分到" */
+  current: () => api.get<unknown, CampaignInfo | null>('/campaign/current'),
+  /** 我的活动数据；没有进行中的活动返回 null */
+  me: () => api.get<unknown, MyCampaignView | null>('/campaign/me'),
+  board: () => api.get<unknown, CampaignScore[]>('/campaign/board'),
+  /** 签到，返回签到后的最长连续天数 */
+  checkin: () => api.post<unknown, number>('/campaign/checkin'),
+  vote: (symbol: string, direction: 'UP' | 'DOWN') =>
+    api.post<unknown, void>('/campaign/vote', { symbol, direction }),
+  /** 我的奖励；未结算、或结算了但分配额为 0（不落行）都返回 null */
+  reward: () => api.get<unknown, CampaignReward | null>('/campaign/reward'),
+  /** 携带 LinuxDo 二次授权 code 领取，见 Login.tsx 的 state 分流。最坏要等 ~2 分钟（服务端重试） */
+  claim: (code: string) => api.post<unknown, CampaignReward>('/campaign/claim', null, { params: { code } }),
 };
 

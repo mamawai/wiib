@@ -99,6 +99,8 @@ export function Layout({ children }: Props) {
             <HeaderNavItem to="/strategies" label="策略" />
             {/* 回测入口暂摘：后端 /api/ai/backtest/* 随下版本发，先别挂死页 */}
             {/* <HeaderNavItem to="/backtest" label="回测" /> */}
+            {/* 活动：桌面端入口。手机端底部 Tab 只有 5 格且已满，收在「我的」页里 */}
+            <HeaderNavItem to="/campaign" label="活动" />
             <HeaderNavItem to="/comments" label="留言" />
           </nav>
 

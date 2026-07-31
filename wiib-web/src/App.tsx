@@ -15,6 +15,7 @@ import { CommoditySelect } from './pages/CommoditySelect';
 import { TradFiSelect } from './pages/TradFiSelect';
 import { Ranking } from './pages/Ranking';
 import { Comments } from './pages/Comments';
+import { Campaign } from './pages/Campaign';
 import { Login } from './pages/Login';
 import { Admin } from './pages/Admin';
 import { Blackjack } from './pages/Blackjack';
@@ -88,6 +89,7 @@ function App() {
                   <Route path="/ranking" element={<Ranking />} />
                   <Route path="/user/:id" element={<UserProfile />} />
                   <Route path="/comments" element={<Comments />} />
+                  <Route path="/campaign" element={<Campaign />} />
                   <Route path="/admin" element={<Admin />} />
                   <Route path="/games" element={<Games />} />
                   <Route path="/me" element={<Me />} />

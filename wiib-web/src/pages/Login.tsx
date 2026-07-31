@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useState, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import NumberFlow from '@number-flow/react';
-import { authApi } from '../api';
+import { authApi, campaignApi } from '../api';
 import { useUserStore } from '../stores/userStore';
+import { useToast } from '../components/ui/use-toast';
+import { fmtNum } from '../lib/utils';
 import { useCryptoStream } from '../hooks/useCryptoStream';
 import { DecryptedText } from '../components/fx/DecryptedText';
 import { Input } from '../components/ui/input';
@@ -22,16 +24,42 @@ function LinuxDoLogo({ className }: { className?: string }) {
   );
 }
 
-const LINUXDO_CONFIG = {
-  clientId: 'toCFytIO9bCHpbUbFKM1mTgvy1ax8tG2',
-  authorizeUrl: 'https://connect.linux.do/oauth2/authorize',
-  redirectUri: 'https://wtfibought.com/login',
-};
 // const LINUXDO_CONFIG = {
-//   clientId: 'NIrMpQ09Jgzjb7r1ZgU3QYnuejk8Z3qS',
+//   clientId: 'toCFytIO9bCHpbUbFKM1mTgvy1ax8tG2',
 //   authorizeUrl: 'https://connect.linux.do/oauth2/authorize',
-//   redirectUri: 'http://localhost:3000/login',
+//   redirectUri: 'https://wtfibought.com/login',
 // };
+const LINUXDO_CONFIG = {
+  clientId: 'NIrMpQ09Jgzjb7r1ZgU3QYnuejk8Z3qS',
+  authorizeUrl: 'https://connect.linux.do/oauth2/authorize',
+  redirectUri: 'http://localhost:3000/login',
+};
+
+/** OAuth state 的 localStorage 键。登录与活动领取共用同一个键，不许各存各的 */
+export const OAUTH_STATE_KEY = 'oauth_state';
+
+/**
+ * 活动领取的 state 前缀。项目只在 LinuxDo 那边注册了 /login 这一个 redirect_uri，
+ * 登录与领取两条链路共用这个落点，回调靠这个前缀区分该走哪边。
+ */
+export const CLAIM_STATE_PREFIX = 'campaign-claim:';
+
+/**
+ * 拼 LinuxDo 授权跳转 URL。登录与活动领取共用，全站只此一处拼。
+ * 抄第二份的下场是切生产配置时漏改一处，领取链路静默指向 localhost。
+ * <p>本文件导出非组件会让 react-refresh 退化成整页刷新（下面那行 disable）：
+ * 挪进 lib 就得把 LINUXDO_CONFIG 一起挪或再导出一遍，等于给"只此一处"开口子，不划算。
+ */
+// eslint-disable-next-line react-refresh/only-export-components -- 理由见上
+export function buildAuthorizeUrl(state: string): string {
+  const p = new URLSearchParams({
+    client_id: LINUXDO_CONFIG.clientId,
+    response_type: 'code',
+    redirect_uri: LINUXDO_CONFIG.redirectUri,
+    state,
+  });
+  return `${LINUXDO_CONFIG.authorizeUrl}?${p.toString()}`;
+}
 
 /** 登录前的实时报价角标：匿名 STOMP 流（后端不拒游客），进门先看见"活"的行情 */
 function LiveQuote({ symbol, name }: { symbol: string; name: string }) {
@@ -54,9 +82,21 @@ function LiveQuote({ symbol, name }: { symbol: string; name: string }) {
 export function Login() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const { toast } = useToast();
   const { user, setToken, fetchUser } = useUserStore();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  // 首次渲染定格"这趟是不是活动领取的回调"。必须定格：下面处理回调时会清掉 oauth_state，
+  // 现算的话判断会中途翻转，"已登录就回首页"那个 effect 就把正在领取的人弹走了。
+  // 判据与下面那个回调 effect 逐字一致（code + state 都在），否则会定格成一个永不开始的领取
+  const [claimCallback] = useState(() => {
+    const q = new URLSearchParams(window.location.search);
+    return !!q.get('code') && !!q.get('state')
+      && (localStorage.getItem(OAUTH_STATE_KEY) ?? '').startsWith(CLAIM_STATE_PREFIX);
+  });
+  // 领取中：服务端最坏要 ~2 分钟（重试 8 次），这段时间要给个说法，不能干等一个"登录中"。
+  // 初值就取定格值，省掉"先闪一下登录卡再变成领取中"
+  const [claiming, setClaiming] = useState(claimCallback);
   // null=模式加载中；两个开关决定展示哪些登录入口
   const [mode, setMode] = useState<{ linuxDoEnabled: boolean; passwordLoginEnabled: boolean } | null>(null);
   const callbackHandled = useRef(false);
@@ -67,12 +107,31 @@ export function Login() {
   const [inviteCode, setInviteCode] = useState('');
 
   const handleOAuthCallback = useCallback(async (code: string, state: string) => {
-    const savedState = localStorage.getItem('oauth_state');
+    const savedState = localStorage.getItem(OAUTH_STATE_KEY);
     if (state !== savedState) {
+      // 这里必须把 claiming 落下来：领取回调的初值是 true，不清就永远转圈、错误提示谁也看不见
+      setClaiming(false);
       setError('安全验证失败，请重试');
       return;
     }
-    localStorage.removeItem('oauth_state');
+    localStorage.removeItem(OAUTH_STATE_KEY);
+
+    // 回调分流：普通登录走 authApi，活动领取走 campaignApi。
+    // 只有一个 redirect_uri，两条链路共用 /login 这个落点，靠 state 前缀区分。
+    // 成功失败都回活动页：结果由 toast 讲，人不该被扔在登录页上
+    if (savedState.startsWith(CLAIM_STATE_PREFIX)) {
+      setClaiming(true);
+      try {
+        const reward = await campaignApi.claim(code);
+        toast(`领取成功，${fmtNum(reward.ldcAmount)} LDC 已发放`, 'success');
+      } catch (e: unknown) {
+        toast(e instanceof Error ? e.message : '领取失败', 'error');
+      } finally {
+        setClaiming(false);
+        navigate('/campaign', { replace: true });
+      }
+      return;
+    }
 
     setLoading(true);
     setError('');
@@ -90,13 +149,14 @@ export function Login() {
     } finally {
       setLoading(false);
     }
-  }, [fetchUser, navigate, setToken]);
+  }, [fetchUser, navigate, setToken, toast]);
 
+  // 领取回调不能走这条：领取的人本来就是登录状态，弹回首页会把还没跑完的领取请求连页面一起掀掉
   useEffect(() => {
-    if (user) {
+    if (user && !claimCallback) {
       navigate('/');
     }
-  }, [user, navigate]);
+  }, [user, navigate, claimCallback]);
 
   // 拉登录模式：两个开关都关才展示管理员直登；失败兜底回 OAuth（既有行为）
   useEffect(() => {
@@ -116,8 +176,8 @@ export function Login() {
 
   const handleLinuxDoLogin = () => {
     const state = Math.random().toString(36).substring(2, 10);
-    localStorage.setItem('oauth_state', state);
-    window.location.href = `${LINUXDO_CONFIG.authorizeUrl}?client_id=${LINUXDO_CONFIG.clientId}&redirect_uri=${encodeURIComponent(LINUXDO_CONFIG.redirectUri)}&response_type=code&state=${state}`;
+    localStorage.setItem(OAUTH_STATE_KEY, state);
+    window.location.href = buildAuthorizeUrl(state);
   };
 
   // 管理员直登：无 OAuth 跳转，直接调后端拿 token 进站
@@ -235,7 +295,7 @@ export function Login() {
                 <span className="microlabel font-semibold">TERMINAL ACCESS</span>
               </div>
               <h2 className="text-xl font-extrabold tracking-tight mt-2">
-                {mode?.passwordLoginEnabled && isRegister ? '创建账户' : '登录终端'}
+                {claiming ? '领取活动奖励' : mode?.passwordLoginEnabled && isRegister ? '创建账户' : '登录终端'}
               </h2>
             </div>
 
@@ -245,10 +305,12 @@ export function Login() {
               </div>
             )}
 
-            {loading || mode === null ? (
+            {claiming || loading || mode === null ? (
               <div className="h-28 flex flex-col items-center justify-center gap-2 text-muted-foreground">
                 <Loader2 className="w-5 h-5 animate-spin text-primary" />
-                <span className="text-xs font-semibold">{loading ? '登录中...' : '加载中...'}</span>
+                <span className="text-xs font-semibold">
+                  {claiming ? '发放中，最长约 2 分钟，请勿关闭页面...' : loading ? '登录中...' : '加载中...'}
+                </span>
               </div>
             ) : (
               <>
