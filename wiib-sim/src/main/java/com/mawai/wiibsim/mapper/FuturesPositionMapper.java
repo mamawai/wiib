@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.mawai.wiibcommon.entity.FuturesPosition;
 import com.mawai.wiibcommon.entity.FuturesStopLoss;
 import com.mawai.wiibcommon.entity.FuturesTakeProfit;
+import com.mawai.wiibsim.dto.CrossSnapshotRow;
 import com.mawai.wiibsim.dto.PositionFillDTO;
 import com.mawai.wiibsim.dto.PositionHistoryDTO;
 import org.apache.ibatis.annotations.Mapper;
@@ -208,4 +209,28 @@ public interface FuturesPositionMapper extends BaseMapper<FuturesPosition> {
     @Update("UPDATE futures_position SET status = #{status}, updated_at = NOW() " +
             "WHERE user_id = #{userId} AND status = 'OPEN'")
     int closeOpenByUserId(@Param("userId") Long userId, @Param("status") String status);
+
+    /**
+     * 全仓账户快照三查合一：余额 + 全仓持仓 + 挂单占用一条 SQL 出。
+     * <p>
+     * 为什么合：tick 巡检（CrossLiquidationService）每用户每秒一次全打在 snapshot 上，压测（2026-08）
+     * 显示每条查询服务端只要 0.02ms、成本全在连接池往返——三条查询 = 拿三次池，巡检突发把 10 连接
+     * 打满时正常 API p99 从 4ms 恶化到 47ms。合一后拿池次数 3→1，巡检吞吐上限 ~2800/s → ~8000/s。
+     * <p>
+     * 用户不存在返回空列表；有账号无持仓返回一行 position_id 为 NULL 的行（LEFT JOIN）。
+     * 挂单占用口径 = 原 sumPendingCrossReserved：PENDING 开/加仓限价单预留的保证金+手续费。
+     */
+    @Select("""
+            SELECT u.balance,
+                   (SELECT COALESCE(SUM(o.frozen_amount), 0) FROM futures_order o
+                     WHERE o.user_id = u.id AND o.status = 'PENDING' AND o.margin_mode = 'CROSS'
+                       AND o.order_side NOT LIKE 'CLOSE%') AS pending_reserved,
+                   p.id AS position_id, p.symbol, p.side, p.leverage,
+                   p.quantity, p.entry_price, p.margin, p.funding_fee_total
+            FROM "user" u
+            LEFT JOIN futures_position p
+                   ON p.user_id = u.id AND p.status = 'OPEN' AND p.margin_mode = 'CROSS'
+            WHERE u.id = #{userId}
+            """)
+    List<CrossSnapshotRow> selectCrossSnapshot(@Param("userId") Long userId);
 }

@@ -21,6 +21,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
 
 import static com.mawai.wiibsim.service.impl.FuturesHelper.calculatePnl;
 import static com.mawai.wiibsim.service.impl.FuturesHelper.markPrice;
@@ -40,10 +41,26 @@ public class CrossLiquidationServiceImpl implements CrossLiquidationService {
     private final RedisLockUtil redisLockUtil;
     private final TradeNotificationService tradeNotificationService;
 
+    /**
+     * tick 去重表：userId → 上次巡检触发时刻。健康检查是账户级的（一次读全部持仓 symbol 的最新价），
+     * 同一秒内多 symbol tick 对同一用户的重复触发纯属浪费。压测（2026-08）：合并原先靠"撞进用户锁
+     * 持有窗口"的时序巧合，REST 降级的错开时序下巡检量翻倍——这里改成设计保证。
+     * 900ms = 1s tick 周期留 100ms 到达抖动，保证每个整秒 tick 必放行一次。
+     * 并发 get/put 竞态放行无害：用户级 Redis 锁是第二道闸。只挡 tick 路径，
+     * sweepAll 兜底与爆仓链路直调 checkUser 不经过这里。
+     */
+    private static final long TICK_DEDUP_MS = 900;
+    private final ConcurrentHashMap<Long, Long> lastTickCheck = new ConcurrentHashMap<>();
+
     @Override
     public void onPriceTick(String symbol) {
+        long now = System.currentTimeMillis();
         for (String uid : crossMarginService.usersOnSymbol(symbol)) {
-            Thread.startVirtualThread(() -> checkUser(Long.parseLong(uid)));
+            long userId = Long.parseLong(uid);
+            Long last = lastTickCheck.get(userId);
+            if (last != null && now - last < TICK_DEDUP_MS) continue;
+            lastTickCheck.put(userId, now);
+            Thread.startVirtualThread(() -> checkUser(userId));
         }
     }
 

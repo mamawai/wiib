@@ -7,8 +7,8 @@ import com.mawai.wiibcommon.entity.User;
 import com.mawai.wiibcommon.enums.ErrorCode;
 import com.mawai.wiibcommon.exception.BizException;
 import com.mawai.wiibsim.config.FuturesLeverageBracketRegistry;
+import com.mawai.wiibsim.dto.CrossSnapshotRow;
 import com.mawai.wiibsim.ledger.Ledger;
-import com.mawai.wiibsim.mapper.FuturesOrderMapper;
 import com.mawai.wiibsim.mapper.FuturesPositionMapper;
 import com.mawai.wiibsim.mapper.UserMapper;
 import com.mawai.wiibsim.service.BankruptcyService;
@@ -39,7 +39,6 @@ public class CrossMarginServiceImpl implements CrossMarginService {
 
     private final UserMapper userMapper;
     private final FuturesPositionMapper positionMapper;
-    private final FuturesOrderMapper orderMapper;
     private final CacheService cacheService;
     private final FuturesLeverageBracketRegistry bracketRegistry;
     private final FuturesPositionIndexService positionIndexService;
@@ -64,26 +63,44 @@ public class CrossMarginServiceImpl implements CrossMarginService {
 
     @Override
     public CrossAccount snapshot(Long userId) {
-        User user = userMapper.selectById(userId);
-        if (user == null) throw new BizException(ErrorCode.USER_NOT_FOUND);
-
-        List<FuturesPosition> positions = positionMapper.selectList(new LambdaQueryWrapper<FuturesPosition>()
-                .eq(FuturesPosition::getUserId, userId)
-                .eq(FuturesPosition::getStatus, "OPEN")
-                .eq(FuturesPosition::getMarginMode, FuturesPosition.CROSS));
+        // 三查合一（余额/持仓/挂单占用）：tick 巡检每用户每秒打一次 snapshot，
+        // 拿池次数 3→1 是压测定的主优化（见 selectCrossSnapshot 注释）
+        List<CrossSnapshotRow> rows = positionMapper.selectCrossSnapshot(userId);
+        if (rows.isEmpty()) throw new BizException(ErrorCode.USER_NOT_FOUND);
 
         BigDecimal upnl = BigDecimal.ZERO;
         BigDecimal usedMargin = BigDecimal.ZERO;
         BigDecimal mm = BigDecimal.ZERO;
-        for (FuturesPosition pos : positions) {
+        List<FuturesPosition> positions = new ArrayList<>();
+        for (CrossSnapshotRow row : rows) {
+            if (row.getPositionId() == null) continue; // LEFT JOIN 空行：有账号无全仓持仓
+            FuturesPosition pos = toPosition(userId, row);
             BigDecimal price = resolvePrice(pos);
             upnl = upnl.add(calculatePnl(pos.getSide(), pos.getEntryPrice(), price, pos.getQuantity()));
             usedMargin = usedMargin.add(pos.getMargin());
             mm = mm.add(bracketRegistry.calcMaintenanceMargin(pos.getSymbol(), price.multiply(pos.getQuantity())));
+            positions.add(pos);
         }
 
-        BigDecimal pendingReserved = orderMapper.sumPendingCrossReserved(userId);
-        return new CrossAccount(user.getBalance(), upnl, usedMargin, pendingReserved, mm, positions);
+        CrossSnapshotRow head = rows.getFirst();
+        return new CrossAccount(head.getBalance(), upnl, usedMargin, head.getPendingReserved(), mm, positions);
+    }
+
+    /** 快照行还原为仓位对象。不含 SL/TP（快照消费方不读，见 CrossSnapshotRow 注释） */
+    private static FuturesPosition toPosition(Long userId, CrossSnapshotRow row) {
+        FuturesPosition p = new FuturesPosition();
+        p.setId(row.getPositionId());
+        p.setUserId(userId);
+        p.setSymbol(row.getSymbol());
+        p.setSide(row.getSide());
+        p.setMarginMode(FuturesPosition.CROSS);
+        p.setLeverage(row.getLeverage());
+        p.setQuantity(row.getQuantity());
+        p.setEntryPrice(row.getEntryPrice());
+        p.setMargin(row.getMargin());
+        p.setFundingFeeTotal(row.getFundingFeeTotal());
+        p.setStatus("OPEN");
+        return p;
     }
 
     /** mark价优先、合约价兜底；都缺退回开仓价（浮盈亏按0算，别让快照因行情缺失炸掉） */
