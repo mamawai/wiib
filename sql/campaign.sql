@@ -1,7 +1,8 @@
 -- ============================================================
--- LDC 瓜分活动（五维交易赛）：活动定义 / 签到 / 多空投票 / 结算发放
--- 与业务表零耦合：活动只读业务表，只写本文件这四张。活动结束整包移除，三步：
---   ① 删表：DROP TABLE IF EXISTS campaign_reward, campaign_vote, campaign_checkin, campaign;
+-- LDC 瓜分活动（五维交易赛）：活动定义 / 签到 / 多空投票 / 结算发放 / 重置遗留
+-- 与业务表零耦合：活动只读业务表，只写本文件这五张。活动结束整包移除，三步：
+--   ① 删表：DROP TABLE IF EXISTS campaign_reward, campaign_vote, campaign_checkin,
+--            campaign_carryover, campaign;
 --   ② 删代码（整目录/整文件）：
 --        wiib-sim/src/main/java/com/mawai/wiibsim/campaign/
 --        wiib-sim/src/test/java/com/mawai/wiibsim/campaign/   ← 别漏，留着编译不过
@@ -10,8 +11,15 @@
 --   ③ 拆挂载点（活动往外伸出去的就这几处，别处一行没有）：
 --        wiib-sim/src/main/resources/application.yml 的 ldc: 段
 --        .env.example 的 LDC_* 几行
---        wiib-web/src/ 六个文件：api/index.ts、types/index.ts、App.tsx、
---                                components/Layout.tsx、pages/Me.tsx、pages/Login.tsx
+--        wiib-sim/.../service/AccountPurgeTx.java 的 campaignCarryoverService 字段
+--                                                  与 purge() 开头 carryOver/chargeExtraReset 两次调用
+--        wiib-sim/.../service/AccountResetService.java 的 campaignCarryoverService 字段
+--                                                  （campaignRunning 判"付费重置"是否可用）
+--        wiib-sim/.../service/impl/BankruptcyServiceImpl.java 的 campaignCarryoverService 字段
+--                                                  （破产恢复非首次时 chargeExtraReset）
+--        wiib-web/src/ 七个文件：api/index.ts、types/index.ts、App.tsx、
+--                                components/Layout.tsx、pages/Me.tsx、pages/Login.tsx、
+--                                pages/Admin.tsx（结算按钮 + adminApi.settleCampaign）
 --   做完这三步业务代码无感。
 -- 落库（psql 不在宿主 PATH 上，走容器）：
 --   docker exec -i postgres-db psql -U mawai -d wiib -f - < sql/campaign.sql
@@ -129,7 +137,29 @@ COMMENT ON COLUMN campaign_reward.external_ref IS 'LDC 返回的 trade_no';
 CREATE INDEX IF NOT EXISTS idx_campaign_reward_status
     ON campaign_reward (campaign_id, status);
 
--- ============ 5. 活动种子行 ============
+-- ============ 5. 重置遗留次数 ============
+-- 重置账户会删掉仓位/订单/预测注单，而活动积分是从这些表现算的，一删就归零。
+-- 重置事务里先把该用户各积分项的达成"次数"累加进本表（AccountPurgeTx → CampaignCarryoverService）。
+-- 只存次数不存分数：阶梯分值只与"第几次"有关，算分时同 code 相加、从头累加，
+-- 阶梯跨重置接着数，高分档与一次性档都刷不出第二份（TradeScorer 类注释有全套推导）。
+-- RESET_EXTRA 例外：不是"重置前固化"而是重置本身的扣分（活动期每周首次免费，之后每次 −30，
+-- 破产自动恢复同样计入次数），由 chargeExtraReset 直接写入，countAll 永不产生这个 code。
+CREATE TABLE IF NOT EXISTS campaign_carryover (
+    id          BIGSERIAL PRIMARY KEY,
+    campaign_id BIGINT      NOT NULL,
+    user_id     BIGINT      NOT NULL,
+    code        VARCHAR(32) NOT NULL,
+    cnt         INT         NOT NULL,
+    created_at  TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at  TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uk_campaign_carryover UNIQUE (campaign_id, user_id, code)
+);
+
+COMMENT ON TABLE  campaign_carryover      IS '重置账户前固化的活动积分达成次数（多次重置累加）';
+COMMENT ON COLUMN campaign_carryover.code IS '积分项：ROI25/ROI50/ROI100/GODLY/SPOT/PREDICTION/STOP_LOSS_HERO/PNL_PROFIT/PNL_LOSS/LIQ_TRIGGER/BUCKET_*（三市通吃的市场桶）/RESET_EXTRA（付费重置）';
+COMMENT ON COLUMN campaign_carryover.cnt  IS '达成次数，UPSERT 累加';
+
+-- ============ 6. 活动种子行 ============
 -- 时间按需改；code 一旦发放过就绝不能改（out_trade_no 靠它重算，改了幂等就断了）
 INSERT INTO campaign (code, name, start_at, end_at, prize_pool, status)
 VALUES ('FIVEDIM_202608', '五维交易赛',

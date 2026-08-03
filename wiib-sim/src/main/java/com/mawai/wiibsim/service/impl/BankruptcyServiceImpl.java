@@ -19,10 +19,12 @@ import com.mawai.wiibsim.mapper.FuturesPositionMapper;
 import com.mawai.wiibsim.mapper.PredictionBetMapper;
 import com.mawai.wiibsim.mapper.UserLedgerMapper;
 import com.mawai.wiibsim.mapper.UserMapper;
+import com.mawai.wiibsim.campaign.service.CampaignCarryoverService;
 import com.mawai.wiibsim.service.BankruptcyService;
 import com.mawai.wiibcommon.cache.CacheService;
 import com.mawai.wiibsim.service.CryptoPositionService;
 import com.mawai.wiibsim.service.FuturesPositionIndexService;
+import com.mawai.wiibsim.service.ResetQuotaService;
 import com.mawai.wiibsim.service.UserService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -52,6 +54,8 @@ public class BankruptcyServiceImpl implements BankruptcyService {
     private final PredictionBetMapper predictionBetMapper;
     private final AssetValuationService assetValuationService;
     private final UserLedgerMapper userLedgerMapper;
+    private final ResetQuotaService resetQuotaService;
+    private final CampaignCarryoverService campaignCarryoverService;
 
     @Value("${trading.initial-balance:10000}")
     private BigDecimal initialBalance;
@@ -176,7 +180,15 @@ public class BankruptcyServiceImpl implements BankruptcyService {
         recordWalletSnapshotDiff(userId, before, initialBalance, LedgerBizType.BANKRUPT_RESET, "破产恢复");
 
         cleanupUserHoldings(userId, "CLOSED");
-        log.info("用户恢复初始资金 userId={} balance={}", userId, initialBalance);
+
+        // 破产自动恢复也占一次每周重置额度：不占的话穿仓破产就是免费的重置通道。
+        // 本周非首次时在活动侧记付费重置 −30（无活动时 chargeExtraReset 是空操作）。
+        // 系统恢复永不被额度挡 —— 这里只计数扣分，不做任何拒绝。
+        long used = resetQuotaService.recordUse(userId);
+        if (used > 1) {
+            campaignCarryoverService.chargeExtraReset(userId);
+        }
+        log.info("用户恢复初始资金 userId={} balance={} 本周第{}次重置", userId, initialBalance, used);
     }
 
     /**

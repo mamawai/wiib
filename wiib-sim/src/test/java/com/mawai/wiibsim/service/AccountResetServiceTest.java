@@ -2,6 +2,8 @@ package com.mawai.wiibsim.service;
 
 import com.mawai.wiibcommon.entity.CryptoOrder;
 import com.mawai.wiibcommon.entity.FuturesPosition;
+import com.mawai.wiibcommon.exception.BizException;
+import com.mawai.wiibsim.campaign.service.CampaignCarryoverService;
 import com.mawai.wiibsim.mapper.CryptoOrderMapper;
 import com.mawai.wiibsim.mapper.FuturesPositionMapper;
 import org.junit.jupiter.api.BeforeEach;
@@ -35,6 +37,8 @@ class AccountResetServiceTest {
     private AccountPurgeTx purgeTx;
     private StringRedisTemplate redis;
     private ZSetOperations<String, String> zSetOps;
+    private ResetQuotaService resetQuota;
+    private CampaignCarryoverService carryoverService;
     private AccountResetService service;
 
     @SuppressWarnings("unchecked")
@@ -44,6 +48,8 @@ class AccountResetServiceTest {
         cryptoOrderMapper = mock(CryptoOrderMapper.class);
         indexService = mock(FuturesPositionIndexService.class);
         purgeTx = mock(AccountPurgeTx.class);
+        resetQuota = mock(ResetQuotaService.class);
+        carryoverService = mock(CampaignCarryoverService.class);
 
         redis = mock(StringRedisTemplate.class);
         zSetOps = mock(ZSetOperations.class);
@@ -52,7 +58,8 @@ class AccountResetServiceTest {
         when(positionMapper.selectList(any())).thenReturn(List.of());
         when(cryptoOrderMapper.selectList(any())).thenReturn(List.of());
 
-        service = new AccountResetService(positionMapper, cryptoOrderMapper, indexService, purgeTx, redis);
+        service = new AccountResetService(positionMapper, cryptoOrderMapper, indexService,
+                purgeTx, redis, resetQuota, carryoverService);
     }
 
     private static FuturesPosition openPosition() {
@@ -73,14 +80,14 @@ class AccountResetServiceTest {
 
         InOrder order = inOrder(indexService, purgeTx);
         order.verify(indexService).unregisterAll(p);
-        order.verify(purgeTx).purge(7L);
+        order.verify(purgeTx).purge(7L, false);
     }
 
     @Test
     void reRegistersIndexWhenPurgeFails() {
         FuturesPosition p = openPosition();
         when(positionMapper.selectList(any())).thenReturn(List.of(p));
-        doThrow(new RuntimeException("db down")).when(purgeTx).purge(7L);
+        doThrow(new RuntimeException("db down")).when(purgeTx).purge(7L, false);
 
         assertThrows(RuntimeException.class, () -> service.reset(7L));
 
@@ -105,6 +112,45 @@ class AccountResetServiceTest {
         service.reset(7L);
 
         verify(redis).delete("buff:status:7:" + LocalDate.now());
+    }
+
+    /** 平时（无活动）每周限 1 次：第二次直接拒，额度退回，业务一步不走 */
+    @Test
+    void 平时每周第二次重置被拒且退回额度() {
+        when(resetQuota.recordUse(7L)).thenReturn(1L, 2L);
+        when(carryoverService.campaignRunning()).thenReturn(false);
+
+        service.resetWithGuard(7L, "alice", "alice");
+        assertThrows(BizException.class, () -> service.resetWithGuard(7L, "alice", "alice"));
+
+        verify(purgeTx, times(1)).purge(7L, false);
+        verify(resetQuota, times(1)).refund(7L);
+    }
+
+    /** 活动期：每周首次免费（purge 不带扣分标记），之后每次放行但标记付费（−30 在事务里记） */
+    @Test
+    void 活动期首次免费之后放行并标记付费() {
+        when(resetQuota.recordUse(7L)).thenReturn(1L, 2L, 3L);
+        when(carryoverService.campaignRunning()).thenReturn(true);
+
+        service.resetWithGuard(7L, "alice", "alice");
+        service.resetWithGuard(7L, "alice", "alice");
+        service.resetWithGuard(7L, "alice", "alice");
+
+        verify(purgeTx, times(1)).purge(7L, false);
+        verify(purgeTx, times(2)).purge(7L, true);
+        verify(resetQuota, never()).refund(7L);
+    }
+
+    /** 重置失败必须把本周额度退回去，否则一次故障吃掉一次额度 */
+    @Test
+    void 重置失败退回本周额度() {
+        when(resetQuota.recordUse(7L)).thenReturn(1L);
+        doThrow(new RuntimeException("db down")).when(purgeTx).purge(7L, false);
+
+        assertThrows(RuntimeException.class, () -> service.resetWithGuard(7L, "alice", "alice"));
+
+        verify(resetQuota).refund(7L);
     }
 
     @Test

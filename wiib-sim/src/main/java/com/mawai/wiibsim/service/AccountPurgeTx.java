@@ -3,6 +3,7 @@ package com.mawai.wiibsim.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.toolkit.support.SFunction;
 import com.mawai.wiibcommon.entity.*;
+import com.mawai.wiibsim.campaign.service.CampaignCarryoverService;
 import com.mawai.wiibsim.mapper.*;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
@@ -12,7 +13,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 
 /**
- * 重置账户的事务段：12 张用户表清空 + user 复位，全成功或全回滚。
+ * 重置账户的事务段：先固化活动遗留积分，再 12 张用户表清空 + user 复位，全成功或全回滚。
  * <p>
  * 单独成 bean 而不是放 {@link AccountResetService} 里，是因为 @Transactional 走 Spring 代理，
  * 同类内部自调用会绕过代理导致事务根本不生效——这种 bug 平时看不出来，只在出错回滚时才暴露。
@@ -35,6 +36,7 @@ public class AccountPurgeTx {
     private final UserBuffMapper userBuffMapper;
     private final UserLedgerMapper userLedgerMapper;
     private final UserService userService;
+    private final CampaignCarryoverService campaignCarryoverService;
 
     @Value("${trading.initial-balance:10000}")
     BigDecimal initialBalance;
@@ -42,9 +44,18 @@ public class AccountPurgeTx {
     /**
      * 清空并复位。不碰 comment / comment_notification（社区内容不是交易数据，
      * 删根评论还会让别人的回复变孤儿），也不碰 workbench_chat_message。
+     *
+     * @param chargeExtraReset 本次是付费重置（本周非首次且活动进行中），在活动侧记 −30
      */
     @Transactional(rollbackFor = Exception.class)
-    public void purge(long userId) {
+    public void purge(long userId, boolean chargeExtraReset) {
+        // 活动遗留积分：删表前先把已达成次数固化进 campaign_carryover。
+        // 必须同一事务：删表回滚则快照也回滚，否则下次算分双算。无活动时是空操作
+        campaignCarryoverService.carryOver(userId);
+        if (chargeExtraReset) {
+            campaignCarryoverService.chargeExtraReset(userId);
+        }
+
         // 交易
         futuresPositionMapper.delete(eq(FuturesPosition.class, FuturesPosition::getUserId, userId));
         futuresOrderMapper.delete(eq(FuturesOrder.class, FuturesOrder::getUserId, userId));

@@ -5,6 +5,7 @@ import com.mawai.wiibcommon.entity.CryptoOrder;
 import com.mawai.wiibcommon.entity.FuturesPosition;
 import com.mawai.wiibcommon.enums.ErrorCode;
 import com.mawai.wiibcommon.exception.BizException;
+import com.mawai.wiibsim.campaign.service.CampaignCarryoverService;
 import com.mawai.wiibsim.mapper.CryptoOrderMapper;
 import com.mawai.wiibsim.mapper.FuturesPositionMapper;
 import lombok.RequiredArgsConstructor;
@@ -12,7 +13,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
-import java.time.Duration;
 import java.time.LocalDate;
 import java.util.List;
 
@@ -30,7 +30,6 @@ public class AccountResetService {
 
     private static final String LIMIT_BUY_PREFIX = "crypto:limit:buy:";
     private static final String LIMIT_SELL_PREFIX = "crypto:limit:sell:";
-    private static final String RESET_LOCK_PREFIX = "user:reset:";
     private static final String RANKING_KEY = "ranking:top";
     /** 三个游戏"进行中的那一局"只存在 Redis 里，不在库表（见各 ServiceImpl 的 SK 常量） */
     private static final List<String> GAME_SESSION_PREFIXES =
@@ -42,6 +41,8 @@ public class AccountResetService {
     private final FuturesPositionIndexService indexService;
     private final AccountPurgeTx purgeTx;
     private final StringRedisTemplate redis;
+    private final ResetQuotaService resetQuota;
+    private final CampaignCarryoverService campaignCarryoverService;
 
     /** 策略账户（quant-FIBO 这类）是 user 表里的真实行，永不可重置；用户名须逐字匹配，防误点 */
     public static void assertResettable(String actualUsername, String confirmUsername) {
@@ -53,24 +54,36 @@ public class AccountResetService {
         }
     }
 
-    /** 每周一次。抢不到键说明 7 天内重置过 */
+    /**
+     * 手动重置的额度闸。自然周（周一~周日）计数，破产自动恢复共用同一计数
+     * （{@link ResetQuotaService}，那边永不被拦、只计数）。
+     * <p>
+     * 活动进行中：每周首次免费，之后每次在活动积分里扣 30（不限次数，扣分与删表同事务）；
+     * 平时：每周限 1 次，超了直接拒。被拒或失败的尝试都退回额度。
+     */
     public void resetWithGuard(long userId, String actualUsername, String confirmUsername) {
         assertResettable(actualUsername, confirmUsername);
-        Boolean first = redis.opsForValue()
-                .setIfAbsent(RESET_LOCK_PREFIX + userId, "1", Duration.ofDays(7));
-        if (!Boolean.TRUE.equals(first)) {
+
+        long used = resetQuota.recordUse(userId);
+        boolean extra = used > 1;
+        if (extra && !campaignCarryoverService.campaignRunning()) {
+            resetQuota.refund(userId);
             throw new BizException(ErrorCode.RESET_TOO_FREQUENT);
         }
         try {
-            reset(userId);
+            reset(userId, extra);
         } catch (RuntimeException e) {
-            // 没重置成功就不该占着一周的额度
-            redis.delete(RESET_LOCK_PREFIX + userId);
+            // 没重置成功就不占本周额度
+            resetQuota.refund(userId);
             throw e;
         }
     }
 
     void reset(long userId) {
+        reset(userId, false);
+    }
+
+    void reset(long userId, boolean chargeExtraReset) {
         List<FuturesPosition> openPositions = futuresPositionMapper.selectList(
                 new LambdaQueryWrapper<FuturesPosition>()
                         .eq(FuturesPosition::getUserId, userId)
@@ -78,7 +91,7 @@ public class AccountResetService {
 
         unregisterIndexes(userId, openPositions);
         try {
-            purgeTx.purge(userId);
+            purgeTx.purge(userId, chargeExtraReset);
         } catch (RuntimeException e) {
             // 删表失败=仓位还在，但触发保护已经摘了，必须装回去，否则强平/止损静默失效
             for (FuturesPosition p : openPositions) {

@@ -114,7 +114,7 @@ public enum ErrorCode {
     WALLET_TRANSFER_INVALID(1951, "划转金额无效"),
 
     // 账户重置错误码 2000+（1200/1600 段已被杠杆与 Crypto 占用）
-    RESET_TOO_FREQUENT(2001, "每周只能重置一次账户"),
+    RESET_TOO_FREQUENT(2001, "本周重置次数已用完（每周限 1 次，周一刷新）"),
     RESET_NOT_ALLOWED(2002, "该账户不可重置"),
 
     // 留言板错误码 2100+

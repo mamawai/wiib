@@ -791,7 +791,8 @@ export function Portfolio() {
               </div>
               <p className="text-xs text-muted-foreground leading-relaxed">
                 清空全部持仓、订单、游戏记录与资产历史，余额恢复为初始资金。
-                留言和禁言状态不受影响。每周只能重置一次。
+                留言、禁言状态与已获得的活动积分不受影响。活动期内每周首次重置免费、
+                之后每次扣 30 活动积分；活动结束后每周限 1 次（周一刷新）。
               </p>
             </div>
             <Button
@@ -815,6 +816,10 @@ export function Portfolio() {
               <p className="text-xs text-muted-foreground leading-relaxed">
                 此操作不可撤销，将清空：现货与合约的全部持仓和订单、预测下注、
                 21点/Mines/视频扑克记录、资产历史、每日 Buff、钱包划转流水。
+              </p>
+              <p className="text-xs leading-relaxed text-warning">
+                活动期内每周第一次重置免费，之后每次扣 30 活动积分（破产自动恢复也计入次数）。
+                已获得的活动积分、签到与投票记录不受重置影响。
               </p>
               <p className="text-xs">
                 请输入你的用户名 <strong className="text-foreground">{user.username}</strong> 以确认：
