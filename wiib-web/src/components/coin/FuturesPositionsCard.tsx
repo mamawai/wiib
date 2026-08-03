@@ -43,12 +43,14 @@ function loadBrackets(): Promise<Record<string, FuturesBracket[]>> {
  * showCloseAll 开启头部"一键全平"（两段确认，市价全平所有仓位）。
  * 加仓无独立入口（对齐Binance）：同方向再下单即自动并入，走开仓面板。
  */
-export function FuturesPositionsCard({ symbol, refreshKey, onOrdersChanged, onPositionsChanged, showCloseAll }: {
+export function FuturesPositionsCard({ symbol, refreshKey, onOrdersChanged, onPositionsChanged, onPositions, showCloseAll }: {
   symbol?: string;
   refreshKey: number;
   onOrdersChanged?: () => void;
   /** 仓位有任何变动（平仓/调杠杆/保证金）时回调；Coin 页用它驱动开仓面板的持仓快照重拉 */
   onPositionsChanged?: () => void;
+  /** 每次拉到仓位列表原样上抛；Coin 页拿它喂 K 线的仓位参考线 */
+  onPositions?: (list: FuturesPosition[]) => void;
   showCloseAll?: boolean;
 }) {
   const { toast } = useToast();
@@ -67,13 +69,15 @@ export function FuturesPositionsCard({ symbol, refreshKey, onOrdersChanged, onPo
     try {
       const list = await futuresApi.positions(symbol);
       setPositions(list);
+      onPositions?.(list);
     } catch (e) {
       console.error('查询合约仓位失败', e);
       setPositions([]);
+      onPositions?.([]);
     } finally {
       setLoading(false);
     }
-  }, [symbol]);
+  }, [symbol, onPositions]);
 
   useEffect(() => { fetchPositions(); }, [fetchPositions, refreshKey]);
 

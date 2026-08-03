@@ -23,7 +23,6 @@ import {
 const HANDLE = 4;
 const FONT = '600 11px ui-monospace, Consolas, monospace';
 /** 标签底色固定深色 —— 与 CandleChart 的悬停气泡同一套路，亮/暗主题下都读得清 */
-const CHIP_BG = 'rgba(16,18,24,.88)';
 const CHIP_FG = '#e6e8ee';
 /** 斐波各档纵向间距小于这个就藏标签（手机竖屏主图只占 3/5 高度，7 条会糊成一坨） */
 const FIB_LABEL_MIN_GAP = 13;
@@ -62,18 +61,25 @@ function box(c: CanvasRenderingContext2D, x: number, y: number, w: number, h: nu
   else c.rect(x, y, w, h);
 }
 
-/** 深底小标签。align='right' 时 x 是右边界 */
+/**
+ * fib 档位小标签（目前唯一调用方）。半透明中性灰底 + 降过不透明度的文字：
+ * 七档标签常年挂在图上，存在感必须低 —— 深底实字会把蜡烛压得喘不过气。
+ * 中性灰不挑主题，亮/暗底上都只是淡淡一层。align='right' 时 x 是右边界。
+ */
 function chip(c: CanvasRenderingContext2D, x: number, y: number, text: string, fg = CHIP_FG, align: 'left' | 'right' = 'left') {
   c.font = FONT;
   const w = c.measureText(text).width + 8, h = 15;
   const left = align === 'right' ? x - w : x;
-  c.fillStyle = CHIP_BG;
+  c.save();
+  c.fillStyle = 'rgba(127,131,142,.18)';
   box(c, left, y - h / 2, w, h, 3);
   c.fill();
+  c.globalAlpha = .72;
   c.fillStyle = fg;
   c.textBaseline = 'middle';
   c.textAlign = 'left';
   c.fillText(text, left + 4, y + .5);
+  c.restore();
 }
 
 // ========== 价格轴 / 时间轴标签 ==========
@@ -218,7 +224,7 @@ class PaneRenderer implements IPrimitivePaneRenderer {
     c.font = FONT;
     const w = c.measureText(t).width + 12, h = 19;
     const rect = { x: p.x + 9, y: p.y - h / 2, w, h };
-    L.textBoxes.set(d.id, rect);
+    L.textBoxes.set(d.id, rect);   // 命中区照旧按整个文字框算，透明不等于点不中
 
     c.setLineDash([]);
     c.fillStyle = d.color;
@@ -226,17 +232,25 @@ class PaneRenderer implements IPrimitivePaneRenderer {
     c.arc(p.x, p.y, 3, 0, Math.PI * 2);
     c.fill();
 
-    c.fillStyle = CHIP_BG;
-    box(c, rect.x, rect.y, w, h, 4);
-    c.fill();
-    c.strokeStyle = d.color;
-    c.lineWidth = sel ? 1.6 : 1;
-    c.stroke();
+    // 底透明：文字直接浮在图上（与输入阶段同观感），只在选中时画一圈虚线框提示命中区。
+    // 描影兜可读性 —— 蓝字叠在同色系蜡烛上时靠这圈暗晕拉开层次，亮色主题下也只是淡淡一层
+    if (sel) {
+      c.strokeStyle = d.color;
+      c.lineWidth = 1;
+      c.setLineDash([4, 3]);
+      box(c, rect.x, rect.y, w, h, 4);
+      c.stroke();
+      c.setLineDash([]);
+    }
 
-    c.fillStyle = CHIP_FG;
+    c.fillStyle = d.color;
     c.textBaseline = 'middle';
     c.textAlign = 'left';
+    c.shadowColor = 'rgba(0,0,0,.5)';
+    c.shadowBlur = 3;
     c.fillText(t, rect.x + 6, p.y + .5);
+    c.shadowBlur = 0;
+    c.shadowColor = 'transparent';
   }
 }
 

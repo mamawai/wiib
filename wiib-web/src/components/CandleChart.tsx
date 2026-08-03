@@ -1,11 +1,11 @@
 import { cn, fmtNum, fmtDateTime } from '../lib/utils';
 import { useEffect, useRef, useState, useCallback, type ReactNode } from 'react';
 import {
-  createChart, CrosshairMode, CandlestickSeries, HistogramSeries, LineSeries, LineStyle,
+  createChart, createSeriesMarkers, CrosshairMode, CandlestickSeries, HistogramSeries, LineSeries, LineStyle,
   type IChartApi, type ISeriesApi, type UTCTimestamp, type MouseEventParams,
-  type DeepPartial, type HandleScrollOptions,
+  type DeepPartial, type HandleScrollOptions, type IPriceLine, type SeriesMarker,
 } from 'lightweight-charts';
-import { Magnet, Maximize2, Minimize2, Minus, MousePointer2, Slash, Trash2, Type } from 'lucide-react';
+import { History, Layers, Magnet, Maximize2, Minimize2, Minus, MousePointer2, Slash, Trash2, Type } from 'lucide-react';
 import { futuresApi } from '../api';
 import { useKlineStream } from '../hooks/useKlineStream';
 import { useIsDark } from '../hooks/useIsDark';
@@ -35,18 +35,18 @@ const fmtBarTime = (d: Date, interval: string) =>
     ? d.toLocaleDateString('zh-CN', { timeZone: 'Asia/Singapore', month: '2-digit', day: '2-digit' })
     : fmtDateTime(d);
 
-/** 气泡 HTML（固定深色，亮/暗主题下都清晰）：时间·开高低收·涨跌·涨跌幅·振幅·量·额。 */
+/** 气泡 HTML（灰白半透明底，亮/暗主题下都清晰）：时间·开高低收·涨跌·涨跌幅·振幅·量·额。 */
 function tooltipHtml(bar: Bar, bars: Bar[], idx: Map<number, number>, d: number, base: string, interval: string): string {
   const i = idx.get(bar.time);
   const prevClose = (i != null && i > 0) ? bars[i - 1].close : bar.open;   // 昨收=前一根收盘
   const chg = bar.close - prevClose;
   const chgPct = prevClose ? chg / prevClose * 100 : 0;
   const amp = prevClose ? (bar.high - bar.low) / prevClose * 100 : 0;
-  const up = chg >= 0, col = up ? '#0abf95' : '#ff5a68', sign = up ? '+' : '';
+  const up = chg >= 0, col = up ? '#089981' : '#f23645', sign = up ? '+' : '';
   const tStr = fmtBarTime(barDate(bar.time), interval);
-  const row = (k: string, v: string, c = '#d1d4dc') =>
+  const row = (k: string, v: string, c = '#1f2328') =>
     `<div style="display:flex;justify-content:space-between;gap:18px"><span style="color:#6b7280">${k}</span><span style="color:${c};font-weight:700">${v}</span></div>`;
-  return `<div style="color:#878b96;font-weight:700;margin-bottom:5px;padding-bottom:5px;border-bottom:1px solid #23262e">${tStr}</div>`
+  return `<div style="color:#6b7280;font-weight:700;margin-bottom:5px;padding-bottom:5px;border-bottom:1px solid rgba(0,0,0,.1)">${tStr}</div>`
     + row('开', fmtNum(bar.open, d)) + row('高', fmtNum(bar.high, d)) + row('低', fmtNum(bar.low, d)) + row('收', fmtNum(bar.close, d))
     + row('涨跌', sign + fmtNum(chg, d), col) + row('涨跌幅', sign + chgPct.toFixed(2) + '%', col)
     + row('振幅', amp.toFixed(2) + '%')
@@ -76,13 +76,19 @@ function histColor(cur: number, prev: number | null): string {
   return strong ? HIST_DN_S : HIST_DN_W;
 }
 
-/** 副图 series 句柄 + 读数条；indicators=false 时压根不建，整个为 null */
+/**
+ * 副图 series 句柄 + 读数条；indicators=false 或两个副图都关时压根不建，整个为 null。
+ * MACD/RSI 各可单独关：关掉的那组 series 不建（hist/dif/dea 为空、rsi 为空数组），
+ * pane 序号动态分配（macdPane/rsiPane，-1 = 未开）——只开 RSI 时它就在 pane 1。
+ */
 interface IndSeries {
   chart: IChartApi;
-  hist: ISeriesApi<'Histogram'>;
-  dif: ISeriesApi<'Line'>;
-  dea: ISeriesApi<'Line'>;
-  rsi: ISeriesApi<'Line'>[];                 // 与 RSI_PERIODS 同序
+  hist?: ISeriesApi<'Histogram'>;
+  dif?: ISeriesApi<'Line'>;
+  dea?: ISeriesApi<'Line'>;
+  rsi: ISeriesApi<'Line'>[];                 // 与 RSI_PERIODS 同序；RSI 关闭时为空
+  macdPane: number;
+  rsiPane: number;
   macdLegend: HTMLDivElement | null;
   rsiLegend: HTMLDivElement | null;
   decimals: number;
@@ -204,8 +210,8 @@ function makeLegend(host: HTMLElement | null): HTMLDivElement | null {
  */
 function ensureLegends(ind: IndSeries) {
   const panes = ind.chart.panes();
-  if (!ind.macdLegend) ind.macdLegend = makeLegend(panes[1]?.getHTMLElement() ?? null);
-  if (!ind.rsiLegend) ind.rsiLegend = makeLegend(panes[2]?.getHTMLElement() ?? null);
+  if (ind.macdPane >= 0 && !ind.macdLegend) ind.macdLegend = makeLegend(panes[ind.macdPane]?.getHTMLElement() ?? null);
+  if (ind.rsiPane >= 0 && !ind.rsiLegend) ind.rsiLegend = makeLegend(panes[ind.rsiPane]?.getHTMLElement() ?? null);
 }
 
 /**
@@ -222,7 +228,7 @@ function renderLegends(ind: IndSeries, param: MouseEventParams | null) {
     return d && 'value' in d ? (d.value as number) : undefined;
   };
 
-  if (ind.macdLegend) {
+  if (ind.macdLegend && ind.hist && ind.dif && ind.dea) {
     const h = pick(ind.hist, ind.last.hist);
     const hc = h === undefined ? LEGEND_DIM : (h >= 0 ? '#089981' : '#f23645');
     ind.macdLegend.style.fontSize = compact ? '10px' : '11px';
@@ -233,7 +239,7 @@ function renderLegends(ind: IndSeries, param: MouseEventParams | null) {
       + legendCell(DEA_COLOR, 'DEA', pick(ind.dea, ind.last.dea), ind.decimals)
       + legendCell(hc, 'MACD', h, ind.decimals);
   }
-  if (ind.rsiLegend) {
+  if (ind.rsiLegend && ind.rsi.length) {
     ind.rsiLegend.style.fontSize = compact ? '10px' : '11px';
     ind.rsiLegend.innerHTML = RSI_PERIODS
       .map((p, k) => legendCell(RSI_COLORS[k], `RSI(${p})`, pick(ind.rsi[k], ind.last.rsi[k]), 2))
@@ -281,18 +287,20 @@ function renderOverlayLegend(
   }
 }
 
-/** 历史全量灌入副图 */
+/** 历史全量灌入副图（关掉的那组没有 series，跳过） */
 function setIndicators(ind: IndSeries, bars: Bar[]) {
   const c = computeAll(bars);
-  ind.hist.setData(bars.flatMap((b, i) => c.hist[i] === null ? []
-    : [{
-      time: b.time as UTCTimestamp,
-      value: c.hist[i] as number,
-      color: histColor(c.hist[i] as number, i > 0 ? c.hist[i - 1] : null),
-    }]));
-  ind.dif.setData(toLine(bars, c.dif));
-  ind.dea.setData(toLine(bars, c.dea));
-  c.rsis.forEach((s, k) => ind.rsi[k].setData(toLine(bars, s)));
+  if (ind.hist) {
+    ind.hist.setData(bars.flatMap((b, i) => c.hist[i] === null ? []
+      : [{
+        time: b.time as UTCTimestamp,
+        value: c.hist[i] as number,
+        color: histColor(c.hist[i] as number, i > 0 ? c.hist[i - 1] : null),
+      }]));
+  }
+  ind.dif?.setData(toLine(bars, c.dif));
+  ind.dea?.setData(toLine(bars, c.dea));
+  ind.rsi.forEach((s, k) => s.setData(toLine(bars, c.rsis[k])));
   cacheLast(ind, c);
 }
 
@@ -307,15 +315,15 @@ function updateIndicatorsLast(ind: IndSeries, bars: Bar[]) {
   if (n < 0) return;
   const c = computeAll(bars);
   const time = bars[n].time as UTCTimestamp;
-  if (c.hist[n] !== null) {
+  if (ind.hist && c.hist[n] !== null) {
     ind.hist.update({
       time, value: c.hist[n] as number,
       color: histColor(c.hist[n] as number, n > 0 ? c.hist[n - 1] : null),
     });
   }
-  if (c.dif[n] !== null) ind.dif.update({ time, value: c.dif[n] as number });
-  if (c.dea[n] !== null) ind.dea.update({ time, value: c.dea[n] as number });
-  c.rsis.forEach((s, k) => { if (s[n] !== null) ind.rsi[k].update({ time, value: s[n] as number }); });
+  if (ind.dif && c.dif[n] !== null) ind.dif.update({ time, value: c.dif[n] as number });
+  if (ind.dea && c.dea[n] !== null) ind.dea.update({ time, value: c.dea[n] as number });
+  ind.rsi.forEach((s, k) => { if (c.rsis[k][n] !== null) s.update({ time, value: c.rsis[k][n] as number }); });
   cacheLast(ind, c);
 }
 
@@ -329,6 +337,29 @@ function updateIndicatorsLast(ind: IndSeries, bars: Bar[]) {
 // （4h→UTC 00/04/08/12/16/20，1d→UTC 00:00），所以 tick 驱动落桶不会错位。
 const BUCKET_MS = { '5m': 300_000, '15m': 900_000, '1h': 3_600_000, '4h': 14_400_000, '1d': 86_400_000 } as const;
 type Interval = keyof typeof BUCKET_MS;
+
+/**
+ * 一个当前仓位要画到图上的全部参考价：入场 / 多档止盈 / 多档止损 / 强平。
+ * 页面把仓位映射成这个通用结构传进来，图表不认识业务实体 —— bstock 页没有合约也就不传。
+ */
+export interface PositionOverlay {
+  id: number;
+  /** 线标签前缀，如 "多 10x" / "空 25x"（双向持仓同 symbol 至多一多一空，天然不重名） */
+  label: string;
+  side: 'LONG' | 'SHORT';
+  entry: number;
+  tps: number[];
+  sls: number[];
+  /** 全仓的强平价是账户级动态估算，可能给不出 → null 不画 */
+  liq: number | null;
+}
+
+/** 一笔历史成交要打到图上的信息。B=买入方向（开多/平空），S=卖出方向（开空/平多） */
+export interface TradeMark {
+  timeMs: number;
+  side: 'B' | 'S';
+  price: number;
+}
 
 // ========== 向左翻历史的三个阈值 ==========
 /** 每次往回翻的根数，与首屏同量级 */
@@ -362,7 +393,7 @@ const TOOL_BTNS: { k: Tool; icon: ReactNode; title: string }[] = [
   { k: 'text', icon: <Type className="w-3.5 h-3.5" />, title: '文字标注：点一下再输入' },
 ];
 
-export function CandleChart({ symbol, interval, limit = 300, visibleBars = 110, klinesFn = futuresApi.klines, streamLive = true, tick = null, indicators = false }: { symbol: string; interval: Interval; limit?: number; visibleBars?: number; klinesFn?: (symbol: string, interval: string, limit: number, endTime?: number) => Promise<number[][]>; streamLive?: boolean; tick?: { price: number; ts: number } | null; indicators?: boolean }) {
+export function CandleChart({ symbol, interval, limit = 300, visibleBars = 110, klinesFn = futuresApi.klines, streamLive = true, tick = null, indicators = false, onIntervalChange, positionOverlays, tradeMarks }: { symbol: string; interval: Interval; limit?: number; visibleBars?: number; klinesFn?: (symbol: string, interval: string, limit: number, endTime?: number) => Promise<number[][]>; streamLive?: boolean; tick?: { price: number; ts: number } | null; indicators?: boolean; onIntervalChange?: (i: Interval) => void; positionOverlays?: PositionOverlay[]; tradeMarks?: TradeMark[] }) {
   const isDark = useIsDark();
   const rootRef = useRef<HTMLDivElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -388,6 +419,28 @@ export function CandleChart({ symbol, interval, limit = 300, visibleBars = 110, 
   const loadingRef = useRef(false);
   const exhaustedRef = useRef(false);
   const hoverRef = useRef<{ time: number | null; x: number; y: number }>({ time: null, x: 0, y: 0 });
+
+  // 仓位参考线：总开关记 localStorage（跨会话保持），单仓位显隐是会话内临时选择不落盘。
+  // chartEpoch 由建图 effect 每次重建后 bump —— 参考线画在蜡烛 series 上，图一重建线就
+  // 随旧图销毁了，画线 effect 必须跟着重跑，否则切周期后线全丢
+  const [showPosLines, setShowPosLines] = useState(() => localStorage.getItem('wiib-chart-pos-lines') !== '0');
+  const [hiddenPosIds, setHiddenPosIds] = useState<ReadonlySet<number>>(new Set());
+  const [chartEpoch, setChartEpoch] = useState(0);
+
+  // 副图开关：MACD/RSI 各自可关。关的那组压根不建 series/pane（省算力也省高度），
+  // 切换走建图 effect 重建 —— 与切周期同一条路径，不为省一次重绘再造第二套增删 pane 逻辑
+  const [subs, setSubs] = useState(() => ({
+    macd: localStorage.getItem('wiib-chart-sub-macd') !== '0',
+    rsi: localStorage.getItem('wiib-chart-sub-rsi') !== '0',
+  }));
+
+  // 历史成交 B/S 标记：默认关（打开一次记住）。marksByTimeRef 供点击弹窗按 bar 查成交
+  const [showMarks, setShowMarks] = useState(() => localStorage.getItem('wiib-chart-trade-marks') === '1');
+  const marksByTimeRef = useRef<Map<number, { b: number[]; s: number[] }>>(new Map());
+  const markTipRef = useRef<HTMLDivElement>(null);
+  const cdRef = useRef<HTMLDivElement>(null);
+  /** 仓位参考线的悬浮小签（写在线上、贴着价格轴左侧），由 250ms 循环随缩放平移重新定位 */
+  const posLabelElsRef = useRef<{ el: HTMLDivElement; price: number }[]>([]);
   const isDarkRef = useRef(isDark);
   const decimals = getCoinPriceDecimals(symbol);
   const base = symbol.replace('USDT', '');
@@ -415,17 +468,19 @@ export function CandleChart({ symbol, interval, limit = 300, visibleBars = 110, 
     ma: maLegendRef.current, ema: emaLegendRef.current, boll: bollLegendRef.current,
   }), []);
 
-  // 显示/定位气泡（用 ref，避免闭包读到过期 isDark/props）
+  // 显示/定位气泡（用 ref，避免闭包读到过期 isDark/props）。
+  // 【钉对侧，不跟光标】看右半边的 K 线，面板停在左侧；看左半边，面板停在右侧（贴价格轴内侧）——
+  // 面板永远不挡正在看的那几根蜡烛。纵向跟随光标居中，夹在图内。
   const showTip = (bar: Bar, px: number, py: number) => {
     const tip = tipRef.current, wrap = wrapRef.current; if (!tip || !wrap) return;
     tip.innerHTML = tooltipHtml(bar, barsRef.current, idxRef.current, decimals, base, interval);
     tip.style.display = 'block';
     const W = wrap.clientWidth, H = wrap.clientHeight, tw = tip.offsetWidth, th = tip.offsetHeight;
-    let x = px + 16, y = py + 16;
-    if (x + tw > W - 4) x = px - tw - 16;     // 贴右→翻左
-    if (y + th > H - 4) y = H - th - 6;       // 贴底→上移
+    const axisW = chartRef.current?.priceScale('right').width() ?? 56;
+    const x = px > W / 2 ? 8 : W - axisW - tw - 8;
+    const y = Math.min(Math.max(4, py - th / 2), H - th - 6);
     tip.style.left = Math.max(4, x) + 'px';
-    tip.style.top = Math.max(4, y) + 'px';
+    tip.style.top = y + 'px';
   };
   const showTipRef = useRef(showTip);
   // 事件回调只在交互时读取，提交后同步最新值即可（render 期写 ref 违反 react-hooks/refs）
@@ -461,8 +516,11 @@ export function CandleChart({ symbol, interval, limit = 300, visibleBars = 110, 
       upColor: '#089981', downColor: '#f23645', borderUpColor: '#089981', borderDownColor: '#f23645',
       wickUpColor: '#089981', wickDownColor: '#f23645',
       priceFormat: { type: 'price', precision: decimals, minMove: 1 / 10 ** decimals },
+      // 轴上的最新价标签关掉：由 cdRef 那个"价格+倒计时"合体框顶替（虚线最新价线保留）
+      lastValueVisible: false,
     });
     candleRef.current = candle;
+    setChartEpoch(e => e + 1);   // 通知仓位参考线 effect：series 换新的了，重画
 
     const vol = chart.addSeries(HistogramSeries, { priceScaleId: '', priceFormat: { type: 'volume' }, lastValueVisible: false, priceLineVisible: false });
     vol.priceScale().applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });   // 量柱压底部 18%
@@ -504,32 +562,44 @@ export function CandleChart({ symbol, interval, limit = 300, visibleBars = 110, 
       ovRef.current = ov;
     }
 
-    // 副图：MACD 挂 pane1、RSI 挂 pane2（addSeries 第三参数就是 pane 序号，v5 自带时间轴/十字线联动）
-    if (indicators) {
+    // 副图：MACD/RSI 各自可开关，pane 序号动态分配（addSeries 第三参数就是 pane 序号，
+    // v5 自带时间轴/十字线联动）。只开 RSI 时它顶到 pane 1，不给关掉的 MACD 留空档
+    if (indicators && (subs.macd || subs.rsi)) {
       const line = { lineWidth: 1 as const, priceLineVisible: false, lastValueVisible: false };
-      const hist = chart.addSeries(HistogramSeries, { priceLineVisible: false, lastValueVisible: false }, 1);
-      const dif = chart.addSeries(LineSeries, { ...line, color: DIF_COLOR }, 1);
-      const dea = chart.addSeries(LineSeries, { ...line, color: DEA_COLOR }, 1);
+      let paneIdx = 1;
+      const macdPane = subs.macd ? paneIdx++ : -1;
+      const rsiPane = subs.rsi ? paneIdx++ : -1;
+
+      const hist = subs.macd
+        ? chart.addSeries(HistogramSeries, { priceLineVisible: false, lastValueVisible: false }, macdPane) : undefined;
+      const dif = subs.macd ? chart.addSeries(LineSeries, { ...line, color: DIF_COLOR }, macdPane) : undefined;
+      const dea = subs.macd ? chart.addSeries(LineSeries, { ...line, color: DEA_COLOR }, macdPane) : undefined;
       // RSI 天然 0-100，锁死纵轴免得自适应缩放把 70/30 线挤出视野
-      const rsi = RSI_PERIODS.map((_, k) => chart.addSeries(LineSeries, {
+      const rsi = subs.rsi ? RSI_PERIODS.map((_, k) => chart.addSeries(LineSeries, {
         ...line, color: RSI_COLORS[k],
         autoscaleInfoProvider: () => ({ priceRange: { minValue: 0, maxValue: 100 } }),
-      }, 2));
-      for (const price of [70, 30]) {
-        rsi[0].createPriceLine({ price, color: REF_LINE, lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: false, title: '' });
+      }, rsiPane)) : [];
+      if (rsi.length) {
+        for (const price of [70, 30]) {
+          rsi[0].createPriceLine({ price, color: REF_LINE, lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: false, title: '' });
+        }
       }
 
       const panes = chart.panes();
-      panes[0].setStretchFactor(3);      // 主图:MACD:RSI = 3:1:1
-      panes[1].setStretchFactor(1);
-      panes[2].setStretchFactor(1);
+      panes[0].setStretchFactor(3);      // 主图:每个副图 = 3:1
       // 顶层 rightPriceScale 的 scaleMargins(bottom .26) 是给主图量柱留的，会连累副图；这里按 pane 覆盖掉
-      panes[1].priceScale('right').applyOptions({ scaleMargins: { top: 0.22, bottom: 0.12 } });  // top 留给 legend
-      panes[2].priceScale('right').applyOptions({ scaleMargins: { top: 0.22, bottom: 0.08 } });
+      if (macdPane >= 0) {
+        panes[macdPane].setStretchFactor(1);
+        panes[macdPane].priceScale('right').applyOptions({ scaleMargins: { top: 0.22, bottom: 0.12 } });  // top 留给 legend
+      }
+      if (rsiPane >= 0) {
+        panes[rsiPane].setStretchFactor(1);
+        panes[rsiPane].priceScale('right').applyOptions({ scaleMargins: { top: 0.22, bottom: 0.08 } });
+      }
       indRef.current = {
-        chart, hist, dif, dea, rsi, decimals,
-        macdLegend: makeLegend(panes[1].getHTMLElement()),
-        rsiLegend: makeLegend(panes[2].getHTMLElement()),
+        chart, hist, dif, dea, rsi, macdPane, rsiPane, decimals,
+        macdLegend: macdPane >= 0 ? makeLegend(panes[macdPane].getHTMLElement()) : null,
+        rsiLegend: rsiPane >= 0 ? makeLegend(panes[rsiPane].getHTMLElement()) : null,
         last: { rsi: [] },
       };
     }
@@ -545,6 +615,23 @@ export function CandleChart({ symbol, interval, limit = 300, visibleBars = 110, 
       if (i == null) { tip.style.display = 'none'; return; }
       hoverRef.current = { time: t, x: param.point.x, y: param.point.y };
       showTipRef.current(barsRef.current[i], param.point.x, param.point.y);
+    });
+
+    // 点击带 B/S 角标的那根 K 线 → 弹出该根内的逐笔成交价；点空白处收起。
+    // 按 bar 的时间桶查而不是抠标记的像素命中 —— 点中蜡烛任意位置都算，手机上尤其重要
+    chart.subscribeClick((param: MouseEventParams) => {
+      const tipEl = markTipRef.current; if (!tipEl) return;
+      const t = param.time as number | undefined;
+      const g = t != null ? marksByTimeRef.current.get(t) : undefined;
+      if (!g || !param.point) { tipEl.style.display = 'none'; return; }
+      const row = (side: string, col: string, prices: number[]) => prices.map(p =>
+        `<div style="display:flex;gap:16px;justify-content:space-between"><span style="color:${col};font-weight:700">${side}</span><span style="color:#1f2328;font-weight:700">${fmtNum(p, decimals)}</span></div>`).join('');
+      tipEl.innerHTML =
+        `<div style="color:#6b7280;font-weight:700;margin-bottom:4px;padding-bottom:4px;border-bottom:1px solid rgba(0,0,0,.1)">成交 · ${fmtBarTime(barDate(t as number), interval)}</div>`
+        + row('买', '#089981', g.b) + row('卖', '#f23645', g.s);
+      tipEl.style.left = `${Math.min(param.point.x + 12, host.clientWidth - 150)}px`;
+      tipEl.style.top = `${Math.min(param.point.y + 12, host.clientHeight - 30 * (g.b.length + g.s.length) - 40)}px`;
+      tipEl.style.display = 'block';
     });
 
     /** 全量重灌蜡烛+量柱+指标。首屏和前插历史共用——LWC 只能 append 不能 prepend，前插只能整条重灌 */
@@ -648,7 +735,7 @@ export function CandleChart({ symbol, interval, limit = 300, visibleBars = 110, 
       readyRef.current = false; barsRef.current = []; idxRef.current = new Map();
       loadingRef.current = false; exhaustedRef.current = false;
     };
-  }, [symbol, interval, limit, visibleBars, decimals, klinesFn, indicators, legendRefs, attachDrawings]);
+  }, [symbol, interval, limit, visibleBars, decimals, klinesFn, indicators, subs, legendRefs, attachDrawings]);
 
   // 指标开关：只切 visible，不重建 series；切完立刻刷读数（展开的组要马上有值）
   useEffect(() => {
@@ -659,6 +746,133 @@ export function CandleChart({ symbol, interval, limit = 300, visibleBars = 110, 
     ov.boll.forEach(s => s.applyOptions({ visible: overlays.boll }));
     renderOverlayLegend(ov, legendRefs(), overlays, null, decimals, chartRef.current ? isCompact(chartRef.current) : false);
   }, [overlays, decimals, legendRefs]);
+
+  // 仓位参考线：入场实线（多=涨色/空=跌色）、TP 虚线、SL 疏点线、强平橙色大虚线。
+  // 多空双开靠色系区分：一个仓位的整组线共用其方向色，强平线例外——那是危险信号，统一橙色。
+  // 【信息写在线上，不落 y 轴】轴标签一多就和刻度、最新价框互相盖；这里每条线配一个
+  // 悬浮小签（「多10x 入场 63000」）贴在价格轴左侧的线尾上，定位由 250ms 循环维护。
+  useEffect(() => {
+    const series = candleRef.current, wrap = wrapRef.current;
+    if (!series || !wrap || !showPosLines || !positionOverlays?.length) return;
+    const lines: IPriceLine[] = [];
+    const labels: { el: HTMLDivElement; price: number }[] = [];
+    for (const p of positionOverlays) {
+      if (hiddenPosIds.has(p.id)) continue;
+      const col = p.side === 'LONG' ? '#0abf95' : '#ff5a68';
+      const add = (price: number | null | undefined, title: string, lineStyle: LineStyle,
+                   color = col, lineWidth: 1 | 2 = 1) => {
+        if (price == null || !(price > 0)) return;
+        lines.push(series.createPriceLine({ price, color, lineWidth, lineStyle, axisLabelVisible: false, title: '' }));
+        const el = document.createElement('div');
+        el.textContent = `${title} ${fmtNum(price, decimals)}`;
+        el.style.cssText = 'position:absolute;display:none;transform:translateY(-50%);z-index:4;'
+          + 'pointer-events:none;padding:0 4px;border-radius:3px;'
+          + `background:${color};color:#fff;font:700 9.5px/1.6 ui-monospace,Consolas,monospace;white-space:nowrap`;
+        wrap.appendChild(el);
+        labels.push({ el, price });
+      };
+      add(p.entry, `${p.label} 入场`, LineStyle.Solid, col, 2);
+      p.tps.forEach((t, i) => add(t, `${p.label} TP${p.tps.length > 1 ? i + 1 : ''}`, LineStyle.Dashed));
+      p.sls.forEach((s, i) => add(s, `${p.label} SL${p.sls.length > 1 ? i + 1 : ''}`, LineStyle.SparseDotted));
+      add(p.liq, `${p.label} 强平`, LineStyle.LargeDashed, '#f97316');
+    }
+    posLabelElsRef.current = labels;
+    return () => {
+      posLabelElsRef.current = [];
+      labels.forEach(l => l.el.remove());
+      // 开关/数据变时挨个摘掉重画；图整体重建时 series 已死、removePriceLine 会抛，吞掉即可
+      try { lines.forEach(l => series.removePriceLine(l)); } catch { /* chart disposed */ }
+    };
+  }, [positionOverlays, showPosLines, hiddenPosIds, decimals, chartEpoch]);
+
+  // 历史成交 B/S 标记：同一根 K 线内聚合成一个角标（B3S2 这种），点开看逐笔价格。
+  // 全买=涨色、全卖=跌色、混合=主色；文本自带方向语义，shape 缩到 0 只留字
+  useEffect(() => {
+    const series = candleRef.current;
+    if (!series || !showMarks || !tradeMarks?.length) { marksByTimeRef.current = new Map(); return; }
+
+    const bucketMs = BUCKET_MS[interval];
+    const byTime = new Map<number, { b: number[]; s: number[] }>();
+    for (const m of tradeMarks) {
+      const time = toBarTime(Math.floor(m.timeMs / bucketMs) * bucketMs);
+      const g = byTime.get(time) ?? { b: [], s: [] };
+      (m.side === 'B' ? g.b : g.s).push(m.price);
+      byTime.set(time, g);
+    }
+    marksByTimeRef.current = byTime;
+
+    // 笔数走上标角标：B³S²（canvas 文本没有富文本，Unicode 上标数字顶上）
+    const SUP = ['⁰', '¹', '²', '³', '⁴', '⁵', '⁶', '⁷', '⁸', '⁹'];
+    const sup = (n: number) => n > 1 ? String(n).split('').map(d => SUP[+d]).join('') : '';
+    const markers: SeriesMarker<UTCTimestamp>[] = [...byTime.entries()]
+      .sort((a, b) => a[0] - b[0])
+      .map(([time, g]) => ({
+        time: time as UTCTimestamp,
+        position: 'aboveBar',
+        color: g.b.length && g.s.length ? '#f97316' : g.b.length ? '#0abf95' : '#ff5a68',
+        shape: 'square',
+        size: 0,
+        text: (g.b.length ? 'B' + sup(g.b.length) : '') + (g.s.length ? 'S' + sup(g.s.length) : ''),
+      }));
+    const plugin = createSeriesMarkers(series, markers);
+
+    return () => {
+      marksByTimeRef.current = new Map();
+      if (markTipRef.current) markTipRef.current.style.display = 'none';
+      // 图整体重建时 series 已死，detach 会抛，吞掉即可
+      try { plugin.detach(); } catch { /* chart disposed */ }
+    };
+  }, [tradeMarks, showMarks, interval, chartEpoch]);
+
+  // 「最新价 + 收盘倒计时」合体框：顶在价格轴上原生最新价标签的位置（原生标签已关），
+  // 上行价格、下行倒计时，一个框解决"倒计时和价格分家"。底色跟当根蜡烛的涨跌走。
+  // 250ms 循环重取 Y 坐标与文案，价格跳动/缩放平移都跟得上；顺带把仓位参考线的悬浮小签
+  // 一起重定位（它们同样要随缩放走，各开一个定时器纯属浪费）。
+  // 休市/断流时倒计时行自动消失（一个停摆的倒计时比没有更误导），价格行保留。
+  useEffect(() => {
+    const el = cdRef.current; if (!el) return;
+    const bucketMs = BUCKET_MS[interval];
+    const render = () => {
+      const chart = chartRef.current, candle = candleRef.current;
+      const last = barsRef.current[barsRef.current.length - 1];
+      const axisW = chart ? chart.priceScale('right').width() : 0;
+
+      // ---- 仓位参考线小签：--------多10x 入场 63000----│y轴│ ----
+      for (const { el: label, price } of posLabelElsRef.current) {
+        const y = candle?.priceToCoordinate(price);
+        if (y == null) { label.style.display = 'none'; continue; }
+        label.style.top = `${y}px`;
+        label.style.right = `${axisW + 4}px`;
+        label.style.display = 'block';
+      }
+
+      if (!chart || !candle || !last) { el.style.display = 'none'; return; }
+      const y = candle.priceToCoordinate(last.close);
+      if (y == null) { el.style.display = 'none'; return; }
+
+      const remain = last.openMs + bucketMs - Date.now();
+      let cd = '';
+      if (remain > 0 && remain <= bucketMs) {
+        const s = Math.floor(remain / 1000);
+        const pad = (n: number) => String(n).padStart(2, '0');
+        const h = Math.floor(s / 3600);
+        cd = h > 0 ? `${h}:${pad(Math.floor((s % 3600) / 60))}:${pad(s % 60)}`
+                   : `${pad(Math.floor(s / 60))}:${pad(s % 60)}`;
+      }
+      el.style.background = last.close >= last.open ? '#089981' : '#f23645';
+      el.innerHTML =
+        `<div style="font:700 11px/1.4 ui-monospace,Consolas,monospace;font-variant-numeric:tabular-nums">${fmtNum(last.close, decimals)}</div>`
+        + (cd ? `<div style="margin-top:1px;padding-top:1px;border-top:1px solid rgba(255,255,255,.28);`
+              + `font:600 9px/1.3 ui-monospace,Consolas,monospace;letter-spacing:.05em;color:rgba(255,255,255,.85)">${cd}</div>` : '');
+      el.style.minWidth = `${axisW}px`;
+      el.style.display = 'block';
+      // 内容定了再量高度，价格行精确压在价格线的延长线上（框心 ≈ 价格行中心）
+      el.style.top = `${y - el.offsetHeight / 2}px`;
+    };
+    render();
+    const timer = setInterval(render, 250);
+    return () => { clearInterval(timer); el.style.display = 'none'; };
+  }, [interval, decimals, chartEpoch]);
 
   // 主题切换：只改颜色，不重建
   useEffect(() => {
@@ -761,10 +975,39 @@ export function CandleChart({ symbol, interval, limit = 300, visibleBars = 110, 
           所以只有 MA/EMA/BOLL 那组和读数跟着 indicators 走。
           读数 span 由 renderOverlayLegend 走 DOM 直改（悬停跟随十字线），高频刷新不过 React */}
       <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 px-2 md:px-1 pb-1.5">
+        {/* 周期组只在全屏时出现：非全屏页面自己有周期 tab，这里再放一份是重复；
+            全屏只把 rootRef 送进 fullscreen，页面那排按钮看不见，切周期全靠这组。
+            切换走父级回调改 props，组件不卸载，全屏状态不丢 */}
+        {fs.active && onIntervalChange && (
+          <div className={group}>
+            {(Object.keys(BUCKET_MS) as Interval[]).map(k => (
+              <button key={k} type="button" onClick={() => onIntervalChange(k)}
+                      className={`num ${chipCls(interval === k)}`}>
+                {k}
+              </button>
+            ))}
+          </div>
+        )}
         {indicators && (
           <div className={group}>
             {(['ma', 'ema', 'boll'] as OverlayKey[]).map(k => (
               <button key={k} type="button" onClick={() => toggle(k)} className={chipCls(overlays[k])}>
+                {k.toUpperCase()}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* 副图开关：切换重建图表（同切周期一条路径），状态各自记 localStorage */}
+        {indicators && (
+          <div className={group}>
+            {(['macd', 'rsi'] as const).map(k => (
+              <button key={k} type="button" className={chipCls(subs[k])}
+                      onClick={() => setSubs(prev => {
+                        const next = { ...prev, [k]: !prev[k] };
+                        localStorage.setItem('wiib-chart-sub-' + k, next[k] ? '1' : '0');
+                        return next;
+                      })}>
                 {k.toUpperCase()}
               </button>
             ))}
@@ -779,6 +1022,49 @@ export function CandleChart({ symbol, interval, limit = 300, visibleBars = 110, 
             </button>
           ))}
         </div>
+
+        {/* 历史成交标记开关：只有页面传了成交数据才出现 */}
+        {tradeMarks != null && (
+          <div className={group}>
+            <button type="button"
+                    onClick={() => {
+                      const v = !showMarks;
+                      setShowMarks(v);
+                      localStorage.setItem('wiib-chart-trade-marks', v ? '1' : '0');
+                    }}
+                    className={iconCls(showMarks)} title="历史成交标记：B/S 角标，点击对应K线看成交价">
+              <History className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
+
+        {/* 仓位参考线开关：只有页面传了仓位数据才出现（现货/代币化美股页没有）。
+            双开时每个仓位一个 chip，激活色跟方向色走，可单独藏掉某一边 */}
+        {positionOverlays != null && (
+          <div className={group}>
+            <button type="button"
+                    onClick={() => {
+                      const v = !showPosLines;
+                      setShowPosLines(v);
+                      localStorage.setItem('wiib-chart-pos-lines', v ? '1' : '0');
+                    }}
+                    className={iconCls(showPosLines)} title="仓位参考线：入场 / 止盈 / 止损 / 强平">
+              <Layers className="w-3.5 h-3.5" />
+            </button>
+            {showPosLines && positionOverlays.length > 1 && positionOverlays.map(p => (
+              <button key={p.id} type="button" className={chipCls(!hiddenPosIds.has(p.id))}
+                      style={hiddenPosIds.has(p.id) ? undefined
+                        : { color: p.side === 'LONG' ? '#0abf95' : '#ff5a68' }}
+                      onClick={() => setHiddenPosIds(prev => {
+                        const next = new Set(prev);
+                        if (next.has(p.id)) next.delete(p.id); else next.add(p.id);
+                        return next;
+                      })}>
+                {p.label}
+              </button>
+            ))}
+          </div>
+        )}
 
         <div className={group}>
           <button type="button" onClick={() => setMagnet(!magnet)} className={iconCls(magnet)}
@@ -811,6 +1097,8 @@ export function CandleChart({ symbol, interval, limit = 300, visibleBars = 110, 
         <div ref={chartDivRef} className="absolute inset-0" />
         {/* 文字标注输入。Esc 会先把锚点清掉，所以随后 unmount 触发的 blur→commit 是空转 */}
         {textEdit && (
+          /* 透明浮层：文字直接浮在图上，所见即所得（提交后的标注就长这样）。
+             只留一条虚线下划线当"这里在输入"的提示，亮暗主题各配可读的字色+反色描影 */
           <input autoFocus placeholder="标注文字，回车确认"
                  onKeyDown={e => {
                    if (e.key === 'Enter') commitText(e.currentTarget.value);
@@ -818,10 +1106,12 @@ export function CandleChart({ symbol, interval, limit = 300, visibleBars = 110, 
                  }}
                  onBlur={e => commitText(e.currentTarget.value)}
                  style={{
-                   position: 'absolute', left: textEdit.x, top: textEdit.y - 12, zIndex: 6, width: 170,
-                   padding: '3px 7px', borderRadius: 6, outline: 'none',
-                   background: 'rgba(16,18,24,.94)', border: '1px solid #2962ff', color: '#e6e8ee',
-                   font: '600 11px/1.5 ui-monospace, Consolas, monospace',
+                   position: 'absolute', left: textEdit.x, top: textEdit.y - 12, zIndex: 6, width: 200,
+                   padding: '2px 0', border: 'none', outline: 'none',
+                   background: 'transparent', borderBottom: '1px dashed rgba(41,98,255,.75)',
+                   color: isDark ? '#e6e8ee' : '#17181a', caretColor: '#2962ff',
+                   textShadow: isDark ? '0 1px 3px rgba(0,0,0,.9)' : '0 1px 3px rgba(255,255,255,.95)',
+                   font: '600 12px/1.5 ui-monospace, Consolas, monospace',
                  }} />
         )}
         {/* 竖屏全屏的形状提示：Android 会被 orientation.lock 直接转过去（这条最多闪一下），
@@ -837,10 +1127,27 @@ export function CandleChart({ symbol, interval, limit = 300, visibleBars = 110, 
           background: 'rgba(13,14,18,.82)', border: '1px solid #23262e', borderRadius: 6, padding: '2px 8px',
           font: '600 11px/1.5 ui-monospace, Consolas, monospace', color: '#a6abb6',
         }} />
+        {/* 两块浮动面板统一灰白半透明+毛玻璃：黑底面板压在蜡烛上太沉 */}
         <div ref={tipRef} style={{
           position: 'absolute', display: 'none', pointerEvents: 'none', zIndex: 5,
-          background: 'rgba(13,14,18,.9)', border: '1px solid #23262e', borderRadius: 8, padding: '8px 11px',
-          font: '12px/1.6 ui-monospace, Consolas, monospace', minWidth: 154, boxShadow: '0 6px 22px rgba(0,0,0,.45)',
+          background: 'rgba(246,246,244,.88)', backdropFilter: 'blur(6px)',
+          border: '1px solid rgba(0,0,0,.08)', borderRadius: 8, padding: '8px 11px',
+          font: '12px/1.6 ui-monospace, Consolas, monospace', minWidth: 154, boxShadow: '0 6px 20px rgba(0,0,0,.18)',
+        }} />
+        {/* B/S 标记的点击弹窗：逐笔成交价（subscribeClick 填充） */}
+        <div ref={markTipRef} style={{
+          position: 'absolute', display: 'none', pointerEvents: 'none', zIndex: 6,
+          background: 'rgba(246,246,244,.9)', backdropFilter: 'blur(6px)',
+          border: '1px solid rgba(0,0,0,.08)', borderRadius: 8, padding: '7px 10px',
+          font: '12px/1.7 ui-monospace, Consolas, monospace', minWidth: 130, boxShadow: '0 6px 20px rgba(0,0,0,.18)',
+        }} />
+        {/* 「最新价 + 收盘倒计时」合体框：顶替原生最新价轴标签。
+            左侧圆角贴轴（右缘与图表齐平）、价格行字号对齐轴刻度、倒计时行细线分隔，
+            底色/文案/位置由 250ms 循环维护 */}
+        <div ref={cdRef} style={{
+          position: 'absolute', display: 'none', pointerEvents: 'none', zIndex: 4, right: 0,
+          color: '#fff', textAlign: 'center', boxSizing: 'border-box', padding: '2px 5px',
+          borderRadius: '4px 0 0 4px', boxShadow: '0 1px 6px rgba(0,0,0,.3)',
         }} />
       </div>
     </div>

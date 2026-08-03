@@ -7,7 +7,7 @@ import { useCryptoStream } from '../hooks/useCryptoStream';
 import { useToast } from '../components/ui/use-toast';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Skeleton } from '../components/ui/skeleton';
-import { CandleChart } from '../components/CandleChart';
+import { CandleChart, type PositionOverlay, type TradeMark } from '../components/CandleChart';
 import TradingViewWidget from '../components/TradingViewWidget';
 import { SpotTradePanel } from '../components/coin/SpotTradePanel';
 import { FuturesOpenPanel } from '../components/coin/FuturesOpenPanel';
@@ -16,7 +16,7 @@ import { CoinOrdersCard } from '../components/coin/CoinOrdersCard';
 import { MarketSessionBadge } from '../components/coin/MarketSessionBadge';
 import { fmtNum } from '../lib/utils';
 import { COIN_MAP, getCoin, DEFAULT_SYMBOL, formatCoinPrice } from '../lib/coinConfig';
-import type { CryptoPosition, FuturesBracket } from '../types';
+import type { CryptoPosition, FuturesBracket, FuturesPosition } from '../types';
 
 /** 图表周期：现货/合约统一 K 线（各拉 500 根：5m≈41h / 15m≈5天 / 1h≈20天 / 4h≈83天 / 1d≈1.4年）；TABS 之后一位 = TradingView 高级图 */
 const TABS = [
@@ -102,6 +102,43 @@ export function Coin({ symbol = DEFAULT_SYMBOL }: { symbol?: string }) {
   };
 
   const [activeTab, setActiveTab] = useState(0);
+
+  // 历史成交 B/S 标记：本 symbol 最近 200 笔终态委托的成交价（图上可见范围足够覆盖）。
+  // B=买入方向（开多/平空），S=卖出方向（开空/平多）。时间取 createdAt：市价单即成交时刻，
+  // 限价单是挂单时刻（成交时刻接口没给），偏差最多一根 K 线，接受
+  const [tradeMarks, setTradeMarks] = useState<TradeMark[]>([]);
+  useEffect(() => {
+    if (!isFuturesMode) { setTradeMarks([]); return; }
+    let cancelled = false;
+    const TERMINAL = new Set(['FILLED', 'STOP_LOSS', 'TAKE_PROFIT', 'LIQUIDATED']);
+    futuresApi.orders(undefined, 1, 200, symbol).then(page => {
+      if (cancelled) return;
+      setTradeMarks(page.records
+        .filter(o => TERMINAL.has(o.status) && o.filledPrice != null)
+        .map(o => ({
+          timeMs: new Date(o.createdAt).getTime(),
+          side: (o.orderSide === 'OPEN_LONG' || o.orderSide === 'CLOSE_SHORT') ? 'B' as const : 'S' as const,
+          price: o.filledPrice as number,
+        })));
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [symbol, isFuturesMode, futuresOrdersKey]);
+
+  // 本 symbol 的合约仓位（仓位卡每次拉到都上抛一份），映射成 K 线的仓位参考线。
+  // 双向持仓同 symbol 至多一多一空，标签"多 10x / 空 25x"天然不重名
+  const [futPositions, setFutPositions] = useState<FuturesPosition[]>([]);
+  const positionOverlays = useMemo<PositionOverlay[] | undefined>(() => {
+    if (!isFuturesMode) return undefined;
+    return futPositions.map(p => ({
+      id: p.id,
+      side: p.side,
+      label: `${p.side === 'LONG' ? '多' : '空'} ${p.leverage}x`,
+      entry: p.entryPrice,
+      tps: (p.takeProfits ?? []).map(t => t.price),
+      sls: (p.stopLosses ?? []).map(s => s.price),
+      liq: p.liquidationPrice > 0 ? p.liquidationPrice : null,
+    }));
+  }, [futPositions, isFuturesMode]);
 
   // 实时价：合约用标记/成交价，现货用现货价；流未到前用 REST 最新收盘兜底（面板可用不至于全 0）
   const livePrice = isFuturesMode ? (tick?.fp ?? tick?.price) : tick?.price;
@@ -245,6 +282,9 @@ export function Coin({ symbol = DEFAULT_SYMBOL }: { symbol?: string }) {
                     symbol={symbol}
                     interval={TABS[activeTab].interval}
                     limit={TABS[activeTab].limit}
+                    onIntervalChange={iv => setActiveTab(TABS.findIndex(t => t.interval === iv))}
+                    positionOverlays={positionOverlays}
+                    tradeMarks={isFuturesMode ? tradeMarks : undefined}
                     klinesFn={isFuturesMode ? futuresApi.klines : cryptoApi.klines}
                     streamLive={klineLive}
                     tick={klineLive ? null : chartTick}
@@ -345,6 +385,7 @@ export function Coin({ symbol = DEFAULT_SYMBOL }: { symbol?: string }) {
           refreshKey={futuresPositionsKey}
           onOrdersChanged={() => setFuturesOrdersKey(k => k + 1)}
           onPositionsChanged={() => setFuturesPanelKey(k => k + 1)}
+          onPositions={setFutPositions}
         />
       )}
 
