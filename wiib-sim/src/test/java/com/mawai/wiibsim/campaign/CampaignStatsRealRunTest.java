@@ -3,6 +3,7 @@ package com.mawai.wiibsim.campaign;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.mawai.wiibsim.campaign.mapper.CampaignStatsMapper;
 import com.mawai.wiibsim.campaign.model.ClosedPositionRow;
+import com.mawai.wiibsim.campaign.score.ScoreRules;
 import com.mawai.wiibsim.campaign.model.EligibleUserRow;
 import com.mawai.wiibsim.dto.PositionHistoryDTO;
 import com.mawai.wiibsim.mapper.FuturesPositionMapper;
@@ -125,7 +126,7 @@ class CampaignStatsRealRunTest {
     void 全部聚合查询都能执行() {
         assertThat(statsMapper.listClosedPositions(FROM, TO)).isNotNull();
         assertThat(statsMapper.listSpotSymbols(FROM, TO, new BigDecimal("1000"))).isNotNull();
-        assertThat(statsMapper.countPredictionHits(FROM, TO, new BigDecimal("50"))).isNotNull();
+        assertThat(statsMapper.countPredictionHits(FROM, TO, ScoreRules.PREDICTION_MIN_COST)).isNotNull();
         assertThat(statsMapper.countStopLossTriggered(FROM, TO)).isNotNull();
         assertThat(statsMapper.countIsolatedLiquidations(FROM, TO)).isNotNull();
         assertThat(statsMapper.countCrossLiquidations(FROM, TO)).isNotNull();

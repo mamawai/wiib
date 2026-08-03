@@ -967,8 +967,8 @@ export interface BacktestResultPayload {
 // ==================== LDC 瓜分活动 ====================
 
 export interface CampaignScoreItem {
-  /** 稳定标识：ROI50 / ROI100 / GODLY / SPOT / TRIPLE / PREDICTION / STOP_LOSS_HERO
-   *  / LIQ_ISOLATED / LIQ_CROSS / CHECKIN / STREAK / FIRST_COMMENT / VOTE */
+  /** 稳定标识：ROI25 / ROI50 / ROI100 / GODLY / SPOT / TRIPLE / PREDICTION / STOP_LOSS_HERO
+   *  / PNL_PROFIT / PNL_LOSS / LIQ_TRIGGER / RESET_EXTRA / CHECKIN / STREAK / FIRST_COMMENT / VOTE */
   code: string;
   label: string;
   /** 达成次数；投票那条恒为 0（它按分不按次） */

@@ -9,6 +9,7 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.IntUnaryOperator;
 
 /**
  * 活动计分的全部阈值、阶梯与分配算法。无依赖纯函数，改规则只改这一个文件。
@@ -25,9 +26,17 @@ public final class ScoreRules {
 
     /** 仓位任务的保证金门槛，判的是累计投入（订单侧 invested_margin），不是仓位表的残值 margin */
     public static final BigDecimal MIN_MARGIN = new BigDecimal("500");
+    public static final BigDecimal ROI_25 = new BigDecimal("0.25");
     public static final BigDecimal ROI_50 = new BigDecimal("0.50");
     public static final BigDecimal ROI_100 = new BigDecimal("1.00");
     public static final BigDecimal ROI_300 = new BigDecimal("3.00");
+
+    /**
+     * 单仓位净盈亏任务的门槛（净利润与净亏损共用，比的是绝对值超过 1000）。
+     * 刻意<b>不设保证金门槛</b>：这对任务是冲着"多空双开刷收益率"来的 ——
+     * 双开的两腿盈亏近似对称，赚的那腿 +1、亏的那腿 −2，双开越多越亏。
+     */
+    public static final BigDecimal PNL_MIN = new BigDecimal("1000");
 
     /** 现货：活动期内该标的累计买入门槛 */
     public static final BigDecimal SPOT_MIN_BUY = new BigDecimal("1000");
@@ -35,15 +44,22 @@ public final class ScoreRules {
     public static final BigDecimal SPOT_MIN_RETURN = new BigDecimal("0.10");
 
     /** 预测市场：单次额度门槛（结算时刻的 cost） */
-    public static final BigDecimal PREDICTION_MIN_COST = new BigDecimal("50");
+    public static final BigDecimal PREDICTION_MIN_COST = new BigDecimal("100");
 
     // ==================== 分值 ====================
 
     public static final int TRIPLE_MARKET = 15;
     public static final int STOP_LOSS_HERO = 3;
-    public static final int PREDICTION_HIT = 5;
-    public static final int PENALTY_ISOLATED = -5;
-    public static final int PENALTY_CROSS = -30;
+    /** 单仓位净亏损 > 1000：每仓 −2，不限次数 */
+    public static final int PNL_LOSS = -2;
+    /** 触发强平：逐仓强平（按被强平的仓位数）与全仓爆仓（按事件数）统一每次 −5 */
+    public static final int PENALTY_LIQ_TRIGGER = -5;
+    /**
+     * 付费重置：活动期每自然周首次重置免费，之后每次扣 30（破产自动恢复同样计入次数）。
+     * 前身是"全仓爆仓 −30"——爆仓的钱已经亏没了、大亏另有 PNL_LOSS 兜着，双重处罚撤销；
+     * 这 30 分挪来看住"重置洗盘"这个真正的口子。
+     */
+    public static final int RESET_EXTRA = -30;
     public static final int CHECKIN_DAILY = 1;
     public static final int FIRST_COMMENT = 1;
 
@@ -56,6 +72,11 @@ public final class ScoreRules {
     public static final BigDecimal VOTE_DAILY_CAP = new BigDecimal("6");
 
     // ==================== 阶梯（n 从 1 起） ====================
+
+    /** ROI≥25%：每笔 1 分，10 笔封顶 */
+    public static int roi25Tier(int n) {
+        return n <= 10 ? 1 : 0;
+    }
 
     /** ROI≥50%：前 5 笔各 5 分，之后各 1 分 */
     public static int roi50Tier(int n) {
@@ -76,6 +97,31 @@ public final class ScoreRules {
     /** 现货达标标的：前 3 个各 5 分，之后各 1 分 */
     public static int spotTier(int n) {
         return n <= 3 ? 5 : 1;
+    }
+
+    /**
+     * 预测市场中奖：前 3 次各 5 分，第 4-10 次各 1 分，之后 0 分。
+     * 每次中奖分值只与"第几次"有关，所以只要中奖次数就能算总分，SQL 侧 COUNT 即可。
+     */
+    public static int predictionTier(int n) {
+        if (n <= 3) return 5;
+        return n <= 10 ? 1 : 0;
+    }
+
+    /** 单仓位净利润 > 1000：每仓 1 分，25 仓封顶（防大本金无限刷） */
+    public static int pnlProfitTier(int n) {
+        return n <= 25 ? 1 : 0;
+    }
+
+    /**
+     * 阶梯前 n 项之和。所有阶梯的分值都只与"第几次"有关，于是任何一档的总分
+     * 都能从<b>次数</b>直接算出 —— 重置遗留（campaign_carryover 只存次数）靠的就是这一点：
+     * 合并次数后从头累加，阶梯跨重置接着数，高分档与一次性档都刷不出第二份。
+     */
+    public static int tierSum(IntUnaryOperator tier, int n) {
+        int sum = 0;
+        for (int i = 1; i <= n; i++) sum += tier.applyAsInt(i);
+        return sum;
     }
 
     // ==================== 连续签到 ====================

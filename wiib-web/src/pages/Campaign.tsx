@@ -35,19 +35,22 @@ interface TaskDef {
  * 分值文案出自设计文档 §2（与 ScoreRules 同源），改规则时两边一起改。
  */
 const TASKS: TaskDef[] = [
+  { code: 'ROI25', label: '单仓位 ROI ≥ 25%', hint: '保证金 ≥ 500；每笔 +1，限 10 笔', group: '交易' },
   { code: 'ROI50', label: '单仓位 ROI ≥ 50%', hint: '保证金 ≥ 500；前 5 笔各 +5，之后各 +1', group: '交易' },
   { code: 'ROI100', label: '单仓位 ROI ≥ 100%', hint: '保证金 ≥ 500；首笔 +15，第 2-3 笔各 +5，之后各 +1', group: '交易' },
   { code: 'GODLY', label: '单笔封神：ROI ≥ 300%', hint: '保证金 ≥ 500；一次性 +20', group: '交易' },
   { code: 'SPOT', label: '现货标的整体收益 ≥ 10%', hint: '按币种累计（不限单笔）：活动期买入 ≥ 1000；前 3 个达标标的各 +5，之后各 +1', group: '交易' },
-  { code: 'PREDICTION', label: '预测市场持有到结算且猜中', hint: '单次额度 ≥ 50；每次 +5', group: '交易' },
+  { code: 'PREDICTION', label: '预测市场持有到结算且猜中', hint: '单次额度 ≥ 100；前 3 次各 +5，第 4-10 次各 +1，之后不加分', group: '交易' },
   { code: 'TRIPLE', label: '三市通吃', hint: '加密合约 / 黄金原油 / 美股永续 各拿下一笔 ROI ≥ 50%；一次性 +15', group: '交易' },
   { code: 'STOP_LOSS_HERO', label: '止损英雄', hint: '挂过止损并被触发；一次性 +3', group: '交易' },
+  { code: 'PNL_PROFIT', label: '单仓位净利润 > 1000', hint: '无保证金门槛；每仓 +1，限 25 仓', group: '交易' },
   { code: 'CHECKIN', label: '每日签到', hint: '每天 +1', group: '日常' },
   { code: 'STREAK', label: '连续签到 3 / 7 / 14 天', hint: '+5 / +15 / +40 累进，断签重计', group: '日常' },
   { code: 'FIRST_COMMENT', label: '首次评论', hint: '一次性 +1', group: '日常' },
   { code: 'VOTE', label: '每日多空投票', hint: '每天 100 分池按当日正确票数均分，单人单日封顶 6 分', group: '投票' },
-  { code: 'LIQ_ISOLATED', label: '逐仓强平', hint: '每次 −5', group: '罚分' },
-  { code: 'LIQ_CROSS', label: '全仓爆仓', hint: '每次 −30', group: '罚分' },
+  { code: 'PNL_LOSS', label: '单仓位净亏损 > 1000', hint: '无保证金门槛；每仓 −2，不限次数', group: '罚分' },
+  { code: 'LIQ_TRIGGER', label: '触发强平', hint: '逐仓强平按仓位数、全仓爆仓按事件数；每次 −5', group: '罚分' },
+  { code: 'RESET_EXTRA', label: '付费重置账户', hint: '活动期每周首次重置免费，之后每次 −30；破产自动恢复同样计入次数', group: '罚分' },
 ];
 
 /** 整数不显示小数：任务分大多是整数，"+5.00" 读起来像金额 */

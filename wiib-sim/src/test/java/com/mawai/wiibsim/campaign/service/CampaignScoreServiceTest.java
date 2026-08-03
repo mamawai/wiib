@@ -92,11 +92,11 @@ class CampaignScoreServiceTest {
                 user(TIE, "tie"), user(REKT, "rekt"), user(ACE, "ace"),
                 user(IDLE, "idle"), user(MID, "mid")));
 
-        when(tradeScorer.scoreAll(START, END)).thenReturn(Map.of(
+        when(tradeScorer.scoreAll(CAMPAIGN_ID, START, END)).thenReturn(Map.of(
                 ACE, List.of(ScoreItem.of("ROI50", "单仓位 ROI ≥ 50%", 2, 10),
-                        ScoreItem.of("LIQ_ISOLATED", "逐仓强平", 1, -5)),
+                        ScoreItem.of("LIQ_TRIGGER", "触发强平", 1, -5)),
                 REKT, List.of(ScoreItem.of("ROI50", "单仓位 ROI ≥ 50%", 2, 10),
-                        ScoreItem.of("LIQ_CROSS", "全仓爆仓", 1, -30))));
+                        ScoreItem.of("RESET_EXTRA", "付费重置账户", 1, -30))));
 
         when(checkinService.scoreAll(any(Campaign.class))).thenReturn(Map.of(
                 ACE, List.of(ScoreItem.of("CHECKIN", "每日签到", 6, 6)),
@@ -140,7 +140,7 @@ class CampaignScoreServiceTest {
         CampaignScore ace = pick(service.scoreBoard(), ACE);
 
         assertThat(ace.items()).extracting(ScoreItem::code)
-                .containsExactly("ROI50", "LIQ_ISOLATED", "CHECKIN", "VOTE");
+                .containsExactly("ROI50", "LIQ_TRIGGER", "CHECKIN", "VOTE");
         assertThat(item(ace.items(), "VOTE").score()).isEqualByComparingTo(new BigDecimal("3.50"));
     }
 
@@ -169,7 +169,7 @@ class CampaignScoreServiceTest {
         assertThat(rekt.penalty()).isEqualTo(-30);
         assertThat(rekt.items()).extracting(ScoreItem::code)
                 .as("扣到 0 的人也得留着明细，否则他不知道分去哪了")
-                .containsExactly("ROI50", "LIQ_CROSS");
+                .containsExactly("ROI50", "RESET_EXTRA");
     }
 
     /**
@@ -364,7 +364,7 @@ class CampaignScoreServiceTest {
         assertThat(service.myView(ACE)).isNull();
 
         verify(statsMapper, never()).listEligibleUsers();
-        verify(tradeScorer, never()).scoreAll(any(), any());
+        verify(tradeScorer, never()).scoreAll(any(), any(), any());
         verify(cacheService, never()).get(any());
     }
 
@@ -402,7 +402,7 @@ class CampaignScoreServiceTest {
         assertThat(second)
                 .as("record 走 fastjson2 转一圈必须逐字段（含 BigDecimal 标度）不变")
                 .isEqualTo(first);
-        verify(tradeScorer, times(1)).scoreAll(START, END);
+        verify(tradeScorer, times(1)).scoreAll(CAMPAIGN_ID, START, END);
         verify(checkinService, times(1)).scoreAll(any(Campaign.class));
         verify(voteService, times(1)).voteScoreByUser(CAMPAIGN_ID);
         verify(statsMapper, times(1)).listEligibleUsers();
@@ -431,7 +431,7 @@ class CampaignScoreServiceTest {
         assertThat(service.scoreBoard()).extracting(CampaignScore::userId).containsExactly(ACE);
 
         verify(statsMapper, never()).listEligibleUsers();
-        verify(tradeScorer, never()).scoreAll(any(), any());
+        verify(tradeScorer, never()).scoreAll(any(), any(), any());
         verify(cacheService, never()).set(any(), any(), any());
     }
 
@@ -454,14 +454,14 @@ class CampaignScoreServiceTest {
                 .as("freshBoard 必须是真算出来的四个人，不是缓存里那份")
                 .extracting(CampaignScore::userId).containsExactly(ACE, MID, TIE, REKT);
         verify(cacheService, never()).get(BOARD_KEY);
-        verify(tradeScorer, times(1)).scoreAll(START, END);
+        verify(tradeScorer, times(1)).scoreAll(CAMPAIGN_ID, START, END);
         // 算完把新结果写回同一个键：结算之后用户看到的榜与真正发出去的钱是同一份
         verify(cacheService).set(eq(BOARD_KEY), any(String.class), eq(Duration.ofSeconds(60)));
 
         assertThat(service.scoreBoard())
                 .as("展示路径不受影响，照样直接吃缓存")
                 .extracting(CampaignScore::userId).containsExactly(ACE);
-        verify(tradeScorer, times(1)).scoreAll(START, END);
+        verify(tradeScorer, times(1)).scoreAll(CAMPAIGN_ID, START, END);
     }
 
     /** 没有活动时 freshBoard 也是空的，不去扫库 */

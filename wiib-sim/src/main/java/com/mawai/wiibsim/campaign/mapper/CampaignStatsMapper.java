@@ -152,8 +152,8 @@ public interface CampaignStatsMapper {
      * （FuturesRiskServiceImpl:218），破产清理不插。
      * <p>
      * 【margin_mode 切开】全仓爆仓时每个仓位也各插一条 LIQUIDATED 订单
-     * （CrossLiquidationServiceImpl:120），不切开就是一次爆仓被扣两遍
-     * （每仓 −5 再加事件 −30）。
+     * （CrossLiquidationServiceImpl:120），不切开的话一次全仓爆仓会按仓位数吃一串 −5 ——
+     * 而全仓爆仓不罚分（钱亏没了本身就是惩罚，撤销缘由见 ScoreRules.RESET_EXTRA 注释）。
      */
     @Select("""
             SELECT user_id AS user_id, COUNT(*) AS cnt
@@ -168,11 +168,12 @@ public interface CampaignStatsMapper {
                                              @Param("end") LocalDateTime end);
 
     /**
-     * 全仓爆仓次数（−30/次）。
+     * 全仓爆仓事件数（并入「触发强平」，每次 −5）。
      * <p>
      * type=6 是 Notification.TYPE_CROSS_LIQUIDATION，实体注释写明
      * 「一次爆掉该用户所有全仓仓位，合并成一条」—— 一次事件正好一条记录，
      * 这是全站唯一能把"爆仓事件"与"被爆的仓位数"分开的地方。
+     * 逐仓那半边按 LIQUIDATED 订单数（countIsolatedLiquidations），两边相加即触发强平总次数。
      */
     @Select("""
             SELECT user_id AS user_id, COUNT(*) AS cnt

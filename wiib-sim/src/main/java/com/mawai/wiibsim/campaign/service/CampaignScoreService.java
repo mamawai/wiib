@@ -108,7 +108,7 @@ public class CampaignScoreService {
      * 也要隔天 00:05 才发。所以活动期间显示的分只会比最终分少，不会多。这是接受的，别当 bug 去"修"。
      */
     private List<CampaignScore> computeBoard(Campaign c) {
-        Map<Long, List<ScoreItem>> trade = tradeScorer.scoreAll(c.getStartAt(), c.getEndAt());
+        Map<Long, List<ScoreItem>> trade = tradeScorer.scoreAll(c.getId(), c.getStartAt(), c.getEndAt());
         Map<Long, List<ScoreItem>> daily = checkinService.scoreAll(c);
         Map<Long, BigDecimal> vote = voteService.voteScoreByUser(c.getId());
 

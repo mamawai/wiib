@@ -131,11 +131,11 @@ class CampaignScoreRealRunTest {
                 new CampaignScore(-1L, "真跑样本", true, 10, 6, new BigDecimal("3.50"), -5,
                         new BigDecimal("14.50"),
                         List.of(ScoreItem.of("ROI50", "单仓位 ROI ≥ 50%", 2, 10),
-                                ScoreItem.of("LIQ_ISOLATED", "逐仓强平", 1, -5),
+                                ScoreItem.of("LIQ_TRIGGER", "触发强平", 1, -5),
                                 new ScoreItem("VOTE", "每日多空投票", 0, new BigDecimal("3.50")))),
                 new CampaignScore(-2L, "零分样本", true, 10, 0, BigDecimal.ZERO, -30,
                         new BigDecimal("0.00"),
-                        List.of(ScoreItem.of("LIQ_CROSS", "全仓爆仓", 1, -30))));
+                        List.of(ScoreItem.of("RESET_EXTRA", "付费重置账户", 1, -30))));
 
         cacheService.set(syntheticKey, JSON.toJSONString(sample), Duration.ofSeconds(60));
         String raw = cacheService.get(syntheticKey);

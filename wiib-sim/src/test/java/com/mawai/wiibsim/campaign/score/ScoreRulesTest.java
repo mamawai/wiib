@@ -52,6 +52,16 @@ class ScoreRulesTest {
         assertThat(ScoreRules.spotTier(4)).isEqualTo(1);
     }
 
+    /** 预测封顶不是降到 1 分而是 0 分：第 11 次起一分没有 */
+    @Test
+    void 预测前三次各五第四到十次各一之后零分() {
+        assertThat(ScoreRules.predictionTier(3)).isEqualTo(5);
+        assertThat(ScoreRules.predictionTier(4)).isEqualTo(1);
+        assertThat(ScoreRules.predictionTier(10)).isEqualTo(1);
+        assertThat(ScoreRules.predictionTier(11)).isZero();
+        assertThat(ScoreRules.predictionTier(100)).isZero();
+    }
+
     // ---- 连续签到 ----
 
     /** 累进：连满 14 天拿满 5+15+40，不是只拿 40 */

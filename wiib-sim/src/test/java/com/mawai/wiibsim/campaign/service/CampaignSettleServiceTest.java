@@ -366,10 +366,10 @@ class CampaignSettleServiceTest {
                 user(TINY, "tiny"), user(ZERO, "zero"), user(LOW, "low"),
                 user(ACE, "ace"), user(MID, "mid")));
 
-        when(tradeScorer.scoreAll(startAt, endAt)).thenReturn(Map.of(
+        when(tradeScorer.scoreAll(CAMPAIGN_ID, startAt, endAt)).thenReturn(Map.of(
                 ACE, List.of(ScoreItem.of("ROI50", "单仓位 ROI ≥ 50%", 3, 1000)),
                 LOW, List.of(ScoreItem.of("ROI50", "单仓位 ROI ≥ 50%", 3, 1000)),
-                ZERO, List.of(ScoreItem.of("LIQ_CROSS", "全仓爆仓", 1, -30))));
+                ZERO, List.of(ScoreItem.of("RESET_EXTRA", "付费重置账户", 1, -30))));
 
         when(checkinService.scoreAll(any(Campaign.class))).thenReturn(Map.of(
                 MID, List.of(ScoreItem.of("CHECKIN", "每日签到", 14, 999))));
