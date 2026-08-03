@@ -50,6 +50,7 @@ class FuturesLimitOpenFillTest {
     private CacheService cacheService;
     private FuturesPositionIndexService positionIndexService;
     private FuturesLeverageBracketRegistry bracketRegistry;
+    private CrossMarginService crossMarginService;
     private FuturesSettlementServiceImpl service;
 
     @BeforeEach
@@ -77,10 +78,11 @@ class FuturesLimitOpenFillTest {
         when(userMapper.atomicUpdateBalance(anyLong(), any())).thenReturn(new BigDecimal("10000"));
         when(userMapper.atomicDeductFrozenBalance(anyLong(), any())).thenReturn(BigDecimal.ZERO);
 
+        crossMarginService = mock(CrossMarginService.class);
         service = new FuturesSettlementServiceImpl(
                 userService, userMapper, positionMapper, orderMapper,
                 new TradingConfig(), bracketRegistry, cacheService, positionIndexService,
-                mock(FuturesRiskService.class), mock(CrossMarginService.class),
+                mock(FuturesRiskService.class), crossMarginService,
                 mock(CrossLiquidationService.class), mock(RedisLockUtil.class), mock(BinanceRestClient.class));
     }
 
@@ -160,6 +162,17 @@ class FuturesLimitOpenFillTest {
         verify(orderMapper).casUpdateStatus(100L, "PROCESSING", "CANCELLED");
         verify(userMapper, never()).atomicDeductFrozenBalance(anyLong(), any());
         verify(positionMapper, never()).insert(any(FuturesPosition.class));
+    }
+
+    /** 与 FuturesOpenMergeTest 同款不变量：全仓加仓并入必须汇入 refreshUserIndex 作废安全带 */
+    @Test
+    void 全仓限价成交并入_刷新用户索引作废安全带() {
+        FuturesPosition lp = pos(1L, "LONG", FuturesPosition.CROSS, 50, "90", "1", "1.80");
+        when(positionMapper.selectList(any())).thenReturn(List.of(lp));
+
+        service.doProcessTriggeredOrder(openOrder("OPEN_LONG", "CROSS", 50, "1", "110", null));
+
+        verify(crossMarginService).refreshUserIndex(UID);
     }
 
     @Test

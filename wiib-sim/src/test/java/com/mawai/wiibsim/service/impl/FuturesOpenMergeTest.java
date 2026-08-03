@@ -262,6 +262,22 @@ class FuturesOpenMergeTest {
                 argThat(l -> l.size() == 1 && l.get(0).getPrice().compareTo(new BigDecimal("85")) == 0));
     }
 
+    /**
+     * 加仓合并会让数量与占用一起变大：ΣV↑ → 账户真实安全半宽变窄，强平安全带若不作废，
+     * 旧的过宽区间会把"新账户状态下已足以爆仓"的插针当带内免检放走。
+     * 合并不改 symbol 集合、Redis 索引本不需要刷——但带的作废（bump）挂在 refreshUserIndex 上，
+     * 所以加仓也必须汇入这个点，与新建仓位路径同款。
+     */
+    @Test
+    void 全仓市价加仓并入_刷新用户索引作废安全带() {
+        FuturesPosition lp = pos(1L, "LONG", FuturesPosition.CROSS, 50, "90", "1", "1.80");
+        when(positionMapper.selectList(any())).thenReturn(List.of(lp));
+
+        service.doOpenPosition(UID, marketReq("LONG", "CROSS", 50, "1"));
+
+        verify(crossMarginService).refreshUserIndex(UID);
+    }
+
     @Test
     void 无持仓_正常新建() {
         when(positionMapper.selectList(any())).thenReturn(List.of());
