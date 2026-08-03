@@ -210,6 +210,9 @@ public class FuturesTradingServiceImpl implements FuturesTradingService {
                     newEntryPrice, newMargin, newQty);
             positionIndexService.updateLiquidationPrice(position.getId(), position.getSymbol(), position.getSide(), liqPrice);
         }
+        // 全仓加仓不改 symbol 集合、Redis 索引本不用刷，刷的是强平安全带作废（bump 在 refreshUserIndex 内）：
+        // 数量与占用变大 → 旧带过宽会把足以爆掉新账户的插针当带内免检放走
+        if (position.isCross()) crossMarginService.refreshUserIndex(userId);
 
         FuturesOrder order = new FuturesOrder();
         order.setUserId(userId);

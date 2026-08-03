@@ -366,6 +366,8 @@ public class FuturesSettlementServiceImpl implements FuturesSettlementService {
                     newEntryPrice, newMargin, newQty);
             positionIndexService.updateLiquidationPrice(position.getId(), position.getSymbol(), position.getSide(), liqPrice);
         }
+        // 同 executeMarketMerge：全仓加仓并入必须汇入 refreshUserIndex 作废强平安全带（bump 在其内）
+        if (position.isCross()) crossMarginService.refreshUserIndex(order.getUserId());
 
         // 回填 position_id：开仓手续费聚合进仓位已实现盈亏
         int filled = orderMapper.casUpdateToFilled(order.getId(), position.getId(), executePrice, addValue, commission, addMargin, null);
