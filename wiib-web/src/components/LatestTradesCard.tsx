@@ -2,7 +2,7 @@ import { Activity, Bot, ChevronRight } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Skeleton } from './ui/skeleton';
-import { fmtDateTime, fmtMoney } from '../lib/utils';
+import { fmtDateTime } from '../lib/utils';
 
 export interface TradeItem {
   id: string;
@@ -54,14 +54,16 @@ export function LatestTradesCard({ trades, loading }: Props) {
             ))}
           </div>
         ) : trades.length > 0 ? (
-          <div className="max-h-80 overflow-y-auto">
+          // 紧凑列（首页 2:1 布局的 1/3 位）：方向 + 币种 + 数量 + 时间。
+          // 金额这一列是窄卡里最放不下的，砍掉 —— 全量含金额去 /trades
+          <div className="max-h-96 overflow-y-auto">
             {trades.map((t) => {
               const tone = t.sideTone ?? (t.orderSide === 'BUY' ? 'buy' : 'sell');
               const sideLabel = t.sideLabel ?? (tone === 'buy' ? '买' : '卖');
               return (
-                <div key={t.id} className="flex items-center justify-between px-4 py-2.5 border-b border-border/20 last:border-b-0 text-sm">
+                <div key={t.id} className="flex items-center justify-between gap-2 px-3 py-2.5 border-b border-border/20 last:border-b-0 text-sm">
                   <div className="flex items-center gap-2 min-w-0">
-                    <span className={`text-xs font-medium px-1.5 py-0.5 rounded ${tone === 'buy' ? 'bg-gain/10 text-gain' : 'bg-loss/10 text-loss'}`}>
+                    <span className={`text-xs font-medium px-1.5 py-0.5 rounded shrink-0 ${tone === 'buy' ? 'bg-gain/10 text-gain' : 'bg-loss/10 text-loss'}`}>
                       {sideLabel}
                     </span>
                     {t.isAi && (
@@ -70,12 +72,9 @@ export function LatestTradesCard({ trades, loading }: Props) {
                       </span>
                     )}
                     <span className="font-medium truncate">{t.name}</span>
-                    <span className="text-muted-foreground text-xs">{t.quantity}{t.unit}</span>
+                    <span className="text-muted-foreground text-xs truncate">{t.quantity}{t.unit}</span>
                   </div>
-                  <div className="flex items-center gap-3 shrink-0">
-                    <span className="text-muted-foreground text-xs">{t.filledAmount ? fmtMoney(t.filledAmount) : '-'}</span>
-                    <span className="text-muted-foreground text-xs w-14 text-right">{fmtDateTime(t.createdAt)}</span>
-                  </div>
+                  <span className="text-muted-foreground text-xs shrink-0">{fmtDateTime(t.createdAt)}</span>
                 </div>
               );
             })}

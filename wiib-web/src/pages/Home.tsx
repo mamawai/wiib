@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import type { ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import NumberFlow from '@number-flow/react';
 import { buffApi, cryptoOrderApi, futuresApi, userApi } from '../api';
@@ -29,6 +30,26 @@ import { orderSideView } from '../lib/orderSide';
 
 const HIDE_NOTICE_KEY = 'wiib-notice-hide-date';
 function shouldShowNotice() { const d = localStorage.getItem(HIDE_NOTICE_KEY); return !d || d !== new Date().toDateString(); }
+
+/** 快捷入口定义。登录后收在总资产看板底部，游客态在页面上单独一行，共用这一份 */
+const QUICK_ENTRIES = [
+  { icon: List, label: '股票', to: '/bstock', ic: 'text-blue-600 dark:text-blue-400' },
+  { icon: DollarSign, label: 'Crypto', to: '/coin', ic: 'text-amber-600 dark:text-amber-400' },
+  { icon: Target, label: '预测', to: '/prediction', ic: 'text-primary' },
+  { icon: Brain, label: 'AI', to: '/ai', ic: 'text-cyan-600 dark:text-cyan-400' },
+  { icon: Gamepad2, label: '游戏', to: '/games', ic: 'text-pink-600 dark:text-pink-400' },
+];
+
+function EntryChip({ onClick, children }: { onClick: () => void; children: ReactNode }) {
+  return (
+    <button
+      onClick={onClick}
+      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-border bg-card hover:bg-surface-hover hover:border-foreground/20 text-xs font-semibold transition-colors cursor-pointer"
+    >
+      {children}
+    </button>
+  );
+}
 
 function greeting(): string {
   const h = new Date().getHours();
@@ -162,7 +183,7 @@ export function Home() {
                   </div>
                 </div>
               </div>
-              <div className="mt-5 flex-1 min-h-16 max-h-40">
+              <div className="mt-5 flex-1 min-h-16 max-h-56">
                 {equityCurve.length > 1 && (
                   <Sparkline
                     /* key 随数据变 → 刷新后 path 重建，描线动画重跑一遍 */
@@ -173,6 +194,22 @@ export function Home() {
                     className="w-full h-full"
                   />
                 )}
+              </div>
+              {/* 快捷入口收进看板底部：右列（月度网格）更高，items-stretch 把本卡拉高后
+                  曲线封顶（max-h）剩下的就是一段死空白，拿它放入口正合适。mt-auto 钉在卡底 */}
+              <div className="mt-auto pt-4 border-t border-border/50 flex flex-wrap gap-2">
+                {QUICK_ENTRIES.map(({ icon: Icon, label, to, ic }) => (
+                  <EntryChip key={to} onClick={() => navigate(to)}>
+                    <Icon className={cn('w-3.5 h-3.5', ic)} />
+                    {label}
+                  </EntryChip>
+                ))}
+                <EntryChip onClick={() => setBuffOpen(true)}>
+                  <Gift className="w-3.5 h-3.5 text-primary" />
+                  福利
+                  {/* 今日未抽 → 亮灯提醒 */}
+                  {buffStatus?.canDraw && <span className="led" />}
+                </EntryChip>
               </div>
             </SpotlightCard>
 
@@ -266,51 +303,36 @@ export function Home() {
         </Card>
       )}
 
-      {/* ====== 快捷入口：压成一行小件（含每日福利，点开弹窗） ====== */}
-      <div className="flex flex-wrap gap-2">
-        {[
-          { icon: List, label: '股票', to: '/bstock', ic: 'text-blue-600 dark:text-blue-400' },
-          { icon: DollarSign, label: 'Crypto', to: '/coin', ic: 'text-amber-600 dark:text-amber-400' },
-          { icon: Target, label: '预测', to: '/prediction', ic: 'text-primary' },
-          { icon: Brain, label: 'AI', to: '/ai', ic: 'text-cyan-600 dark:text-cyan-400' },
-          { icon: Gamepad2, label: '游戏', to: '/games', ic: 'text-pink-600 dark:text-pink-400' },
-        ].map(({ icon: Icon, label, to, ic }) => (
-          <button
-            key={to}
-            onClick={() => navigate(to)}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-border bg-card hover:bg-surface-hover hover:border-foreground/20 text-xs font-semibold transition-colors cursor-pointer"
-          >
-            <Icon className={cn('w-3.5 h-3.5', ic)} />
-            {label}
-          </button>
-        ))}
-        {ready && (
-          <button
-            onClick={() => setBuffOpen(true)}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-border bg-card hover:bg-surface-hover hover:border-foreground/20 text-xs font-semibold transition-colors cursor-pointer"
-          >
-            <Gift className="w-3.5 h-3.5 text-primary" />
-            福利
-            {/* 今日未抽 → 亮灯提醒 */}
-            {buffStatus?.canDraw && <span className="led" />}
-          </button>
-        )}
-      </div>
+      {/* ====== 快捷入口（游客态）：登录后这排收进上面的总资产看板里，不再单独占一行 ====== */}
+      {!ready && (
+        <div className="flex flex-wrap gap-2">
+          {QUICK_ENTRIES.map(({ icon: Icon, label, to, ic }) => (
+            <EntryChip key={to} onClick={() => navigate(to)}>
+              <Icon className={cn('w-3.5 h-3.5', ic)} />
+              {label}
+            </EntryChip>
+          ))}
+        </div>
+      )}
 
       {/* ====== 市场行情：三分类终端表，点分类头去市场页，点行直达交易页 ====== */}
       <HomeMarketSection />
 
-      {/* ====== 成交 + 快讯 + 爆仓 + FAQ ====== */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
-        <LatestTradesCard trades={latestTrades} loading={tradesLoading} />
-        {/* 实时快讯：BlockBeats 缓存（quant 侧），与最新成交并列 */}
-        <NewsFlashCard />
-        {/* 爆仓动态：轻量入口横幅，点击进 /force-orders 全量页 */}
+      {/* ====== 快讯 + 成交（主次分栏 2:1）+ 爆仓 + FAQ ====== */}
+      {/* 按内容量分宽度：快讯标题+全文吃 2/3，成交一行十几个字 1/3 够用（金额细节在 /trades）。
+          1:1 时代的毛病是左空右挤，快讯还得截成两行 */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-start">
+        {/* 实时快讯：BlockBeats 缓存（quant 侧） */}
         <div className="md:col-span-2">
+          <NewsFlashCard />
+        </div>
+        <LatestTradesCard trades={latestTrades} loading={tradesLoading} />
+        {/* 爆仓动态：轻量入口横幅，点击进 /force-orders 全量页 */}
+        <div className="md:col-span-3">
           <ForceOrdersCard />
         </div>
         {/* 新手教学 FAQ */}
-        <div className="md:col-span-2">
+        <div className="md:col-span-3">
           <HomeFaq />
         </div>
       </div>

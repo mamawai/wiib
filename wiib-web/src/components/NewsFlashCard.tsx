@@ -44,7 +44,8 @@ export function NewsFlashCard() {
         ) : items.length === 0 ? (
           <div className="py-10 text-center text-sm text-muted-foreground">暂无快讯</div>
         ) : (
-          <div className="max-h-80 overflow-y-auto -mx-1 px-1">
+          // overflow-x-hidden + break-words：正文全文展示后，长链接/无空格长串不能把卡顶出横向滚动条
+          <div className="max-h-96 overflow-y-auto overflow-x-hidden -mx-1 px-1">
             {items.map(n => (
               <a
                 key={n.id}
@@ -55,12 +56,13 @@ export function NewsFlashCard() {
               >
                 <span className="num text-[10px] text-muted-foreground shrink-0 pt-0.5">{fmtTime(n.createTime)}</span>
                 <span className="min-w-0 flex-1">
-                  <span className="block text-xs font-semibold leading-snug group-hover:text-primary transition-colors">
+                  <span className="block text-xs font-semibold leading-snug break-words group-hover:text-primary transition-colors">
                     {n.title}
                     {n.url && <ExternalLink className="inline w-2.5 h-2.5 ml-1 opacity-40" />}
                   </span>
+                  {/* 全文不截断：2/3 宽度是给全文腾的，截两行就白拿这个宽度了 */}
                   {n.plain && (
-                    <span className="block text-[11px] text-muted-foreground leading-snug mt-0.5 line-clamp-2">
+                    <span className="block text-[11px] text-muted-foreground leading-relaxed mt-0.5 break-words">
                       {n.plain}
                     </span>
                   )}

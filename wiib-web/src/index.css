@@ -32,6 +32,12 @@
   --radius-xl: 0.75rem;
   --font-sans: "Plus Jakarta Sans Variable", ui-sans-serif, system-ui, "Microsoft YaHei", sans-serif;
   --font-mono: "JetBrains Mono Variable", "Cascadia Mono", Consolas, ui-monospace, monospace;
+  /* 汉字可读性：全站的说明/规则/提示长文本几乎都压在 text-xs 上，默认 0.75rem 读中文太挤。
+     抬到 0.8125rem 并放宽行高，一个旋钮改全站；层级不变（仍小于 text-sm），
+     10/11px 与 .microlabel 那些仪表微标签是设计元素，不跟着动 */
+  --text-xs: 0.8125rem;
+  --text-xs--line-height: 1.5;
+  --text-sm--line-height: 1.5;
 }
 
 
