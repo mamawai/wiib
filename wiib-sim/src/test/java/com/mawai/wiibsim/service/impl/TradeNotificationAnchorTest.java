@@ -79,7 +79,8 @@ class TradeNotificationAnchorTest {
                 mock(FuturesLeverageBracketRegistry.class), crossMarginService, tradeNotification);
 
         crossLiquidation = new CrossLiquidationServiceImpl(crossMarginService, positionMapper, orderMapper,
-                tradingConfig, cacheService, indexService, mock(RedisLockUtil.class), tradeNotification);
+                tradingConfig, cacheService, indexService, mock(RedisLockUtil.class), tradeNotification,
+                new CrossBandRegistry());
     }
 
     private static FuturesPosition isolatedLong() {
@@ -192,7 +193,7 @@ class TradeNotificationAnchorTest {
         when(cacheService.getMarkPrice(anyString())).thenReturn(new BigDecimal("90"));
         when(positionMapper.casClosePosition(anyLong(), anyString(), any(), any())).thenReturn(1);
 
-        crossLiquidation.liquidateAll(7L);
+        crossLiquidation.liquidateAll(7L, null, null);
 
         ArgumentCaptor<BigDecimal> settle = ArgumentCaptor.forClass(BigDecimal.class);
         verify(tradeNotification).crossLiquidation(eq(7L), eq(2), settle.capture());
@@ -208,7 +209,7 @@ class TradeNotificationAnchorTest {
         when(cacheService.getMarkPrice(anyString())).thenReturn(new BigDecimal("90"));
         when(positionMapper.casClosePosition(anyLong(), anyString(), any(), any())).thenReturn(0);
 
-        crossLiquidation.liquidateAll(7L);
+        crossLiquidation.liquidateAll(7L, null, null);
 
         verify(tradeNotification, never()).crossLiquidation(anyLong(), anyInt(), any());
     }

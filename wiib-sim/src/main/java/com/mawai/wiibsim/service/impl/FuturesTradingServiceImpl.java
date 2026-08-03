@@ -737,13 +737,18 @@ public class FuturesTradingServiceImpl implements FuturesTradingService {
         }
         if (crossDelta.signum() > 0) crossMarginService.assertCanAfford(userId, crossDelta);
 
+        boolean crossAdjusted = false;
         for (FuturesPosition p : positions) {
             if (p.isCross()) {
                 adjustCrossLeverage(p, newLeverage);
+                crossAdjusted = true;
             } else {
                 adjustIsolatedLeverage(userId, p, newLeverage, markPrice);
             }
         }
+        // 全仓占用变了：强平安全带的流出下界 (U−mm)/2 失真，汇入 refreshUserIndex 作废——
+        // 这是占用变动唯一不经开平仓/成交/settle 的口子，其余路径都已就近调它
+        if (crossAdjusted) crossMarginService.refreshUserIndex(userId);
 
         log.info("futures调杠杆 userId={} symbol={} →{}x 仓位数={}", userId, request.getSymbol(), newLeverage, positions.size());
     }

@@ -21,7 +21,6 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.List;
-import java.util.concurrent.ConcurrentHashMap;
 
 import static com.mawai.wiibsim.service.impl.FuturesHelper.calculatePnl;
 import static com.mawai.wiibsim.service.impl.FuturesHelper.markPrice;
@@ -40,49 +39,72 @@ public class CrossLiquidationServiceImpl implements CrossLiquidationService {
     private final FuturesPositionIndexService positionIndexService;
     private final RedisLockUtil redisLockUtil;
     private final TradeNotificationService tradeNotificationService;
-
-    /**
-     * tick 去重表：userId → 上次巡检触发时刻。健康检查是账户级的（一次读全部持仓 symbol 的最新价），
-     * 同一秒内多 symbol tick 对同一用户的重复触发纯属浪费。压测（2026-08）：合并原先靠"撞进用户锁
-     * 持有窗口"的时序巧合，REST 降级的错开时序下巡检量翻倍——这里改成设计保证。
-     * 900ms = 1s tick 周期留 100ms 到达抖动，保证每个整秒 tick 必放行一次。
-     * 并发 get/put 竞态放行无害：用户级 Redis 锁是第二道闸。只挡 tick 路径，
-     * sweepAll 兜底与爆仓链路直调 checkUser 不经过这里。
-     */
-    private static final long TICK_DEDUP_MS = 900;
-    private final ConcurrentHashMap<Long, Long> lastTickCheck = new ConcurrentHashMap<>();
+    private final CrossBandRegistry bandRegistry;
 
     @Override
-    public void onPriceTick(String symbol) {
-        long now = System.currentTimeMillis();
+    public void onPriceTick(String symbol, BigDecimal markPrice) {
+        double price = markPrice.doubleValue();
         for (String uid : crossMarginService.usersOnSymbol(symbol)) {
             long userId = Long.parseLong(uid);
-            Long last = lastTickCheck.get(userId);
-            if (last != null && now - last < TICK_DEDUP_MS) continue;
-            lastTickCheck.put(userId, now);
-            Thread.startVirtualThread(() -> checkUser(userId));
+            // 带内 = 数学上保证爆不了（推导见 CrossBandRegistry），免检；无带/带作废/出带才精查。
+            // 取代原 900ms 时间去重：时间窗会吞掉窗口内的第二根插针，带只按价格裁决——插针越狠越必查
+            if (!bandRegistry.shouldCheck(userId, symbol, price)) continue;
+            Thread.startVirtualThread(() -> checkUser(userId, symbol, markPrice));
         }
     }
 
     @Override
     public void checkUser(Long userId) {
-        // 用户级锁：同一账户的检查/爆仓串行
+        checkUser(userId, null, null);
+    }
+
+    @Override
+    public void checkUser(Long userId, String pinSymbol, BigDecimal pinPrice) {
+        // 用户级锁：同一账户的检查/爆仓串行。有界等待而非抢不到即弃——
+        // 插针触发排在前一个精查后面时必须等到它，静默丢弃 = 漏针
         String lockKey = "futures:cross:liq:" + userId;
-        String lockValue = redisLockUtil.tryLock(lockKey, 30);
-        if (lockValue == null) return;
+        String lockValue = redisLockUtil.tryLockWithWait(lockKey, 30, 30_000);
+        if (lockValue == null) {
+            log.error("全仓精查获锁超时 userId={} pin={}@{}，交由兜底轮询重查", userId, pinSymbol, pinPrice);
+            return;
+        }
         try {
-            var account = crossMarginService.snapshot(userId);
+            // 锁后复检：排队期间前一个精查可能已重建带，钉价在新带内 = 已被数学证明安全，省一次快照
+            if (pinSymbol != null && !bandRegistry.shouldCheck(userId, pinSymbol, pinPrice.doubleValue())) return;
+
+            long epoch = bandRegistry.epoch(userId); // 先捕纪元再读快照：期间资金变动会让回填天然失效
+            var account = crossMarginService.snapshot(userId, pinSymbol, pinPrice);
             if (account.positions().isEmpty()) {
-                // 仓位已被别的路径清掉（如破产清算），顺手把索引残留擦干净
+                // 仓位已被别的路径清掉（如破产清算），顺手把索引和带的残留擦干净
                 crossMarginService.refreshUserIndex(userId);
+                bandRegistry.remove(userId);
                 return;
             }
-            if (!account.liquidatable()) return;
-            SpringUtils.getAopProxy(this).liquidateAll(userId);
+            if (account.liquidatable()) {
+                SpringUtils.getAopProxy(this).liquidateAll(userId, pinSymbol, pinPrice);
+                return;
+            }
+            rebuildBand(userId, epoch, account);
         } catch (Exception e) {
             log.error("全仓健康检查失败 userId={}", userId, e);
         } finally {
             redisLockUtil.unlock(lockKey, lockValue);
+        }
+    }
+
+    /** 精查末尾回填安全带；缓冲耗尽（半宽0）则清带 = 退化为每 tick 必查，方向 fail-safe */
+    private void rebuildBand(Long userId, long epoch, CrossMarginService.CrossAccount account) {
+        BigDecimal totalNotional = BigDecimal.ZERO;
+        for (FuturesPosition pos : account.positions()) {
+            totalNotional = totalNotional.add(
+                    account.refPrices().get(pos.getSymbol()).multiply(pos.getQuantity()));
+        }
+        BigDecimal halfWidth = CrossBandRegistry.halfWidth(account.equity(),
+                account.usedMargin(), account.maintenanceMargin(), totalNotional);
+        if (halfWidth.signum() > 0) {
+            bandRegistry.put(userId, epoch, CrossBandRegistry.ranges(account.refPrices(), halfWidth));
+        } else {
+            bandRegistry.remove(userId);
         }
     }
 
@@ -100,9 +122,11 @@ public class CrossLiquidationServiceImpl implements CrossLiquidationService {
     /**
      * 全组爆：所有全仓仓位按 mark 价强平，盈亏净额一次结算进余额（允许为负）。
      * 结算后余额 &lt; 0 = 穿仓 → 立即破产（游戏钱包也保不住，这是用户要自己控制的风险点）。
+     * <p>pinSymbol 的结算价钉在 pinPrice：插针触发的爆仓按触发那一刻的价格结算，
+     * 缓存价回落不影响——判定与结算同一口径，否则会出现"按50判爆、按100结算"的分裂。</p>
      */
     @Transactional(rollbackFor = Exception.class)
-    protected void liquidateAll(Long userId) {
+    protected void liquidateAll(Long userId, String pinSymbol, BigDecimal pinPrice) {
         var positions = positionMapper.selectList(new LambdaQueryWrapper<FuturesPosition>()
                 .eq(FuturesPosition::getUserId, userId)
                 .eq(FuturesPosition::getStatus, "OPEN")
@@ -112,7 +136,8 @@ public class CrossLiquidationServiceImpl implements CrossLiquidationService {
         BigDecimal settle = BigDecimal.ZERO;
         int closed = 0;
         for (FuturesPosition pos : positions) {
-            BigDecimal price = markPrice(cacheService, pos.getSymbol());
+            BigDecimal price = pos.getSymbol().equals(pinSymbol)
+                    ? pinPrice : markPrice(cacheService, pos.getSymbol());
             BigDecimal pnl = calculatePnl(pos.getSide(), pos.getEntryPrice(), price, pos.getQuantity());
             BigDecimal closeValue = price.multiply(pos.getQuantity()).setScale(2, RoundingMode.HALF_UP);
             BigDecimal commission = tradingConfig.calculateFuturesCommission(closeValue, true, true);

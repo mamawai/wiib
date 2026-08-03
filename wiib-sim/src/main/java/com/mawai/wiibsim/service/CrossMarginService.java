@@ -4,6 +4,7 @@ import com.mawai.wiibcommon.entity.FuturesPosition;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -29,6 +30,12 @@ public interface CrossMarginService {
 
     /** 全仓账户快照：一次算齐 equity/available/维持保证金，四处（开仓校验/划转/强平/展示）共用一个口径 */
     CrossAccount snapshot(Long userId);
+
+    /**
+     * 带钉住价的快照（插针语义）：pinSymbol 的估值用 pinPrice 而非缓存价，其余 symbol 照缓存。
+     * 强平巡检用——触发 tick 的插针价哪怕下一秒回落，判定仍按触发那一刻的价格。
+     */
+    CrossAccount snapshot(Long userId, String pinSymbol, BigDecimal pinPrice);
 
     /**
      * 余额钱包动钱的唯一额度闸：available ≥ cost，不足抛 FUTURES_CROSS_AVAILABLE_NOT_ENOUGH。
@@ -66,14 +73,17 @@ public interface CrossMarginService {
     Set<String> allCrossUsers();
 
     /**
-     * 账户快照。positions 为快照时点的全仓持仓（价格已冻结在 unrealizedPnl/maintenanceMargin 里）。
+     * 账户快照。positions 为快照时点的全仓持仓（价格已冻结在 unrealizedPnl/maintenanceMargin 里）；
+     * refPrices 为快照估值实际用到的各 symbol 价格——安全带必须锚在这组价上（带的数学保证
+     * 以快照时点状态为基准，事后重取缓存价会引入漂移）。
      */
     record CrossAccount(BigDecimal balance,
                         BigDecimal unrealizedPnl,
                         BigDecimal usedMargin,
                         BigDecimal pendingReserved,
                         BigDecimal maintenanceMargin,
-                        List<FuturesPosition> positions) {
+                        List<FuturesPosition> positions,
+                        Map<String, BigDecimal> refPrices) {
 
         public BigDecimal equity() {
             return balance.add(unrealizedPnl);

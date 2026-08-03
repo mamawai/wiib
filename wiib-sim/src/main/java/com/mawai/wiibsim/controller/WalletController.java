@@ -78,7 +78,8 @@ public class WalletController {
         // 划转后的账户视角：余额少了 amount，其余不变；各仓位强平价按此重估
         CrossMarginService.CrossAccount after = new CrossMarginService.CrossAccount(
                 account.balance().subtract(amount), account.unrealizedPnl(), account.usedMargin(),
-                account.pendingReserved(), account.maintenanceMargin(), account.positions());
+                account.pendingReserved(), account.maintenanceMargin(), account.positions(),
+                account.refPrices());
         List<Map<String, Object>> positions = account.positions().stream()
                 .<Map<String, Object>>map(pos -> Map.of(
                         "positionId", (Object) pos.getId(),
