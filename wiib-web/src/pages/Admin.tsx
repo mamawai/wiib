@@ -474,6 +474,8 @@ export function Admin() {
                   <Button variant="outline" className="h-9 text-xs" onClick={() => handleAction(adminApi.bankruptcyCheck, 'bankruptcyCheck')} disabled={actionLoading !== null}>执行爆仓检查</Button>
                   <Button variant="outline" className="h-9 text-xs" onClick={() => handleAction(adminApi.accrueInterest, 'accrueInterest')} disabled={actionLoading !== null}>手动计息</Button>
                   <Button variant="outline" className="h-9 text-xs" onClick={() => handleAction(adminApi.assetSnapshot, 'assetSnapshot')} disabled={actionLoading !== null}>资产快照</Button>
+                  {/* 活动结算：end_at 之后才会成功（服务端校验），幂等可重点 */}
+                  <Button variant="outline" className="h-9 text-xs" onClick={() => void handleMessageAction(() => adminApi.settleCampaign().then(n => `活动已结算，生成 ${n} 行奖励`), 'settleCampaign')} disabled={actionLoading !== null}>结算 LDC 活动</Button>
                 </div>
               </div>
               {/* AI 量化 */}

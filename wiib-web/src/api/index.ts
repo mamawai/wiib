@@ -73,7 +73,8 @@ export const userApi = {
   /** 指定月份逐日快照（首页月度盈亏网格）。month 形如 2026-07；快照只写到昨天，返回里没有今天 */
   assetDaily: (month: string) => api.get<unknown, AssetSnapshot[]>('/user/asset-daily', { params: { month } }),
   categoryAverages: (days = 30) => api.get<unknown, CategoryAverages>('/user/category-averages', { params: { days } }),
-  // 重置账户：清空交易与游戏数据回到初始资金，每周一次，需逐字输入用户名确认
+  // 重置账户：清空交易与游戏数据回到初始资金。活动期每周首次免费、之后每次扣 30 活动分；
+  // 平时每周限 1 次。需逐字输入用户名确认
   resetAccount: (confirmUsername: string) =>
     api.post<unknown, void>('/user/reset', { confirmUsername }),
   /** 详情页公开开关（默认开）。关掉只挡别人看你的持仓与仓位历史，仍照常上排行榜 */
@@ -174,6 +175,9 @@ export const adminApi = {
   setDailyInterestRate: (dailyInterestRate: number) =>
     api.post<unknown, number>('/admin/task/margin/daily-interest-rate', { dailyInterestRate }),
   assetSnapshot: () => api.post<unknown, void>('/admin/task/asset-snapshot'),
+  // LDC 活动结算：活动过了 end_at 后手动触发，幂等（已结算再点直接返回已有行数）。
+  // 结算会把 status 翻成 SETTLING，用户端领取入口随之出现
+  settleCampaign: () => api.post<unknown, number>('/campaign/settle'),
   // AI Key管理
   listAiKeys: () => api.get<unknown, AiKeyConfig[]>('/admin/ai-agent/keys'),
   saveAiKey: (key: AiKeyConfig) => api.post<unknown, AiKeyConfig>('/admin/ai-agent/keys', key),
