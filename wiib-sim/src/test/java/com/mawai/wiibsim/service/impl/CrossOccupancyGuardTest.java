@@ -3,13 +3,13 @@ package com.mawai.wiibsim.service.impl;
 import com.mawai.wiibcommon.cache.CacheService;
 import com.mawai.wiibcommon.dto.FuturesAddMarginRequest;
 import com.mawai.wiibcommon.entity.FuturesPosition;
-import com.mawai.wiibcommon.entity.User;
 import com.mawai.wiibcommon.enums.ErrorCode;
 import com.mawai.wiibcommon.exception.BizException;
 import com.mawai.wiibcommon.market.BinanceRestClient;
 import com.mawai.wiibsim.config.FuturesLeverageBracketRegistry;
 import com.mawai.wiibsim.config.TradeFilterRegistry;
 import com.mawai.wiibsim.config.TradingConfig;
+import com.mawai.wiibsim.dto.CrossSnapshotRow;
 import com.mawai.wiibsim.mapper.FuturesOrderMapper;
 import com.mawai.wiibsim.mapper.FuturesPositionMapper;
 import com.mawai.wiibsim.mapper.UserMapper;
@@ -66,36 +66,30 @@ class CrossOccupancyGuardTest {
         cacheService = mock(CacheService.class);
         bracketRegistry = mock(FuturesLeverageBracketRegistry.class);
 
-        User user = new User();
-        user.setId(UID);
-        user.setBalance(new BigDecimal("1000"));
-        when(userMapper.selectById(UID)).thenReturn(user);
-
-        // entry=mark=100 → 浮盈0，把变量收敛到只剩"占用"一项
-        when(positionMapper.selectList(any())).thenReturn(List.of(crossPosition()));
+        // entry=mark=100 → 浮盈0，把变量收敛到只剩"占用"一项。
+        // snapshot 已三查合一（selectCrossSnapshot），stub 也只剩这一个口
+        when(positionMapper.selectCrossSnapshot(UID)).thenReturn(List.of(crossSnapshotRow()));
         when(cacheService.getMarkPrice(CROSS_SYMBOL)).thenReturn(new BigDecimal("100"));
         when(bracketRegistry.calcMaintenanceMargin(eq(CROSS_SYMBOL), any())).thenReturn(new BigDecimal("10"));
-        when(orderMapper.sumPendingCrossReserved(UID)).thenReturn(BigDecimal.ZERO);
 
-        crossMargin = new CrossMarginServiceImpl(userMapper, positionMapper, orderMapper, cacheService,
+        crossMargin = new CrossMarginServiceImpl(userMapper, positionMapper, cacheService,
                 bracketRegistry, mock(FuturesPositionIndexService.class), mock(BankruptcyService.class),
                 mock(StringRedisTemplate.class));
     }
 
-    /** 20x 全仓：qty 20 @100 → 名义额 2000，占用 2000/20 = 100 */
-    private static FuturesPosition crossPosition() {
-        FuturesPosition p = new FuturesPosition();
-        p.setId(1L);
-        p.setUserId(UID);
-        p.setSymbol(CROSS_SYMBOL);
-        p.setSide("LONG");
-        p.setMarginMode(FuturesPosition.CROSS);
-        p.setLeverage(20);
-        p.setEntryPrice(new BigDecimal("100"));
-        p.setQuantity(new BigDecimal("20"));
-        p.setMargin(new BigDecimal("100"));
-        p.setStatus("OPEN");
-        return p;
+    /** 20x 全仓快照行：钱包 1000，qty 20 @100 → 名义额 2000，占用 2000/20 = 100 */
+    private static CrossSnapshotRow crossSnapshotRow() {
+        CrossSnapshotRow row = new CrossSnapshotRow();
+        row.setBalance(new BigDecimal("1000"));
+        row.setPendingReserved(BigDecimal.ZERO);
+        row.setPositionId(1L);
+        row.setSymbol(CROSS_SYMBOL);
+        row.setSide("LONG");
+        row.setLeverage(20);
+        row.setEntryPrice(new BigDecimal("100"));
+        row.setQuantity(new BigDecimal("20"));
+        row.setMargin(new BigDecimal("100"));
+        return row;
     }
 
     @Test

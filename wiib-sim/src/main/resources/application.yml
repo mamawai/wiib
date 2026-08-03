@@ -20,7 +20,7 @@ spring:
     password: ${PG_PASSWORD}
     hikari:
       pool-name: wiib-hikari
-      maximum-pool-size: 10
+      maximum-pool-size: 15
       minimum-idle: 3
       connection-timeout: 30000
       idle-timeout: 300000
