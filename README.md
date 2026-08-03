@@ -11,7 +11,7 @@
 
 <br/>
 
-[![Java](https://img.shields.io/badge/Java-21-ED8B00?logo=openjdk&logoColor=white)](https://openjdk.org/projects/jdk/21/)
+[![Java](https://img.shields.io/badge/Java-25-ED8B00?logo=openjdk&logoColor=white)](https://openjdk.org/projects/jdk/25/)
 [![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4.1.0-6DB33F?logo=springboot&logoColor=white)](https://spring.io/projects/spring-boot)
 [![langgraph4j](https://img.shields.io/badge/langgraph4j-1.8.20-F97316)](https://github.com/bsorrentino/langgraph4j)
 [![Spring AI](https://img.shields.io/badge/Spring%20AI-2.0.0-6DB33F?logo=spring&logoColor=white)](https://docs.spring.io/spring-ai/reference/)
@@ -133,7 +133,7 @@
 
 <table>
 <tr><th>层级</th><th>技术</th><th>版本 / 说明</th></tr>
-<tr><td rowspan="2"><b>运行时</b></td><td>Java</td><td>21，启用 Virtual Threads</td></tr>
+<tr><td rowspan="2"><b>运行时</b></td><td>Java</td><td>25，启用 Virtual Threads</td></tr>
 <tr><td>Spring Boot</td><td>4.1.0（Web 层 JSON 随之换代到 Jackson 3，包名 <code>tools.jackson</code>）</td></tr>
 <tr><td rowspan="3"><b>AI</b></td><td>langgraph4j</td><td>1.8.20（core + spring-ai + agentexecutor + postgres-saver）</td></tr>
 <tr><td>Spring AI</td><td>2.0.0（OpenAI Compatible + Responses API，思考档位可配，配置在 DB）</td></tr>
@@ -364,7 +364,7 @@ whatifibought/                        # Maven 多 module 聚合 reactor
 
 | 依赖 | 最低版本 | 说明 |
 |---|---:|---|
-| JDK | 21 | 需要 Virtual Threads |
+| JDK | 25 | pom `<release>` 即 25，低版本编译不过 |
 | Maven | 3.9+ | 后端构建 |
 | Node.js | 20+ | 前端构建（Vite 7） |
 | PostgreSQL | 14+ | 主数据库（三进程共享） |
