@@ -17,12 +17,6 @@ import java.math.RoundingMode;
 @ConfigurationProperties(prefix = "trading")
 public class TradingConfig {
 
-    /** 手续费率（默认0.05%） */
-    private BigDecimal commissionRate = new BigDecimal("0.0005");
-
-    /** 最低手续费（默认5元） */
-    private BigDecimal minCommission = new BigDecimal("5.00");
-
     /** crypto现货手续费率（默认0.1%，用于现货加密货币交易） */
     private BigDecimal cryptoCommissionRate = new BigDecimal("0.001");
 
@@ -65,14 +59,6 @@ public class TradingConfig {
         private BigDecimal balanceTolerance = new BigDecimal("0.05");
         /** 仓位操作分布式锁超时时间（秒） */
         private int lockTimeoutSeconds = 30;
-    }
-
-    /**
-     * 计算手续费（不满5元按5元收取）
-     */
-    public BigDecimal calculateCommission(BigDecimal amount) {
-        BigDecimal commission = amount.multiply(commissionRate).setScale(2, RoundingMode.HALF_UP);
-        return commission.compareTo(minCommission) < 0 ? minCommission : commission;
     }
 
     public BigDecimal calculateCryptoCommission(BigDecimal amount) {

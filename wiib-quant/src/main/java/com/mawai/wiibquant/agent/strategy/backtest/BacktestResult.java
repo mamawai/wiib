@@ -148,10 +148,6 @@ public class BacktestResult {
         return List.copyOf(trades);
     }
 
-    public List<BigDecimal> getEquityCurve() {
-        return List.copyOf(equityCurve);
-    }
-
     // ==================== 报告输出 ====================
 
     @Override

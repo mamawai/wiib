@@ -66,10 +66,6 @@ public record MacroContext(
         return new MacroContext(symbol, Instant.EPOCH, Map.of(), true, List.of("MACRO_CONTEXT_NEUTRAL"));
     }
 
-    public MacroContext withStale(boolean newStale) {
-        return new MacroContext(symbol, computedAt, legs, newStale, qualityFlags);
-    }
-
     public MacroRiskHint toRiskHint() {
         double budget = 1.0;
         boolean stressed = false;
@@ -84,13 +80,5 @@ public record MacroContext(
             return MacroRiskHint.neutral();
         }
         return new MacroRiskHint(budget, shock, stressed);
-    }
-
-    private Leg leg(ForecastHorizon horizon) {
-        return legs.getOrDefault(horizon, Leg.neutral());
-    }
-
-    private static String directionText(int sign) {
-        return sign > 0 ? "LONG" : sign < 0 ? "SHORT" : "FLAT";
     }
 }

@@ -296,14 +296,6 @@ public class CryptoIndicatorCalculator {
         return "sideways";
     }
 
-    static String closedTrendSummary(List<BigDecimal> series, int lookback, boolean lastClosed) {
-        int closedSize = closedEndExclusive(series != null ? series.size() : 0, lastClosed);
-        if (series == null || closedSize < lookback + 1) {
-            return "unknown";
-        }
-        return trendSummary(series.subList(0, closedSize), lookback);
-    }
-
     // ==================== 4. 均线排列 ====================
 
     /**

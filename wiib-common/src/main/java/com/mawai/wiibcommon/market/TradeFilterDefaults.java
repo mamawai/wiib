@@ -50,10 +50,6 @@ public final class TradeFilterDefaults {
         return FUTURES.get(symbol);
     }
 
-    public static Filter spot(String symbol) {
-        return SPOT.get(symbol);
-    }
-
     /** 数量向下对齐步长（quant 定量出口用）；step 无效原样返回 */
     public static BigDecimal floorToStep(BigDecimal qty, BigDecimal step) {
         if (qty == null || step == null || step.signum() <= 0) return qty;

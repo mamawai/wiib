@@ -14,11 +14,4 @@ public record TrainingSample(ResearchFeatures features, BigDecimal realizedLongR
         this(features, realizedLongReturn, Double.NaN, null);
     }
 
-    public TrainingSample(ResearchFeatures features, BigDecimal realizedLongReturn, double realizedForwardReturn) {
-        this(features, realizedLongReturn, realizedForwardReturn, null);
-    }
-
-    public int realizedDirection() {
-        return realizedLongReturn == null ? 0 : realizedLongReturn.signum();
-    }
 }
