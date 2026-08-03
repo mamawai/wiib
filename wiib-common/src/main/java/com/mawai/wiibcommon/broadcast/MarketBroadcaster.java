@@ -18,7 +18,6 @@ public class MarketBroadcaster {
     private final StringRedisTemplate redisTemplate;
 
     public static final String CHANNEL_PREFIX = "ws:broadcast:";
-    public static final String STOCK_CHANNEL = CHANNEL_PREFIX + "stock";
     public static final String CRYPTO_CHANNEL = CHANNEL_PREFIX + "crypto";
     public static final String PREDICTION_CHANNEL = CHANNEL_PREFIX + "prediction";
     public static final String FUTURES_CHANNEL = CHANNEL_PREFIX + "futures";
@@ -27,10 +26,6 @@ public class MarketBroadcaster {
     public static final String STREAM_HEALTH_CHANNEL = CHANNEL_PREFIX + "stream-health";
     // 进程 JVM 监控：feed/quant 定时采样发布，sim 中继到 /topic/monitor/{进程}（sim 自身直推不走此频道）
     public static final String MONITOR_CHANNEL = CHANNEL_PREFIX + "monitor";
-
-    public void broadcastStockQuote(String stockCode, String message) {
-        publish(STOCK_CHANNEL, stockCode, message);
-    }
 
     public void broadcastCryptoQuote(String symbol, String message) {
         publish(CRYPTO_CHANNEL, symbol, message);

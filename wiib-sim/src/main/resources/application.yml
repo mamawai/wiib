@@ -35,9 +35,6 @@ spring:
       password: ${REDIS_PASSWORD:}
       timeout: 10000
 
-mybatis-plus:
-  mapper-locations: classpath:/mapper/**/*.xml
-
 management:
   endpoints:
     web:
@@ -65,14 +62,12 @@ auth:
 
 trading:
   initial-balance: 10000
-  commission-rate: 0.0005        # 0.05%
   # 假名盐。改了全站假名整体重排(纯展示，不动数据)，但同一次部署内必须稳定——
   # 用随机值等于每重启一次全站假名换一遍，"稳定假名"就没了
   alias-salt: ${TRADE_ALIAS_SALT:wiib-public-trade}
 
+# sim 只用 REST（补漏/行情兜底），WS 直连在 feed 进程
 binance:
-  ws-url: wss://stream.binance.com:9443/ws
-  futures-ws-url: wss://fstream.binance.com/ws
   rest-base-url: https://api.binance.com
   futures-rest-base-url: https://fapi.binance.com
   symbols:
@@ -94,7 +89,6 @@ binance:
     - MUUSDT
     - KORUUSDT
     - SPCXUSDT
-  fallback-poll-interval: 5000
 
 websocket:
   max-connections: 10000

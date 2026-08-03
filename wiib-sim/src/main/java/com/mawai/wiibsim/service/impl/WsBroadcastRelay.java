@@ -30,7 +30,7 @@ public class WsBroadcastRelay implements MessageListener {
     @PostConstruct
     public void init() {
         for (String ch : new String[]{
-                MarketBroadcaster.STOCK_CHANNEL, MarketBroadcaster.CRYPTO_CHANNEL,
+                MarketBroadcaster.CRYPTO_CHANNEL,
                 MarketBroadcaster.FUTURES_CHANNEL, MarketBroadcaster.PREDICTION_CHANNEL,
                 MarketBroadcaster.KLINE_CHANNEL,
                 MarketBroadcaster.STREAM_HEALTH_CHANNEL, MarketBroadcaster.MONITOR_CHANNEL}) {

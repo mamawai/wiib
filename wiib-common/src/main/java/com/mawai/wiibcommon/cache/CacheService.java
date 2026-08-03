@@ -233,28 +233,6 @@ public class CacheService {
         );
     }
 
-    // ==================== Hash操作 ====================
-
-    public void hSet(String key, String field, String value) {
-        stringRedisTemplate.opsForHash().put(key, field, value);
-    }
-
-    public String hGet(String key, String field) {
-        Object value = stringRedisTemplate.opsForHash().get(key, field);
-        return value != null ? value.toString() : null;
-    }
-
-    public Map<String, String> hGetAll(String key) {
-        Map<Object, Object> raw = stringRedisTemplate.opsForHash().entries(key);
-        Map<String, String> result = new HashMap<>();
-        raw.forEach((k, v) -> result.put(k.toString(), v.toString()));
-        return result;
-    }
-
-    public void hSetAll(String key, Map<String, String> hash) {
-        stringRedisTemplate.opsForHash().putAll(key, hash);
-    }
-
     // ==================== 对象序列化（使用RedisTemplate） ====================
 
     public void setObject(String key, Object obj, Duration ttl) {
@@ -269,22 +247,6 @@ public class CacheService {
     @SuppressWarnings("unchecked")
     public <T> List<T> getList(String key) {
         return (List<T>) redisTemplate.opsForValue().get(key);
-    }
-
-    // ==================== Set操作 ====================
-
-    /**
-     * 添加元素到Set
-     */
-    public void sAdd(String key, String... values) {
-        stringRedisTemplate.opsForSet().add(key, values);
-    }
-
-    /**
-     * 获取Set的所有成员
-     */
-    public Set<String> sMembers(String key) {
-        return stringRedisTemplate.opsForSet().members(key);
     }
 
     // ==================== ZSet操作 ====================
