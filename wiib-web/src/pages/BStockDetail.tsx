@@ -164,6 +164,7 @@ function BStockDetail({ symbol }: { symbol: string }) {
                 interval={CHART_TABS[chartTab].interval}
                 klinesFn={bstockApi.klines}
                 streamLive={false}
+                onIntervalChange={iv => setChartTab(CHART_TABS.findIndex(t => t.interval === iv))}
                 tick={tick?.price != null && tick?.ts != null ? { price: tick.price, ts: tick.ts } : null}
               />
             </div>
