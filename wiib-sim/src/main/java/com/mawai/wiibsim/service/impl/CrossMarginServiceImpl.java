@@ -44,6 +44,7 @@ public class CrossMarginServiceImpl implements CrossMarginService {
     private final FuturesPositionIndexService positionIndexService;
     private final BankruptcyService bankruptcyService;
     private final StringRedisTemplate redis;
+    private final CrossBandRegistry bandRegistry;
 
     @PostConstruct
     void init() {
@@ -63,6 +64,11 @@ public class CrossMarginServiceImpl implements CrossMarginService {
 
     @Override
     public CrossAccount snapshot(Long userId) {
+        return snapshot(userId, null, null);
+    }
+
+    @Override
+    public CrossAccount snapshot(Long userId, String pinSymbol, BigDecimal pinPrice) {
         // 三查合一（余额/持仓/挂单占用）：tick 巡检每用户每秒打一次 snapshot，
         // 拿池次数 3→1 是压测定的主优化（见 selectCrossSnapshot 注释）
         List<CrossSnapshotRow> rows = positionMapper.selectCrossSnapshot(userId);
@@ -72,10 +78,14 @@ public class CrossMarginServiceImpl implements CrossMarginService {
         BigDecimal usedMargin = BigDecimal.ZERO;
         BigDecimal mm = BigDecimal.ZERO;
         List<FuturesPosition> positions = new ArrayList<>();
+        // 每 symbol 只解析一次并记入 refPrices：安全带必须锚在快照实际所用价上，
+        // 同 symbol 多仓（多空对冲）估值也因此严格同价。钉价 symbol 用 pinPrice（插针语义）
+        Map<String, BigDecimal> refPrices = new HashMap<>();
         for (CrossSnapshotRow row : rows) {
             if (row.getPositionId() == null) continue; // LEFT JOIN 空行：有账号无全仓持仓
             FuturesPosition pos = toPosition(userId, row);
-            BigDecimal price = resolvePrice(pos);
+            BigDecimal price = refPrices.computeIfAbsent(pos.getSymbol(),
+                    s -> s.equals(pinSymbol) ? pinPrice : resolvePrice(pos));
             upnl = upnl.add(calculatePnl(pos.getSide(), pos.getEntryPrice(), price, pos.getQuantity()));
             usedMargin = usedMargin.add(pos.getMargin());
             mm = mm.add(bracketRegistry.calcMaintenanceMargin(pos.getSymbol(), price.multiply(pos.getQuantity())));
@@ -83,7 +93,7 @@ public class CrossMarginServiceImpl implements CrossMarginService {
         }
 
         CrossSnapshotRow head = rows.getFirst();
-        return new CrossAccount(head.getBalance(), upnl, usedMargin, head.getPendingReserved(), mm, positions);
+        return new CrossAccount(head.getBalance(), upnl, usedMargin, head.getPendingReserved(), mm, positions, refPrices);
     }
 
     /** 快照行还原为仓位对象。不含 SL/TP（快照消费方不读，见 CrossSnapshotRow 注释） */
@@ -162,6 +172,9 @@ public class CrossMarginServiceImpl implements CrossMarginService {
 
     @Override
     public void refreshUserIndex(Long userId) {
+        // 全仓状态变动（开平仓/成交/SL·TP/强平/资金费/调杠杆）的汇合点：
+        // 先作废安全带（事务内自动补提交后第二跳，竞态闭合见 bump 注释），再刷 Redis 索引
+        bandRegistry.bump(userId);
         Set<String> newSyms = positionMapper.selectList(new LambdaQueryWrapper<FuturesPosition>()
                         .eq(FuturesPosition::getUserId, userId)
                         .eq(FuturesPosition::getStatus, "OPEN")

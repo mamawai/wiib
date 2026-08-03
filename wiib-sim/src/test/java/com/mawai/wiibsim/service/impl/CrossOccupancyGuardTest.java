@@ -74,7 +74,7 @@ class CrossOccupancyGuardTest {
 
         crossMargin = new CrossMarginServiceImpl(userMapper, positionMapper, cacheService,
                 bracketRegistry, mock(FuturesPositionIndexService.class), mock(BankruptcyService.class),
-                mock(StringRedisTemplate.class));
+                mock(StringRedisTemplate.class), new CrossBandRegistry());
     }
 
     /** 20x 全仓快照行：钱包 1000，qty 20 @100 → 名义额 2000，占用 2000/20 = 100 */

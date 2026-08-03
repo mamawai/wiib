@@ -86,8 +86,10 @@ public class MatchPriceConsumer implements MessageListener {
                                        BigDecimal futLow, BigDecimal futHigh) {
         futuresLiquidationService.checkOnPriceUpdate(symbol, markLow, futLow);
         futuresLiquidationService.checkOnPriceUpdate(symbol, markHigh, futHigh);
-        // 全仓按当下账户状态巡检即可，无需区间补偿（轮询制没有"错过穿越"问题）
-        crossLiquidationService.onPriceTick(symbol);
+        // 全仓补两端：空窗里的插针藏在区间高低点（equity 对单 symbol 价格线性 → 端点即最坏情形），
+        // 低端抓多头重的账户、高端抓空头重的，钉价语义与实时 tick 一致
+        crossLiquidationService.onPriceTick(symbol, markLow);
+        crossLiquidationService.onPriceTick(symbol, markHigh);
     }
 
     @Override
@@ -110,7 +112,7 @@ public class MatchPriceConsumer implements MessageListener {
                     BigDecimal mp = new BigDecimal(obj.getString("price"));
                     String cp = redisTemplate.opsForValue().get(FUTURES_PRICE_KEY_PREFIX + symbol);
                     futuresLiquidationService.checkOnPriceUpdate(symbol, mp, cp != null ? new BigDecimal(cp) : mp);
-                    crossLiquidationService.onPriceTick(symbol);
+                    crossLiquidationService.onPriceTick(symbol, mp);
                 }
                 case "spot-recover" -> cryptoOrderService.recoverLimitOrders(symbol,
                         new BigDecimal(obj.getString("low")), new BigDecimal(obj.getString("high")));
