@@ -163,5 +163,5 @@ COMMENT ON COLUMN campaign_carryover.cnt  IS '达成次数，UPSERT 累加';
 -- 时间按需改；code 一旦发放过就绝不能改（out_trade_no 靠它重算，改了幂等就断了）
 INSERT INTO campaign (code, name, start_at, end_at, prize_pool, status)
 VALUES ('FIVEDIM_202608', '五维交易赛',
-        '2026-08-03 00:00:00', '2026-08-17 00:00:00', 500, 'RUNNING')
+        '2026-08-04 17:30:00', '2026-08-18 17:30:00', 500, 'RUNNING')
 ON CONFLICT (code) DO NOTHING;
