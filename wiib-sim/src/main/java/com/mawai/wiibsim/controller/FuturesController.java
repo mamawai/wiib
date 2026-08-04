@@ -152,7 +152,7 @@ public class FuturesController {
             @RequestParam(defaultValue = "1") int pageNum,
             @RequestParam(defaultValue = "20") int pageSize) {
         int safePageNum = Math.max(pageNum, 1);
-        int safePageSize = Math.min(Math.max(pageSize, 1), 100);
+        int safePageSize = Math.clamp(pageSize, 1, 100);
         return Result.ok(forceOrderService.getPage(symbol, safePageNum, safePageSize));
     }
 

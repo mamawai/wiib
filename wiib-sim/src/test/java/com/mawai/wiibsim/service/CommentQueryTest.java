@@ -20,7 +20,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyInt;
-import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
@@ -69,7 +69,7 @@ class CommentQueryTest {
     @Test
     void guestVotedAllFalseWithoutTouchingRedis() {
         when(commentMapper.selectRootPage(anyInt(), anyInt())).thenReturn(List.of(dto(1L, null)));
-        when(commentMapper.selectChildPreviews(anyList(), anyInt()))
+        when(commentMapper.selectChildPreviews(any(), anyInt()))
                 .thenReturn(List.of(dto(11L, 1L)));
 
         List<CommentDTO> roots = service.listRoots(null, 1, 20);
@@ -83,7 +83,7 @@ class CommentQueryTest {
     @Test
     void loggedInVotedReadsRedisPerComment() {
         when(commentMapper.selectRootPage(anyInt(), anyInt())).thenReturn(List.of(dto(1L, null)));
-        when(commentMapper.selectChildPreviews(anyList(), anyInt())).thenReturn(List.of());
+        when(commentMapper.selectChildPreviews(any(), anyInt())).thenReturn(List.of());
         when(setOps.isMember("comment:voted:1", "7")).thenReturn(true);
 
         List<CommentDTO> roots = service.listRoots(ME, 1, 20);
@@ -95,7 +95,7 @@ class CommentQueryTest {
     void childPreviewsAttachToOwningRoot() {
         when(commentMapper.selectRootPage(anyInt(), anyInt()))
                 .thenReturn(List.of(dto(1L, null), dto(2L, null)));
-        when(commentMapper.selectChildPreviews(anyList(), anyInt()))
+        when(commentMapper.selectChildPreviews(any(), anyInt()))
                 .thenReturn(List.of(dto(11L, 1L), dto(12L, 1L), dto(21L, 2L)));
 
         List<CommentDTO> roots = service.listRoots(null, 1, 20);
@@ -109,7 +109,7 @@ class CommentQueryTest {
     @Test
     void rootWithoutChildrenGetsEmptyListNotNull() {
         when(commentMapper.selectRootPage(anyInt(), anyInt())).thenReturn(List.of(dto(1L, null)));
-        when(commentMapper.selectChildPreviews(anyList(), anyInt())).thenReturn(List.of());
+        when(commentMapper.selectChildPreviews(any(), anyInt())).thenReturn(List.of());
 
         List<CommentDTO> roots = service.listRoots(null, 1, 20);
 
@@ -122,7 +122,7 @@ class CommentQueryTest {
 
         assertTrue(service.listRoots(ME, 5, 20).isEmpty());
 
-        verify(commentMapper, never()).selectChildPreviews(anyList(), anyInt());
+        verify(commentMapper, never()).selectChildPreviews(any(), anyInt());
     }
 
     @Test
@@ -224,11 +224,12 @@ class CommentQueryTest {
         // 当页最后一条根评论静默丢掉预览。现在直接吃上一步查到的 ID
         when(commentMapper.selectRootPage(anyInt(), anyInt()))
                 .thenReturn(List.of(dto(1L, null), dto(2L, null)));
-        when(commentMapper.selectChildPreviews(anyList(), anyInt())).thenReturn(List.of());
+        when(commentMapper.selectChildPreviews(any(), anyInt())).thenReturn(List.of());
 
         service.listRoots(null, 1, 20);
 
-        verify(commentMapper).selectChildPreviews(List.of(1L, 2L), 2);
+        // Mockito 对数组参数按元素比较（Equality.areEqual），不是引用比较
+        verify(commentMapper).selectChildPreviews(new Long[]{1L, 2L}, 2);
     }
 
     @Test

@@ -183,7 +183,7 @@ public interface UserMapper extends BaseMapper<User> {
 
     /** 原子增加杠杆借款本金，返回变动后本金；null=用户不存在 */
     @Options(flushCache = Options.FlushCachePolicy.TRUE, useCache = false)
-    @Select("UPDATE \"user\" SET margin_loan_principal = COALESCE(margin_loan_principal, 0) + #{amount}, updated_at = NOW() " +
+    @Select("UPDATE \"user\" SET margin_loan_principal = margin_loan_principal + #{amount}, updated_at = NOW() " +
             "WHERE id = #{userId} RETURNING margin_loan_principal")
     BigDecimal atomicAddMarginLoanPrincipal(@Param("userId") Long userId, @Param("amount") BigDecimal amount);
 
@@ -199,7 +199,7 @@ public interface UserMapper extends BaseMapper<User> {
      * 本金条件放 WHERE：与新借款并发时本金已变正，此时不该抹掉新写入的起算点。
      */
     @Update("UPDATE \"user\" SET margin_interest_last_date = NULL, updated_at = NOW() " +
-            "WHERE id = #{userId} AND COALESCE(margin_loan_principal, 0) = 0")
+            "WHERE id = #{userId} AND margin_loan_principal = 0")
     int clearMarginInterestLastDate(@Param("userId") Long userId);
 
     /**
@@ -223,13 +223,13 @@ public interface UserMapper extends BaseMapper<User> {
      */
     @Options(flushCache = Options.FlushCachePolicy.TRUE, useCache = false)
     @Select("UPDATE \"user\" SET " +
-            "margin_interest_accrued = COALESCE(margin_interest_accrued, 0) - #{paidInterest}, " +
-            "margin_loan_principal = COALESCE(margin_loan_principal, 0) - #{paidPrincipal}, " +
+            "margin_interest_accrued = margin_interest_accrued - #{paidInterest}, " +
+            "margin_loan_principal = margin_loan_principal - #{paidPrincipal}, " +
             "balance = balance + #{creditedToBalance}, " +
             "updated_at = NOW() " +
             "WHERE id = #{userId} " +
-            "AND COALESCE(margin_interest_accrued, 0) >= #{paidInterest} " +
-            "AND COALESCE(margin_loan_principal, 0) >= #{paidPrincipal} " +
+            "AND margin_interest_accrued >= #{paidInterest} " +
+            "AND margin_loan_principal >= #{paidPrincipal} " +
             "RETURNING margin_interest_accrued, margin_loan_principal, balance")
     CashInflow atomicApplyCashInflow(@Param("userId") Long userId,
                                      @Param("paidInterest") BigDecimal paidInterest,
@@ -238,7 +238,7 @@ public interface UserMapper extends BaseMapper<User> {
 
     /** 原子计息：增加利息并更新计息日期，返回变动后应计利息；null=用户不存在或已破产（破产不计息） */
     @Options(flushCache = Options.FlushCachePolicy.TRUE, useCache = false)
-    @Select("UPDATE \"user\" SET margin_interest_accrued = COALESCE(margin_interest_accrued, 0) + #{interestDelta}, " +
+    @Select("UPDATE \"user\" SET margin_interest_accrued = margin_interest_accrued + #{interestDelta}, " +
             "margin_interest_last_date = #{today}, updated_at = NOW() " +
             "WHERE id = #{userId} AND is_bankrupt = FALSE " +
             "RETURNING margin_interest_accrued")
@@ -249,7 +249,7 @@ public interface UserMapper extends BaseMapper<User> {
     /** 标记爆仓并清空资金相关状态 */
     @Update("UPDATE \"user\" SET " +
             "is_bankrupt = TRUE, " +
-            "bankrupt_count = COALESCE(bankrupt_count, 0) + 1, " +
+            "bankrupt_count = bankrupt_count + 1, " +
             "bankrupt_at = NOW(), " +
             "bankrupt_reset_date = #{resetDate}, " +
             "balance = 0, " +

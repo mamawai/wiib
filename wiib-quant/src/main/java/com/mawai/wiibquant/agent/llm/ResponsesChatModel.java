@@ -55,7 +55,8 @@ import java.util.Map;
 @Slf4j
 public class ResponsesChatModel implements ChatModel {
 
-    private static final Duration CALL_TIMEOUT = Duration.ofMinutes(10);
+    /** 阻塞调用超时；openai 协议路径（AiAgentRuntimeManager）引用同一常量对齐——思考模型长回答，官方默认 60s 不够 */
+    public static final Duration CALL_TIMEOUT = Duration.ofMinutes(10);
     /** SSE 相邻事件最大间隔：防半开连接把消费方永久挂死（behavior 的 blockLast 会占死信号量）。
      *  取 5 分钟是给 high 档长思考的静默期留余量——多数服务端思考期间也会发 reasoning 事件/keepalive 注释行，都算心跳 */
     private static final Duration STREAM_IDLE_TIMEOUT = Duration.ofMinutes(5);
@@ -92,8 +93,8 @@ public class ResponsesChatModel implements ChatModel {
      * ResilientChatService 构造时 instanceof 恒假 → 专家/汇总的工具全程挂不上（真跑实证过）。
      */
     @Override
-    public ChatOptions getOptions() {
-        ToolCallingChatOptions.Builder builder = ToolCallingChatOptions.builder().model(model);
+    public @NonNull ChatOptions getOptions() {
+        ToolCallingChatOptions.Builder<?> builder = ToolCallingChatOptions.builder().model(model);
         if (temperature != null) {
             builder.temperature(temperature);
         }
@@ -103,7 +104,7 @@ public class ResponsesChatModel implements ChatModel {
     // ========== 阻塞调用 ==========
 
     @Override
-    public @NonNull ChatResponse call(Prompt prompt) {
+    public @NonNull ChatResponse call(@NonNull Prompt prompt) {
         // 只负责"说"：带 toolCalls 的 AssistantMessage 原样返回，工具由图的 ExecuteToolsAction 执行。
         // Spring AI 2.0 起 ChatModel 层不再做内部工具执行（internalToolExecutionEnabled 已移除）
         return callWithRetry(prompt);
@@ -158,7 +159,7 @@ public class ResponsesChatModel implements ChatModel {
     // ========== 流式调用 ==========
 
     @Override
-    public @NonNull Flux<ChatResponse> stream(Prompt prompt) {
+    public @NonNull Flux<ChatResponse> stream(@NonNull Prompt prompt) {
         // 纯透传，帧到即发——工具执行归图，本层不攒帧，工作台 token 实时性不受影响
         return streamOnce(prompt);
     }
@@ -184,7 +185,7 @@ public class ResponsesChatModel implements ChatModel {
                 .bodyToFlux(new ParameterizedTypeReference<ServerSentEvent<String>>() {
                 })
                 .timeout(STREAM_IDLE_TIMEOUT)
-                .onErrorMap(java.util.concurrent.TimeoutException.class, e ->
+                .onErrorMap(java.util.concurrent.TimeoutException.class, _ ->
                         new TransientAiException("Responses SSE 空闲超过 " + STREAM_IDLE_TIMEOUT.toMinutes() + " 分钟，判定连接挂死"))
                 .concatMap(sse -> toFrames(sse, state));
         });

@@ -5,8 +5,6 @@ import com.alibaba.fastjson2.JSONArray;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.spring.service.impl.ServiceImpl;
 import com.mawai.wiibcommon.entity.KlineHistory;
-import com.mawai.wiibcommon.market.KlineBar;
-import com.mawai.wiibcommon.market.BinanceRestClient;
 import com.mawai.wiibcommon.mapper.KlineHistoryMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;

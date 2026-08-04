@@ -1,8 +1,8 @@
 package com.mawai.wiibcommon.constant;
 
 /**
- * AI 功能位名（ai_model_assignment.function_name 的契约值）。
- * sim/quant 两进程共用此常量避免魔法字符串漂移；前端 Admin.tsx 的 FUNCTION_LABELS 需与此同步。
+ * AI 功能位名（ai_model_assignment.function_name 的契约值），现只有 quant 进程使用。
+ * 前端 Admin.tsx 的 FUNCTION_LABELS 需与此同步。
  */
 public final class AiFunctions {
 
@@ -14,8 +14,6 @@ public final class AiFunctions {
     public static final String QUANT_LIGHT = "quant-light";
     /** quant：对话 ModelFallback 兜底 */
     public static final String CHAT = "chat";
-    /** sim：每日行情参数/虚构新闻生成（sim 进程自读 DB） */
-    public static final String SIM = "sim";
 
     private AiFunctions() {
     }

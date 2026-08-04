@@ -5,8 +5,8 @@ import com.mawai.wiibcommon.constant.QuantConstants;
 import com.mawai.wiibcommon.enums.ErrorCode;
 import com.mawai.wiibcommon.exception.BizException;
 
+import org.jspecify.annotations.NonNull;
 import org.springframework.core.MethodParameter;
-import org.springframework.lang.NonNull;
 import org.springframework.web.bind.support.WebDataBinderFactory;
 import org.springframework.web.context.request.NativeWebRequest;
 import org.springframework.web.method.support.HandlerMethodArgumentResolver;
@@ -22,14 +22,13 @@ public class SymbolArgumentResolver implements HandlerMethodArgumentResolver {
     private static final String DEFAULT_SYMBOL = "BTCUSDT";
 
     @Override
-    public boolean supportsParameter(@NonNull MethodParameter parameter) {
+    public boolean supportsParameter(MethodParameter parameter) {
         return parameter.hasParameterAnnotation(Symbol.class)
                 && parameter.getParameterType() == String.class;
     }
 
     @Override
-    public Object resolveArgument(@NonNull MethodParameter parameter, ModelAndViewContainer mavContainer,
-                                  @NonNull NativeWebRequest webRequest, WebDataBinderFactory binderFactory) {
+    public Object resolveArgument(@NonNull MethodParameter parameter, ModelAndViewContainer mavContainer, NativeWebRequest webRequest, WebDataBinderFactory binderFactory) {
         String raw = webRequest.getParameter(PARAM_NAME);
         if (raw == null || raw.isBlank()) {
             raw = DEFAULT_SYMBOL;

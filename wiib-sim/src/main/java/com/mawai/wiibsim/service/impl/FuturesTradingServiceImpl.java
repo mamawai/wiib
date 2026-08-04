@@ -836,7 +836,7 @@ public class FuturesTradingServiceImpl implements FuturesTradingService {
 
     private Map<Long, BigDecimal> sumRealizedByPosition(List<FuturesPosition> positions) {
         if (positions.isEmpty()) return Map.of();
-        List<Long> ids = positions.stream().map(FuturesPosition::getId).toList();
+        Long[] ids = positions.stream().map(FuturesPosition::getId).toArray(Long[]::new);
         Map<Long, BigDecimal> map = new HashMap<>();
         for (Map<String, Object> row : orderMapper.sumRealizedPnlByPositionIds(ids)) {
             map.put(((Number) row.get("position_id")).longValue(), (BigDecimal) row.get("amount"));

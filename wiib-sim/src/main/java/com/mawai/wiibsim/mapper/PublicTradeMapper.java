@@ -20,21 +20,8 @@ import java.util.List;
 @Mapper
 public interface PublicTradeMapper {
 
-    /**
-     * 两张订单表的公共列。抽出来是因为下面查数据和查总数要用同一份，
-     * 两处各写一遍迟早对不上（一边加了筛选另一边忘了，翻页页数就是错的）。
-     */
-    String UNION_SQL = """
-            SELECT 'SPOT' AS kind, o.id AS trade_id, o.user_id, u.username,
-                   o.symbol, o.order_side, o.quantity, o.filled_price, o.filled_amount, o.created_at
-            FROM crypto_order o JOIN "user" u ON u.id = o.user_id
-            WHERE o.status = 'FILLED'
-            UNION ALL
-            SELECT 'FUTURES', o.id, o.user_id, u.username,
-                   o.symbol, o.order_side, o.quantity, o.filled_price, o.filled_amount, o.created_at
-            FROM futures_order o JOIN "user" u ON u.id = o.user_id
-            WHERE o.status = 'FILLED'
-            """;
+    // 三条时间线查询的 SQL 在 resources/mapper/PublicTradeMapper.xml：
+    // 动态筛选（symbol/kind）用 <if> 拼接，公共 UNION 片段用 <sql>+<include> 单源复用——
 
     /**
      * 分页取一页。
@@ -43,36 +30,12 @@ public interface PublicTradeMapper {
      * 只按 created_at 排，两页之间的相对顺序由 PG 随便定，翻页会重复或漏行。
      * trade_id 单独也不够——两张表的 id 各自从 1 开始，必然撞号，得加 kind 才唯一。
      */
-    @Select("""
-            <script>
-            SELECT * FROM (
-            """ + UNION_SQL + """
-            ) t
-            <where>
-              <if test="symbol != null"> AND t.symbol = #{symbol} </if>
-              <if test="kind != null"> AND t.kind = #{kind} </if>
-            </where>
-            ORDER BY t.created_at DESC, t.kind ASC, t.trade_id DESC
-            LIMIT #{limit} OFFSET #{offset}
-            </script>
-            """)
     List<PublicTradeRow> selectPage(@Param("symbol") String symbol,
                                     @Param("kind") String kind,
                                     @Param("limit") int limit,
                                     @Param("offset") int offset);
 
     /** 总条数，给前端算总页数。筛选条件必须与 selectPage 保持一致 */
-    @Select("""
-            <script>
-            SELECT COUNT(*) FROM (
-            """ + UNION_SQL + """
-            ) t
-            <where>
-              <if test="symbol != null"> AND t.symbol = #{symbol} </if>
-              <if test="kind != null"> AND t.kind = #{kind} </if>
-            </where>
-            </script>
-            """)
     long countAll(@Param("symbol") String symbol, @Param("kind") String kind);
 
     /**
@@ -80,16 +43,6 @@ public interface PublicTradeMapper {
      * <p>
      * 这条<b>不是</b>给全站匿名页用的：它按人筛，调用方必须先过隐私开关门控。
      */
-    @Select("""
-            <script>
-            SELECT * FROM (
-            """ + UNION_SQL + """
-            ) t
-            WHERE t.user_id = #{userId}
-            ORDER BY t.created_at DESC, t.kind ASC, t.trade_id DESC
-            LIMIT #{limit} OFFSET #{offset}
-            </script>
-            """)
     List<PublicTradeRow> selectPageByUser(@Param("userId") Long userId,
                                           @Param("limit") int limit,
                                           @Param("offset") int offset);

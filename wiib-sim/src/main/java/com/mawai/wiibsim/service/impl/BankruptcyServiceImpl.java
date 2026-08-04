@@ -10,7 +10,6 @@ import com.mawai.wiibcommon.enums.LedgerBizType;
 import com.mawai.wiibcommon.enums.LedgerWallet;
 import com.mawai.wiibcommon.exception.BizException;
 import com.mawai.wiibcommon.util.SpringUtils;
-import com.mawai.wiibcommon.util.TradingDayUtil;
 import com.mawai.wiibsim.config.TradingConfig;
 import com.mawai.wiibsim.mapper.CryptoOrderMapper;
 import com.mawai.wiibsim.mapper.CryptoPositionMapper;
@@ -153,7 +152,8 @@ public class BankruptcyServiceImpl implements BankruptcyService {
 
     @Transactional(rollbackFor = Exception.class)
     protected void liquidateUser(Long userId, LocalDate today) {
-        LocalDate resetDate = TradingDayUtil.nextTradingDay(today);
+        // 7×24 连续交易无休市日，破产次日即恢复
+        LocalDate resetDate = today.plusDays(1);
 
         // markBankrupt 是整体覆写型 SQL（五个钱包全置 0），拿不到旧值，而算 delta 非知道旧值不可。
         // 所以先加行锁读快照：并发的资金 UPDATE 会在这把锁上排队，读到的就是这次清零真正抹掉的金额。

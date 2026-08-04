@@ -19,8 +19,9 @@ public final class QuantConstants {
     public static String normalizeSymbol(String symbol) {
         if (symbol == null || symbol.isBlank()) return "BTCUSDT";
         symbol = symbol.trim().toUpperCase();
-        if (symbol.endsWith("USDT")) symbol = symbol.substring(0, symbol.length() - 4);
-        else if (symbol.endsWith("USDC")) symbol = symbol.substring(0, symbol.length() - 4);
+        String substring = symbol.substring(0, symbol.length() - 4);
+        if (symbol.endsWith("USDT")) symbol = substring;
+        else if (symbol.endsWith("USDC")) symbol = substring;
         if (symbol.isBlank()) return "BTCUSDT";
         String normalized = symbol + "USDT";
         if (!ALLOWED_SYMBOLS.contains(normalized)) {

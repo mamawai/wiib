@@ -53,7 +53,7 @@ public class CrossBandRegistry {
 
     private record Band(long epoch, Map<String, double[]> ranges) {}
 
-    /** userId → 纪元。只增不删，防迟到旧带撞回历史纪元复活（条目仅一个 Long，量级无虞） */
+    /** userId → 纪元。只增不删，防迟到旧带撞回历史纪元复活（条目仅一个 Long） */
     private final ConcurrentHashMap<Long, Long> epochs = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<Long, Band> bands = new ConcurrentHashMap<>();
 

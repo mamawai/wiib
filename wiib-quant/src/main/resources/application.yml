@@ -55,7 +55,8 @@ spring:
       timeout: 10000
 
 mybatis-plus:
-  mapper-locations: classpath:/mapper/**/*.xml
+  # classpath*: 才会扫依赖 jar——KlineHistoryMapper.xml 在 wiib-common 的 jar 里，不带 * 扫不到
+  mapper-locations: classpath*:/mapper/**/*.xml
 
 management:
   endpoints:

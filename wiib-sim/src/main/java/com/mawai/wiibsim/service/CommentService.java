@@ -279,7 +279,7 @@ public class CommentService {
         // 复算一遍窗口，但两次查询之间只要有人发了新根评论，窗口就整体挪一格——
         // 当页最后一条根评论会拿不到预览，显示"查看全部N条"却一条都展不开
         Map<Long, List<CommentDTO>> previewsByRoot = commentMapper
-                .selectChildPreviews(roots.stream().map(CommentDTO::getId).toList(), PREVIEW_SIZE)
+                .selectChildPreviews(roots.stream().map(CommentDTO::getId).toArray(Long[]::new), PREVIEW_SIZE)
                 .stream()
                 .collect(Collectors.groupingBy(CommentDTO::getRootId));
         for (CommentDTO root : roots) {

@@ -30,8 +30,10 @@ public class PositionHistoryService {
 
     /** symbol 传 null 即不筛币种 */
     public IPage<PositionHistoryDTO> page(Long userId, String symbol, int pageNum, int pageSize) {
+        // 空串归一成 null：SQL 侧只认 null 为"不筛"（原 <if> 里 symbol != '' 的语义挪到这）
+        String symbolFilter = (symbol == null || symbol.isEmpty()) ? null : symbol;
         Page<PositionHistoryDTO> page = new Page<>(Math.max(pageNum, 1), Math.clamp(pageSize, 1, MAX_PAGE_SIZE));
-        futuresPositionMapper.selectPositionHistory(page, userId, symbol);
+        futuresPositionMapper.selectPositionHistory(page, userId, symbolFilter);
         attachFills(page.getRecords());
         return page;
     }
@@ -44,7 +46,7 @@ public class PositionHistoryService {
      */
     private void attachFills(List<PositionHistoryDTO> rows) {
         if (rows.isEmpty()) return;
-        List<Long> ids = rows.stream().map(PositionHistoryDTO::getId).toList();
+        Long[] ids = rows.stream().map(PositionHistoryDTO::getId).toArray(Long[]::new);
         Map<Long, List<PositionFillDTO>> byPosition = futuresPositionMapper.selectFillsByPositionIds(ids)
                 .stream()
                 .collect(Collectors.groupingBy(PositionFillDTO::getPositionId));

@@ -199,7 +199,7 @@ public class RankingService {
      */
     public Page<RankingDTO> getRankingPage(String sort, int pageNum, int pageSize) {
         int safeNum = Math.max(pageNum, 1);
-        int safeSize = Math.min(Math.max(pageSize, 1), MAX_PAGE_SIZE);
+        int safeSize = Math.clamp(pageSize, 1, MAX_PAGE_SIZE);
         RankingSort dimension = RankingSort.of(sort);
 
         List<RankingDTO> all = getRanking();

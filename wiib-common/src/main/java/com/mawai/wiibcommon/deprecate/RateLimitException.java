@@ -12,7 +12,4 @@ public class RateLimitException extends BizException {
         super(ErrorCode.RATE_LIMIT_EXCEEDED.getCode(), message);
     }
 
-    public RateLimitException() {
-        super(ErrorCode.RATE_LIMIT_EXCEEDED);
-    }
 }

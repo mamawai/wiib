@@ -2,7 +2,6 @@ package com.mawai.wiibsim.controller;
 
 import com.mawai.wiibcommon.annotation.CurrentUserId;
 import com.mawai.wiibcommon.dto.WalletTransferRequest;
-import com.mawai.wiibcommon.entity.FuturesPosition;
 import com.mawai.wiibcommon.entity.User;
 import com.mawai.wiibcommon.enums.ErrorCode;
 import com.mawai.wiibcommon.exception.BizException;
@@ -81,7 +80,7 @@ public class WalletController {
                 account.pendingReserved(), account.maintenanceMargin(), account.positions(),
                 account.refPrices());
         List<Map<String, Object>> positions = account.positions().stream()
-                .<Map<String, Object>>map(pos -> Map.of(
+                .map(pos -> Map.of(
                         "positionId", (Object) pos.getId(),
                         "symbol", pos.getSymbol(),
                         "side", pos.getSide(),

@@ -42,11 +42,11 @@ import java.util.stream.Collectors;
 @Component
 public class AiAgentRuntimeManager {
 
-    // P2a 删 reflection（方向反思链）；P4 增 quant-light（对话子 agent 浅模型，深浅分层省成本）
-    // 管理口径（种子/Admin白名单/配置删除保护）：前4个是本进程运行时功能位（refresh()按名建模型），
-    // sim 是 wiib-sim 进程的功能位——它每次调用自读 DB，不在本进程建模型，只借 quant 统一种子和管理
+    // P2a 删 reflection（方向反思链）；P4 增 quant-light（对话子 agent 浅模型，深浅分层省成本）；
+    // sim 随 wiib-sim 的 AiService 死代码删除（老股/期权行情生成遗留），DB 孤儿行无害且前端已过滤
+    // 管理口径（种子/Admin白名单/配置删除保护）：全部是本进程运行时功能位，refresh()按名建模型
     private static final List<String> MANAGED_FUNCTIONS = List.of(
-            AiFunctions.BEHAVIOR, AiFunctions.QUANT, AiFunctions.QUANT_LIGHT, AiFunctions.CHAT, AiFunctions.SIM);
+            AiFunctions.BEHAVIOR, AiFunctions.QUANT, AiFunctions.QUANT_LIGHT, AiFunctions.CHAT);
 
     private final BehaviorAgentFactory behaviorAgentFactory;
     private final ApplicationEventPublisher eventPublisher;
@@ -101,7 +101,6 @@ public class AiAgentRuntimeManager {
                 if (configs.isEmpty()) {
                     runtimeRef.set(null);
                     log.warn("AI未配置：ai_runtime_config为空，AI功能暂不可用——在Admin页添加LLM配置后自动生效，无需重启");
-                    ok = true;
                 } else {
                     seedMissingAssignments(configs);
                     Map<Long, AiRuntimeConfig> configMap = configs.stream()
@@ -114,8 +113,8 @@ public class AiAgentRuntimeManager {
                             buildFromAssignment(assignments, AiFunctions.CHAT, configMap)
                     ));
                     log.info("AI运行时已刷新，共{}个LLM配置，{}个功能位分配", configMap.size(), assignments.size());
-                    ok = true;
                 }
+                ok = true;
             } catch (Exception e) {
                 log.error("AI运行时构建失败，沿用变更前模型运行", e);
                 ok = false;
@@ -203,11 +202,12 @@ public class AiAgentRuntimeManager {
         }
 
         // Spring AI 2.0 起底层换成官方 OpenAI SDK，连接参数经 OpenAiSetup 建 client（照抄官方
-        // OpenAiChatAutoConfiguration 的建法）。maxRetries=3 与 ResponsesChatModel 对齐：
-        // 阻塞路径的重试统一归模型层，ResilientChatService 只管兜底切换，避免两层叠乘放大尾延迟
+        // OpenAiChatAutoConfiguration 的建法）。timeout 非空是硬约束——SDK 是 Kotlin，传 null 运行时 NPE；
+        // 超时/maxRetries=3 都取 ResponsesChatModel 同值：阻塞路径的重试超时统一归模型层，
+        // ResilientChatService 只管兜底切换，避免两层叠乘放大尾延迟
         OpenAIClient openAiClient = OpenAiSetup.setupSyncClient(
                 config.getBaseUrl(), config.getApiKey(), null, null, null, null,
-                false, false, config.getModel(), null, 3, null, null,
+                false, false, config.getModel(), ResponsesChatModel.CALL_TIMEOUT, 3, null, null,
                 observationRegistry, null, List.of());
 
         OpenAiChatOptions.Builder options = OpenAiChatOptions.builder()

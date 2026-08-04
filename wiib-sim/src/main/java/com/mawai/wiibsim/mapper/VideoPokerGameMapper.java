@@ -11,7 +11,7 @@ import java.math.BigDecimal;
 @Mapper
 public interface VideoPokerGameMapper extends BaseMapper<VideoPokerGame> {
 
-    @Select("SELECT COALESCE(SUM(COALESCE(payout, 0) - bet_amount), 0) FROM video_poker_game WHERE user_id = #{userId} AND status = 'SETTLED'")
+    @Select("SELECT COALESCE(SUM(payout - bet_amount), 0) FROM video_poker_game WHERE user_id = #{userId} AND status = 'SETTLED'")
     BigDecimal sumNetProfit(@Param("userId") Long userId);
 
     @Select("SELECT COUNT(*) FROM video_poker_game WHERE user_id = #{userId} AND status = 'SETTLED'")

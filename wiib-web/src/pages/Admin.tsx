@@ -17,7 +17,6 @@ const FUNCTION_LABELS: Record<string, string> = {
   quant: '量化研判(深)',
   'quant-light': '对话专家(浅)',
   chat: '对话兜底',
-  sim: '模拟行情生成',
 };
 const MODEL_ASSIGNMENT_FUNCTIONS = new Set(Object.keys(FUNCTION_LABELS));
 

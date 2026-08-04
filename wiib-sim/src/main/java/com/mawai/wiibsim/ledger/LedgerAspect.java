@@ -82,7 +82,7 @@ public class LedgerAspect {
 
         if (type == null) {
             type = LedgerBizType.UNKNOWN;
-            remark = callerOf(point);
+            remark = callerOf();
             log.warn("[Ledger] 资金变动无语义标注 userId={} method={} caller={}", userId, method, remark);
         }
 
@@ -170,7 +170,7 @@ public class LedgerAspect {
     }
 
     /** 兜底记录调用来源，方便事后补语义 */
-    private static String callerOf(JoinPoint point) {
+    private static String callerOf() {
         return StackWalker.getInstance()
                 .walk(s -> s.map(StackWalker.StackFrame::getClassName)
                         .filter(c -> c.startsWith("com.mawai.wiibsim.service"))

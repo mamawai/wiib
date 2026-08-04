@@ -26,7 +26,7 @@ const GAMES = [
     path: '/videopoker',
     icon: Diamond,
     title: '视频扑克',
-    desc: "Joker's Wild，Joker牌百搭",
+    desc: '经典 Jacks or Better，凑J对保本',
     color: 'text-purple-400',
     bg: 'bg-purple-500/10 hover:bg-purple-500/20',
   },

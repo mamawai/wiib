@@ -26,6 +26,8 @@
         position: fixed; inset: 0; z-index: 9999;
         --c-bg: #f6f6f4; --c-fg: #17181a; --c-line: #e4e4df;
         --c-pri: #f97316; --c-cell: #ececea; --c-mut: #71737b;
+        /* 溶解延迟/呼吸相位的兜底：真值由下方 JS 逐格内联覆写 */
+        --d: 0s; --bd: 0s;
       }
       html.dark #splash {
         --c-bg: #0b0c0f; --c-fg: #eceef0; --c-line: #23262e;
@@ -131,7 +133,7 @@
           <path class="sp-p" style="--i:4" pathLength="100" d="M112 30 L140 30 L148 38 L148 45 L140 52 L112 52"/>
           <rect class="sp-dot" x="160" y="43" width="10" height="10"/>
         </svg>
-        <div class="sp-lbl">GRID ONLINE <b>·</b> <i class="sp-wide">全市场</i>数据接入</div>
+        <div class="sp-lbl">GRID ONLINE <b>·</b> 数据接入中</div>
       </div>
     </div>
     <script>

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.mawai.wiibsim.mapper.UserLedgerMapper">
+
+    <!-- 游标翻页：beforeId 是索引扫描边界，必须动态拼接（详见接口 javadoc） -->
+    <select id="selectByCursor" resultType="com.mawai.wiibcommon.entity.UserLedger">
+        SELECT * FROM user_ledger
+        WHERE user_id = #{userId}
+        <if test="bizType != null"> AND biz_type = #{bizType} </if>
+        <if test="beforeId != null"> AND id &lt; #{beforeId} </if>
+        ORDER BY id DESC
+        LIMIT #{limit}
+    </select>
+
+</mapper>

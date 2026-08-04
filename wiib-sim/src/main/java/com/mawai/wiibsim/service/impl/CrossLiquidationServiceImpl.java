@@ -46,8 +46,7 @@ public class CrossLiquidationServiceImpl implements CrossLiquidationService {
         double price = markPrice.doubleValue();
         for (String uid : crossMarginService.usersOnSymbol(symbol)) {
             long userId = Long.parseLong(uid);
-            // 带内 = 数学上保证爆不了（推导见 CrossBandRegistry），免检；无带/带作废/出带才精查。
-            // 取代原 900ms 时间去重：时间窗会吞掉窗口内的第二根插针，带只按价格裁决——插针越狠越必查
+            // 带内免检，无带/带作废/出带才精查，（推导见 CrossBandRegistry）。
             if (!bandRegistry.shouldCheck(userId, symbol, price)) continue;
             Thread.startVirtualThread(() -> checkUser(userId, symbol, markPrice));
         }

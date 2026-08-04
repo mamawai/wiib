@@ -1,6 +1,7 @@
 package com.mawai.wiibsim.controller;
 
 import com.alibaba.fastjson2.JSON;
+import com.alibaba.fastjson2.JSONObject;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.mawai.wiibcommon.config.BinanceProperties;
 import com.mawai.wiibcommon.dto.UserDTO;
@@ -36,6 +37,7 @@ import java.util.Map;
  * <p>quant 的 behavior/持仓建议等 AI agent 通过 HTTP 拿用户账本统计，不直连 sim 库表——
  * sim 改表结构 quant 不受影响。鉴权走 {@code InternalApiFilter} 的 X-Internal-Token，已在 SaToken 放行。
  * <p>每个端点逻辑 = 原 BehaviorAnalysisTools 对应 @Tool，返回同样的统计 JSON。
+ * <p>键名是与 quant 侧 BehaviorAnalysisReport 的反序列化契约，改名必须两端同步。
  */
 @RestController
 @RequestMapping("/internal/behavior")
@@ -60,29 +62,29 @@ public class BehaviorDataController {
     public String getUserProfile(@PathVariable Long userId) {
         User user = userMapper.selectById(userId);
         if (user == null) return "用户不存在";
-        return JSON.toJSONString(new Object() {
-            public final BigDecimal balance = user.getBalance();
-            public final BigDecimal frozenBalance = user.getFrozenBalance();
-            public final int bankruptCount = user.getBankruptCount();
-            public final boolean isBankrupt = user.getIsBankrupt();
-            public final Object bankruptAt = user.getBankruptAt();
-            public final Object createdAt = user.getCreatedAt();
-        });
+        return new JSONObject()
+                .fluentPut("balance", user.getBalance())
+                .fluentPut("frozenBalance", user.getFrozenBalance())
+                .fluentPut("bankruptCount", user.getBankruptCount())
+                .fluentPut("isBankrupt", user.getIsBankrupt())
+                .fluentPut("bankruptAt", user.getBankruptAt())
+                .fluentPut("createdAt", user.getCreatedAt())
+                .toJSONString();
     }
 
     @GetMapping("/{userId}/portfolio-summary")
     public String getPortfolioSummary(@PathVariable Long userId) {
         UserDTO dto = userService.getUserPortfolio(userId);
-        return JSON.toJSONString(new Object() {
-            public final BigDecimal totalAssets = dto.getTotalAssets();
-            public final BigDecimal balance = dto.getBalance();
-            public final BigDecimal frozenBalance = dto.getFrozenBalance();
-            public final BigDecimal positionMarketValue = dto.getPositionMarketValue();
-            public final BigDecimal marginLoanPrincipal = dto.getMarginLoanPrincipal();
-            public final BigDecimal marginInterestAccrued = dto.getMarginInterestAccrued();
-            public final BigDecimal profit = dto.getProfit();
-            public final BigDecimal profitPct = dto.getProfitPct();
-        });
+        return new JSONObject()
+                .fluentPut("totalAssets", dto.getTotalAssets())
+                .fluentPut("balance", dto.getBalance())
+                .fluentPut("frozenBalance", dto.getFrozenBalance())
+                .fluentPut("positionMarketValue", dto.getPositionMarketValue())
+                .fluentPut("marginLoanPrincipal", dto.getMarginLoanPrincipal())
+                .fluentPut("marginInterestAccrued", dto.getMarginInterestAccrued())
+                .fluentPut("profit", dto.getProfit())
+                .fluentPut("profitPct", dto.getProfitPct())
+                .toJSONString();
     }
 
     @GetMapping("/{userId}/asset-snapshots")
@@ -94,52 +96,40 @@ public class BehaviorDataController {
     @GetMapping("/{userId}/crypto-stats")
     public String getCryptoTradeStats(@PathVariable Long userId) {
         // bStock 共用现货引擎（同表同持仓服务），行为口径按 symbol 集拆开，与资产五分类对齐
-        BigDecimal buyTotal = cryptoOrderMapper.sumBuyFilledAmount(userId);
-        BigDecimal sellTotal = cryptoOrderMapper.sumSellFilledAmount(userId);
         long posCount = cryptoPositionService.getUserPositions(userId).stream()
                 .filter(p -> !bStockService.isBStockSymbol(p.getSymbol())).count();
         BigDecimal avgLev = cryptoOrderMapper.selectAvgLeverage(userId);
-        String levUsage = classifyLeverageUsage(avgLev);
-        return JSON.toJSONString(new Object() {
-            public final BigDecimal totalBuyAmount = buyTotal;
-            public final BigDecimal totalSellAmount = sellTotal;
-            public final int positionCount = (int) posCount;
-            public final BigDecimal avgLeverage = avgLev;
-            public final String leverageUsage = levUsage;
-        });
+        return new JSONObject()
+                .fluentPut("totalBuyAmount", cryptoOrderMapper.sumBuyFilledAmount(userId))
+                .fluentPut("totalSellAmount", cryptoOrderMapper.sumSellFilledAmount(userId))
+                .fluentPut("positionCount", posCount)
+                .fluentPut("avgLeverage", avgLev)
+                .fluentPut("leverageUsage", classifyLeverageUsage(avgLev))
+                .toJSONString();
     }
 
     @GetMapping("/{userId}/bstock-stats")
     public String getBstockTradeStats(@PathVariable Long userId) {
-        BigDecimal buyTotal = cryptoOrderMapper.sumBstockBuyFilledAmount(userId);
-        BigDecimal sellTotal = cryptoOrderMapper.sumBstockSellFilledAmount(userId);
         long posCount = cryptoPositionService.getUserPositions(userId).stream()
                 .filter(p -> bStockService.isBStockSymbol(p.getSymbol())).count();
-        return JSON.toJSONString(new Object() {
-            public final int positionCount = (int) posCount;
-            public final BigDecimal totalBuyAmount = buyTotal;
-            public final BigDecimal totalSellAmount = sellTotal;
-        });
+        return new JSONObject()
+                .fluentPut("positionCount", posCount)
+                .fluentPut("totalBuyAmount", cryptoOrderMapper.sumBstockBuyFilledAmount(userId))
+                .fluentPut("totalSellAmount", cryptoOrderMapper.sumBstockSellFilledAmount(userId))
+                .toJSONString();
     }
 
     @GetMapping("/{userId}/futures-stats")
     public String getFuturesTradeStats(@PathVariable Long userId) {
-        BigDecimal pnl = futuresOrderMapper.sumRealizedPnl(userId);
-        long count = futuresOrderMapper.countFilledOrders(userId);
-        String dir = futuresOrderMapper.selectDirectionPreference(userId);
-        BigDecimal lev = futuresOrderMapper.selectAvgLeverage(userId);
-        BigDecimal slRate = futuresPositionMapper.selectStopLossRate(userId);
-        int liqCount = futuresPositionMapper.countLiquidatedPositions(userId);
-        Map<String, Object> categories = futuresByCategory(userId);
-        return JSON.toJSONString(new Object() {
-            public final BigDecimal realizedPnl = pnl;
-            public final long orderCount = count;
-            public final String direction = dir;
-            public final BigDecimal avgLeverage = lev;
-            public final BigDecimal stopLossRate = slRate;
-            public final int liquidationCount = liqCount;
-            public final Map<String, Object> byCategory = categories;
-        });
+        return new JSONObject()
+                .fluentPut("realizedPnl", futuresOrderMapper.sumRealizedPnl(userId))
+                .fluentPut("orderCount", futuresOrderMapper.countFilledOrders(userId))
+                .fluentPut("direction", futuresOrderMapper.selectDirectionPreference(userId))
+                .fluentPut("avgLeverage", futuresOrderMapper.selectAvgLeverage(userId))
+                .fluentPut("stopLossRate", futuresPositionMapper.selectStopLossRate(userId))
+                .fluentPut("liquidationCount", futuresPositionMapper.countLiquidatedPositions(userId))
+                .fluentPut("byCategory", futuresByCategory(userId))
+                .toJSONString();
     }
 
     /**
@@ -176,16 +166,12 @@ public class BehaviorDataController {
 
     @GetMapping("/{userId}/prediction-stats")
     public String getPredictionStats(@PathVariable Long userId) {
-        BigDecimal profit = predictionBetMapper.sumRealizedProfit(userId);
-        int freq = predictionBetMapper.countSettledBets(userId);
-        BigDecimal rate = predictionBetMapper.selectWinRate(userId);
-        String dirPref = predictionBetMapper.selectDirectionPreference(userId);
-        return JSON.toJSONString(new Object() {
-            public final int frequency = freq;
-            public final BigDecimal netProfit = profit;
-            public final BigDecimal winRate = rate;
-            public final String directionPreference = dirPref;
-        });
+        return new JSONObject()
+                .fluentPut("frequency", predictionBetMapper.countSettledBets(userId))
+                .fluentPut("netProfit", predictionBetMapper.sumRealizedProfit(userId))
+                .fluentPut("winRate", predictionBetMapper.selectWinRate(userId))
+                .fluentPut("directionPreference", predictionBetMapper.selectDirectionPreference(userId))
+                .toJSONString();
     }
 
     @GetMapping("/{userId}/blackjack-stats")
@@ -195,33 +181,29 @@ public class BehaviorDataController {
         if (account == null) {
             return "{\"totalHands\":0,\"totalWon\":0,\"totalLost\":0,\"biggestWin\":0,\"todayConverted\":0}";
         }
-        return JSON.toJSONString(new Object() {
-            public final long totalHands = account.getTotalHands();
-            public final long totalWon = account.getTotalWon();
-            public final long totalLost = account.getTotalLost();
-            public final long biggestWin = account.getBiggestWin();
-            public final long todayConverted = account.getTodayConverted();
-        });
+        return new JSONObject()
+                .fluentPut("totalHands", account.getTotalHands())
+                .fluentPut("totalWon", account.getTotalWon())
+                .fluentPut("totalLost", account.getTotalLost())
+                .fluentPut("biggestWin", account.getBiggestWin())
+                .fluentPut("todayConverted", account.getTodayConverted())
+                .toJSONString();
     }
 
     @GetMapping("/{userId}/mines-stats")
     public String getMinesStats(@PathVariable Long userId) {
-        int freq = minesGameMapper.countFinishedGames(userId);
-        BigDecimal profit = minesGameMapper.sumNetProfit(userId);
-        return JSON.toJSONString(new Object() {
-            public final int frequency = freq;
-            public final BigDecimal netProfit = profit;
-        });
+        return new JSONObject()
+                .fluentPut("frequency", minesGameMapper.countFinishedGames(userId))
+                .fluentPut("netProfit", minesGameMapper.sumNetProfit(userId))
+                .toJSONString();
     }
 
     @GetMapping("/{userId}/videopoker-stats")
     public String getVideoPokerStats(@PathVariable Long userId) {
-        int freq = videoPokerGameMapper.countSettledGames(userId);
-        BigDecimal profit = videoPokerGameMapper.sumNetProfit(userId);
-        return JSON.toJSONString(new Object() {
-            public final int frequency = freq;
-            public final BigDecimal netProfit = profit;
-        });
+        return new JSONObject()
+                .fluentPut("frequency", videoPokerGameMapper.countSettledGames(userId))
+                .fluentPut("netProfit", videoPokerGameMapper.sumNetProfit(userId))
+                .toJSONString();
     }
 
     private String classifyLeverageUsage(BigDecimal avgLeverage) {

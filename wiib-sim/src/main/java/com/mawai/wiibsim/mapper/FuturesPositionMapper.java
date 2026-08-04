@@ -92,7 +92,7 @@ public interface FuturesPositionMapper extends BaseMapper<FuturesPosition> {
                          @Param("closedPnl") BigDecimal closedPnl);
 
     /** 排行榜交易盈利：资金费已从余额或保证金扣过，这里按仓位累计扣回 */
-    @Select("SELECT user_id, COALESCE(SUM(COALESCE(funding_fee_total, 0)), 0) AS amount " +
+    @Select("SELECT user_id, SUM(funding_fee_total) AS amount " +
             "FROM futures_position GROUP BY user_id")
     List<Map<String, Object>> sumFundingFeeTotalAll();
 
@@ -145,9 +145,12 @@ public interface FuturesPositionMapper extends BaseMapper<FuturesPosition> {
      * <p>
      * 已实现盈亏在 SQL 里就减完手续费和资金费，投资回报率同理——这是聚合的自然延伸，
      * 拆回 Java 再算一遍等于让 DTO 同时背着原料和成品两套字段。
+     * <p>
+     * 【symbol 可选过滤】(? IS NULL OR p.symbol = ?) 代替 &lt;if&gt; 拼接：访问路径是 user_id 索引，
+     * symbol 只是叠加的残余过滤（symbol 索引不带用户维度，对本查询永远不是优选），计划中性。
+     * null 才是"不筛"，空串由 PositionHistoryService 归一。
      */
     @Select("""
-            <script>
             SELECT p.id, p.symbol, p.side, p.margin_mode, p.leverage, p.status, p.memo,
                    p.entry_price, p.funding_fee_total,
                    p.created_at AS opened_at,
@@ -176,11 +179,8 @@ public interface FuturesPositionMapper extends BaseMapper<FuturesPosition> {
                 GROUP BY position_id
             ) o ON o.position_id = p.id
             WHERE p.user_id = #{userId} AND p.status IN ('CLOSED', 'LIQUIDATED')
-            <if test="symbol != null and symbol != ''">
-                AND p.symbol = #{symbol}
-            </if>
+              AND (#{symbol, jdbcType=VARCHAR} IS NULL OR p.symbol = #{symbol, jdbcType=VARCHAR})
             ORDER BY p.updated_at DESC, p.id DESC
-            </script>
             """)
     IPage<PositionHistoryDTO> selectPositionHistory(IPage<PositionHistoryDTO> page,
                                                     @Param("userId") Long userId,
@@ -193,18 +193,15 @@ public interface FuturesPositionMapper extends BaseMapper<FuturesPosition> {
      * 按下单时间排会让"先挂后成"的单插到前面去，分批平仓的顺序就乱了。
      */
     @Select("""
-            <script>
             SELECT position_id, id AS order_id, order_side, order_type, status,
                    quantity, filled_price AS price, filled_amount AS amount,
                    commission, realized_pnl, updated_at AS filled_at
             FROM futures_order
             WHERE status IN ('FILLED', 'STOP_LOSS', 'TAKE_PROFIT', 'LIQUIDATED')
-              AND position_id IN
-              <foreach collection="positionIds" item="id" open="(" separator="," close=")">#{id}</foreach>
+              AND position_id = ANY(#{positionIds, typeHandler=org.apache.ibatis.type.ArrayTypeHandler})
             ORDER BY updated_at, id
-            </script>
             """)
-    List<PositionFillDTO> selectFillsByPositionIds(@Param("positionIds") List<Long> positionIds);
+    List<PositionFillDTO> selectFillsByPositionIds(@Param("positionIds") Long[] positionIds);
 
     @Update("UPDATE futures_position SET status = #{status}, updated_at = NOW() " +
             "WHERE user_id = #{userId} AND status = 'OPEN'")
