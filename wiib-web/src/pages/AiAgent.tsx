@@ -199,6 +199,13 @@ export function AiAgent() {
                       <Metric label="方向" value={behaviorReport.tradeBehavior.futures.direction} />
                       <Metric label="平仓盈亏" {...(() => { const p = pnl(behaviorReport.tradeBehavior.futures.realizedPnl); return { value: p.text, tone: p.tone }; })()} />
                       <Metric label="平均杠杆" value={`${behaviorReport.tradeBehavior.futures.avgLeverage}x`} />
+                      {(['crypto', 'commodity', 'tradfi'] as const).map(cat => {
+                        const c = behaviorReport.tradeBehavior.futures.byCategory?.[cat];
+                        if (!c || c.orderCount <= 0) return null;
+                        const p = pnl(c.realizedPnl);
+                        const label = cat === 'crypto' ? '加密盈亏' : cat === 'commodity' ? '大宗盈亏' : '美股盈亏';
+                        return <Metric key={cat} label={label} value={p.text} tone={p.tone} />;
+                      })}
                     </CategoryBlock>
                   )}
                   {behaviorReport.tradeBehavior.prediction.frequency > 0 && (

@@ -2,6 +2,7 @@ package com.mawai.wiibsim.controller;
 
 import com.alibaba.fastjson2.JSON;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.mawai.wiibcommon.config.BinanceProperties;
 import com.mawai.wiibcommon.dto.UserDTO;
 import com.mawai.wiibcommon.entity.BlackjackAccount;
 import com.mawai.wiibcommon.entity.User;
@@ -26,7 +27,9 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 用户行为数据 internal API（sim 暴露给 quant 调用）。
@@ -51,6 +54,7 @@ public class BehaviorDataController {
     private final MinesGameMapper minesGameMapper;
     private final VideoPokerGameMapper videoPokerGameMapper;
     private final UserService userService;
+    private final BinanceProperties binanceProperties;
 
     @GetMapping("/{userId}/user-profile")
     public String getUserProfile(@PathVariable Long userId) {
@@ -126,6 +130,7 @@ public class BehaviorDataController {
         BigDecimal lev = futuresOrderMapper.selectAvgLeverage(userId);
         BigDecimal slRate = futuresPositionMapper.selectStopLossRate(userId);
         int liqCount = futuresPositionMapper.countLiquidatedPositions(userId);
+        Map<String, Object> categories = futuresByCategory(userId);
         return JSON.toJSONString(new Object() {
             public final BigDecimal realizedPnl = pnl;
             public final long orderCount = count;
@@ -133,7 +138,40 @@ public class BehaviorDataController {
             public final BigDecimal avgLeverage = lev;
             public final BigDecimal stopLossRate = slRate;
             public final int liquidationCount = liqCount;
+            public final Map<String, Object> byCategory = categories;
         });
+    }
+
+    /**
+     * 合约分品类拆解：与资产五分类同源的符号集归桶（crypto 永续 / 大宗金油 / TradFi 美股ETF永续）。
+     * 未知符号（已下架）归 crypto 默认桶不丢数据；三桶恒在，LLM/前端拿到的结构恒定。
+     */
+    private Map<String, Object> futuresByCategory(Long userId) {
+        Map<String, BigDecimal> pnlBy = new LinkedHashMap<>(
+                Map.of("crypto", BigDecimal.ZERO, "commodity", BigDecimal.ZERO, "tradfi", BigDecimal.ZERO));
+        Map<String, Long> cntBy = new LinkedHashMap<>(
+                Map.of("crypto", 0L, "commodity", 0L, "tradfi", 0L));
+        for (Map<String, Object> row : futuresOrderMapper.sumRealizedPnlBySymbol(userId)) {
+            String cat = futuresCategory((String) row.get("symbol"));
+            pnlBy.merge(cat, (BigDecimal) row.get("amount"), BigDecimal::add);
+        }
+        for (Map<String, Object> row : futuresOrderMapper.countFilledOrdersBySymbol(userId)) {
+            String cat = futuresCategory((String) row.get("symbol"));
+            cntBy.merge(cat, ((Number) row.get("cnt")).longValue(), Long::sum);
+        }
+        Map<String, Object> out = new LinkedHashMap<>();
+        for (String cat : List.of("crypto", "commodity", "tradfi")) {
+            out.put(cat, Map.of("realizedPnl", pnlBy.get(cat), "orderCount", cntBy.get(cat)));
+        }
+        return out;
+    }
+
+    private String futuresCategory(String symbol) {
+        List<String> commodity = binanceProperties.getCommoditySymbols();
+        List<String> tradfi = binanceProperties.getTradfiSymbols();
+        if (commodity != null && commodity.contains(symbol)) return "commodity";
+        if (tradfi != null && tradfi.contains(symbol)) return "tradfi";
+        return "crypto";
     }
 
     @GetMapping("/{userId}/prediction-stats")

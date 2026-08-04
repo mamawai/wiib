@@ -66,6 +66,22 @@ public class BehaviorAnalysisReport {
         private BigDecimal avgLeverage;
         private BigDecimal stopLossRate;
         private int liquidationCount;
+        /** 分品类拆解（与资产五分类同源符号集）；软字段不参与 isValid 硬校验 */
+        private FuturesCategoryBreakdown byCategory;
+    }
+
+    /** crypto=加密永续、commodity=金/油、tradfi=美股ETF永续 */
+    @Data
+    public static class FuturesCategoryBreakdown {
+        private FuturesCategoryStats crypto;
+        private FuturesCategoryStats commodity;
+        private FuturesCategoryStats tradfi;
+    }
+
+    @Data
+    public static class FuturesCategoryStats {
+        private BigDecimal realizedPnl;
+        private int orderCount;
     }
 
     @Data

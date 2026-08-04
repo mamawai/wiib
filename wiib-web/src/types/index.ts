@@ -527,7 +527,15 @@ export interface BehaviorAnalysisReport {
   tradeBehavior: {
     crypto: { positionCount: number; totalBuyAmount: number; totalSellAmount: number; leverageUsage: string };
     bstock: { positionCount: number; totalBuyAmount: number; totalSellAmount: number };
-    futures: { realizedPnl: number; orderCount: number; direction: string; avgLeverage: number; stopLossRate: number; liquidationCount: number };
+    futures: {
+      realizedPnl: number; orderCount: number; direction: string; avgLeverage: number;
+      stopLossRate: number; liquidationCount: number;
+      byCategory?: {
+        crypto: { realizedPnl: number; orderCount: number };
+        commodity: { realizedPnl: number; orderCount: number };
+        tradfi: { realizedPnl: number; orderCount: number };
+      };
+    };
     prediction: { frequency: number; netProfit: number; winRate: number; directionPreference: string };
   };
   gameBehavior: {
