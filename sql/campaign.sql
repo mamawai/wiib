@@ -156,7 +156,7 @@ CREATE TABLE IF NOT EXISTS campaign_carryover (
 );
 
 COMMENT ON TABLE  campaign_carryover      IS '重置账户前固化的活动积分达成次数（多次重置累加）';
-COMMENT ON COLUMN campaign_carryover.code IS '积分项：ROI25/ROI50/ROI100/GODLY/SPOT/PREDICTION/STOP_LOSS_HERO/PNL_PROFIT/PNL_LOSS/LIQ_TRIGGER/BUCKET_*（三市通吃的市场桶）/RESET_EXTRA（付费重置）';
+COMMENT ON COLUMN campaign_carryover.code IS '积分项：ROI20/ROI40/ROI60/ROI100（占位制阶梯的累计达标笔数）/GODLY/SPOT（现货达标单位数）/PREDICTION/STOP_LOSS_HERO/PNL_PROFIT/PNL_LOSS/LIQ_TRIGGER/BUCKET_*（三市通吃的市场桶）/RESET_EXTRA（付费重置）';
 COMMENT ON COLUMN campaign_carryover.cnt  IS '达成次数，UPSERT 累加';
 
 -- ============ 6. 活动种子行 ============
