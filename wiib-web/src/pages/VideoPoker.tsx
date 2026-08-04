@@ -21,28 +21,25 @@ const SUIT_SYMBOLS: Record<string, string> = { H: '♥', D: '♦', C: '♣', S: 
 const SUIT_COLORS: Record<string, string> = { H: 'text-red-500', D: 'text-red-500', C: 'text-zinc-800', S: 'text-zinc-800' };
 const RANK_DISPLAY: Record<string, string> = { T: '10', A: 'A', J: 'J', Q: 'Q', K: 'K' };
 
+// key 对齐后端 handRank（中奖行高亮靠它匹配）；8/5 Jacks or Better 标准表，倍率含本金
 const PAYOUT_TABLE = [
-  { name: '皇家同花顺', mult: '800x' },
-  { name: '小丑皇家同花顺', mult: '100x' },
-  { name: '五张相同', mult: '50x' },
-  { name: '同花顺', mult: '50x' },
-  { name: '四条', mult: '20x' },
-  { name: '葫芦', mult: '7x' },
-  { name: '同花', mult: '5x' },
-  { name: '顺子', mult: '3.5x' },
-  { name: '三条', mult: '2.5x' },
-  { name: '两对', mult: '1.5x' },
-  { name: 'J或更大', mult: '1x' },
+  { key: 'Royal Flush', name: '皇家同花顺', mult: '800x' },
+  { key: 'Straight Flush', name: '同花顺', mult: '50x' },
+  { key: 'Four of a Kind', name: '四条', mult: '25x' },
+  { key: 'Full House', name: '葫芦', mult: '8x' },
+  { key: 'Flush', name: '同花', mult: '5x' },
+  { key: 'Straight', name: '顺子', mult: '4x' },
+  { key: 'Three of a Kind', name: '三条', mult: '3x' },
+  { key: 'Two Pair', name: '两对', mult: '2x' },
+  { key: 'Jacks or Better', name: 'J对或更大', mult: '1x' },
 ];
 
 function parseCard(card: string) {
-  if (card.startsWith('JK')) return { rank: '🃏', suit: '', isJoker: true, color: 'text-purple-400' };
   const rank = card[0];
   const suit = card[1];
   return {
     rank: RANK_DISPLAY[rank] ?? rank,
     suit: SUIT_SYMBOLS[suit] ?? suit,
-    isJoker: false,
     color: SUIT_COLORS[suit] ?? 'text-zinc-800',
   };
 }
@@ -80,10 +77,6 @@ function PokerCard({ card, isHeld, isOldHeld, isReplacing, onClick, disabled, de
       {showBack ? (
         <div className="vp-card-back">
           <div className="vp-card-back-pattern" />
-        </div>
-      ) : parsed?.isJoker ? (
-        <div className="vp-card-joker">
-          <span className="text-2xl sm:text-4xl">🃏</span>
         </div>
       ) : parsed ? (
         <div className="vp-card-front">
@@ -223,7 +216,7 @@ export function VideoPoker() {
       <div className="flex items-center justify-between px-1">
         <div className="flex items-center gap-2.5">
           <div className="p-2 rounded-lg bg-purple-500/15">
-            <span className="text-xl">🃏</span>
+            <span className="text-xl">♠️</span>
           </div>
           <div>
             <div className="text-[10px] text-muted-foreground uppercase tracking-wider">游戏钱包</div>
@@ -246,15 +239,15 @@ export function VideoPoker() {
           <div className="grid grid-cols-2 gap-x-6 gap-y-0.5">
             {PAYOUT_TABLE.map(row => (
               <div
-                key={row.name}
+                key={row.key}
                 className={cn(
                   'flex justify-between text-xs px-2 py-0.5 rounded',
-                  winRank === row.name
+                  winRank === row.key
                     ? 'bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 font-bold'
                     : 'text-muted-foreground',
                 )}
               >
-                <span className={winRank === row.name ? 'text-emerald-800 dark:text-emerald-200' : 'text-foreground/70'}>{row.name}</span>
+                <span className={winRank === row.key ? 'text-emerald-800 dark:text-emerald-200' : 'text-foreground/70'}>{row.name}</span>
                 <span className="tabular-nums font-medium ml-2">{row.mult}</span>
               </div>
             ))}
@@ -273,7 +266,7 @@ export function VideoPoker() {
             )}>
               {winRank ? (
                 <div>
-                  <div className="text-lg">{winRank}</div>
+                  <div className="text-lg">{PAYOUT_TABLE.find(r => r.key === winRank)?.name ?? winRank}</div>
                   <div className="text-sm font-normal text-emerald-800 dark:text-emerald-300/80">+{fmtNum(game.payout)} ({game.multiplier}x)</div>
                 </div>
               ) : (
@@ -349,7 +342,7 @@ export function VideoPoker() {
                 disabled={acting || betAmount < 10 || betAmount > 5000 || betAmount > balance}
                 className="w-full h-12 text-base font-bold bg-amber-500 hover:bg-amber-400 text-black"
               >
-                🃏 发牌
+                ♠️ 发牌
               </Button>
             </div>
           ) : isDealing ? (
@@ -390,7 +383,7 @@ export function VideoPoker() {
           <section>
             <h3 className="font-semibold mb-1.5 text-xs uppercase tracking-wider text-muted-foreground">基础规则</h3>
             <ul className="list-disc list-inside text-muted-foreground space-y-0.5 text-xs">
-              <li>一副牌牌（含小丑牌），目标凑最高牌型</li>
+              <li>标准52张一副牌（无鬼牌），目标凑最高牌型</li>
               <li>下注后发5张，选择保留（HOLD）或不保留</li>
               <li>换牌后未保留的牌被替换，按赔率表结算</li>
             </ul>
@@ -398,10 +391,9 @@ export function VideoPoker() {
           <section>
             <h3 className="font-semibold mb-1.5 text-xs uppercase tracking-wider text-muted-foreground">牌型说明</h3>
             <ul className="text-muted-foreground space-y-0.5 text-xs">
-              <li><strong className="text-foreground/80">皇家同花顺</strong> A K Q J 10 同花 · <strong className="text-foreground/80">小丑皇家</strong> 小丑替代 · <strong className="text-foreground/80">五张相同</strong> 四条+小丑</li>
-              <li><strong className="text-foreground/80">同花顺</strong> 连续五张同花 · <strong className="text-foreground/80">四条</strong> 四张同点 · <strong className="text-foreground/80">葫芦</strong> 三条+一对</li>
-              <li><strong className="text-foreground/80">同花</strong> 五张同花 · <strong className="text-foreground/80">顺子</strong> 连续五张 · <strong className="text-foreground/80">三条</strong> 三张同点</li>
-              <li><strong className="text-foreground/80">两对</strong> 两组对子 · <strong className="text-foreground/80">J或更大</strong> J以上的一对（最低奖励）</li>
+              <li><strong className="text-foreground/80">皇家同花顺</strong> A K Q J 10 同花 · <strong className="text-foreground/80">同花顺</strong> 连续五张同花 · <strong className="text-foreground/80">四条</strong> 四张同点</li>
+              <li><strong className="text-foreground/80">葫芦</strong> 三条+一对 · <strong className="text-foreground/80">同花</strong> 五张同花 · <strong className="text-foreground/80">顺子</strong> 连续五张</li>
+              <li><strong className="text-foreground/80">三条</strong> 三张同点 · <strong className="text-foreground/80">两对</strong> 两组对子 · <strong className="text-foreground/80">J对或更大</strong> J以上的一对（保本返还）</li>
             </ul>
           </section>
         </CardContent>

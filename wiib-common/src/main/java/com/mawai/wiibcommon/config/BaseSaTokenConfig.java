@@ -119,10 +119,10 @@ public abstract class BaseSaTokenConfig implements WebMvcConfigurer {
 
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
-        registry.addInterceptor(new SaInterceptor(handle ->
+        registry.addInterceptor(new SaInterceptor(_ ->
                 SaRouter.match("/**")
                         .notMatch(getExcludePaths())
-                        .check(r -> StpUtil.checkLogin())
+                        .check(_ -> StpUtil.checkLogin())
         ) {
             @Override
             public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) throws Exception {

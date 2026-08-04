@@ -526,17 +526,6 @@ html.dark .vp-machine { box-shadow: inset 0 1px 0 rgba(255, 255, 255, .07); }
 .vp-card-center { font-size: 1.75rem }
 @media (min-width: 640px) { .vp-card-center { font-size: 2.5rem; } }
 
-.vp-card-joker {
-  width: 100%;
-  height: 100%;
-  background: linear-gradient(135deg, #7c3aed 0%, #5b21b6 100%);
-  border-radius: inherit;
-  border: 1px solid #8b5cf6;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
 .vp-card-back {
   width: 100%;
   height: 100%;

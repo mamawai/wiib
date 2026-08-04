@@ -13,7 +13,6 @@ import java.lang.annotation.*;
 @Target(ElementType.PARAMETER)
 @Retention(RetentionPolicy.RUNTIME)
 @Documented
-@Parameter(in = ParameterIn.QUERY, name = "symbol", required = false,
-        example = "BTCUSDT", description = "交易对（默认 BTCUSDT）") // 供 Swagger 文档展示
+@Parameter(in = ParameterIn.QUERY, name = "symbol", example = "BTCUSDT", description = "交易对（默认 BTCUSDT）")
 public @interface Symbol {
 }

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.mawai.wiibcommon.mapper.KlineHistoryMapper">
+
+    <!-- 幂等批插：唯一键冲突直接跳过 → 回填可重复跑、回测可复现 -->
+    <insert id="batchInsertIgnore">
+        INSERT INTO kline_history
+          (symbol, interval_code, open_time, close_time, open, high, low, close, volume)
+        VALUES
+        <foreach collection="list" item="b" separator=",">
+            (#{b.symbol}, #{b.intervalCode}, #{b.openTime}, #{b.closeTime},
+             #{b.open}, #{b.high}, #{b.low}, #{b.close}, #{b.volume})
+        </foreach>
+        ON CONFLICT (symbol, interval_code, open_time) DO NOTHING
+    </insert>
+
+</mapper>

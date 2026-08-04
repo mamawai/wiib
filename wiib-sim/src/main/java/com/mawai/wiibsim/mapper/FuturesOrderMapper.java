@@ -40,18 +40,16 @@ public interface FuturesOrderMapper extends BaseMapper<FuturesOrder> {
                           @Param("marginAmount") BigDecimal marginAmount,
                           @Param("realizedPnl") BigDecimal realizedPnl);
 
-    /** 持仓已实现盈亏：开/加仓单只贡献-fee，平仓单贡献 pnl-fee；只算已成交状态，资金费不在此表另行累计 */
+    /** 持仓已实现盈亏：开/加仓单只贡献-fee，平仓单贡献 pnl-fee；只算已成交状态，资金费不在此表另行累计。
+     *  ID 集合走 = ANY(数组)，同 CommentMapper.selectChildPreviews 的取舍 */
     @Select("""
-            <script>
             SELECT position_id, COALESCE(SUM(COALESCE(realized_pnl, 0) - COALESCE(commission, 0)), 0) AS amount
             FROM futures_order
             WHERE status IN ('FILLED', 'STOP_LOSS', 'TAKE_PROFIT')
-              AND position_id IN
-              <foreach collection="positionIds" item="id" open="(" separator="," close=")">#{id}</foreach>
+              AND position_id = ANY(#{positionIds, typeHandler=org.apache.ibatis.type.ArrayTypeHandler})
             GROUP BY position_id
-            </script>
             """)
-    List<Map<String, Object>> sumRealizedPnlByPositionIds(@Param("positionIds") List<Long> positionIds);
+    List<Map<String, Object>> sumRealizedPnlByPositionIds(@Param("positionIds") Long[] positionIds);
 
     /** CAS标记为TRIGGERED */
     @Update("UPDATE futures_order SET status = 'TRIGGERED', filled_price = #{triggerPrice}, updated_at = NOW() " +

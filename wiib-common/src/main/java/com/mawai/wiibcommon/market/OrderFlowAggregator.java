@@ -56,7 +56,7 @@ public class OrderFlowAggregator {
             List<MapRecord<String, Object, Object>> last = redisTemplate.opsForStream()
                     .reverseRange(KEY_PREFIX + symbol, Range.unbounded(), Limit.limit().count(1));
             if (last == null || last.isEmpty()) return 0L;
-            Object ts = last.get(0).getValue().get("ts");
+            Object ts = last.getFirst().getValue().get("ts");
             return ts == null ? 0L : Long.parseLong(ts.toString());
         } catch (Exception e) {
             return 0L;

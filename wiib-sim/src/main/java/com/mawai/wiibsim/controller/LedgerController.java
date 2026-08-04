@@ -50,7 +50,7 @@ public class LedgerController {
         // （全局处理器接 MethodArgumentTypeMismatchException），不会安静地返个空列表让人以为真没流水
         String bizTypeName = bizType == null ? null : bizType.name();
         // 下限兜到 1：PG 对负数 LIMIT 直接报错，limit=-1 不兜就是一个手搓请求刷 500
-        int safeLimit = Math.min(Math.max(limit, 1), MAX_LIMIT);
+        int safeLimit = Math.clamp(limit, 1, MAX_LIMIT);
         return Result.ok(ledgerMapper.selectByCursor(userId, bizTypeName, beforeId, safeLimit));
     }
 

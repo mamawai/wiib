@@ -13,7 +13,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 @MapperScan({"com.mawai.wiibsim.mapper", "com.mawai.wiibcommon.mapper"})
 public class WiibSimApplication {
 
-    public static void main(String[] args) {
+    static void main(String[] args) {
         SpringApplication.run(WiibSimApplication.class, args);
     }
 }

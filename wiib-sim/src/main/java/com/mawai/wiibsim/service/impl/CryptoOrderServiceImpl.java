@@ -477,7 +477,7 @@ public class CryptoOrderServiceImpl extends ServiceImpl<CryptoOrderMapper, Crypt
     private int getCount(String buyKey, Set<ZSetOperations.TypedTuple<String>> buyOrSellHits, boolean noBuyOrSell, int count) {
         if (!noBuyOrSell) {
             stringRedisTemplate.opsForZSet().remove(buyKey, buyOrSellHits.stream()
-                    .map(ZSetOperations.TypedTuple::getValue).toArray());
+                    .map(stringTypedTuple -> stringTypedTuple.getValue()).toArray());
             for (var tuple : buyOrSellHits) {
                 triggerAndExecuteOrder(Long.parseLong(Objects.requireNonNull(tuple.getValue())),
                         BigDecimal.valueOf(Objects.requireNonNull(tuple.getScore())));

@@ -96,7 +96,6 @@ public class BuffServiceImpl extends ServiceImpl<UserBuffMapper, UserBuff> imple
 
         BuffType buffType = BuffDrawUtil.drawBuff();
 
-        String extraData = null;
         if (Objects.requireNonNull(buffType.getCategory()) == BuffType.Category.CASH) {
             int amount = (int) buffType.getValue();
             userService.updateBalance(userId, BigDecimal.valueOf(amount));
@@ -109,7 +108,7 @@ public class BuffServiceImpl extends ServiceImpl<UserBuffMapper, UserBuff> imple
         buff.setBuffType(buffType.name());
         buff.setBuffName(buffType.getDisplayName());
         buff.setRarity(buffType.getRarity().name());
-        buff.setExtraData(extraData);
+        buff.setExtraData(null);
         buff.setDrawDate(today);
         buff.setExpireAt(today.plusDays(1).atStartOfDay());
         buff.setIsUsed(buffType.getCategory() != BuffType.Category.DISCOUNT);

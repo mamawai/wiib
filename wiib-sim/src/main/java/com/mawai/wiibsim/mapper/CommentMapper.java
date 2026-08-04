@@ -74,9 +74,11 @@ public interface CommentMapper extends BaseMapper<Comment> {
      * 根评论ID由调用方传进来，不在这里重算分页窗口。早先是用 CTE 按同样的 offset/limit
      * 复算一遍，看着少传一个参数，但两次查询之间只要有并发增删，两边算出的窗口就不是同一批，
      * 当页最后一条根评论会静默丢掉预览。
+     * <p>
+     * ID 集合用 = ANY(数组) 不用 foreach 拼 IN：语句形态不随 ID 个数变（plan cache 友好），
+     * 空数组也是合法 SQL（IN () 是语法错），PG 计划器内部本来就把 IN 重写成 = ANY。
      */
     @Select("""
-            <script>
             WITH ranked AS (
                 SELECT c.id, c.user_id AS userId, u.username, u.avatar,
                        c.root_id AS rootId, c.reply_to_user_id AS replyToUserId,
@@ -88,17 +90,16 @@ public interface CommentMapper extends BaseMapper<Comment> {
                 FROM comment c
                 JOIN "user" u ON u.id = c.user_id
                 LEFT JOIN "user" ru ON ru.id = c.reply_to_user_id
-                WHERE c.status = 1 AND c.root_id IN
-                <foreach collection="rootIds" item="rid" open="(" separator="," close=")">#{rid}</foreach>
+                WHERE c.status = 1
+                  AND c.root_id = ANY(#{rootIds, typeHandler=org.apache.ibatis.type.ArrayTypeHandler})
             )
             SELECT id, userId, username, avatar, rootId, replyToUserId, replyToUsername,
                    content, likeCount, dislikeCount, updatedAt, selfDeleted, createdAt
             FROM ranked
-            WHERE rn &lt;= #{preview}
+            WHERE rn <= #{preview}
             ORDER BY rootId, createdAt
-            </script>
             """)
-    List<CommentDTO> selectChildPreviews(@Param("rootIds") List<Long> rootIds,
+    List<CommentDTO> selectChildPreviews(@Param("rootIds") Long[] rootIds,
                                          @Param("preview") int preview);
 
     /**

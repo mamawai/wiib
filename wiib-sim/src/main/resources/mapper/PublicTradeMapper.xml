@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.mawai.wiibsim.mapper.PublicTradeMapper">
+
+    <!-- 两张订单表的公共列。抽出来是因为查数据和查总数要用同一份，
+         两处各写一遍迟早对不上（一边加了筛选另一边忘了，翻页页数就是错的） -->
+    <sql id="unionAll">
+        SELECT 'SPOT' AS kind, o.id AS trade_id, o.user_id, u.username,
+               o.symbol, o.order_side, o.quantity, o.filled_price, o.filled_amount, o.created_at
+        FROM crypto_order o JOIN "user" u ON u.id = o.user_id
+        WHERE o.status = 'FILLED'
+        UNION ALL
+        SELECT 'FUTURES', o.id, o.user_id, u.username,
+               o.symbol, o.order_side, o.quantity, o.filled_price, o.filled_amount, o.created_at
+        FROM futures_order o JOIN "user" u ON u.id = o.user_id
+        WHERE o.status = 'FILLED'
+    </sql>
+
+    <select id="selectPage" resultType="com.mawai.wiibsim.dto.PublicTradeRow">
+        SELECT * FROM ( <include refid="unionAll"/> ) t
+        <where>
+            <if test="symbol != null"> AND t.symbol = #{symbol} </if>
+            <if test="kind != null"> AND t.kind = #{kind} </if>
+        </where>
+        ORDER BY t.created_at DESC, t.kind ASC, t.trade_id DESC
+        LIMIT #{limit} OFFSET #{offset}
+    </select>
+
+    <select id="countAll" resultType="long">
+        SELECT COUNT(*) FROM ( <include refid="unionAll"/> ) t
+        <where>
+            <if test="symbol != null"> AND t.symbol = #{symbol} </if>
+            <if test="kind != null"> AND t.kind = #{kind} </if>
+        </where>
+    </select>
+
+    <select id="selectPageByUser" resultType="com.mawai.wiibsim.dto.PublicTradeRow">
+        SELECT * FROM ( <include refid="unionAll"/> ) t
+        WHERE t.user_id = #{userId}
+        ORDER BY t.created_at DESC, t.kind ASC, t.trade_id DESC
+        LIMIT #{limit} OFFSET #{offset}
+    </select>
+
+</mapper>

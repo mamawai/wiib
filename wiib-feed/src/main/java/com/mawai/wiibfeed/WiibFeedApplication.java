@@ -12,7 +12,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 @SpringBootApplication(scanBasePackages = {"com.mawai.wiibfeed", "com.mawai.wiibcommon"})
 @MapperScan({"com.mawai.wiibcommon.mapper"})
 public class WiibFeedApplication {
-    public static void main(String[] args) {
+    static void main(String[] args) {
         SpringApplication.run(WiibFeedApplication.class, args);
     }
 }
