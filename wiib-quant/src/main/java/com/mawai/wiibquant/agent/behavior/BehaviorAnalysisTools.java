@@ -48,7 +48,7 @@ public class BehaviorAnalysisTools {
         return fetch("统计bStock交易数据", userId, "bstock-stats");
     }
 
-    @Tool(description = "获取用户合约交易统计：已实现盈亏、订单数、多空偏好、平均杠杆、止损率、爆仓次数")
+    @Tool(description = "获取用户合约交易统计：已实现盈亏、订单数、多空偏好、平均杠杆、止损率、爆仓次数，含分品类拆解(crypto加密/commodity大宗金油/tradfi美股ETF)")
     public String getFuturesTradeStats(@ToolParam(description = "用户ID") Long userId) {
         return fetch("统计合约交易数据", userId, "futures-stats");
     }

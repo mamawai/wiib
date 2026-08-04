@@ -88,6 +88,11 @@ public interface FuturesOrderMapper extends BaseMapper<FuturesOrder> {
     @Select("SELECT COUNT(*) FROM futures_order WHERE user_id = #{userId} AND status = 'FILLED'")
     long countFilledOrders(@Param("userId") Long userId);
 
+    /** 分符号成交单数：行为分析按品类（crypto/大宗/tradfi）归桶用，归桶在 Java 侧按符号集做 */
+    @Select("SELECT symbol, COUNT(*) AS cnt FROM futures_order " +
+            "WHERE user_id = #{userId} AND status = 'FILLED' GROUP BY symbol")
+    List<Map<String, Object>> countFilledOrdersBySymbol(@Param("userId") Long userId);
+
     @Update("UPDATE futures_order SET status = 'CANCELLED', updated_at = NOW() " +
             "WHERE user_id = #{userId} AND status IN ('PENDING', 'TRIGGERED', 'PROCESSING')")
     int cancelOpenOrdersByUserId(@Param("userId") Long userId);
