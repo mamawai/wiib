@@ -31,20 +31,34 @@ public class BehaviorAnalysisService {
             .expireAfterWrite(30, TimeUnit.MINUTES)
             .maximumSize(10_000)
             .build();
+    // 失败负缓存：失败不进 reportCache 的话，用户每点一次重试就全额烧一遍 agent（ReAct 十几次
+    // 工具调用）且永远烧不出缓存。失败也短存，把重试风暴钝化成每 2 分钟最多一次真跑；
+    // TTL 刻意远短于成功缓存——给上游（模型/网络）故障恢复留窗口
+    private final Cache<Long, String> failCache = Caffeine.newBuilder()
+            .expireAfterWrite(2, TimeUnit.MINUTES)
+            .maximumSize(10_000)
+            .build();
 
     public Result<BehaviorAnalysisReport> analyze(long userId) {
         BehaviorAnalysisReport cached = reportCache.getIfPresent(userId);
         if (cached != null) {
             return Result.ok(cached);
         }
+        String recentFail = failCache.getIfPresent(userId);
+        if (recentFail != null) {
+            return Result.fail(recentFail);
+        }
 
         if (!behaviorSemaphore.tryAcquire()) {
+            // 瞬时负载不是故障：不进负缓存，下一秒就可能有空位
             return Result.fail("当前分析人数已满，请稍后再试");
         }
         try {
             Result<BehaviorAnalysisReport> result = doAnalyze(userId);
             if (result.getCode() == 0 && result.getData() != null) {
                 reportCache.put(userId, result.getData());
+            } else {
+                failCache.put(userId, result.getMsg());
             }
             return result;
         } finally {
