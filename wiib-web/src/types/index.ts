@@ -525,10 +525,9 @@ export interface BehaviorAnalysisReport {
     trend: { date: string; totalAssets: number }[];
   };
   tradeBehavior: {
-    stock: { positionCount: number; orderCount: number; totalBuyAmount: number; preference: string };
     crypto: { positionCount: number; totalBuyAmount: number; totalSellAmount: number; leverageUsage: string };
+    bstock: { positionCount: number; totalBuyAmount: number; totalSellAmount: number };
     futures: { realizedPnl: number; orderCount: number; direction: string; avgLeverage: number; stopLossRate: number; liquidationCount: number };
-    option: { totalBtoAmount: number; totalStcAmount: number };
     prediction: { frequency: number; netProfit: number; winRate: number; directionPreference: string };
   };
   gameBehavior: {

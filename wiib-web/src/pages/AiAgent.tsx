@@ -178,20 +178,19 @@ export function AiAgent() {
               {/* 交易行为 */}
               <SectionCard icon={Coins} title="交易行为分析">
                 <div className="grid sm:grid-cols-2 gap-2.5">
-                  {behaviorReport.tradeBehavior.stock.positionCount > 0 && (
-                    <CategoryBlock icon={BarChart3} title="股票">
-                      <Metric label="持仓" value={behaviorReport.tradeBehavior.stock.positionCount} />
-                      <Metric label="订单" value={behaviorReport.tradeBehavior.stock.orderCount} />
-                      <Metric label="买入额" value={`$${behaviorReport.tradeBehavior.stock.totalBuyAmount.toLocaleString()}`} />
-                      <Metric label="偏好" value={behaviorReport.tradeBehavior.stock.preference} />
-                    </CategoryBlock>
-                  )}
                   {behaviorReport.tradeBehavior.crypto.positionCount > 0 && (
                     <CategoryBlock icon={Coins} title="加密货币">
                       <Metric label="持仓" value={behaviorReport.tradeBehavior.crypto.positionCount} />
                       <Metric label="杠杆" value={behaviorReport.tradeBehavior.crypto.leverageUsage} />
                       <Metric label="买入" value={`$${behaviorReport.tradeBehavior.crypto.totalBuyAmount.toLocaleString()}`} />
                       <Metric label="卖出" value={`$${behaviorReport.tradeBehavior.crypto.totalSellAmount.toLocaleString()}`} />
+                    </CategoryBlock>
+                  )}
+                  {behaviorReport.tradeBehavior.bstock.positionCount > 0 && (
+                    <CategoryBlock icon={BarChart3} title="美股 bStock">
+                      <Metric label="持仓" value={behaviorReport.tradeBehavior.bstock.positionCount} />
+                      <Metric label="买入" value={`$${behaviorReport.tradeBehavior.bstock.totalBuyAmount.toLocaleString()}`} />
+                      <Metric label="卖出" value={`$${behaviorReport.tradeBehavior.bstock.totalSellAmount.toLocaleString()}`} />
                     </CategoryBlock>
                   )}
                   {behaviorReport.tradeBehavior.futures.orderCount > 0 && (
