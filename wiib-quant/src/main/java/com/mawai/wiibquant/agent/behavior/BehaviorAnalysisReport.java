@@ -36,19 +36,18 @@ public class BehaviorAnalysisReport {
 
     @Data
     public static class TradeBehavior {
-        private StockBehavior stock;
         private CryptoBehavior crypto;
+        private BStockBehavior bstock;
         private FuturesBehavior futures;
-        private OptionBehavior option;
         private PredictionBehavior prediction;
     }
 
+    /** bStock 代币化美股：共用现货引擎，靠 symbol 集与 crypto 区分（数据源 bstock-stats） */
     @Data
-    public static class StockBehavior {
+    public static class BStockBehavior {
         private int positionCount;
-        private int orderCount;
         private BigDecimal totalBuyAmount;
-        private String preference;
+        private BigDecimal totalSellAmount;
     }
 
     @Data
@@ -67,12 +66,6 @@ public class BehaviorAnalysisReport {
         private BigDecimal avgLeverage;
         private BigDecimal stopLossRate;
         private int liquidationCount;
-    }
-
-    @Data
-    public static class OptionBehavior {
-        private BigDecimal totalBtoAmount;
-        private BigDecimal totalStcAmount;
     }
 
     @Data
@@ -122,11 +115,13 @@ public class BehaviorAnalysisReport {
     public boolean isValid() {
         if (overview == null || overview.getDistribution() == null
                 || overview.getTotalAssets() == null || overview.getTotalProfitPct() == null) return false;
-        if (tradeBehavior == null || tradeBehavior.getStock() == null
-                || tradeBehavior.getStock().getTotalBuyAmount() == null) return false;
+        // 只校验现役维度（crypto/futures/prediction）——已下线维度的硬校验会逼模型瞎编，见 BehaviorReportValidityTest
+        if (tradeBehavior == null) return false;
         if (tradeBehavior.getCrypto() == null
                 || tradeBehavior.getCrypto().getTotalBuyAmount() == null
                 || tradeBehavior.getCrypto().getTotalSellAmount() == null) return false;
+        if (tradeBehavior.getBstock() == null
+                || tradeBehavior.getBstock().getTotalBuyAmount() == null) return false;
         if (tradeBehavior.getFutures() == null
                 || tradeBehavior.getFutures().getRealizedPnl() == null
                 || tradeBehavior.getFutures().getAvgLeverage() == null) return false;

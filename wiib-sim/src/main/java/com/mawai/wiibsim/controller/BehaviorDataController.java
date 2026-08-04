@@ -15,6 +15,7 @@ import com.mawai.wiibsim.mapper.PredictionBetMapper;
 import com.mawai.wiibsim.mapper.UserAssetSnapshotMapper;
 import com.mawai.wiibsim.mapper.UserMapper;
 import com.mawai.wiibsim.mapper.VideoPokerGameMapper;
+import com.mawai.wiibsim.service.BStockService;
 import com.mawai.wiibsim.service.CryptoPositionService;
 import com.mawai.wiibsim.service.UserService;
 import lombok.RequiredArgsConstructor;
@@ -42,6 +43,7 @@ public class BehaviorDataController {
     private final UserAssetSnapshotMapper snapshotMapper;
     private final CryptoOrderMapper cryptoOrderMapper;
     private final CryptoPositionService cryptoPositionService;
+    private final BStockService bStockService;
     private final FuturesOrderMapper futuresOrderMapper;
     private final FuturesPositionMapper futuresPositionMapper;
     private final PredictionBetMapper predictionBetMapper;
@@ -87,17 +89,32 @@ public class BehaviorDataController {
 
     @GetMapping("/{userId}/crypto-stats")
     public String getCryptoTradeStats(@PathVariable Long userId) {
+        // bStock 共用现货引擎（同表同持仓服务），行为口径按 symbol 集拆开，与资产五分类对齐
         BigDecimal buyTotal = cryptoOrderMapper.sumBuyFilledAmount(userId);
         BigDecimal sellTotal = cryptoOrderMapper.sumSellFilledAmount(userId);
-        List<?> positions = cryptoPositionService.getUserPositions(userId);
+        long posCount = cryptoPositionService.getUserPositions(userId).stream()
+                .filter(p -> !bStockService.isBStockSymbol(p.getSymbol())).count();
         BigDecimal avgLev = cryptoOrderMapper.selectAvgLeverage(userId);
         String levUsage = classifyLeverageUsage(avgLev);
         return JSON.toJSONString(new Object() {
             public final BigDecimal totalBuyAmount = buyTotal;
             public final BigDecimal totalSellAmount = sellTotal;
-            public final int positionCount = positions.size();
+            public final int positionCount = (int) posCount;
             public final BigDecimal avgLeverage = avgLev;
             public final String leverageUsage = levUsage;
+        });
+    }
+
+    @GetMapping("/{userId}/bstock-stats")
+    public String getBstockTradeStats(@PathVariable Long userId) {
+        BigDecimal buyTotal = cryptoOrderMapper.sumBstockBuyFilledAmount(userId);
+        BigDecimal sellTotal = cryptoOrderMapper.sumBstockSellFilledAmount(userId);
+        long posCount = cryptoPositionService.getUserPositions(userId).stream()
+                .filter(p -> bStockService.isBStockSymbol(p.getSymbol())).count();
+        return JSON.toJSONString(new Object() {
+            public final int positionCount = (int) posCount;
+            public final BigDecimal totalBuyAmount = buyTotal;
+            public final BigDecimal totalSellAmount = sellTotal;
         });
     }
 

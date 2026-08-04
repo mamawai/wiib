@@ -25,7 +25,7 @@ public class BehaviorAgentFactory {
 
     private static final String INSTRUCTION = """
             你是专业的用户行为分析师。请根据工具获取的数据，全面分析用户在以下维度的行为模式：
-            1. 交易行为：股票、加密货币现货、合约、期权、Prediction
+            1. 交易行为：加密货币现货、bStock 代币化美股、合约、Prediction
             2. 游戏行为：Blackjack、Mines、Video Poker
             3. 风险画像：根据杠杆使用、破产历史、游戏频率判断风险等级(保守/稳健/激进/赌徒)
             4. 给出针对性建议

@@ -9,7 +9,7 @@ import java.util.function.Consumer;
 
 /**
  * 用户行为分析 AI 工具（quant 侧）。
- * <p>老 GBM 股市/期权下线后余 9 个 @Tool；数据 HTTP 调 sim 的
+ * <p>老 GBM 股市/期权已下线（bStock 代币化美股为现役维度）；数据 HTTP 调 sim 的
  * {@code /internal/behavior} 端点（{@link SimInternalClient}），quant 与 sim 编译解耦。
  */
 @RequiredArgsConstructor
@@ -41,6 +41,11 @@ public class BehaviorAnalysisTools {
     @Tool(description = "获取用户加密货币交易统计：买入总额、卖出总额、持仓数、杠杆使用情况")
     public String getCryptoTradeStats(@ToolParam(description = "用户ID") Long userId) {
         return fetch("统计加密货币交易数据", userId, "crypto-stats");
+    }
+
+    @Tool(description = "获取用户bStock(代币化美股)交易统计：持仓数、买入总额、卖出总额")
+    public String getBstockTradeStats(@ToolParam(description = "用户ID") Long userId) {
+        return fetch("统计bStock交易数据", userId, "bstock-stats");
     }
 
     @Tool(description = "获取用户合约交易统计：已实现盈亏、订单数、多空偏好、平均杠杆、止损率、爆仓次数")
