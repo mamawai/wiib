@@ -362,8 +362,7 @@ export function Campaign() {
         <div className="leading-relaxed">
           <span className="font-bold text-warning">本活动仅限 LinuxDo 登录用户参与。</span>
           <span className="text-muted-foreground ml-1">
-            邀请码注册的账号不计积分、不上榜、不参与 LDC 分配（LDC 只能发到 LinuxDo 账号上，
-            平台也没有"本地账号绑定 LinuxDo"的入口）。
+            邀请码注册的账号不计积分、不上榜、不参与 LDC 分配
           </span>
         </div>
       </div>
