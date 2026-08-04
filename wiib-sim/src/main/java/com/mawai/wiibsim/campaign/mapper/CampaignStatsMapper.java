@@ -3,8 +3,7 @@ package com.mawai.wiibsim.campaign.mapper;
 import com.mawai.wiibsim.campaign.model.ClosedPositionRow;
 import com.mawai.wiibsim.campaign.model.CountRow;
 import com.mawai.wiibsim.campaign.model.EligibleUserRow;
-import com.mawai.wiibsim.campaign.model.HeldPositionRow;
-import com.mawai.wiibsim.campaign.model.SpotSymbolRow;
+import com.mawai.wiibsim.campaign.model.SpotOrderRow;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
@@ -67,38 +66,41 @@ public interface CampaignStatsMapper {
                                                 @Param("end") LocalDateTime end);
 
     /**
-     * 现货：按 (用户, 标的) 聚合，只留活动期内买入额已过 1000 门槛的那些。
+     * 现货成交流水（全历史、按成交时间排好序），只取活动期内买入额（含手续费）过门槛的 (用户, 标的) 对，
+     * Java 侧逐笔重放算已实现收益率的高水位（TradeScorer.countSpotUnits）。
+     * <p>
+     * 【为什么返流水不返聚合】达标单位是"摸到过的最高台阶"、只进不退，期末聚合比率会漏掉
+     * 中途冲高后回落的那段；比率只在成交那一刻变化（只算已实现、不掺盘中价），逐笔重放即可复现全程。
+     * <p>
+     * 【外层不卡时间窗】比率分子分母都是全历史累计（单笔收益率能靠"只卖赚的、亏的扛着"造假，
+     * 全历史净现金流造不了假）；活动窗口只决定哪些时刻的比率参与取最高，这一步在 Java 侧做。
      * <p>
      * 【成交时间取 updated_at 不取 created_at】限价单挂上和真正成交是两个时刻，
      * 按下单时间算会把活动前挂、活动中成交的单排除掉。同 FuturesPositionMapper:196 的口径。
-     * <p>
-     * 【HAVING 先剪枝】不达门槛的 (用户,标的) 对根本不用返回，结果集能小一个量级。
      */
     @Select("""
-            SELECT user_id AS user_id,
-                   symbol  AS symbol,
-                   COALESCE(SUM(CASE WHEN order_side = 'BUY'
-                                      AND updated_at >= #{start} AND updated_at < #{end}
-                                     THEN filled_amount + COALESCE(commission, 0)
-                                     ELSE 0 END), 0) AS buy_in_window,
-                   COALESCE(SUM(CASE WHEN order_side = 'BUY'
-                                     THEN filled_amount + COALESCE(commission, 0)
-                                     ELSE 0 END), 0) AS buy_all,
-                   COALESCE(SUM(CASE WHEN order_side = 'SELL'
-                                     THEN filled_amount - COALESCE(commission, 0)
-                                     ELSE 0 END), 0) AS sell_all
-            FROM crypto_order
-            WHERE status = 'FILLED'
-            GROUP BY user_id, symbol
-            HAVING SUM(CASE WHEN order_side = 'BUY'
-                             AND updated_at >= #{start} AND updated_at < #{end}
-                            THEN filled_amount + COALESCE(commission, 0)
-                            ELSE 0 END) >= #{minBuy}
-            ORDER BY user_id, buy_in_window DESC
+            SELECT o.user_id                 AS user_id,
+                   o.symbol                  AS symbol,
+                   o.order_side              AS order_side,
+                   o.filled_amount           AS filled_amount,
+                   COALESCE(o.commission, 0) AS commission,
+                   o.updated_at              AS filled_at
+            FROM crypto_order o
+            JOIN (
+                SELECT user_id, symbol
+                FROM crypto_order
+                WHERE status = 'FILLED'
+                  AND order_side = 'BUY'
+                  AND updated_at >= #{start} AND updated_at < #{end}
+                GROUP BY user_id, symbol
+                HAVING SUM(filled_amount + COALESCE(commission, 0)) >= #{minBuy}
+            ) q ON q.user_id = o.user_id AND q.symbol = o.symbol
+            WHERE o.status = 'FILLED'
+            ORDER BY o.user_id, o.symbol, o.updated_at, o.id
             """)
-    List<SpotSymbolRow> listSpotSymbols(@Param("start") LocalDateTime start,
-                                        @Param("end") LocalDateTime end,
-                                        @Param("minBuy") BigDecimal minBuy);
+    List<SpotOrderRow> listSpotOrders(@Param("start") LocalDateTime start,
+                                      @Param("end") LocalDateTime end,
+                                      @Param("minBuy") BigDecimal minBuy);
 
     /**
      * 预测市场：活动期内下注、持有到结算且猜中、额度达标的次数。
@@ -223,22 +225,6 @@ public interface CampaignStatsMapper {
             WHERE linux_do_id ~ '^[0-9]+$'
             """)
     List<EligibleUserRow> listEligibleUsers();
-
-    /**
-     * 全站现货在持数量。现货标的整体收益 =（卖出总额 − 买入总额 + 剩余持仓市值）÷ 买入总额，
-     * 这条提供"剩余持仓"那一项；市值在 Java 侧乘当前价（价在 Redis，SQL 拿不到）。
-     * <p>
-     * 数量取 quantity + frozen_quantity：冻结的是挂单锁住的量，仍算这个人的持仓，
-     * 与 AssetSnapshotServiceImpl:305 的口径一致。
-     */
-    @Select("""
-            SELECT user_id AS user_id,
-                   symbol  AS symbol,
-                   quantity + COALESCE(frozen_quantity, 0) AS qty
-            FROM crypto_position
-            WHERE quantity + COALESCE(frozen_quantity, 0) > 0
-            """)
-    List<HeldPositionRow> listHeldPositions();
 
     /**
      * 平台侧记录的 LinuxDo ID。领取时用来校验"这次授权的是不是本人的号"。

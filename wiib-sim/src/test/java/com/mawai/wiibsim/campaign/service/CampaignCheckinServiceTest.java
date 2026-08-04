@@ -288,14 +288,14 @@ class CampaignCheckinServiceTest {
                 .extracting(ScoreItem::code, ScoreItem::count, ScoreItem::score)
                 .containsExactly(
                         tuple("CHECKIN", 6, BigDecimal.valueOf(6)),
-                        tuple("STREAK", 3, BigDecimal.valueOf(5)));
+                        tuple("STREAK", 3, BigDecimal.valueOf(3)));
         assertThat(result.get(OTHER))
                 .extracting(ScoreItem::code, ScoreItem::count, ScoreItem::score)
                 .containsExactly(tuple("CHECKIN", 2, BigDecimal.valueOf(2)));
     }
 
     /**
-     * ★ 断段只按最长的那一段发一次 ★ 3 连 + 断 + 3 连 = 5 分，不是两个 +5 = 10。
+     * ★ 断段只按最长的那一段发一次 ★ 3 连 + 断 + 3 连 = 3 分，不是两个 +3 = 6。
      * <p>
      * 若按"每一段各判一次"累加，"签3天歇1天"比老老实实连签划算，时间这个压不缩的资源就被绕过了
      * （ScoreRules.streakBonus 的注释说的就是这件事）。上面那条用例已顺带覆盖，
@@ -310,8 +310,8 @@ class CampaignCheckinServiceTest {
         ScoreItem streak = item(service.scoreAll(fixedCampaign()).get(ME), "STREAK");
 
         assertThat(streak.score())
-                .as("两段各 3 天各发一个 +5 就是 10，这条正是要挡住那种算法")
-                .isEqualByComparingTo(BigDecimal.valueOf(5));
+                .as("两段各 3 天各发一个 +3 就是 6，这条正是要挡住那种算法")
+                .isEqualByComparingTo(BigDecimal.valueOf(3));
         assertThat(streak.count()).as("count 报的是最长段，不是总天数").isEqualTo(3);
     }
 
@@ -326,7 +326,7 @@ class CampaignCheckinServiceTest {
      * <ul>
      *   <li>ME 窗口内是 8-3、8-4 与 8-15、8-16 两段各 2 天 → 最长 2 → 不够 3 天档 →
      *       <b>根本不该有 STREAK 这条</b>；漏筛的话 8-2/8-3/8-4 和 8-15/8-16/8-17
-     *       都成了 3 连，凭空多出一条 +5。</li>
+     *       都成了 3 连，凭空多出一条 +3。</li>
      *   <li>OTHER 窗口内 8-3~8-7 共 5 天 → STREAK 的 count 是 5；漏筛的话 8-2 接上去变成 6。</li>
      * </ul>
      * 8-17 这一天的取舍就是半开区间的含义：活动结束在 8-17 00:00:00，那一整天已经在窗外。
@@ -356,7 +356,7 @@ class CampaignCheckinServiceTest {
                 .extracting(ScoreItem::code, ScoreItem::count, ScoreItem::score)
                 .containsExactly(
                         tuple("CHECKIN", 5, BigDecimal.valueOf(5)),
-                        tuple("STREAK", 5, BigDecimal.valueOf(5)));
+                        tuple("STREAK", 5, BigDecimal.valueOf(3)));
     }
 
     /** 全部签到都在窗口外的人直接不进结果，而不是留一条 0 分的空明细 */

@@ -93,9 +93,9 @@ class CampaignScoreServiceTest {
                 user(IDLE, "idle"), user(MID, "mid")));
 
         when(tradeScorer.scoreAll(CAMPAIGN_ID, START, END)).thenReturn(Map.of(
-                ACE, List.of(ScoreItem.of("ROI50", "单仓位 ROI ≥ 50%", 2, 10),
+                ACE, List.of(ScoreItem.of("ROI40", "单仓位 ROI ≥ 40%", 2, 10),
                         ScoreItem.of("LIQ_TRIGGER", "触发强平", 1, -5)),
-                REKT, List.of(ScoreItem.of("ROI50", "单仓位 ROI ≥ 50%", 2, 10),
+                REKT, List.of(ScoreItem.of("ROI40", "单仓位 ROI ≥ 40%", 2, 10),
                         ScoreItem.of("RESET_EXTRA", "付费重置账户", 1, -30))));
 
         when(checkinService.scoreAll(any(Campaign.class))).thenReturn(Map.of(
@@ -140,7 +140,7 @@ class CampaignScoreServiceTest {
         CampaignScore ace = pick(service.scoreBoard(), ACE);
 
         assertThat(ace.items()).extracting(ScoreItem::code)
-                .containsExactly("ROI50", "LIQ_TRIGGER", "CHECKIN", "VOTE");
+                .containsExactly("ROI40", "LIQ_TRIGGER", "CHECKIN", "VOTE");
         assertThat(item(ace.items(), "VOTE").score()).isEqualByComparingTo(new BigDecimal("3.50"));
     }
 
@@ -169,7 +169,7 @@ class CampaignScoreServiceTest {
         assertThat(rekt.penalty()).isEqualTo(-30);
         assertThat(rekt.items()).extracting(ScoreItem::code)
                 .as("扣到 0 的人也得留着明细，否则他不知道分去哪了")
-                .containsExactly("ROI50", "RESET_EXTRA");
+                .containsExactly("ROI40", "RESET_EXTRA");
     }
 
     /**

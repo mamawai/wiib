@@ -20,42 +20,65 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 class ScoreRulesTest {
 
-    // ---- 阶梯边界：每一档都测"最后一个高分位"和"第一个降档位" ----
+    // ---- ROI 占位制：每仓只占一档，高档满了往下顺延 ----
 
+    /** 首个 100% 只占 100 档；后来的 100% 依次落 60 档、40 档，最后进无限溢出 */
     @Test
-    void roi50档前五笔各五分之后各一分() {
-        assertThat(List.of(1, 2, 3, 4, 5).stream().map(ScoreRules::roi50Tier).toList())
-                .containsExactly(5, 5, 5, 5, 5);
-        assertThat(ScoreRules.roi50Tier(6)).isEqualTo(1);
-        assertThat(ScoreRules.roi50Tier(100)).isEqualTo(1);
+    void 占位制高档满了往下顺延() {
+        // 1 笔 ≥100%：只占 100 档，60/40 档一个名额不占
+        assertThat(ScoreRules.roiLadder(1, 1, 1, 1))
+                .isEqualTo(new ScoreRules.RoiLadder(1, 0, 0, 0, 0));
+        // 5 笔 ≥100%：1 进 100 档、3 进 60 档、1 进 40 档
+        assertThat(ScoreRules.roiLadder(5, 5, 5, 5))
+                .isEqualTo(new ScoreRules.RoiLadder(1, 3, 1, 0, 0));
+        // 10 笔 ≥100%：40 档也满，最后 1 笔进无限溢出
+        assertThat(ScoreRules.roiLadder(10, 10, 10, 10))
+                .isEqualTo(new ScoreRules.RoiLadder(1, 3, 5, 1, 0));
     }
 
+    /** 各区间各归各档：3 笔 [20,40) 进 20 档，7 笔 [40,60) 里 5 笔占 40 档、2 笔溢出 */
     @Test
-    void roi100档首笔十五第二三笔各五之后各一() {
-        assertThat(ScoreRules.roi100Tier(1)).isEqualTo(15);
-        assertThat(ScoreRules.roi100Tier(2)).isEqualTo(5);
-        assertThat(ScoreRules.roi100Tier(3)).isEqualTo(5);
-        assertThat(ScoreRules.roi100Tier(4)).isEqualTo(1);
+    void 占位制各区间落对应档() {
+        assertThat(ScoreRules.roiLadder(10, 7, 0, 0))
+                .isEqualTo(new ScoreRules.RoiLadder(0, 0, 5, 2, 3));
+    }
+
+    /** 20~40% 区间的仓不与 ≥40% 抢名额，也吃不到无限溢出：30 笔全记 band20，计分时只认 20 笔 */
+    @Test
+    void 低区间仓位只进自己那档() {
+        assertThat(ScoreRules.roiLadder(30, 0, 0, 0))
+                .isEqualTo(new ScoreRules.RoiLadder(0, 0, 0, 0, 30));
+    }
+
+    /** 混合场景：2 笔 100% + 2 笔 [60,100) + 4 笔 [40,60) + 1 笔 [20,40) */
+    @Test
+    void 占位制混合区间分派() {
+        // c20=9, c40=8, c60=4, c100=2 → 100 档 1；60 池 1+2=3 全进；40 池 0+4=4 全进；band20=1
+        assertThat(ScoreRules.roiLadder(9, 8, 4, 2))
+                .isEqualTo(new ScoreRules.RoiLadder(1, 3, 4, 0, 1));
     }
 
     /** 封神是一次性的：第二笔起 0 分，不是 1 分 */
     @Test
     void 封神只认第一笔() {
-        assertThat(ScoreRules.godlyTier(1)).isEqualTo(20);
+        assertThat(ScoreRules.godlyTier(1)).isEqualTo(25);
         assertThat(ScoreRules.godlyTier(2)).isZero();
         assertThat(ScoreRules.godlyTier(9)).isZero();
     }
 
+    /** 现货单位阶梯：前 3 个各 5，第 4 起各 1、限 20 次 —— 第 24 个单位起 0 分 */
     @Test
-    void 现货前三个标的各五分之后各一分() {
+    void 现货前三个单位高分之后各一分限二十次() {
         assertThat(ScoreRules.spotTier(3)).isEqualTo(5);
         assertThat(ScoreRules.spotTier(4)).isEqualTo(1);
+        assertThat(ScoreRules.spotTier(23)).isEqualTo(1);
+        assertThat(ScoreRules.spotTier(24)).isZero();
     }
 
     /** 预测封顶不是降到 1 分而是 0 分：第 11 次起一分没有 */
     @Test
-    void 预测前三次各五第四到十次各一之后零分() {
-        assertThat(ScoreRules.predictionTier(3)).isEqualTo(5);
+    void 预测前三次各三第四到十次各一之后零分() {
+        assertThat(ScoreRules.predictionTier(3)).isEqualTo(3);
         assertThat(ScoreRules.predictionTier(4)).isEqualTo(1);
         assertThat(ScoreRules.predictionTier(10)).isEqualTo(1);
         assertThat(ScoreRules.predictionTier(11)).isZero();
@@ -64,16 +87,16 @@ class ScoreRulesTest {
 
     // ---- 连续签到 ----
 
-    /** 累进：连满 14 天拿满 5+15+40，不是只拿 40 */
+    /** 累进：连满 14 天拿满 3+5+10，不是只拿 10 */
     @Test
     void 连续签到奖励累进且按档累加() {
         assertThat(ScoreRules.streakBonus(2)).isZero();
-        assertThat(ScoreRules.streakBonus(3)).isEqualTo(5);
-        assertThat(ScoreRules.streakBonus(6)).isEqualTo(5);
-        assertThat(ScoreRules.streakBonus(7)).isEqualTo(20);
-        assertThat(ScoreRules.streakBonus(13)).isEqualTo(20);
-        assertThat(ScoreRules.streakBonus(14)).isEqualTo(60);
-        assertThat(ScoreRules.streakBonus(30)).isEqualTo(60);
+        assertThat(ScoreRules.streakBonus(3)).isEqualTo(3);
+        assertThat(ScoreRules.streakBonus(6)).isEqualTo(3);
+        assertThat(ScoreRules.streakBonus(7)).isEqualTo(8);
+        assertThat(ScoreRules.streakBonus(13)).isEqualTo(8);
+        assertThat(ScoreRules.streakBonus(14)).isEqualTo(18);
+        assertThat(ScoreRules.streakBonus(30)).isEqualTo(18);
     }
 
     @Test
@@ -88,7 +111,7 @@ class ScoreRulesTest {
     }
 
     /**
-     * 断签重计不是断签清零：两段各 3 天只能拿一次 +5，不能拿 +10。
+     * 断签重计不是断签清零：两段各 3 天只能拿一次 +3，不能拿 +6。
      * 否则"签3天歇1天"比连续签划算，把时间这个唯一压缩不了的资源变成了可绕过的。
      */
     @Test
@@ -96,7 +119,7 @@ class ScoreRulesTest {
         int bonus = ScoreRules.streakBonus(ScoreRules.longestStreak(List.of(
                 LocalDate.of(2026, 8, 3), LocalDate.of(2026, 8, 4), LocalDate.of(2026, 8, 5),
                 LocalDate.of(2026, 8, 7), LocalDate.of(2026, 8, 8), LocalDate.of(2026, 8, 9))));
-        assertThat(bonus).isEqualTo(5);
+        assertThat(bonus).isEqualTo(3);
     }
 
     @Test

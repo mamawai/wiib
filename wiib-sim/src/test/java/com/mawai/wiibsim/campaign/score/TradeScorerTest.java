@@ -2,7 +2,7 @@ package com.mawai.wiibsim.campaign.score;
 
 import com.mawai.wiibsim.campaign.model.ClosedPositionRow;
 import com.mawai.wiibsim.campaign.model.ScoreItem;
-import com.mawai.wiibsim.campaign.model.SpotSymbolRow;
+import com.mawai.wiibsim.campaign.model.SpotOrderRow;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
@@ -15,17 +15,21 @@ import java.util.Set;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * 交易积分判分：计数（countPositions / countSpot）与按次数算分（toItems）合起来测。
+ * 交易积分判分：计数（countPositions / countSpotUnits）与按次数算分（toItems）合起来测。
  * 全部手搓数据，不起 Spring 不碰库。
  * <p>
  * 【重点在四处】① ROI 各档的保证金门槛用累计投入而非仓位表残值，而净盈亏任务<b>没有</b>这道门槛；
- * ② 一笔高 ROI 同时命中多档要独立累加；③ 三市通吃的三个桶来自 BinanceProperties 的两个配置列表；
+ * ② 占位制一仓只占一档、高档满了往下顺延，封神与三市桶独立共享不占名额；
+ * ③ 现货是已实现收益的高水位棘轮，只进不退、窗口外的时刻不取数；
  * ④ toItems 只认次数 —— 重置遗留合并进来的次数与现算的次数走同一条路，阶梯接着数、一次性档不复发。
  */
 class TradeScorerTest {
 
     private static final Set<String> COMMODITY = Set.of("XAUUSDT", "CLUSDT");
     private static final Set<String> TRADFI = Set.of("SNDKUSDT", "SOXLUSDT", "MUUSDT", "SPCXUSDT");
+
+    private static final LocalDateTime START = LocalDateTime.of(2026, 8, 1, 0, 0);
+    private static final LocalDateTime END = LocalDateTime.of(2026, 8, 15, 0, 0);
 
     private static ClosedPositionRow pos(String symbol, String margin, String pnl, int minuteOffset) {
         ClosedPositionRow r = new ClosedPositionRow();
@@ -56,79 +60,102 @@ class TradeScorerTest {
     void 保证金不足只计净盈亏不计ROI档() {
         List<ScoreItem> items = score(List.of(pos("BTCUSDT", "499", "5000", 1)));
 
-        assertThat(scoreOf(items, "ROI25")).isEqualByComparingTo("0");
-        assertThat(scoreOf(items, "ROI50")).isEqualByComparingTo("0");
-        assertThat(scoreOf(items, "GODLY")).isEqualByComparingTo("0");
+        assertThat(items).extracting(ScoreItem::code)
+                .doesNotContain("ROI20", "ROI40", "ROI60", "ROI100", "GODLY", "BUCKET_crypto");
         assertThat(scoreOf(items, "PNL_PROFIT")).isEqualByComparingTo("1");
     }
 
-    /** 边界：恰好 500 要算 */
+    /** 边界：恰好 500 要算。250/500 = 50% 落 [40,60) 档 +3，同时顶起三市的桶 */
     @Test
     void 保证金恰好五百算达标() {
-        assertThat(scoreOf(score(List.of(pos("BTCUSDT", "500", "250", 1))), "ROI50"))
-                .isEqualByComparingTo("5");
+        List<ScoreItem> items = score(List.of(pos("BTCUSDT", "500", "250", 1)));
+
+        assertThat(scoreOf(items, "ROI40")).isEqualByComparingTo("3");
+        assertThat(scoreOf(items, "BUCKET_crypto")).isEqualByComparingTo("0");
+        assertThat(items).extracting(ScoreItem::code).contains("BUCKET_crypto");
     }
 
-    /** ROI 恰好 50%（250/500）达标，49.8% 只够 25% 档 */
+    /** ROI 边界按大于等于判：19.9% 无档可进，恰好 20% 进 20 档，恰好 40% 进 40 档 */
     @Test
     void ROI边界按大于等于判() {
-        List<ScoreItem> under = score(List.of(pos("BTCUSDT", "500", "249", 1)));
-        assertThat(scoreOf(under, "ROI50")).isEqualByComparingTo("0");
-        assertThat(scoreOf(under, "ROI25")).isEqualByComparingTo("1");
+        assertThat(score(List.of(pos("BTCUSDT", "1000", "199", 1))))
+                .extracting(ScoreItem::code).doesNotContain("ROI20", "ROI40");
 
-        assertThat(scoreOf(score(List.of(pos("BTCUSDT", "500", "250", 1))), "ROI50"))
-                .isEqualByComparingTo("5");
+        List<ScoreItem> at20 = score(List.of(pos("BTCUSDT", "1000", "200", 1)));
+        assertThat(scoreOf(at20, "ROI20")).isEqualByComparingTo("1");
+        assertThat(scoreOf(at20, "ROI40")).isEqualByComparingTo("0");
+
+        List<ScoreItem> at40 = score(List.of(pos("BTCUSDT", "1000", "400", 1)));
+        assertThat(scoreOf(at40, "ROI40")).isEqualByComparingTo("3");
+        assertThat(scoreOf(at40, "ROI20")).isEqualByComparingTo("0");
     }
 
-    /**
-     * 一笔 350% 同时命中四档：1(25%档) + 5(50%档首笔) + 15(100%档首笔) + 20(封神) = 41。
-     * 各档独立判定，不是取最高那一档。
-     */
+    // ---- 占位制：一仓只占一档 ----
+
+    /** 一笔 350% 只占 100 档（+15），不再同时吃满四档；封神与桶独立共享，不占名额 */
     @Test
-    void 一笔高ROI各档独立累加() {
+    void 一仓只占一档封神与桶独立共享() {
         List<ScoreItem> items = score(List.of(pos("BTCUSDT", "1000", "3500", 1)));
 
-        assertThat(scoreOf(items, "ROI25")).isEqualByComparingTo("1");
-        assertThat(scoreOf(items, "ROI50")).isEqualByComparingTo("5");
         assertThat(scoreOf(items, "ROI100")).isEqualByComparingTo("15");
-        assertThat(scoreOf(items, "GODLY")).isEqualByComparingTo("20");
-    }
-
-    /** 阶梯只看总次数：7 笔 60% → 前 5 笔各 5、第 6/7 笔各 1 → 27 */
-    @Test
-    void 阶梯前五笔高分之后降档() {
-        List<ClosedPositionRow> rows = new ArrayList<>();
-        for (int i = 1; i <= 7; i++) rows.add(pos("BTCUSDT", "1000", "600", i));
-
-        assertThat(scoreOf(score(rows), "ROI50")).isEqualByComparingTo("27");
-    }
-
-    /** 封神只发一次：第二笔 300%+ 不再加分（但 50/100 两档照常降档累加） */
-    @Test
-    void 封神第二笔不再加分() {
-        List<ScoreItem> items = score(List.of(
-                pos("BTCUSDT", "1000", "4000", 1), pos("ETHUSDT", "1000", "4000", 2)));
-
-        assertThat(scoreOf(items, "GODLY")).isEqualByComparingTo("20");
-        assertThat(scoreOf(items, "ROI100")).isEqualByComparingTo("20");   // 15 + 5
-    }
-
-    // ---- ROI ≥ 25% 档 ----
-
-    /** 25% 档每笔 1 分、10 笔封顶：12 笔 30% 只拿 10 分，且够不着 50% 档 */
-    @Test
-    void ROI25档每笔一分十笔封顶() {
-        List<ClosedPositionRow> rows = new ArrayList<>();
-        for (int i = 1; i <= 12; i++) rows.add(pos("BTCUSDT", "1000", "300", i));
-        List<ScoreItem> items = score(rows);
-
-        assertThat(items).filteredOn(i -> i.code().equals("ROI25"))
+        assertThat(scoreOf(items, "ROI60")).isEqualByComparingTo("0");
+        assertThat(scoreOf(items, "ROI40")).isEqualByComparingTo("0");
+        assertThat(scoreOf(items, "ROI20")).isEqualByComparingTo("0");
+        assertThat(scoreOf(items, "GODLY")).isEqualByComparingTo("25");
+        assertThat(items).filteredOn(i -> i.code().equals("BUCKET_crypto"))
                 .singleElement()
                 .satisfies(i -> {
-                    assertThat(i.count()).isEqualTo(12);
-                    assertThat(i.score()).isEqualByComparingTo("10");
+                    assertThat(i.count()).isEqualTo(1);
+                    assertThat(i.score()).isEqualByComparingTo("0");
                 });
-        assertThat(scoreOf(items, "ROI50")).isEqualByComparingTo("0");
+    }
+
+    /** 拍板过的场景：第 1 笔 100% 占掉 100 档，第 2 笔 100% 顺延进 60 档拿 +5 */
+    @Test
+    void 第二笔百分百顺延进六十档() {
+        List<ScoreItem> items = score(List.of(
+                pos("BTCUSDT", "1000", "1000", 1), pos("ETHUSDT", "1000", "1000", 2)));
+
+        assertThat(scoreOf(items, "ROI100")).isEqualByComparingTo("15");
+        assertThat(scoreOf(items, "ROI60")).isEqualByComparingTo("5");
+        assertThat(scoreOf(items, "GODLY")).isEqualByComparingTo("0");
+    }
+
+    /** 40 档满 5 笔后溢出每笔 +1 无限：9 笔 45% → 5×3 + 4×1 */
+    @Test
+    void 四十档满后溢出每笔一分无限() {
+        List<ClosedPositionRow> rows = new ArrayList<>();
+        for (int i = 1; i <= 9; i++) rows.add(pos("BTCUSDT", "1000", "450", i));
+        List<ScoreItem> items = score(rows);
+
+        assertThat(items).filteredOn(i -> i.code().equals("ROI40"))
+                .singleElement()
+                .satisfies(i -> {
+                    assertThat(i.count()).isEqualTo(5);
+                    assertThat(i.score()).isEqualByComparingTo("15");
+                });
+        assertThat(items).filteredOn(i -> i.code().equals("ROI40_EXTRA"))
+                .singleElement()
+                .satisfies(i -> {
+                    assertThat(i.count()).isEqualTo(4);
+                    assertThat(i.score()).isEqualByComparingTo("4");
+                });
+    }
+
+    /** 20~40% 档 20 笔封顶后 0 分，count 报真实笔数；这些仓永远吃不到溢出 +1 */
+    @Test
+    void 低档二十笔封顶不吃溢出() {
+        List<ClosedPositionRow> rows = new ArrayList<>();
+        for (int i = 1; i <= 25; i++) rows.add(pos("BTCUSDT", "1000", "300", i));
+        List<ScoreItem> items = score(rows);
+
+        assertThat(items).filteredOn(i -> i.code().equals("ROI20"))
+                .singleElement()
+                .satisfies(i -> {
+                    assertThat(i.count()).isEqualTo(25);
+                    assertThat(i.score()).isEqualByComparingTo("20");
+                });
+        assertThat(items).extracting(ScoreItem::code).doesNotContain("ROI40", "ROI40_EXTRA");
     }
 
     // ---- 净盈亏任务 ----
@@ -143,9 +170,9 @@ class TradeScorerTest {
         assertThat(scoreOf(items, "PNL_LOSS")).isEqualByComparingTo("0");
     }
 
-    /** 净利润 25 仓封顶：30 仓大赚只拿 25 分，count 仍报 30 */
+    /** 净利润 20 仓封顶：30 仓大赚只拿 20 分，count 仍报 30 */
     @Test
-    void 净利润每仓一分二十五仓封顶() {
+    void 净利润每仓一分二十仓封顶() {
         List<ClosedPositionRow> rows = new ArrayList<>();
         for (int i = 1; i <= 30; i++) rows.add(pos("BTCUSDT", "100", "2000", i));
 
@@ -153,7 +180,7 @@ class TradeScorerTest {
                 .singleElement()
                 .satisfies(i -> {
                     assertThat(i.count()).isEqualTo(30);
-                    assertThat(i.score()).isEqualByComparingTo("25");
+                    assertThat(i.score()).isEqualByComparingTo("20");
                 });
     }
 
@@ -188,6 +215,39 @@ class TradeScorerTest {
         assertThat(scoreOf(score(three), "TRIPLE")).isEqualByComparingTo("15");
     }
 
+    /** 桶的门槛独立于阶梯保持 50%：三个市场各一笔 45% 能占 40 档名额，却顶不起任何一个桶 */
+    @Test
+    void 桶门槛五十独立于阶梯四十() {
+        List<ScoreItem> items = score(List.of(
+                pos("BTCUSDT", "1000", "450", 1),
+                pos("XAUUSDT", "1000", "450", 2),
+                pos("MUUSDT", "1000", "450", 3)));
+
+        assertThat(scoreOf(items, "ROI40")).isEqualByComparingTo("9");
+        assertThat(items).extracting(ScoreItem::code)
+                .doesNotContain("BUCKET_crypto", "BUCKET_commodity", "BUCKET_tradfi", "TRIPLE");
+    }
+
+    /** 桶达成状态单独下发（score 0），前端拿它打勾；没凑齐三个就没有 TRIPLE 行 */
+    @Test
+    void 桶达成状态单独下发用于打勾() {
+        List<ScoreItem> items = score(List.of(
+                pos("BTCUSDT", "1000", "600", 1),
+                pos("ETHUSDT", "1000", "600", 2),
+                pos("XAUUSDT", "1000", "500", 3)));
+
+        assertThat(items).filteredOn(i -> i.code().equals("BUCKET_crypto"))
+                .singleElement()
+                .satisfies(i -> {
+                    assertThat(i.count()).isEqualTo(2);
+                    assertThat(i.score()).isEqualByComparingTo("0");
+                });
+        assertThat(items).filteredOn(i -> i.code().equals("BUCKET_commodity"))
+                .singleElement()
+                .satisfies(i -> assertThat(i.count()).isEqualTo(1));
+        assertThat(items).extracting(ScoreItem::code).doesNotContain("BUCKET_tradfi", "TRIPLE");
+    }
+
     /** 三市通吃沿用同一门槛：保证金不够的那笔不能顶桶 */
     @Test
     void 三市通吃不认保证金不足的仓位() {
@@ -212,18 +272,20 @@ class TradeScorerTest {
 
     // ---- 重置遗留：toItems 只认次数，合并进来的与现算的走同一条路 ----
 
-    /** 遗留 5 笔 + 新 1 笔 = 第 6 笔，只拿 1 分 —— 高分位重置刷不回来 */
+    /** 遗留 + 新交易合并成 6 笔 ≥40%：40 档占满 5 笔 +15，第 6 笔进溢出 +1 —— 高分位重置刷不回来 */
     @Test
-    void 遗留次数并入后阶梯接着数() {
-        assertThat(scoreOf(TradeScorer.toItems(Map.of("ROI50", 6)), "ROI50"))
-                .isEqualByComparingTo("26");   // 5×5 + 1
+    void 遗留次数并入后占位接着排() {
+        List<ScoreItem> items = TradeScorer.toItems(Map.of("ROI20", 6, "ROI40", 6));
+
+        assertThat(scoreOf(items, "ROI40")).isEqualByComparingTo("15");
+        assertThat(scoreOf(items, "ROI40_EXTRA")).isEqualByComparingTo("1");
     }
 
-    /** 遗留里已封神，重置后再封神不发第二份 20 */
+    /** 遗留里已封神，重置后再封神不发第二份 25 */
     @Test
     void 遗留封神不复发() {
         assertThat(scoreOf(TradeScorer.toItems(Map.of("GODLY", 2)), "GODLY"))
-                .isEqualByComparingTo("20");
+                .isEqualByComparingTo("25");
     }
 
     /** 重置前凑了 2 个桶，重置后补上第 3 个 → 三市通吃照样成立 */
@@ -238,58 +300,89 @@ class TradeScorerTest {
                 .isEqualByComparingTo("0");
     }
 
-    // ---- 现货 ----
+    // ---- 现货：已实现收益的高水位棘轮 ----
 
-    private static SpotSymbolRow spot(String symbol, String buyWindow, String buyAll, String sellAll) {
-        SpotSymbolRow r = new SpotSymbolRow();
+    private static SpotOrderRow ord(String side, String amount, String fee, int minuteOffset) {
+        SpotOrderRow r = new SpotOrderRow();
         r.setUserId(1L);
-        r.setSymbol(symbol);
-        r.setBuyInWindow(new BigDecimal(buyWindow));
-        r.setBuyAll(new BigDecimal(buyAll));
-        r.setSellAll(new BigDecimal(sellAll));
+        r.setSymbol("BTCUSDT");
+        r.setOrderSide(side);
+        r.setFilledAmount(new BigDecimal(amount));
+        r.setCommission(new BigDecimal(fee));
+        r.setFilledAt(LocalDateTime.of(2026, 8, 3, 0, 0).plusMinutes(minuteOffset));
         return r;
     }
 
-    private static List<ScoreItem> scoreSpot(List<SpotSymbolRow> rows, Map<String, BigDecimal> held) {
-        return TradeScorer.toItems(Map.of("SPOT", TradeScorer.countSpot(rows, held)));
+    /** 活动窗口开始前的成交 */
+    private static SpotOrderRow ordJuly(String side, String amount, String fee, int minuteOffset) {
+        SpotOrderRow r = ord(side, amount, fee, minuteOffset);
+        r.setFilledAt(LocalDateTime.of(2026, 7, 1, 0, 0).plusMinutes(minuteOffset));
+        return r;
     }
 
-    /** 收益率 =（卖出 − 买入 + 在持市值）÷ 买入。买 1000 卖 500 还剩值 700 的货 → 20% */
-    @Test
-    void 现货收益率含在持市值() {
-        List<ScoreItem> items = scoreSpot(
-                List.of(spot("BTCUSDT", "1000", "1000", "500")),
-                Map.of("BTCUSDT", new BigDecimal("700")));
-
-        assertThat(scoreOf(items, "SPOT")).isEqualByComparingTo("5");
+    private static int units(List<SpotOrderRow> rows) {
+        return TradeScorer.countSpotUnits(rows, START, END);
     }
 
-    /** 不到 10% 不给分：买 1000 卖 500 只剩值 550 → 5% */
+    /** 验收例子：BTC 花 2000 卖回 2400（20% = 2 单位）+ 闪迪 1000 卖回 2000（100% = 10 单位）→ 3×5 + 9×1 = 24 */
     @Test
-    void 现货收益不足十个点不计分() {
-        assertThat(scoreSpot(
-                List.of(spot("BTCUSDT", "1000", "1000", "500")),
-                Map.of("BTCUSDT", new BigDecimal("550")))).isEmpty();
+    void 现货单位制验收例子() {
+        int btc = units(List.of(ord("BUY", "2000", "0", 1), ord("SELL", "2400", "0", 2)));
+        int sndkb = units(List.of(ord("BUY", "1000", "0", 3), ord("SELL", "2000", "0", 4)));
+
+        assertThat(btc).isEqualTo(2);
+        assertThat(sndkb).isEqualTo(10);
+        assertThat(scoreOf(TradeScorer.toItems(Map.of("SPOT", btc + sndkb)), "SPOT"))
+                .isEqualByComparingTo("24");
     }
 
-    /** 前 3 个标的各 5 分，第 4 个起各 1 分 */
+    /** 棘轮只进不退：摸到 10% 后加仓亏回去单位不回收；爬回 12.5% 不加，要摸到 20% 才有第 2 个 */
     @Test
-    void 现货前三个标的高分之后降档() {
-        List<SpotSymbolRow> rows = List.of(
-                spot("BTCUSDT", "5000", "1000", "1500"),
-                spot("ETHUSDT", "4000", "1000", "1500"),
-                spot("SOLUSDT", "3000", "1000", "1500"),
-                spot("XRPUSDT", "2000", "1000", "1500"));
-
-        // 5 + 5 + 5 + 1
-        assertThat(scoreOf(scoreSpot(rows, Map.of()), "SPOT")).isEqualByComparingTo("16");
+    void 现货高水位只进不退() {
+        assertThat(units(List.of(
+                ord("BUY", "1000", "0", 1),
+                ord("SELL", "1100", "0", 2),    // (1100-1000)/1000 = 10% → 1 单位
+                ord("BUY", "1000", "0", 3),     // (1100-2000)/2000 = -45%，不回收
+                ord("SELL", "1150", "0", 4),    // (2250-2000)/2000 = 12.5%，没到下一台阶
+                ord("SELL", "150", "0", 5))))   // (2400-2000)/2000 = 20% → 2 单位
+                .isEqualTo(2);
     }
 
-    /** 全卖光（在持为 0）也算数，不能因为查不到持仓就跳过 */
+    /** 手续费两头都算：买付 1010、卖净得 1188 → 17.6%，只算 1 个单位 */
     @Test
-    void 清仓标的照常算收益() {
-        assertThat(scoreOf(scoreSpot(
-                List.of(spot("BTCUSDT", "1000", "1000", "1200")), Map.of()), "SPOT"))
-                .isEqualByComparingTo("5");
+    void 现货收益率含手续费() {
+        assertThat(units(List.of(
+                ord("BUY", "1000", "10", 1),
+                ord("SELL", "1200", "12", 2))))
+                .isEqualTo(1);
+    }
+
+    /** 窗口外的时刻不取数：活动前摸到 50% 不算成绩，但那段成本一直沉在分母里 */
+    @Test
+    void 现货窗口外高水位不算() {
+        assertThat(units(List.of(
+                ordJuly("BUY", "1000", "0", 1),
+                ordJuly("SELL", "1500", "0", 2),   // 活动前就实现了 50%，不取数
+                ord("BUY", "1000", "0", 3))))      // 窗口内首个时刻：(1500-2000)/2000 = -25%
+                .isZero();
+    }
+
+    /** 亏损标的就是 0 个单位，不会出负数 */
+    @Test
+    void 现货亏损不出负单位() {
+        assertThat(units(List.of(ord("BUY", "1000", "0", 1), ord("SELL", "500", "0", 2))))
+                .isZero();
+    }
+
+    /** 单位阶梯封顶：26 个单位 = 3×5 + 20×1，第 24 个起 0 分，count 报真实单位数 */
+    @Test
+    void 现货单位阶梯限二十次加一() {
+        assertThat(TradeScorer.toItems(Map.of("SPOT", 26)))
+                .filteredOn(i -> i.code().equals("SPOT"))
+                .singleElement()
+                .satisfies(i -> {
+                    assertThat(i.count()).isEqualTo(26);
+                    assertThat(i.score()).isEqualByComparingTo("35");
+                });
     }
 }

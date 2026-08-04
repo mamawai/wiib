@@ -130,7 +130,7 @@ class CampaignScoreRealRunTest {
         List<CampaignScore> sample = List.of(
                 new CampaignScore(-1L, "真跑样本", true, 10, 6, new BigDecimal("3.50"), -5,
                         new BigDecimal("14.50"),
-                        List.of(ScoreItem.of("ROI50", "单仓位 ROI ≥ 50%", 2, 10),
+                        List.of(ScoreItem.of("ROI40", "单仓位 ROI ≥ 40%", 2, 10),
                                 ScoreItem.of("LIQ_TRIGGER", "触发强平", 1, -5),
                                 new ScoreItem("VOTE", "每日多空投票", 0, new BigDecimal("3.50")))),
                 new CampaignScore(-2L, "零分样本", true, 10, 0, BigDecimal.ZERO, -30,

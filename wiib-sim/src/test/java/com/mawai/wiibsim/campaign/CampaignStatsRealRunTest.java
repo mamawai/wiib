@@ -121,17 +121,16 @@ class CampaignStatsRealRunTest {
                 .noneMatch(id -> id.startsWith("internal:"));
     }
 
-    /** 九条 SQL 全都得能真发出去：注解 SQL 写错了只有跑起来才知道 */
+    /** 八条 SQL 全都得能真发出去：注解 SQL 写错了只有跑起来才知道 */
     @Test
     void 全部聚合查询都能执行() {
         assertThat(statsMapper.listClosedPositions(FROM, TO)).isNotNull();
-        assertThat(statsMapper.listSpotSymbols(FROM, TO, new BigDecimal("1000"))).isNotNull();
+        assertThat(statsMapper.listSpotOrders(FROM, TO, new BigDecimal("1000"))).isNotNull();
         assertThat(statsMapper.countPredictionHits(FROM, TO, ScoreRules.PREDICTION_MIN_COST)).isNotNull();
         assertThat(statsMapper.countStopLossTriggered(FROM, TO)).isNotNull();
         assertThat(statsMapper.countIsolatedLiquidations(FROM, TO)).isNotNull();
         assertThat(statsMapper.countCrossLiquidations(FROM, TO)).isNotNull();
         assertThat(statsMapper.listCommenters(FROM, TO)).isNotNull();
         assertThat(statsMapper.listEligibleUsers()).isNotNull();
-        assertThat(statsMapper.listHeldPositions()).isNotNull();
     }
 }

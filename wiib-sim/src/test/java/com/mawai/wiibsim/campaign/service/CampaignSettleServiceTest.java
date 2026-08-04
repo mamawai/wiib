@@ -367,8 +367,8 @@ class CampaignSettleServiceTest {
                 user(ACE, "ace"), user(MID, "mid")));
 
         when(tradeScorer.scoreAll(CAMPAIGN_ID, startAt, endAt)).thenReturn(Map.of(
-                ACE, List.of(ScoreItem.of("ROI50", "单仓位 ROI ≥ 50%", 3, 1000)),
-                LOW, List.of(ScoreItem.of("ROI50", "单仓位 ROI ≥ 50%", 3, 1000)),
+                ACE, List.of(ScoreItem.of("ROI40", "单仓位 ROI ≥ 40%", 3, 1000)),
+                LOW, List.of(ScoreItem.of("ROI40", "单仓位 ROI ≥ 40%", 3, 1000)),
                 ZERO, List.of(ScoreItem.of("RESET_EXTRA", "付费重置账户", 1, -30))));
 
         when(checkinService.scoreAll(any(Campaign.class))).thenReturn(Map.of(

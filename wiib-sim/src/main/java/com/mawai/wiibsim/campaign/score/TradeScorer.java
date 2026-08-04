@@ -1,12 +1,10 @@
 package com.mawai.wiibsim.campaign.score;
 
-import com.mawai.wiibcommon.cache.CacheService;
 import com.mawai.wiibcommon.config.BinanceProperties;
 import com.mawai.wiibsim.campaign.mapper.CampaignCarryoverMapper;
 import com.mawai.wiibsim.campaign.mapper.CampaignStatsMapper;
 import com.mawai.wiibsim.campaign.model.*;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
@@ -20,10 +18,12 @@ import java.util.stream.Collectors;
  * 交易任务与罚分。分两步：先把每个用户各积分项的<b>达成次数</b>数出来（countAll），
  * 再由次数算分（toItems）。
  * <p>
- * 【为什么是"次数制"而不是逐笔判分】所有阶梯的分值都只与"第几次"有关（见 ScoreRules 各 tier），
- * 所以次数就是充分统计量。这么拆的直接受益者是<b>重置遗留</b>：重置账户会删掉仓位/订单/预测注单，
+ * 【为什么是"次数制"而不是逐笔判分】所有任务的得分都能从达成<b>次数</b>直接算出：
+ * 普通阶梯只看"第几次"（ScoreRules 各 tier），ROI 占位制从四个阈值的累计笔数派生占位结果
+ * （ScoreRules.roiLadder），现货用流水重放出的单位数走 spotTier —— 次数就是充分统计量。
+ * 这么拆的直接受益者是<b>重置遗留</b>：重置账户会删掉仓位/订单/预测注单，
  * 重置事务里把 countAll 的结果累加进 campaign_carryover（只存次数），算分时同 code 相加、
- * 阶梯按合并后的总次数从头累加 —— 高分档接着数、一次性档天然封顶，一周重置两次也刷不出第二份。
+ * 按合并后的总次数从头重算 —— 高分档接着数、一次性档天然封顶，一周重置两次也刷不出第二份。
  * 快照与日常算分共用同一个 countAll，两边口径永远一致。
  * <p>
  * 【合约三分类为什么不复用 CategorySets】AssetSnapshotServiceImpl 那个是 private record，
@@ -32,14 +32,16 @@ import java.util.stream.Collectors;
  * BinanceProperties 的 commoditySymbols / tradfiSymbols 两个配置列表，
  * 读同一份配置不构成第二套口径，不会漂移。
  */
-@Slf4j
 @Component
 @RequiredArgsConstructor
 public class TradeScorer {
 
-    public static final String CODE_ROI25 = "ROI25";
-    public static final String CODE_ROI50 = "ROI50";
+    public static final String CODE_ROI20 = "ROI20";
+    public static final String CODE_ROI40 = "ROI40";
+    public static final String CODE_ROI60 = "ROI60";
     public static final String CODE_ROI100 = "ROI100";
+    /** ≥40% 配额外的无限 +1。纯展示用的明细 code：countAll 不产生它，toItems 从占位结果派生 */
+    public static final String CODE_ROI40_EXTRA = "ROI40_EXTRA";
     public static final String CODE_GODLY = "GODLY";
     public static final String CODE_SPOT = "SPOT";
     public static final String CODE_TRIPLE = "TRIPLE";
@@ -63,9 +65,14 @@ public class TradeScorer {
      */
     public static final String BUCKET_PREFIX = "BUCKET_";
 
+    /** 三市桶的展示文案，顺序固定。score 恒 0，只为前端把"哪个市场已拿下"打上勾 */
+    private static final List<Map.Entry<String, String>> MARKETS = List.of(
+            Map.entry("crypto", "三市 · 加密合约一笔 ROI ≥ 50%"),
+            Map.entry("commodity", "三市 · 黄金原油一笔 ROI ≥ 50%"),
+            Map.entry("tradfi", "三市 · 美股永续一笔 ROI ≥ 50%"));
+
     private final CampaignStatsMapper statsMapper;
     private final BinanceProperties binanceProperties;
-    private final CacheService cacheService;
     private final CampaignCarryoverMapper carryoverMapper;
 
     /**
@@ -75,8 +82,8 @@ public class TradeScorer {
     public Map<Long, List<ScoreItem>> scoreAll(Long campaignId, LocalDateTime start, LocalDateTime end) {
         Map<Long, Map<String, Integer>> counts = countAll(start, end);
 
-        // 重置遗留：同 code 次数相加。阶梯按合并后的总次数从头累加（ScoreRules.tierSum），
-        // 重置前占掉的高分位不会再吐出来
+        // 重置遗留：同 code 次数相加。阶梯与占位都按合并后的总次数从头重算
+        // （ScoreRules.tierSum / roiLadder），重置前占掉的高分位不会再吐出来
         for (CarryoverRow r : carryoverMapper.listByCampaign(campaignId)) {
             counts.computeIfAbsent(r.getUserId(), k -> new HashMap<>())
                     .merge(r.getCode(), r.getCnt(), Integer::sum);
@@ -116,12 +123,12 @@ public class TradeScorer {
                 .forEach((userId, rows) ->
                         countPositions(rows, commodity, tradfi).forEach((code, cnt) -> add(result, userId, code, cnt)));
 
-        // ---- 现货 ----
-        Map<Long, Map<String, BigDecimal>> heldValue = loadHeldValue();
-        statsMapper.listSpotSymbols(start, end, ScoreRules.SPOT_MIN_BUY).stream()
-                .collect(Collectors.groupingBy(SpotSymbolRow::getUserId, LinkedHashMap::new, Collectors.toList()))
-                .forEach((userId, rows) ->
-                        add(result, userId, CODE_SPOT, countSpot(rows, heldValue.getOrDefault(userId, Map.of()))));
+        // ---- 现货：按 (用户, 标的) 重放流水取高水位单位数，同一用户各标的单位加总进一条阶梯 ----
+        statsMapper.listSpotOrders(start, end, ScoreRules.SPOT_MIN_BUY).stream()
+                .collect(Collectors.groupingBy(SpotOrderRow::getUserId, LinkedHashMap::new,
+                        Collectors.groupingBy(SpotOrderRow::getSymbol, LinkedHashMap::new, Collectors.toList())))
+                .forEach((userId, bySymbol) -> add(result, userId, CODE_SPOT,
+                        bySymbol.values().stream().mapToInt(rows -> countSpotUnits(rows, start, end)).sum()));
 
         // ---- 预测 / 止损 / 逐仓罚 ----
         for (CountRow r : statsMapper.countPredictionHits(start, end, ScoreRules.PREDICTION_MIN_COST)) {
@@ -140,9 +147,13 @@ public class TradeScorer {
     /**
      * 一个用户的合约仓位计数。
      * <p>
-     * 净盈亏任务与 ROI 各档独立判：净盈亏<b>无保证金门槛</b>（1000 的绝对额本身就是门槛，
-     * 见 ScoreRules.PNL_MIN 注释），ROI 各档沿用累计投入 ≥ 500。
-     * 三档 ROI 独立判定：一笔 350% 且保证金达标的，25%、50%、100% 档、封神各计一次。
+     * 净盈亏任务与 ROI 阶梯独立判：净盈亏<b>无保证金门槛</b>（1000 的绝对额本身就是门槛，
+     * 见 ScoreRules.PNL_MIN 注释），ROI 阶梯沿用累计投入 ≥ 500。
+     * <p>
+     * 这里存的是各阈值的<b>累计</b>达标笔数（一笔 100% 的仓 ROI20/40/60/100 四个 code 都 +1），
+     * "每仓只占一档"的占位分派在 toItems 里由 ScoreRules.roiLadder 从累计数派生 ——
+     * 累计数才能与重置遗留同 code 相加，占位结果是算出来的、不是存出来的。
+     * 三市的桶（50%）与封神（300%）独立于占位制，各自照常计数。
      */
     static Map<String, Integer> countPositions(List<ClosedPositionRow> rows,
                                                Set<String> commodity, Set<String> tradfi) {
@@ -161,11 +172,12 @@ public class TradeScorer {
             // 过了上面那关就一定 investedMargin >= 500 > 0，roi() 只在 <= 0 时给 null，这里不会为空
             BigDecimal roi = r.roi();
 
-            if (roi.compareTo(ScoreRules.ROI_25) >= 0) inc(c, CODE_ROI25);
+            if (roi.compareTo(ScoreRules.ROI_20) >= 0) inc(c, CODE_ROI20);
+            if (roi.compareTo(ScoreRules.ROI_40) >= 0) inc(c, CODE_ROI40);
             if (roi.compareTo(ScoreRules.ROI_50) >= 0) {
-                inc(c, CODE_ROI50);
                 inc(c, BUCKET_PREFIX + classify(r.getSymbol(), commodity, tradfi));
             }
+            if (roi.compareTo(ScoreRules.ROI_60) >= 0) inc(c, CODE_ROI60);
             if (roi.compareTo(ScoreRules.ROI_100) >= 0) inc(c, CODE_ROI100);
             if (roi.compareTo(ScoreRules.ROI_300) >= 0) inc(c, CODE_GODLY);
         }
@@ -173,44 +185,84 @@ public class TradeScorer {
     }
 
     /**
-     * 一个用户达标现货标的个数。
+     * 一个 (用户, 标的) 的现货达标单位数：按成交时间重放全历史流水，每笔成交后算一次
+     * 已实现收益率 =（累计卖出净得 − 累计买入总付）÷ 累计买入总付（买卖均含手续费），
+     * 取<b>活动窗口内</b>的成交时刻里摸到过的最高台阶（每 10% 一档，向下取整）。
      * <p>
-     * 收益率 =（全历史卖出净得 − 全历史买入总付 + 当前在持市值）÷ 全历史买入总付。
-     * 单笔收益率能靠"只卖赚的、亏的扛着"造假，标的整体收益率造不了假。
+     * 【高水位只进不退】先摸到 10% 拿了分，之后加仓亏回去不回收；想再拿分要爬上下一个台阶。
+     * 正因为只算已实现、比率只在成交那一刻变化，高水位能从流水确定性重放出来，不用另存状态，
+     * 全量重算保持幂等。窗口外的时刻不取数：活动前的辉煌不算成绩，但它沉淀的成本一直在分母里。
+     * <p>
+     * 【分母是全历史买入总付】单笔收益率能靠"只卖赚的、亏的扛着"造假，全历史净现金流造不了假 ——
+     * 代价是想拿分基本要把这个标的卖干净（卖出净得超过总投入）。
      */
-    static int countSpot(List<SpotSymbolRow> rows, Map<String, BigDecimal> heldValue) {
-        int n = 0;
-        for (SpotSymbolRow r : rows) {
-            if (r.getBuyAll() == null || r.getBuyAll().signum() <= 0) continue;
-            BigDecimal held = heldValue.getOrDefault(r.getSymbol(), BigDecimal.ZERO);
-            BigDecimal ret = r.getSellAll().subtract(r.getBuyAll()).add(held)
-                    .divide(r.getBuyAll(), 6, RoundingMode.HALF_UP);
-            if (ret.compareTo(ScoreRules.SPOT_MIN_RETURN) >= 0) n++;
+    static int countSpotUnits(List<SpotOrderRow> rows, LocalDateTime start, LocalDateTime end) {
+        BigDecimal buy = BigDecimal.ZERO;
+        BigDecimal sell = BigDecimal.ZERO;
+        int units = 0;
+        for (SpotOrderRow r : rows) {
+            if ("BUY".equals(r.getOrderSide())) {
+                buy = buy.add(r.getFilledAmount()).add(r.getCommission());
+            } else {
+                sell = sell.add(r.getFilledAmount()).subtract(r.getCommission());
+            }
+            if (buy.signum() <= 0) continue;
+            if (r.getFilledAt().isBefore(start) || !r.getFilledAt().isBefore(end)) continue;
+
+            BigDecimal ratio = sell.subtract(buy).divide(buy, 6, RoundingMode.HALF_UP);
+            // 亏损时 FLOOR 出负台阶，被 max(units, ·) 天然压住 —— units 从 0 起步、只升不降
+            units = Math.max(units, ratio.divide(ScoreRules.SPOT_UNIT_STEP, 0, RoundingMode.FLOOR).intValue());
         }
-        return n;
+        return units;
     }
 
     /**
-     * 次数 → 明细。count 展示合并后的总次数（含重置遗留），score = 阶梯前 n 项之和。
+     * 次数 → 明细。count 展示合并后的总次数（含重置遗留），score = 该项累计得分。
      * <p>
-     * 一次性项的语义由各自的 tier 承担：封神 tierSum 到 2 还是 20 分；
+     * ROI 阶梯从累计达标笔数派生占位结果（ScoreRules.roiLadder），按档拆行下发：
+     * 100/60/40 三档的 count 是占掉的名额数，溢出行与 20~40% 行的 count 是真实笔数。
+     * 一次性项的语义由各自的 tier 承担：封神 tierSum 到 2 还是 25 分；
      * 止损英雄这里显式归一（count 恒 1）；三市通吃看 BUCKET_* 凑没凑齐三个。
      */
     static List<ScoreItem> toItems(Map<String, Integer> c) {
         List<ScoreItem> items = new ArrayList<>();
 
-        addTier(items, c, CODE_ROI25, "单仓位 ROI ≥ 25%（保证金 ≥ 500）", ScoreRules::roi25Tier);
-        addTier(items, c, CODE_ROI50, "单仓位 ROI ≥ 50%（保证金 ≥ 500）", ScoreRules::roi50Tier);
-        addTier(items, c, CODE_ROI100, "单仓位 ROI ≥ 100%（保证金 ≥ 500）", ScoreRules::roi100Tier);
+        ScoreRules.RoiLadder ladder = ScoreRules.roiLadder(
+                c.getOrDefault(CODE_ROI20, 0), c.getOrDefault(CODE_ROI40, 0),
+                c.getOrDefault(CODE_ROI60, 0), c.getOrDefault(CODE_ROI100, 0));
+        if (ladder.n100() > 0) {
+            items.add(ScoreItem.of(CODE_ROI100, "单仓位 ROI ≥ 100%（保证金 ≥ 500）",
+                    ladder.n100(), ladder.n100() * ScoreRules.LADDER_100_POINTS));
+        }
+        if (ladder.n60() > 0) {
+            items.add(ScoreItem.of(CODE_ROI60, "单仓位 ROI ≥ 60%（保证金 ≥ 500）",
+                    ladder.n60(), ladder.n60() * ScoreRules.LADDER_60_POINTS));
+        }
+        if (ladder.n40() > 0) {
+            items.add(ScoreItem.of(CODE_ROI40, "单仓位 ROI ≥ 40%（保证金 ≥ 500）",
+                    ladder.n40(), ladder.n40() * ScoreRules.LADDER_40_POINTS));
+        }
+        if (ladder.extra40() > 0) {
+            items.add(ScoreItem.of(CODE_ROI40_EXTRA, "ROI ≥ 40% 配额外加分", ladder.extra40(), ladder.extra40()));
+        }
+        if (ladder.band20() > 0) {
+            items.add(ScoreItem.of(CODE_ROI20, "单仓位 ROI 20% ~ 40%（保证金 ≥ 500）",
+                    ladder.band20(), Math.min(ladder.band20(), ScoreRules.LADDER_20_SLOTS)));
+        }
+
         addTier(items, c, CODE_GODLY, "单笔封神：ROI ≥ 300%", ScoreRules::godlyTier);
 
+        for (Map.Entry<String, String> m : MARKETS) {
+            int n = c.getOrDefault(BUCKET_PREFIX + m.getKey(), 0);
+            if (n > 0) items.add(ScoreItem.of(BUCKET_PREFIX + m.getKey(), m.getValue(), n, 0));
+        }
         long buckets = c.keySet().stream().filter(k -> k.startsWith(BUCKET_PREFIX)).count();
         if (buckets >= 3) {
             items.add(ScoreItem.of(CODE_TRIPLE, "三市通吃：加密合约 / 黄金原油 / 美股永续", 1,
                     ScoreRules.TRIPLE_MARKET));
         }
 
-        addTier(items, c, CODE_SPOT, "现货标的整体收益 ≥ 10%（活动期买入 ≥ 1000）", ScoreRules::spotTier);
+        addTier(items, c, CODE_SPOT, "现货达标单位：已实现收益每摸高 10% 记一个", ScoreRules::spotTier);
         addTier(items, c, CODE_PREDICTION, "预测市场持有到结算且猜中", ScoreRules::predictionTier);
 
         if (c.getOrDefault(CODE_STOP_LOSS, 0) > 0) {
@@ -247,33 +299,6 @@ public class TradeScorer {
         if (commodity.contains(symbol)) return "commodity";
         if (tradfi.contains(symbol)) return "tradfi";
         return "crypto";
-    }
-
-    /**
-     * userId → (symbol → 在持市值)。缺价的标的按 0 计，不整仓丢弃。
-     * <p>
-     * 【缺价要留痕】按 0 计会压低该标的的整体收益率，能把一个本该达标的现货任务压到不达标 ——
-     * 那是真金白银的 LDC 差额。逐条 debug 太细看不见，故末尾按标的数汇总 warn 一条，
-     * 运营看日志能立刻知道"这轮有几个标的是瞎算的"。
-     */
-    private Map<Long, Map<String, BigDecimal>> loadHeldValue() {
-        Map<Long, Map<String, BigDecimal>> out = new HashMap<>();
-        Set<String> missingPrice = new HashSet<>();
-        for (HeldPositionRow h : statsMapper.listHeldPositions()) {
-            BigDecimal price = cacheService.getCryptoPrice(h.getSymbol());
-            if (price == null) {
-                log.debug("活动积分：{} 缺现价，在持市值按 0 计", h.getSymbol());
-                missingPrice.add(h.getSymbol());
-                continue;
-            }
-            out.computeIfAbsent(h.getUserId(), k -> new HashMap<>())
-                    .merge(h.getSymbol(), price.multiply(h.getQty()), BigDecimal::add);
-        }
-        if (!missingPrice.isEmpty()) {
-            log.warn("活动积分：{} 个标的缺现价，在持市值按 0 计，现货任务可能被低估：{}",
-                    missingPrice.size(), missingPrice);
-        }
-        return out;
     }
 
     private static void inc(Map<String, Integer> c, String code) {

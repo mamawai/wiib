@@ -58,12 +58,12 @@ class CampaignCarryoverServiceTest {
     void 只固化本人的次数() {
         when(campaignService.current()).thenReturn(campaign());
         when(tradeScorer.countAll(START, END)).thenReturn(Map.of(
-                1L, Map.of("ROI50", 2, "PNL_LOSS", 1),
-                2L, Map.of("ROI50", 9)));
+                1L, Map.of("ROI40", 2, "PNL_LOSS", 1),
+                2L, Map.of("ROI40", 9)));
 
         service.carryOver(1L);
 
-        verify(carryoverMapper).upsertAdd(CAMPAIGN_ID, 1L, "ROI50", 2);
+        verify(carryoverMapper).upsertAdd(CAMPAIGN_ID, 1L, "ROI40", 2);
         verify(carryoverMapper).upsertAdd(CAMPAIGN_ID, 1L, "PNL_LOSS", 1);
         verifyNoMoreInteractions(carryoverMapper);
     }
@@ -72,7 +72,7 @@ class CampaignCarryoverServiceTest {
     void 没有任何次数的用户不写行() {
         when(campaignService.current()).thenReturn(campaign());
         when(tradeScorer.countAll(START, END)).thenReturn(Map.of(
-                2L, Map.of("ROI50", 9)));
+                2L, Map.of("ROI40", 9)));
 
         service.carryOver(1L);
 

@@ -27,25 +27,37 @@ interface TaskDef {
   label: string;
   hint: string;
   group: TaskGroup;
+  /** 子任务行，缩进渲染（三市通吃的三个市场桶） */
+  sub?: boolean;
+  /** 纯状态行（后端 score 恒 0，只为打勾），分值列恒显示 — */
+  noScore?: boolean;
 }
 
 /**
  * 任务全集。后端 items 里只有已达成的条目，光渲染它的话新人进来是一片空白，
  * 「再做一个任务能多拿多少」这件事就无从谈起 —— 阶梯的推力全靠这份清单撑着。
- * 分值文案出自设计文档 §2（与 ScoreRules 同源），改规则时两边一起改。
+ * 分值文案与 ScoreRules / TradeScorer.toItems 同源，改规则时两边一起改。
+ * <p>
+ * ROI 五行是占位制阶梯：每笔达标仓位只计入"还有名额的最高档"，高档满了往下顺延，
+ * 顺序排成 100 → 60 → 40 → 配额外 → 20~40，读下来就是顺延的方向。
  */
 const TASKS: TaskDef[] = [
-  { code: 'ROI25', label: '单仓位 ROI ≥ 25%', hint: '保证金 ≥ 500；每笔 +1，限 10 笔', group: '交易' },
-  { code: 'ROI50', label: '单仓位 ROI ≥ 50%', hint: '保证金 ≥ 500；前 5 笔各 +5，之后各 +1', group: '交易' },
-  { code: 'ROI100', label: '单仓位 ROI ≥ 100%', hint: '保证金 ≥ 500；首笔 +15，第 2-3 笔各 +5，之后各 +1', group: '交易' },
-  { code: 'GODLY', label: '单笔封神：ROI ≥ 300%', hint: '保证金 ≥ 500；一次性 +20', group: '交易' },
-  { code: 'SPOT', label: '现货标的整体收益 ≥ 10%', hint: '按币种累计（不限单笔）：活动期买入 ≥ 1000；前 3 个达标标的各 +5，之后各 +1', group: '交易' },
-  { code: 'PREDICTION', label: '预测市场持有到结算且猜中', hint: '单次额度 ≥ 100；前 3 次各 +5，第 4-10 次各 +1，之后不加分', group: '交易' },
-  { code: 'TRIPLE', label: '三市通吃', hint: '加密合约 / 黄金原油 / 美股永续 各拿下一笔 ROI ≥ 50%；一次性 +15', group: '交易' },
+  { code: 'ROI100', label: '单仓位 ROI ≥ 100%', hint: '保证金 ≥ 500；限 1 笔 +15。占位制：每笔仓位只计入还有名额的最高档', group: '交易' },
+  { code: 'ROI60', label: '单仓位 ROI ≥ 60%', hint: '保证金 ≥ 500；限 3 笔各 +5；100% 档满后的仓位顺延到这里', group: '交易' },
+  { code: 'ROI40', label: '单仓位 ROI ≥ 40%', hint: '保证金 ≥ 500；限 5 笔各 +3；高档满后的仓位顺延到这里', group: '交易' },
+  { code: 'ROI40_EXTRA', label: 'ROI ≥ 40% 配额外', hint: '上面三档名额全部占满后，之后每笔 ROI ≥ 40% 再 +1，不限次数（全场唯一无限项）', group: '交易' },
+  { code: 'ROI20', label: '单仓位 ROI 20% ~ 40%', hint: '保证金 ≥ 500；每笔 +1，限 20 笔；只收 20%~40% 区间的仓位，≥ 40% 的走上面的档', group: '交易' },
+  { code: 'GODLY', label: '单笔封神：ROI ≥ 300%', hint: '保证金 ≥ 500；一次性 +25，不占阶梯名额', group: '交易' },
+  { code: 'TRIPLE', label: '三市通吃', hint: '下面三个市场各拿下一笔 ROI ≥ 50%（保证金 ≥ 500）；集齐一次性 +15', group: '交易' },
+  { code: 'BUCKET_crypto', label: '三市 · 加密合约一笔 ROI ≥ 50%', hint: 'BTC / ETH / DOGE / SOL / XRP / BNB 合约', group: '交易', sub: true, noScore: true },
+  { code: 'BUCKET_commodity', label: '三市 · 黄金原油一笔 ROI ≥ 50%', hint: 'XAU 黄金 / CL 原油永续', group: '交易', sub: true, noScore: true },
+  { code: 'BUCKET_tradfi', label: '三市 · 美股永续一笔 ROI ≥ 50%', hint: 'SNDK 闪迪 / MU 美光 / SOXL / SKHYNIX 海力士 / KORU / SPCX 永续', group: '交易', sub: true, noScore: true },
+  { code: 'SPOT', label: '现货达标单位：已实现收益每摸高 10% 记一个', hint: '按标的：活动期买入 ≥ 1000；卖出落袋才算、买卖都含手续费；前 3 个单位各 +5，之后各 +1（限 20 次）；只进不退，细则见下方', group: '交易' },
+  { code: 'PREDICTION', label: '预测市场持有到结算且猜中', hint: '单次额度 ≥ 100；前 3 次各 +3，第 4-10 次各 +1，之后不加分', group: '交易' },
   { code: 'STOP_LOSS_HERO', label: '止损英雄', hint: '挂过止损并被触发；一次性 +3', group: '交易' },
-  { code: 'PNL_PROFIT', label: '单仓位净利润 > 1000', hint: '无保证金门槛；每仓 +1，限 25 仓', group: '交易' },
+  { code: 'PNL_PROFIT', label: '单仓位净利润 > 1000', hint: '无保证金门槛；每仓 +1，限 20 仓', group: '交易' },
   { code: 'CHECKIN', label: '每日签到', hint: '每天 +1', group: '日常' },
-  { code: 'STREAK', label: '连续签到 3 / 7 / 14 天', hint: '+5 / +15 / +40 累进，断签重计', group: '日常' },
+  { code: 'STREAK', label: '连续签到 3 / 7 / 14 天', hint: '+3 / +5 / +10 累进，断签重计', group: '日常' },
   { code: 'FIRST_COMMENT', label: '首次评论', hint: '一次性 +1', group: '日常' },
   { code: 'VOTE', label: '每日多空投票', hint: '每天 100 分池按当日正确票数均分，单人单日封顶 6 分', group: '投票' },
   { code: 'PNL_LOSS', label: '单仓位净亏损 > 1000', hint: '无保证金门槛；每仓 −2，不限次数', group: '罚分' },
@@ -69,7 +81,13 @@ function TaskRow({ def, item }: { def: TaskDef; item: CampaignScoreItem | null }
   const done = item != null;
   const negative = (item?.score ?? 0) < 0;
   return (
-    <div className="flex items-center gap-3 px-4 py-2.5 border-b border-border/25 last:border-b-0">
+    <div
+      className={cn(
+        'flex items-center gap-3 px-4 py-2.5 border-b border-border/25 last:border-b-0',
+        // 子任务行缩进 + 压暗底色：一眼看出是上一行（三市通吃）的组成部分
+        def.sub && 'pl-10 bg-card-2/40',
+      )}
+    >
       <span
         className={cn(
           'w-4 h-4 shrink-0 rounded-full border flex items-center justify-center',
@@ -98,10 +116,11 @@ function TaskRow({ def, item }: { def: TaskDef; item: CampaignScoreItem | null }
       <span
         className={cn(
           'num text-[13px] font-bold tabular-nums w-14 text-right shrink-0',
-          !done ? 'text-muted-foreground/50' : negative ? 'text-loss' : 'text-gain',
+          // 纯状态行（三个市场桶）没有分值可言，达成与否都显示 —，勾和 ×n 已经把话说完了
+          !done || def.noScore ? 'text-muted-foreground/50' : negative ? 'text-loss' : 'text-gain',
         )}
       >
-        {done ? `${item.score > 0 ? '+' : ''}${fmtScore(item.score)}` : '—'}
+        {done && !def.noScore ? `${item.score > 0 ? '+' : ''}${fmtScore(item.score)}` : '—'}
       </span>
     </div>
   );
@@ -604,7 +623,7 @@ export function Campaign() {
                   {view.checkedToday ? '今日已签到' : '签到 +1'}
                 </Button>
                 <p className="text-[10px] text-muted-foreground leading-relaxed">
-                  每天 +1，连签 3 / 7 / 14 天再累进拿 +5 / +15 / +40。断签重新计连续天数。
+                  每天 +1，连签 3 / 7 / 14 天再累进拿 +3 / +5 / +10。断签重新计连续天数。
                 </p>
               </CardContent>
             </Card>
@@ -669,11 +688,12 @@ export function Campaign() {
             </CardContent>
           </Card>
 
-          {/* ===== 计分细则：两个收益率的口径 ===== */}
+          {/* ===== 计分细则：占位制 + 两个收益率的口径 ===== */}
           {/* 文案与后端同源：合约 = CampaignStatsMapper.listClosedPositions（与仓位历史页同口径），
-              现货 = TradeScorer.scoreSpot。改口径时两边一起改，别让页面变成过期承诺 */}
+              占位 = ScoreRules.roiLadder，现货 = TradeScorer.countSpotUnits。
+              改口径时两边一起改，别让页面变成过期承诺 */}
           <Card>
-            <CardHeader className="pb-3"><CardTitle>收益率怎么算</CardTitle></CardHeader>
+            <CardHeader className="pb-3"><CardTitle>规则怎么算</CardTitle></CardHeader>
             <CardContent className="pb-4 space-y-4 text-[11px] leading-relaxed text-muted-foreground">
               <div className="space-y-1.5">
                 <div className="microlabel font-bold text-foreground">合约仓位 ROI</div>
@@ -690,33 +710,57 @@ export function Campaign() {
                   持仓浮盈不算；部分平仓的每一段都记在整个仓位的账上，等最后一段平掉一起算。
                   计入哪一天看完全平掉的时刻 —— 活动开始前就开着的老仓位，活动期内平掉照样算。
                 </p>
+                <p>
+                  <strong className="font-bold text-foreground">占位制：每笔仓位只计入一个档位。</strong>
+                  按平仓先后落进"还有名额的最高档"：100% 档（1 笔）满了落 60% 档（3 笔），
+                  再满落 40% 档（5 笔），三档全满后每笔 ≥ 40% 的仓 +1、不限次数。
+                  20%~40% 区间的仓只进自己那档（20 笔），不占高档名额也不参与无限 +1。
+                  单笔封神（≥ 300%，+25）与三市通吃（≥ 50% 点亮市场）独立判定，同一笔仓可以叠着算。
+                </p>
                 <p className="text-foreground/80">
                   例：投入保证金 600 开多 BTC，先平一半赚 200，再全平赚 150，开平手续费共 20，资金费付 10
                   → 净盈亏 = 200 + 150 − 20 − 10 = 320，ROI = 320 ÷ 600 ≈ 53.3%
-                  → 保证金门槛（600 ≥ 500）与「ROI ≥ 50%」档双双达标。
+                  → 落进「ROI ≥ 40%」档拿 +3（60% 档还够不着），同时点亮三市通吃的加密合约桶（≥ 50%）。
                 </p>
               </div>
               <div className="space-y-1.5">
-                <div className="microlabel font-bold text-foreground">现货标的整体收益率</div>
+                <div className="microlabel font-bold text-foreground">现货达标单位（已实现收益）</div>
                 <div className="num rounded-md bg-card-2 px-2.5 py-1.5 text-foreground">
-                  收益率 = (卖出净得 − 买入总付 + 在持市值) ÷ 买入总付
+                  已实现收益率 = (累计卖出净得 − 累计买入总付) ÷ 累计买入总付
                 </div>
                 <p>
                   现货没有仓位概念，按<strong className="font-bold text-foreground">标的</strong>算：
                   「活动期内累计买入 ≥ 1000」是该标的活动期内所有买单的累计，
-                  <strong className="font-bold text-foreground">不要求单笔 ≥ 1000</strong>；
-                  收益率则按该标的<strong className="font-bold text-foreground">全部历史</strong>逐项累计 ——
-                  买入总付含手续费、卖出净得已扣手续费、没卖的部分按当前价折成市值。每个达标标的只计一次。
+                  <strong className="font-bold text-foreground">不要求单笔 ≥ 1000</strong>。
+                  收益率<strong className="font-bold text-foreground">只算卖出落袋的部分</strong>：
+                  买入总付 = 实际掏出的现金（币值 + 手续费），卖出净得 = 实际到手的现金（已扣手续费），
+                  现货手续费买卖各 0.1%，还拿在手里的持仓不折算 ——
+                  分母是该标的全部历史买入总付，所以想拿分基本要把这个标的卖干净（卖出净得超过总投入）。
+                </p>
+                <p>
+                  <strong className="font-bold text-foreground">台阶制，只进不退：</strong>
+                  已实现收益率每摸到一个 10% 的整数倍（10%、20%、30%……）记一个达标单位；
+                  拿到的单位不因之后回落收回，想再拿要爬上下一个台阶（摸过 10% 后跌回 5%，
+                  回到 15% 不加，摸到 20% 才有第 2 个）。所有标的的单位进同一条阶梯：
+                  前 3 个各 +5，之后各 +1（限 20 次，第 24 个单位起不加分）。
                 </p>
                 <p>
                   用折扣券的买单按<strong className="font-bold text-foreground">折后实付</strong>记账，两头一致：
                   省下的钱做低了成本、会抬高收益率；但门槛进度同样按实付累计，
                   九五折买 800 只按 760 计入「≥ 1000」，所以还需要买入 240。
                 </p>
+                <p>
+                  参与标的 = 全部现货：加密现货
+                  <span className="num"> BTC / ETH / DOGE / SOL / XRP / BNB</span>，
+                  以及全部 bStock 代币化美股
+                  <span className="num"> SNDKB 闪迪 / MUB 美光 / NVDAB 英伟达 / AMDB / TSLAB 特斯拉 /
+                  MSTRB 微策略 / CRCLB Circle / QQQB 纳指 / SOXLB 半导体 / SPCXB SpaceX</span>。
+                </p>
                 <p className="text-foreground/80">
-                  例：BTC 现货历史累计买入花 2000（含手续费），累计卖出到手 1500，在持部分按现价值 750
-                  → (1500 − 2000 + 750) ÷ 2000 = 12.5% ≥ 10% 达标；
-                  若活动期内该标的买入不足 1000，则不参与判定。
+                  例：BTC 现货掏出共 2002（币值 2000 + 0.1% 手续费 2），全部卖出到手 2402.40（卖得 2404.80 − 0.1% 手续费 2.40）
+                  → (2402.40 − 2002) ÷ 2002 = 20% = 2 个单位，各 +5 拿 +10；
+                  又掏 1001 买闪迪 bStock（币值 1000 + 手续费 1），全部卖出到手 2002（卖得 2004 − 手续费 2）
+                  → 100% = 10 个单位，第 1 个占掉最后一个 +5 名额、其余 9 个各 +1 → 两个标的合计 +24。
                 </p>
               </div>
               <p>

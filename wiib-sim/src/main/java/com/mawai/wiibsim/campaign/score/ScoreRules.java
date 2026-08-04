@@ -14,8 +14,9 @@ import java.util.function.IntUnaryOperator;
 /**
  * 活动计分的全部阈值、阶梯与分配算法。无依赖纯函数，改规则只改这一个文件。
  * <p>
- * 【阶梯为什么必要】ROI≥100% 那档在 100x 杠杆下价格动 1% 就达标，不递减会成为主刷分渠道；
- * ROI≥50% 同理。达标制的意义在于赚 5% 和赚 500% 拿一样的分，梭哈换不来超额收益。
+ * 【ROI 阶梯是占位制】每仓只占"还有名额的最高档"，高档满了往下顺延（见 {@link #roiLadder}）。
+ * 各档独立判的话，100x 杠杆下价格动 1% 的一笔仓能同时吃满全部档位；
+ * 占位制下它只占走一个名额，高分得靠多笔不同的仓去凑，梭哈换不来超额收益。
  */
 public final class ScoreRules {
 
@@ -26,8 +27,11 @@ public final class ScoreRules {
 
     /** 仓位任务的保证金门槛，判的是累计投入（订单侧 invested_margin），不是仓位表的残值 margin */
     public static final BigDecimal MIN_MARGIN = new BigDecimal("500");
-    public static final BigDecimal ROI_25 = new BigDecimal("0.25");
+    public static final BigDecimal ROI_20 = new BigDecimal("0.20");
+    public static final BigDecimal ROI_40 = new BigDecimal("0.40");
+    /** 只给三市通吃的桶用：桶的门槛独立于占位制阶梯，保持 50% */
     public static final BigDecimal ROI_50 = new BigDecimal("0.50");
+    public static final BigDecimal ROI_60 = new BigDecimal("0.60");
     public static final BigDecimal ROI_100 = new BigDecimal("1.00");
     public static final BigDecimal ROI_300 = new BigDecimal("3.00");
 
@@ -40,8 +44,8 @@ public final class ScoreRules {
 
     /** 现货：活动期内该标的累计买入门槛 */
     public static final BigDecimal SPOT_MIN_BUY = new BigDecimal("1000");
-    /** 现货：该标的整体收益率门槛（全历史净现金流口径） */
-    public static final BigDecimal SPOT_MIN_RETURN = new BigDecimal("0.10");
+    /** 现货：达标单位的台阶宽度 —— 标的已实现收益率每摸到一个 10% 的整数倍记一个单位 */
+    public static final BigDecimal SPOT_UNIT_STEP = new BigDecimal("0.10");
 
     /** 预测市场：单次额度门槛（结算时刻的 cost） */
     public static final BigDecimal PREDICTION_MIN_COST = new BigDecimal("100");
@@ -71,46 +75,74 @@ public final class ScoreRules {
      */
     public static final BigDecimal VOTE_DAILY_CAP = new BigDecimal("6");
 
-    // ==================== 阶梯（n 从 1 起） ====================
+    // ==================== ROI 占位制阶梯 ====================
 
-    /** ROI≥25%：每笔 1 分，10 笔封顶 */
-    public static int roi25Tier(int n) {
-        return n <= 10 ? 1 : 0;
-    }
+    /** 各档名额。20~40% 档满了就是 0 分；≥40% 配额外的溢出每笔 1 分、无上限（全场唯一无限项） */
+    public static final int LADDER_100_SLOTS = 1;
+    public static final int LADDER_60_SLOTS = 3;
+    public static final int LADDER_40_SLOTS = 5;
+    public static final int LADDER_20_SLOTS = 20;
 
-    /** ROI≥50%：前 5 笔各 5 分，之后各 1 分 */
-    public static int roi50Tier(int n) {
-        return n <= 5 ? 5 : 1;
-    }
+    /** 各档单笔分值（≥40% 溢出与 20~40% 档都是每笔 1 分，不设常量） */
+    public static final int LADDER_100_POINTS = 15;
+    public static final int LADDER_60_POINTS = 5;
+    public static final int LADDER_40_POINTS = 3;
 
-    /** ROI≥100%：首笔 15，第 2-3 笔各 5，之后各 1 */
-    public static int roi100Tier(int n) {
-        if (n == 1) return 15;
-        return n <= 3 ? 5 : 1;
-    }
-
-    /** 单笔封神 ROI≥300%：一次性，第 2 笔起 0 分（不是降到 1 分） */
-    public static int godlyTier(int n) {
-        return n == 1 ? 20 : 0;
-    }
-
-    /** 现货达标标的：前 3 个各 5 分，之后各 1 分 */
-    public static int spotTier(int n) {
-        return n <= 3 ? 5 : 1;
+    /**
+     * 占位结果：n100/n60/n40 是各档实际占掉的名额数，extra40 是 ≥40% 配额外的溢出笔数（每笔 1 分），
+     * band20 是 20%~40% 区间的达标笔数 —— 不封顶（展示要报真实笔数），计分时超出名额的部分为 0。
+     */
+    public record RoiLadder(int n100, int n60, int n40, int extra40, int band20) {
     }
 
     /**
-     * 预测市场中奖：前 3 次各 5 分，第 4-10 次各 1 分，之后 0 分。
+     * ROI 占位制：每仓只占"还有名额的最高档"，高档满了往下顺延；≥40% 的仓在配额外每笔 +1 无限。
+     * <p>
+     * 入参是四个阈值的<b>累计</b>达标笔数（≥20% / ≥40% / ≥60% / ≥100%，一笔 100% 的仓四个都 +1）。
+     * 资格是嵌套的（≥100% 必然 ≥60%/≥40%），"按平仓时间贪心占最高档"的结果因此只由笔数决定、
+     * 与顺序无关 —— 占位制照样是纯次数函数，重置遗留合并次数后从头重算即可，这是它能落地的关键。
+     * <p>
+     * 20%~40% 区间的仓只进自己那档（{@link #LADDER_20_SLOTS} 笔封顶），
+     * 不与 ≥40% 的仓抢名额，也吃不到无限 +1。
+     */
+    public static RoiLadder roiLadder(int c20, int c40, int c60, int c100) {
+        int n100 = Math.min(c100, LADDER_100_SLOTS);
+
+        // 100 档占不上的 ≥100% 仓落进 60 档的池子，60 档占不上的再落 40 档，依次类推
+        int pool60 = (c100 - n100) + (c60 - c100);
+        int n60 = Math.min(pool60, LADDER_60_SLOTS);
+
+        int pool40 = (pool60 - n60) + (c40 - c60);
+        int n40 = Math.min(pool40, LADDER_40_SLOTS);
+
+        return new RoiLadder(n100, n60, n40, pool40 - n40, c20 - c40);
+    }
+
+    // ==================== 阶梯（n 从 1 起） ====================
+
+    /** 单笔封神 ROI≥300%：一次性 25 分，第 2 笔起 0 分（不是降到 1 分）。独立于占位制，不占名额 */
+    public static int godlyTier(int n) {
+        return n == 1 ? 25 : 0;
+    }
+
+    /** 现货达标单位（已实现收益率每摸到一个 10% 台阶记一个）：前 3 个各 5 分，之后各 1 分、限 20 次 */
+    public static int spotTier(int n) {
+        if (n <= 3) return 5;
+        return n <= 23 ? 1 : 0;
+    }
+
+    /**
+     * 预测市场中奖：前 3 次各 3 分，第 4-10 次各 1 分，之后 0 分。
      * 每次中奖分值只与"第几次"有关，所以只要中奖次数就能算总分，SQL 侧 COUNT 即可。
      */
     public static int predictionTier(int n) {
-        if (n <= 3) return 5;
+        if (n <= 3) return 3;
         return n <= 10 ? 1 : 0;
     }
 
-    /** 单仓位净利润 > 1000：每仓 1 分，25 仓封顶（防大本金无限刷） */
+    /** 单仓位净利润 > 1000：每仓 1 分，20 仓封顶（防大本金无限刷） */
     public static int pnlProfitTier(int n) {
-        return n <= 25 ? 1 : 0;
+        return n <= 20 ? 1 : 0;
     }
 
     /**
@@ -127,16 +159,16 @@ public final class ScoreRules {
     // ==================== 连续签到 ====================
 
     /**
-     * 连续签到奖励，累进：连满 14 天 = 5+15+40 = 60。
+     * 连续签到奖励，累进：连满 14 天 = 3+5+10 = 18。
      * <p>
      * 参数是<b>最长连续段</b>而非总签到天数，且各档只发一次 —— 若按段累加，
-     * "签3天歇1天"能拿两个 +5，比老老实实连签 6 天(+5)还多，时间这个压缩不了的资源就被绕过了。
+     * "签3天歇1天"能拿两个 +3，比老老实实连签 6 天(+3)还多，时间这个压缩不了的资源就被绕过了。
      */
     public static int streakBonus(int longestStreak) {
         int bonus = 0;
-        if (longestStreak >= 3) bonus += 5;
-        if (longestStreak >= 7) bonus += 15;
-        if (longestStreak >= 14) bonus += 40;
+        if (longestStreak >= 3) bonus += 3;
+        if (longestStreak >= 7) bonus += 5;
+        if (longestStreak >= 14) bonus += 10;
         return bonus;
     }
 
