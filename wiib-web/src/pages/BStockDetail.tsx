@@ -11,6 +11,7 @@ import { Skeleton } from '../components/ui/skeleton';
 import { CandleChart } from '../components/CandleChart';
 import { FuturesActionButton } from '../components/FuturesActionButton';
 import { useQuantityAnimation } from '../components/coin/useQuantityAnimation';
+import { floorToStep } from '../components/coin/futuresMath';
 import { cn, fmtNum } from '../lib/utils';
 import { ChevronLeft, Wallet, Globe, Landmark } from 'lucide-react';
 import type { BStock, CryptoPosition } from '../types';
@@ -49,6 +50,8 @@ function BStockDetail({ symbol }: { symbol: string }) {
   const [chartTab, setChartTab] = useState(0);
   const [side, setSide] = useState<'BUY' | 'SELL'>('BUY');
   const [qty, setQty] = useState('');
+  // 买入输入单位：股数 / USDT 预算。USDT 指"含手续费的现金占用"（用杠杆时即保证金+手续费）
+  const [buyUnit, setBuyUnit] = useState<'SHARE' | 'USDT'>('SHARE');
   const [leverage, setLeverage] = useState(1);
   const [submitting, setSubmitting] = useState(false);
   const [actionSuccess, setActionSuccess] = useState(false);
@@ -72,7 +75,15 @@ function BStockDetail({ symbol }: { symbol: string }) {
     return () => window.clearTimeout(timer);
   }, [actionSuccess]);
 
-  const qtyNum = parseFloat(qty) || 0;
+  // USDT 预算 ↔ 股数换算：买入现金占用 = 数量 × 价格 × (1/杠杆 + 手续费率)，
+  // 与下面 marginCost 的算式同源（bstock 输入的是总股数，保证金=成交额/杠杆、手续费按全额算）。
+  // 换算出的股数按 QTY_STEP 向下取整，预估与提交用同一个数，界面不骗人
+  const isUsdtInput = side === 'BUY' && buyUnit === 'USDT';
+  const unitFactor = livePrice * (1 / (side === 'BUY' ? leverage : 1) + COMMISSION_RATE);
+  const inputNum = parseFloat(qty) || 0;
+  const qtyNum = isUsdtInput
+    ? (unitFactor > 0 ? floorToStep(inputNum / unitFactor, QTY_STEP) : 0)
+    : inputNum;
   const amount = qtyNum * livePrice;
   const commission = amount * COMMISSION_RATE;
   const isLevBuy = side === 'BUY' && leverage > 1;
@@ -82,8 +93,20 @@ function BStockDetail({ symbol }: { symbol: string }) {
   const chg = info?.changePct ?? 0;
   const up = chg >= 0;
 
+  /** 切换单位时把已输入的值按当前价换算过去，不清空 */
+  const switchUnit = (u: 'SHARE' | 'USDT') => {
+    if (u === buyUnit) return;
+    const v = parseFloat(qty);
+    if (v > 0 && unitFactor > 0) {
+      setQty(u === 'USDT' ? (v * unitFactor).toFixed(2) : (v / unitFactor).toFixed(4));
+    }
+    setBuyUnit(u);
+  };
+
   const setPct = (pct: number) => {
     if (livePrice <= 0) return;
+    // USDT 模式：% 直接取余额的百分比当预算，换算成股数的事留给预估/提交
+    if (isUsdtInput) { animateQty(Math.max(0, balance * pct), 0.01); return; }
     const target = side === 'BUY'
       ? (balance * pct * leverage) / (livePrice * (1 + COMMISSION_RATE))
       : held * pct;
@@ -91,7 +114,7 @@ function BStockDetail({ symbol }: { symbol: string }) {
   };
 
   const submit = async () => {
-    if (qtyNum <= 0) { toast('请输入数量', 'error'); return; }
+    if (qtyNum <= 0) { toast(isUsdtInput ? '请输入金额' : '请输入数量', 'error'); return; }
     if (side === 'SELL' && qtyNum > held) { toast('持仓不足', 'error'); return; }
     setSubmitting(true);
     try {
@@ -243,13 +266,35 @@ function BStockDetail({ symbol }: { symbol: string }) {
                 <span>持有 <span className="text-foreground tabular-nums">{fmtNum(held)}</span></span>
               </div>
 
-              {/* 数量 */}
+              {/* 数量 / 金额 */}
               <div className="space-y-2">
-                <label className="text-xs font-bold text-muted-foreground">数量（股）</label>
+                {side === 'BUY' ? (
+                  <div className="flex items-center gap-2">
+                    <label className="text-xs font-bold text-muted-foreground">{buyUnit === 'USDT' ? '金额' : '数量'}</label>
+                    {/* 输入单位切换：按股数买 / 按 USDT 预算买 */}
+                    <div className="flex rounded border border-border overflow-hidden divide-x divide-border">
+                      {(['SHARE', 'USDT'] as const).map(u => (
+                        <button
+                          key={u}
+                          type="button"
+                          onClick={() => switchUnit(u)}
+                          className={cn(
+                            'px-2 py-0.5 text-[10px] font-bold transition-colors cursor-pointer',
+                            buyUnit === u ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground',
+                          )}
+                        >
+                          {u === 'SHARE' ? '股' : 'USDT'}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <label className="text-xs font-bold text-muted-foreground">数量（股）</label>
+                )}
                 <Input
                   value={qty}
                   onChange={e => setQty(e.target.value.replace(/[^0-9.]/g, ''))}
-                  placeholder="数量"
+                  placeholder={isUsdtInput ? '花费金额 (USDT，含手续费)' : '数量'}
                   inputMode="decimal"
                   className="h-11 text-base tabular-nums"
                 />
@@ -281,6 +326,12 @@ function BStockDetail({ symbol }: { symbol: string }) {
 
               {/* 预览：次级面板，数字随数量实时跳动（百分比按钮触发缓动） */}
               <div className="rounded-md border border-border bg-card-2 px-3.5 py-3 space-y-1.5 text-xs">
+                {isUsdtInput && (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">预估买到{leverage > 1 ? ` (${leverage}x)` : ''}</span>
+                    <span className="tabular-nums font-bold">≈ {fmtNum(qtyNum)} 股</span>
+                  </div>
+                )}
                 <div className="flex justify-between"><span className="text-muted-foreground">成交额</span><span className="tabular-nums font-bold">{fmtNum(amount)}</span></div>
                 <div className="flex justify-between"><span className="text-muted-foreground">手续费 (0.1%)</span><span className="tabular-nums font-bold">{fmtNum(commission)}</span></div>
                 {isLevBuy && <div className="flex justify-between"><span className="text-muted-foreground">借款</span><span className="tabular-nums font-bold text-amber-400">{fmtNum(amount - amount / leverage)}</span></div>}

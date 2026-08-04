@@ -47,6 +47,8 @@ export function SpotTradePanel({ symbol, currentPrice, position, onModeChange, o
   const animateQuantity = useQuantityAnimation(quantity, setQuantity);
   const [limitPrice, setLimitPrice] = useState('');
   const [leverage, setLeverage] = useState(1);
+  // 买入输入单位：币数量 / USDT 预算。USDT 指"含手续费的总现金占用"，与仓位 % 按钮同一口径
+  const [buyUnit, setBuyUnit] = useState<'COIN' | 'USDT'>('COIN');
   const [submitting, setSubmitting] = useState(false);
   const [actionSuccess, setActionSuccess] = useState(false);
 
@@ -60,12 +62,35 @@ export function SpotTradePanel({ symbol, currentPrice, position, onModeChange, o
     return () => window.clearTimeout(timer);
   }, [actionSuccess]);
 
+  // USDT 预算 ↔ 币数量的换算系数：现金占用 = 数量 × 价格 × (1 + 手续费率 × 杠杆)。
+  // 与仓位 % 按钮同一公式（杠杆只在市价买入生效；限价买不支持杠杆）
+  const unitLv = orderType === 'MARKET' ? leverage : 1;
+  const unitPrice = orderType === 'LIMIT' ? (parseFloat(limitPrice) || 0) : currentPrice;
+  const unitFactor = unitPrice * (1 + COMMISSION_RATE * unitLv);
+  const isUsdtInput = side === 'BUY' && buyUnit === 'USDT';
+
+  /** 切换单位时把已输入的值按当前价换算过去，不清空 */
+  const switchUnit = (u: 'COIN' | 'USDT') => {
+    if (u === buyUnit) return;
+    const v = parseFloat(quantity);
+    if (v > 0 && unitFactor > 0) {
+      setQuantity(u === 'USDT' ? (v * unitFactor).toFixed(2) : String(floorToStep(v / unitFactor, MIN_QTY)));
+    }
+    setBuyUnit(u);
+  };
+
   const handleSubmit = async () => {
-    const qty = parseFloat(quantity);
-    if (!qty || qty < MIN_QTY) { toast(`最小数量 ${MIN_QTY}`, 'error'); return; }
     if (orderType === 'LIMIT') {
       const lp = parseFloat(limitPrice);
       if (!lp || lp <= 0) { toast('请输入有效限价', 'error'); return; }
+    }
+    // USDT 模式：输入是总花费预算（含手续费），先按当前价换算成数量，再走原有校验与提交。
+    // 市价单实际按服务端提交时刻的价成交，与页面价的抖动差和仓位 % 按钮同级，模拟盘可接受
+    const input = parseFloat(quantity);
+    const qty = isUsdtInput ? (unitFactor > 0 ? (input || 0) / unitFactor : 0) : input;
+    if (!qty || qty < MIN_QTY) {
+      toast(isUsdtInput ? `金额太小，买不到最小数量 ${MIN_QTY} ${cfg.name}` : `最小数量 ${MIN_QTY}`, 'error');
+      return;
     }
     // ×杠杆会产生浮点尾差，按步长向下对齐；全量卖出保留精确持仓量（后端豁免步长，尘埃能清干净）
     const isFullSell = side === 'SELL' && qty === (position?.quantity ?? -1);
@@ -96,7 +121,7 @@ export function SpotTradePanel({ symbol, currentPrice, position, onModeChange, o
       setActionSuccess(true);
       if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
       if (useBuff && discountBuff) { setDiscountBuff(null); setUseBuff(false); }
-      setQuantity(String(MIN_QTY));
+      setQuantity(isUsdtInput ? '' : String(MIN_QTY));
       setLimitPrice('');
       setLeverage(1);
       onTraded();
@@ -105,9 +130,10 @@ export function SpotTradePanel({ symbol, currentPrice, position, onModeChange, o
     } finally { setSubmitting(false); }
   };
 
-  // 预估金额
-  const qtyNum = parseFloat(quantity) || 0;
-  const priceForCalc = orderType === 'LIMIT' ? (parseFloat(limitPrice) || 0) : currentPrice;
+  // 预估金额。USDT 模式先把预算换算回数量，后面的估算全部照旧（合计会≈输入的预算，自证口径一致）
+  const inputNum = parseFloat(quantity) || 0;
+  const qtyNum = isUsdtInput ? (unitFactor > 0 ? inputNum / unitFactor : 0) : inputNum;
+  const priceForCalc = unitPrice;
   const discountRate = useBuff && discountBuff && orderType === 'MARKET' ? Number(discountBuff.buffType.match(/DISCOUNT_(\d+)/)?.[1] ?? 100) / 100 : 1;
   const leveragedQty = side === 'BUY' && orderType === 'MARKET' && leverage > 1 ? qtyNum * leverage : qtyNum;
   const estimatedAmount = leveragedQty * priceForCalc;
@@ -147,7 +173,26 @@ export function SpotTradePanel({ symbol, currentPrice, position, onModeChange, o
         {/* 数量 + 余额 */}
         <div className="space-y-1.5">
           <div className="flex items-center justify-between">
-            <label className="text-xs font-bold text-muted-foreground">数量 ({cfg.name})</label>
+            {side === 'BUY' ? (
+              <div className="flex items-center gap-2">
+                <label className="text-xs font-bold text-muted-foreground">{buyUnit === 'USDT' ? '金额' : '数量'}</label>
+                {/* 输入单位切换：按币数量买 / 按 USDT 预算买 */}
+                <div className="flex rounded border border-border overflow-hidden divide-x divide-border">
+                  {(['COIN', 'USDT'] as const).map(u => (
+                    <button
+                      key={u}
+                      type="button"
+                      onClick={() => switchUnit(u)}
+                      className={`px-2 py-0.5 text-[10px] font-bold transition-colors cursor-pointer ${buyUnit === u ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+                    >
+                      {u === 'COIN' ? cfg.name : 'USDT'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <label className="text-xs font-bold text-muted-foreground">数量 ({cfg.name})</label>
+            )}
             {user && (
               <span className="text-xs font-bold text-muted-foreground flex items-center gap-1">
                 <Wallet className="w-3.5 h-3.5" />
@@ -158,7 +203,14 @@ export function SpotTradePanel({ symbol, currentPrice, position, onModeChange, o
               </span>
             )}
           </div>
-          <Input type="number" placeholder={String(MIN_QTY)} value={quantity} onChange={e => setQuantity(e.target.value)} step={String(MIN_QTY)} min={MIN_QTY} />
+          <Input
+            type="number"
+            placeholder={isUsdtInput ? '花费金额 (USDT，含手续费)' : String(MIN_QTY)}
+            value={quantity}
+            onChange={e => setQuantity(e.target.value)}
+            step={isUsdtInput ? '0.01' : String(MIN_QTY)}
+            min={isUsdtInput ? 0 : MIN_QTY}
+          />
           {currentPrice > 0 && (
             <div className="space-y-1.5 pt-1">
               <label className="text-xs font-bold text-muted-foreground flex items-center gap-1.5">
@@ -171,6 +223,11 @@ export function SpotTradePanel({ symbol, currentPrice, position, onModeChange, o
                   if (side === 'SELL' && pct >= 1) {
                     const full = position?.quantity ?? 0;
                     if (full > 0) setQuantity(String(full));
+                    return;
+                  }
+                  // USDT 模式：% 直接取余额的百分比当预算，换算成数量的事留给预估/提交
+                  if (isUsdtInput) {
+                    animateQuantity(Math.max(0, (user?.balance ?? 0) * pct), 0.01);
                     return;
                   }
                   let raw: number;
@@ -247,6 +304,12 @@ export function SpotTradePanel({ symbol, currentPrice, position, onModeChange, o
         <div className="mt-auto pt-4 border-t border-border border-dashed space-y-4">
           {qtyNum > 0 && priceForCalc > 0 && (
             <div className="space-y-2">
+              {isUsdtInput && (
+                <div className="flex justify-between text-xs font-bold text-muted-foreground">
+                  <span>预估买到{unitLv > 1 ? ` (${unitLv}x 总仓位)` : ''}</span>
+                  <span className="font-mono text-foreground">≈ {fmtNum(floorToStep(leveragedQty, filter.stepSize))} {cfg.name}</span>
+                </div>
+              )}
               {side === 'BUY' && leverage > 1 && (
                 <div className="flex justify-between text-xs font-bold text-muted-foreground">
                   <span>总仓位 ({leverage}x)</span>
