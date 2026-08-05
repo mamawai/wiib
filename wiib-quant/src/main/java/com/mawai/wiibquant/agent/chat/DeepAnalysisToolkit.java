@@ -2,12 +2,9 @@ package com.mawai.wiibquant.agent.chat;
 
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONObject;
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.mawai.wiibcommon.constant.QuantConstants;
 import com.mawai.wiibcommon.entity.QuantDeepAnalysis;
-import com.mawai.wiibcommon.entity.QuantSnapshot;
 import com.mawai.wiibquant.agent.analysis.DeepAnalysisService;
-import com.mawai.wiibquant.mapper.QuantSnapshotMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.model.ToolContext;
@@ -31,7 +28,6 @@ public class DeepAnalysisToolkit {
 
     private final DeepAnalysisService deepAnalysisService;
     private final ApprovalRegistry approvalRegistry;
-    private final QuantSnapshotMapper snapshotMapper;
     private final WorkbenchRunRegistry runRegistry;
 
     @Tool(name = "run_deep_analysis", description = """
@@ -59,30 +55,25 @@ public class DeepAnalysisToolkit {
 
         log.info("[DeepTool] 用户已授权，执行深研判 session={} symbol={}", sessionId, normalized);
         long closeTime = System.currentTimeMillis();
-        // 对话轨挂靠最新快照（≤5min 前）：snapshotId 溯源 + 三腿喂 prompt，与定时轨同口径
-        QuantSnapshot latest = latestSnapshot(normalized);
-        Long snapshotId = latest != null ? latest.getId() : null;
-        String volLegsJson = latest != null ? latest.getVolLegsJson() : null;
-
-        // 复用定时轨同一套研判服务；Bull∥Bear 虚拟线程并行（对话场景无图结构，服务级并行等价）
+        // Bull∥Bear 虚拟线程并行（对话场景无图结构，服务级并行等价）
         // 全程静默数分钟，按阶段推进度给 SSE，前端才知道跑到哪了
         runRegistry.publishProgress(sessionId, "深研判 " + normalized + " 启动：Bull/Bear 并行辩论中（约需数分钟）");
         String newsContext = deepAnalysisService.buildNewsContext();
         CompletableFuture<String> bullF = CompletableFuture.supplyAsync(() -> {
-            String r = deepAnalysisService.bullArgue(normalized, newsContext, volLegsJson);
+            String r = deepAnalysisService.bullArgue(normalized, newsContext);
             runRegistry.publishProgress(sessionId, "Bull 多方论证完成");
             return r;
         });
         CompletableFuture<String> bearF = CompletableFuture.supplyAsync(() -> {
-            String r = deepAnalysisService.bearArgue(normalized, newsContext, volLegsJson);
+            String r = deepAnalysisService.bearArgue(normalized, newsContext);
             runRegistry.publishProgress(sessionId, "Bear 空方论证完成");
             return r;
         });
         String bull = bullF.join();
         String bear = bearF.join();
         runRegistry.publishProgress(sessionId, "辩论汇齐，Judge 裁决中");
-        QuantDeepAnalysis analysis = deepAnalysisService.judge(normalized, closeTime, snapshotId, "chat",
-                newsContext, volLegsJson, bull, bear);
+        QuantDeepAnalysis analysis = deepAnalysisService.judge(normalized, closeTime, "chat",
+                newsContext, bull, bear);
         if (analysis == null) {
             JSONObject out = new JSONObject();
             out.put("status", "FAILED");
@@ -100,13 +91,6 @@ public class DeepAnalysisToolkit {
         out.put("invalidation", analysis.getInvalidation());
         out.put("judgeReasoning", analysis.getJudgeReasoning());
         return out.toJSONString();
-    }
-
-    private QuantSnapshot latestSnapshot(String symbol) {
-        return snapshotMapper.selectOne(new LambdaQueryWrapper<QuantSnapshot>()
-                .eq(QuantSnapshot::getSymbol, symbol)
-                .orderByDesc(QuantSnapshot::getCloseTime)
-                .last("LIMIT 1"));
     }
 
     private String sessionId(ToolContext toolContext) {

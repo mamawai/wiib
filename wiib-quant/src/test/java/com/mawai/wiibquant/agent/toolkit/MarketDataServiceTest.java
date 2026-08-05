@@ -5,7 +5,6 @@ import com.mawai.wiibcommon.market.BinanceRestClient;
 import com.mawai.wiibcommon.market.DepthStreamCache;
 import com.mawai.wiibcommon.market.ForceOrderService;
 import com.mawai.wiibcommon.market.OrderFlowAggregator;
-import com.mawai.wiibquant.agent.quant.service.MacroContextService;
 import com.mawai.wiibquant.config.DeribitClient;
 import org.junit.jupiter.api.Test;
 
@@ -19,11 +18,10 @@ class MarketDataServiceTest {
     private final DepthStreamCache depthStreamCache = mock(DepthStreamCache.class);
     private final DeribitClient deribitClient = mock(DeribitClient.class);
     private final OrderFlowAggregator orderFlowAggregator = mock(OrderFlowAggregator.class);
-    private final MacroContextService macroContextService = mock(MacroContextService.class);
 
     private MarketDataService service(long ttlMillis) {
         return new MarketDataService(binanceRestClient, forceOrderService, depthStreamCache,
-                deribitClient, orderFlowAggregator, macroContextService, KlineInterval.M5, ttlMillis);
+                deribitClient, orderFlowAggregator, KlineInterval.M5, ttlMillis);
     }
 
     @Test
@@ -33,7 +31,6 @@ class MarketDataServiceTest {
 
         assertThat(assembly.available()).isFalse();
         assertThat(assembly.snapshot()).isNull();
-        assertThat(assembly.fragility().score()).isZero();
     }
 
     @Test

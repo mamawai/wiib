@@ -1,6 +1,5 @@
 package com.mawai.wiibquant.agent.toolkit;
 
-import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONObject;
 import com.mawai.wiibquant.agent.quant.domain.FeatureSnapshot;
 import lombok.RequiredArgsConstructor;
@@ -9,7 +8,7 @@ import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.stereotype.Component;
 
 /**
- * 市场状态工具：实时快照 / 期权IV / 脆弱度，全部走 MarketDataService 共享组装（60s缓存），
+ * 市场状态工具：实时快照 / 期权IV，全部走 MarketDataService 共享组装（60s缓存），
  * 一轮对话内多工具调用不重复采集。
  */
 @Component
@@ -69,21 +68,6 @@ public class MarketToolkit {
         out.put("symbol", a.snapshot().symbol());
         out.put("dvolIndex", a.snapshot().dvolIndex());
         out.put("ivSummary", a.snapshot().toIvSummary());
-        return out.toJSONString();
-    }
-
-    @Tool(name = "fragility", description = """
-            Get the deterministic market fragility score (0-100) for a crypto symbol,
-            composed of positioning crowdedness + deleveraging intensity + vol-state.
-            Includes fragile direction (which way the market breaks easier - a structural
-            inference, NOT a directional prediction) and a one-line headline.""")
-    public String fragility(@ToolParam(description = "Symbol, e.g. BTCUSDT") String symbol) {
-        MarketAssembly a = dataService.assemble(symbol);
-        if (!a.available()) {
-            return unavailableJson(a);
-        }
-        JSONObject out = (JSONObject) JSON.toJSON(a.fragility());
-        out.put("available", true);
         return out.toJSONString();
     }
 

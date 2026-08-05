@@ -7,13 +7,11 @@ import com.mawai.wiibquant.agent.toolkit.NewsCache;
 import com.mawai.wiibquant.agent.toolkit.QuantLlm;
 import com.mawai.wiibquant.mapper.QuantDeepAnalysisMapper;
 import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentCaptor;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class DeepAnalysisServiceTest {
@@ -45,11 +43,10 @@ class DeepAnalysisServiceTest {
         // 故意给和=97 的分布，验证归一化到 100
         when(quantLlm.call(anyString())).thenReturn(judgeJson(30, 30, 37, false));
 
-        QuantDeepAnalysis analysis = service.judge("BTCUSDT", 123L, 9L, "cron_1h",
-                "无新闻上下文", null, "bull论据", "bear论据");
+        QuantDeepAnalysis analysis = service.judge("BTCUSDT", 123L, "cron_1h",
+                "无新闻上下文", "bull论据", "bear论据");
 
         assertThat(analysis).isNotNull();
-        assertThat(analysis.getSnapshotId()).isEqualTo(9L);
         assertThat(analysis.getTriggerSource()).isEqualTo("cron_1h");
         JSONObject scenarios = JSONObject.parseObject(analysis.getScenariosJson());
         int sum = scenarios.getIntValue("bullPct") + scenarios.getIntValue("rangePct") + scenarios.getIntValue("bearPct");
@@ -64,10 +61,10 @@ class DeepAnalysisServiceTest {
                 .thenReturn(com.mawai.wiibquant.agent.toolkit.MarketAssembly.unavailable("BTCUSDT", java.util.Map.of()));
         when(quantLlm.call(anyString())).thenThrow(new RuntimeException("LLM down"));
 
-        QuantDeepAnalysis analysis = service.judge("BTCUSDT", 123L, null, "cron_1h",
-                "无新闻上下文", null, "bull", "bear");
+        QuantDeepAnalysis analysis = service.judge("BTCUSDT", 123L, "cron_1h",
+                "无新闻上下文", "bull", "bear");
 
-        assertThat(analysis).isNull(); // 研判缺席，不抛异常（快照时序不受影响）
+        assertThat(analysis).isNull(); // 研判缺席，不抛异常
     }
 
     @Test
@@ -76,41 +73,7 @@ class DeepAnalysisServiceTest {
                 .thenReturn(com.mawai.wiibquant.agent.toolkit.MarketAssembly.unavailable("BTCUSDT", java.util.Map.of()));
         when(quantLlm.call(anyString())).thenThrow(new RuntimeException("timeout"));
 
-        assertThat(service.bullArgue("BTCUSDT", "无新闻上下文", null)).contains("未能提供论据");
-    }
-
-    @Test
-    void volLegsRenderIntoArguePrompt() {
-        when(marketDataService.assemble("BTCUSDT"))
-                .thenReturn(com.mawai.wiibquant.agent.toolkit.MarketAssembly.unavailable("BTCUSDT", java.util.Map.of()));
-        when(quantLlm.call(anyString())).thenReturn("论据");
-        String legs = """
-                {"H6":{"sigmaBps":85,"percentile":0.82,"volState":"HIGH","lowCut":0.0055,"highCut":0.0110,
-                "regime":"RANGE","regimeConfidence":0.61}}""";
-
-        service.bullArgue("BTCUSDT", "无新闻上下文", legs);
-
-        ArgumentCaptor<String> prompt = ArgumentCaptor.forClass(String.class);
-        verify(quantLlm).call(prompt.capture());
-        // LLM 看到的幅度数字与落库三腿同一份：bps/分位/档界/regime 全渲染进 prompt
-        assertThat(prompt.getValue())
-                .contains("vol预测")
-                .contains("H6: 预期波动=85bps(90天分位82%)")
-                .contains("波动档=HIGH(档界55/110bps)")
-                .contains("regime=RANGE(0.61)");
-    }
-
-    @Test
-    void missingVolLegsRenderExplicitPlaceholder() {
-        when(marketDataService.assemble("BTCUSDT"))
-                .thenReturn(com.mawai.wiibquant.agent.toolkit.MarketAssembly.unavailable("BTCUSDT", java.util.Map.of()));
-        when(quantLlm.call(anyString())).thenReturn("论据");
-
-        service.bullArgue("BTCUSDT", "无新闻上下文", null);
-
-        ArgumentCaptor<String> prompt = ArgumentCaptor.forClass(String.class);
-        verify(quantLlm).call(prompt.capture());
-        assertThat(prompt.getValue()).contains("无（本次快照未携带）"); // 缺失明示，不静默装有
+        assertThat(service.bullArgue("BTCUSDT", "无新闻上下文")).contains("未能提供论据");
     }
 
     @Test
@@ -126,8 +89,8 @@ class DeepAnalysisServiceTest {
                 .thenReturn(com.mawai.wiibquant.agent.toolkit.MarketAssembly.unavailable("BTCUSDT", java.util.Map.of()));
         when(quantLlm.call(contains("Judge"))).thenReturn(judgeJson(33, 34, 33, true));
 
-        QuantDeepAnalysis analysis = service.judge("BTCUSDT", 1L, null, "sentinel",
-                "无新闻上下文", null, "bull", "bear");
+        QuantDeepAnalysis analysis = service.judge("BTCUSDT", 1L, "sentinel",
+                "无新闻上下文", "bull", "bear");
 
         assertThat(analysis).isNotNull();
         assertThat(analysis.getNoDirection()).isTrue(); // 无方向态是一等状态

@@ -1,18 +1,13 @@
 package com.mawai.wiibquant.controller;
 
 import com.mawai.wiibcommon.annotation.RequireAdmin;
-import com.mawai.wiibcommon.annotation.Symbol;
 import com.mawai.wiibcommon.constant.AiProtocols;
 import com.mawai.wiibcommon.entity.AiModelAssignment;
 import com.mawai.wiibcommon.entity.AiRuntimeConfig;
-import com.mawai.wiibcommon.constant.QuantConstants;
 import com.mawai.wiibcommon.util.Result;
 import com.mawai.wiibcommon.mapper.AiModelAssignmentMapper;
 import com.mawai.wiibcommon.mapper.AiRuntimeConfigMapper;
-import com.mawai.wiibquant.agent.analysis.VolVerificationService;
 import com.mawai.wiibquant.agent.config.AiAgentRuntimeManager;
-import com.mawai.wiibquant.agent.research.ForecastHorizon;
-import com.mawai.wiibquant.task.QuantSnapshotScheduler;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.Data;
@@ -36,8 +31,6 @@ public class AiAgentAdminController {
     private static final Set<String> EFFORT_LEVELS = Set.of("none", "low", "medium", "high");
 
     private final AiAgentRuntimeManager aiAgentRuntimeManager;
-    private final QuantSnapshotScheduler quantSnapshotScheduler;
-    private final VolVerificationService volVerificationService;
     private final AiRuntimeConfigMapper configMapper;
     private final AiModelAssignmentMapper assignmentMapper;
 
@@ -181,45 +174,7 @@ public class AiAgentAdminController {
         return Result.ok(null);
     }
 
-    // ========== 量化触发 ==========
-
-    @PostMapping("/quant/trigger")
-    @Operation(summary = "手动触发量化分析")
-    public Result<String> triggerQuant(@Symbol String symbol) {
-        Thread.startVirtualThread(() -> quantSnapshotScheduler.runSnapshot(symbol));
-        return Result.ok("量化分析已触发: " + symbol);
-    }
-
-    @PostMapping("/quant/verify/trigger")
-    @Operation(summary = "手动触发量化预测验证")
-    public Result<String> triggerQuantVerification(@RequestParam(required = false) String symbol) {
-        List<String> symbols;
-        if (symbol == null || symbol.isBlank()) {
-            symbols = QuantConstants.WATCH_SYMBOLS;
-        } else {
-            try {
-                symbols = List.of(QuantConstants.normalizeSymbol(symbol));
-            } catch (IllegalArgumentException e) {
-                return Result.fail("symbol格式错误: " + e.getMessage());
-            }
-        }
-        // P3 起验证对象=vol 预测点（quant_vol_verification），旧方向验证已随旧管线删除
-        for (String s : symbols) {
-            Thread.startVirtualThread(() -> {
-                try {
-                    int verified = 0;
-                    for (ForecastHorizon horizon : ForecastHorizon.values()) {
-                        verified += volVerificationService.verifyDue(s, horizon);
-                    }
-                    log.info("[Admin] 手动触发 vol 验证完成 symbol={} verified={}", s, verified);
-                } catch (Exception e) {
-                    log.error("[Admin] 手动触发 vol 验证失败 symbol={}", s, e);
-                }
-            });
-        }
-        return Result.ok("vol 预测验证已触发: " + symbols);
-    }
-
+    // 量化触发端点（快照/vol验证）已随预测管线下线（2026-08：生产验证无前瞻信息）。
     // quant-config 开关端点已删：开关框架自 v1 调权清理后空转（无注册开关），随死表清理一并拆除。
 
     // ========== DTO ==========

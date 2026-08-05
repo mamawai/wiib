@@ -29,15 +29,6 @@ class MarketToolkitTest {
     }
 
     @Test
-    void fragilityOutputsScoreAndHeadline() {
-        when(dataService.assemble("BTCUSDT")).thenReturn(assemblyWithSnapshot());
-
-        String json = toolkit.fragility("BTCUSDT");
-
-        assertThat(json).contains("61").contains("HIGH").contains("下行脆弱");
-    }
-
-    @Test
     void optionIvOutputsSummary() {
         when(dataService.assemble("BTCUSDT")).thenReturn(assemblyWithSnapshot());
 
@@ -51,7 +42,6 @@ class MarketToolkitTest {
         when(dataService.assemble("BTCUSDT")).thenReturn(MarketAssembly.unavailable("BTCUSDT", Map.of()));
 
         assertThat(toolkit.marketSnapshot("BTCUSDT")).contains("\"available\":false");
-        assertThat(toolkit.fragility("BTCUSDT")).contains("\"available\":false");
         assertThat(toolkit.optionIv("BTCUSDT")).contains("\"available\":false");
     }
 }
