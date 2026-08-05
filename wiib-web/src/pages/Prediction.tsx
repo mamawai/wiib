@@ -166,7 +166,9 @@ export function Prediction() {
     if (clockSourceMs != null) {
       setServerClockOffsetMs(clockSourceMs - Date.now());
     }
-    const calibratedNow = Date.now() + serverClockOffsetMs;
+    // 校准now直接取推送带的服务端时刻，不能读 serverClockOffsetMs：
+    // 一读就得进依赖，而本effect又拿 Date.now() 重算它写回，每轮值必变 → 自激死循环炸 React #185
+    const calibratedNow = clockSourceMs ?? Date.now();
     const curWs = round?.windowStart ?? Math.floor(calibratedNow / 1000 / WINDOW_SECONDS) * WINDOW_SECONDS;
     if (wsRound.windowStart && wsRound.windowStart < curWs) {
       // 旧回合结算推送，不覆盖当前回合，只刷新数据
@@ -174,7 +176,7 @@ export function Prediction() {
       return;
     }
     setRound(prev => ({ ...prev, ...wsRound } as PredictionRound));
-  }, [wsRound, fetchBets, fetchUser, round?.windowStart, serverClockOffsetMs]);
+  }, [wsRound, fetchBets, fetchUser, round?.windowStart]);
 
   useEffect(() => {
     const tick = () => {
