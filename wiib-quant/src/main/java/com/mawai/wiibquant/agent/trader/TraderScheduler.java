@@ -77,18 +77,24 @@ public class TraderScheduler {
     }
 
     private void fireTrader(AiTrader trader, long boundary) {
-        Long fired = firedBoundary.get(trader.getId());
-        if (fired != null && fired >= boundary) {
-            return; // 本边界已触发过（多 symbol 事件/兜底重复）
+        // 原子抢占本边界：多 symbol 事件/兜底并发到达时只有一个赢家，输家静默返回（不是SKIPPED）
+        boolean[] won = new boolean[1];
+        firedBoundary.compute(trader.getId(), (id, prev) -> {
+            if (prev == null || prev < boundary) {
+                won[0] = true;
+                return boundary;
+            }
+            return prev;
+        });
+        if (!won[0]) {
+            return;
         }
         if (!inFlight.add(trader.getId())) {
-            // 上一唤醒还在跑：本边界作废并留痕，等下一根K线的新鲜信号
-            firedBoundary.put(trader.getId(), boundary);
+            // 上一边界的唤醒还在跑：本边界作废并留痕，等下一根K线的新鲜信号
             runner.recordSkipped(trader, boundary);
             log.info("[TraderSched] 上轮未完跳过 traderId={} boundary={}", trader.getId(), boundary);
             return;
         }
-        firedBoundary.put(trader.getId(), boundary);
         Thread.startVirtualThread(() -> {
             try {
                 slots.acquire();

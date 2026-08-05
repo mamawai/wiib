@@ -4,6 +4,7 @@ import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.mawai.wiibcommon.dto.FuturesPositionDTO;
 import com.mawai.wiibcommon.entity.AiTrader;
 import com.mawai.wiibcommon.entity.AiTraderDecision;
@@ -206,35 +207,42 @@ public class TraderWakeupRunner {
         return d;
     }
 
+    // 状态回写一律列级更新：runner 手里的 trader 是调度时刻的快照，整行 updateById 会把
+    // 用户并发修改的配置（提示词/模型等）覆盖回旧值
+
     private void markLiquidated(AiTrader trader, AiTraderDecision decision) {
         decision.setStatus(AiTraderDecision.STATUS_OK);
         decision.setReasoning("账户权益已低于爆仓终局线，本局结束。可在配置页重置开新一局。");
         decisionMapper.insert(decision);
-        trader.setStatus(AiTrader.STATUS_LIQUIDATED);
-        trader.setPausedReason("爆仓终局：权益低于初始资金1%");
-        trader.setUpdatedAt(LocalDateTime.now());
-        traderMapper.updateById(trader);
+        traderMapper.update(null, new LambdaUpdateWrapper<AiTrader>()
+                .eq(AiTrader::getId, trader.getId())
+                .set(AiTrader::getStatus, AiTrader.STATUS_LIQUIDATED)
+                .set(AiTrader::getPausedReason, "爆仓终局：权益低于初始资金1%")
+                .set(AiTrader::getUpdatedAt, LocalDateTime.now()));
         log.info("[Trader] 爆仓终局 traderId={} round={}", trader.getId(), trader.getRoundNo());
     }
 
     private void recordFailure(AiTrader trader, String lastError) {
         int failures = (trader.getConsecutiveFailures() == null ? 0 : trader.getConsecutiveFailures()) + 1;
-        trader.setConsecutiveFailures(failures);
+        LambdaUpdateWrapper<AiTrader> update = new LambdaUpdateWrapper<AiTrader>()
+                .eq(AiTrader::getId, trader.getId())
+                .set(AiTrader::getConsecutiveFailures, failures)
+                .set(AiTrader::getUpdatedAt, LocalDateTime.now());
         if (failures >= MAX_CONSECUTIVE_FAILURES) {
-            trader.setStatus(AiTrader.STATUS_PAUSED);
-            trader.setPausedReason("连续" + failures + "次唤醒失败: " + (lastError.length() > 150
-                    ? lastError.substring(0, 150) : lastError));
+            update.set(AiTrader::getStatus, AiTrader.STATUS_PAUSED)
+                    .set(AiTrader::getPausedReason, "连续" + failures + "次唤醒失败: "
+                            + (lastError.length() > 150 ? lastError.substring(0, 150) : lastError));
             log.warn("[Trader] 连败自动暂停 traderId={} failures={}", trader.getId(), failures);
         }
-        trader.setUpdatedAt(LocalDateTime.now());
-        traderMapper.updateById(trader);
+        traderMapper.update(null, update);
     }
 
     private void clearFailures(AiTrader trader) {
         if (trader.getConsecutiveFailures() != null && trader.getConsecutiveFailures() > 0) {
-            trader.setConsecutiveFailures(0);
-            trader.setUpdatedAt(LocalDateTime.now());
-            traderMapper.updateById(trader);
+            traderMapper.update(null, new LambdaUpdateWrapper<AiTrader>()
+                    .eq(AiTrader::getId, trader.getId())
+                    .set(AiTrader::getConsecutiveFailures, 0)
+                    .set(AiTrader::getUpdatedAt, LocalDateTime.now()));
         }
     }
 }
