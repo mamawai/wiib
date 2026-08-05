@@ -63,6 +63,11 @@ public class SimTradeClient {
         return unwrap(api.cancel(userId, orderId));
     }
 
+    /** 改持仓止损单（sim 侧整组替换语义，与用户端同一入口）。 */
+    public void setStopLoss(Long userId, com.mawai.wiibcommon.dto.FuturesStopLossRequest request) {
+        unwrap(api.setStopLoss(userId, request));
+    }
+
     public FuturesOrderResponse getOrder(Long userId, Long orderId) {
         return unwrap(api.order(userId, orderId));
     }

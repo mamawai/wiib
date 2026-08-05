@@ -11,7 +11,8 @@ import static org.mockito.Mockito.when;
 class MarketToolkitTest {
 
     private final MarketDataService dataService = mock(MarketDataService.class);
-    private final MarketToolkit toolkit = new MarketToolkit(dataService);
+    private final MarketToolkit toolkit = new MarketToolkit(dataService,
+            mock(com.mawai.wiibcommon.market.BinanceRestClient.class));
 
     /** 共用造件见 TestAssemblies（record 无法可靠 mock，统一真实构造）。 */
     private MarketAssembly assemblyWithSnapshot() {
