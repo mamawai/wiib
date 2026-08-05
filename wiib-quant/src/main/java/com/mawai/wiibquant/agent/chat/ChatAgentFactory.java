@@ -10,7 +10,6 @@ import com.mawai.wiibquant.agent.llm.ModelCallLimiter;
 import com.mawai.wiibquant.agent.llm.ResilientChatService;
 import com.mawai.wiibquant.agent.toolkit.MarketToolkit;
 import com.mawai.wiibquant.agent.toolkit.NewsToolkit;
-import com.mawai.wiibquant.agent.toolkit.QuantForecastToolkit;
 import lombok.extern.slf4j.Slf4j;
 import org.bsc.langgraph4j.CompileConfig;
 import org.bsc.langgraph4j.CompiledGraph;
@@ -75,9 +74,8 @@ import static org.bsc.langgraph4j.action.AsyncNodeActionWithConfig.node_async;
 public class ChatAgentFactory {
 
     public static final String MARKET_AGENT = "market_agent";
-    public static final String QUANT_AGENT = "quant_agent";
     public static final String NEWS_AGENT = "news_agent";
-    public static final Set<String> EXPERT_AGENTS = Set.of(MARKET_AGENT, QUANT_AGENT, NEWS_AGENT);
+    public static final Set<String> EXPERT_AGENTS = Set.of(MARKET_AGENT, NEWS_AGENT);
 
     /** 结束派发、转去汇总的信号值。对齐 langgraph4j 官方 how-to 的 Router.next 值域（含 FINISH） */
     static final String FINISH = "FINISH";
@@ -95,8 +93,8 @@ public class ChatAgentFactory {
         @Tool(name = "route", description = """
                 决定下一步。需要真实数据时给出专家名；专家数据已够、可以作答时给 ["FINISH"]。""")
         public String route(@ToolParam(description = """
-                下一步去向：market_agent(行情/持仓/清算/期权/脆弱度)、quant_agent(波动率预测/regime/预测战绩)、
-                news_agent(加密新闻快讯)，或 ["FINISH"] 表示不再派发、直接作答。""") List<String> next) {
+                下一步去向：market_agent(行情/持仓/清算/期权)、news_agent(加密新闻快讯)，
+                或 ["FINISH"] 表示不再派发、直接作答。""") List<String> next) {
             return "";
         }
     }
@@ -140,9 +138,9 @@ public class ChatAgentFactory {
 
     private static final String ROUTER_INSTRUCTION = """
             你是研判工作台的调度器。看完对话后，用 route 工具给出下一步：
-            - 还需要真实数据 → 给专家名：market_agent(实时行情/持仓/清算/期权/脆弱度)、
-              quant_agent(波动率预测/regime/预测战绩)、news_agent(加密新闻快讯，BlockBeats 快讯源)
-            - 涉及行情、预测、新闻的问题必须先派专家取数，不要凭记忆判断
+            - 还需要真实数据 → 给专家名：market_agent(实时行情/持仓/清算/期权)、
+              news_agent(加密新闻快讯，BlockBeats 快讯源)
+            - 涉及行情、新闻的问题必须先派专家取数，不要凭记忆判断
             - 对话里已有专家返回的数据、足够回答用户了 → 给 ["FINISH"]
             - 同一批专家已经取过数就不要重复派，改给 ["FINISH"]
             只调用 route 工具，不要输出任何文字。""";
@@ -153,7 +151,6 @@ public class ChatAgentFactory {
 
     private final AiAgentRuntimeManager runtimeManager;
     private final MarketToolkit marketToolkit;
-    private final QuantForecastToolkit quantForecastToolkit;
     private final NewsToolkit newsToolkit;
     private final DeepAnalysisToolkit deepAnalysisToolkit;
     private final ApprovalRegistry approvalRegistry;
@@ -178,7 +175,6 @@ public class ChatAgentFactory {
      */
     public ChatAgentFactory(AiAgentRuntimeManager runtimeManager,
                             MarketToolkit marketToolkit,
-                            QuantForecastToolkit quantForecastToolkit,
                             NewsToolkit newsToolkit,
                             DeepAnalysisToolkit deepAnalysisToolkit,
                             ApprovalRegistry approvalRegistry,
@@ -190,7 +186,6 @@ public class ChatAgentFactory {
                             @Value("${quant.workbench.news-supplement-source:}") String supplementSource) {
         this.runtimeManager = runtimeManager;
         this.marketToolkit = marketToolkit;
-        this.quantForecastToolkit = quantForecastToolkit;
         this.newsToolkit = newsToolkit;
         this.deepAnalysisToolkit = deepAnalysisToolkit;
         this.approvalRegistry = approvalRegistry;
@@ -217,7 +212,7 @@ public class ChatAgentFactory {
         synchronized (this) {
             if (cached == null) {
                 cached = build();
-                log.info("对话工作台图已构建（supervisor + 3 专家并行 + PostgresSaver）");
+                log.info("对话工作台图已构建（supervisor + {} 专家并行 + PostgresSaver）", EXPERT_AGENTS.size());
             }
             return cached;
         }
@@ -241,15 +236,8 @@ public class ChatAgentFactory {
         experts.put(MARKET_AGENT, expertGraph(light, marketToolkit, "required", """
                 你是市场状态专家。用工具获取真实数据回答，所有结论必须引用工具返回的具体数字；
                 数据不可用(available=false)时如实告知，绝不编造。
-                只回答行情/持仓/清算/期权/脆弱度，新闻等其他领域即使知道也不要写，有对应专家负责。
+                只回答行情/持仓/清算/期权，新闻等其他领域即使知道也不要写，有对应专家负责。
                 回答精炼中文。"""));
-        experts.put(QUANT_AGENT, expertGraph(light, quantForecastToolkit, "required", """
-                你是量化预测专家。工具给的是本系统的 vol/regime 预测与实盘验证战绩。
-                本系统验证过的能力是波动幅度与风险预测；方向预测无验证优势。被问涨跌方向时
-                不要生硬拒绝——给双向波动情景 + 风险提示（幅度、regime、脆弱度），说明方向确定性低的原因。
-                被问"预测准不准"时调 scorecard 用真实战绩回答（QLIKE 越低越好，improvement>0=跑赢基准）。
-                只回答波动/风险/预测战绩，新闻等其他领域即使知道也不要写，有对应专家负责。
-                回答精炼中文，引用具体数字。"""));
         // 新闻专家只管 BlockBeats：数据走"预取"（news_search 无参数，预取 100% 保证快讯在
         // 上下文里，不依赖模型行为；不挂 function tool——实测挂着它 auto 下还会再调一次纯浪费）。
         // 联网补的那一路不归它：模型的服务端搜索关不掉（grok 实测所有请求参数/换模型均无效），
@@ -336,8 +324,8 @@ public class ChatAgentFactory {
                            news_agent 的条目一条不丢、保留 [BlockBeats] 标；你搜到的独有条目一律标 %s 并尽量附出处；
                            同一事件两边都有则合并为一条标 %s。按市场影响力排序取前30条，
                            不足30就全部输出，除去重外不删减。只列真实搜到的，搜不到就只用专家清单
-                        3. 被问涨跌方向时不要生硬拒绝：本系统验证过的能力是波动与风险预测（方向预测无验证优势），
-                           给"双向情景 + 当前风险画像 + 仓位/止损等风控参考"，并说明方向确定性低的原因
+                        3. 被问涨跌方向时不要生硬拒绝：本系统不做方向预测，给"双向情景 + 当前市场状态
+                           （资金费/持仓/清算等实测数据）+ 仓位/止损等风控参考"，并说明方向确定性低的原因
                         4. 信号矛盾时大方说"看不清"，这是专业而不是失职
                         5. 仅当用户明确说出"深度研判/全面分析"这类字眼时 → 调 run_deep_analysis 工具（昂贵，需用户确认：
                            返回 PENDING_APPROVAL 时告知用户确认卡片已弹出，等确认后你会被再次唤起执行）；

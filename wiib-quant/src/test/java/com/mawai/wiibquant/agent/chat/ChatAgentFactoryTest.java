@@ -4,7 +4,6 @@ import com.mawai.wiibquant.agent.config.AiAgentRuntime;
 import com.mawai.wiibquant.agent.config.AiAgentRuntimeManager;
 import com.mawai.wiibquant.agent.toolkit.MarketToolkit;
 import com.mawai.wiibquant.agent.toolkit.NewsToolkit;
-import com.mawai.wiibquant.agent.toolkit.QuantForecastToolkit;
 import org.bsc.langgraph4j.CompiledGraph;
 import org.bsc.langgraph4j.GraphRepresentation;
 import org.bsc.langgraph4j.RunnableConfig;
@@ -47,7 +46,7 @@ class ChatAgentFactoryTest {
         when(model.getOptions()).thenReturn(ToolCallingChatOptions.builder().build());
         when(runtimeManager.current()).thenReturn(new AiAgentRuntime(model, model, model, model));
         return new ChatAgentFactory(runtimeManager,
-                mock(MarketToolkit.class), mock(QuantForecastToolkit.class), mock(NewsToolkit.class),
+                mock(MarketToolkit.class), mock(NewsToolkit.class),
                 mock(DeepAnalysisToolkit.class), approvalRegistry, mock(BaseCheckpointSaver.class),
                 new SpringAIJacksonStateSerializer<>(MessagesState::new), 12, 32000, 6, "X");
     }
@@ -70,7 +69,7 @@ class ChatAgentFactoryTest {
         assertThat(graph).isNotNull();
         String mermaid = graph.stateGraph
                 .getGraph(GraphRepresentation.Type.MERMAID, "workbench").content();
-        assertThat(mermaid).contains("market_agent").contains("quant_agent").contains("news_agent");
+        assertThat(mermaid).contains("market_agent").contains("news_agent").doesNotContain("quant_agent");
         // 路由与汇总拆成两个角色：router 只决定去向，summarizer 只写答案
         assertThat(mermaid).contains("router").contains("dispatch").contains("join").contains("summarizer");
     }
