@@ -77,7 +77,7 @@ public class TradeTools {
             out.put("positions", ps);
             List<FuturesOrderResponse> pending = simTradeClient.getPendingOrders(simUserId, null);
             out.put("pendingOrders", JSON.toJSON(pending));
-            return record("get_account", null, "ok").toJSONString(out);
+            return ok("get_account", null, out.toJSONString());
         } catch (Exception e) {
             return fail("get_account", null, e);
         }
@@ -137,7 +137,7 @@ public class TradeTools {
                 openReq.setTakeProfits(List.of(tp));
             }
             FuturesOrderResponse resp = simTradeClient.openPosition(simUserId, openReq);
-            return record("open_position", argSummary, "ok").toJSONString(JSON.toJSON(resp));
+            return ok("open_position", argSummary, JSON.toJSONString(resp));
         } catch (Exception e) {
             return fail("open_position", argSummary, e);
         }
@@ -160,7 +160,7 @@ public class TradeTools {
             req.setQuantity(BigDecimal.valueOf(quantity));
             req.setOrderType("MARKET");
             FuturesOrderResponse resp = simTradeClient.closePosition(simUserId, req);
-            return record("close_position", args, "ok").toJSONString(JSON.toJSON(resp));
+            return ok("close_position", args, JSON.toJSONString(resp));
         } catch (Exception e) {
             return fail("close_position", args, e);
         }
@@ -184,7 +184,7 @@ public class TradeTools {
             item.setQuantity(BigDecimal.valueOf(quantity));
             req.setStopLosses(List.of(item));
             simTradeClient.setStopLoss(simUserId, req);
-            return record("set_stop_loss", args, "ok").toJSONString(new JSONObject().fluentPut("ok", true));
+            return ok("set_stop_loss", args, "{\"ok\":true}");
         } catch (Exception e) {
             return fail("set_stop_loss", args, e);
         }
@@ -195,7 +195,7 @@ public class TradeTools {
         JSONObject args = new JSONObject().fluentPut("orderId", orderId);
         try {
             FuturesOrderResponse resp = simTradeClient.cancelOrder(simUserId, orderId);
-            return record("cancel_order", args, "ok").toJSONString(JSON.toJSON(resp));
+            return ok("cancel_order", args, JSON.toJSONString(resp));
         } catch (Exception e) {
             return fail("cancel_order", args, e);
         }
@@ -224,13 +224,13 @@ public class TradeTools {
         return a;
     }
 
-    /** 成功轨迹：记录后返回一个包装器把结果同时写进轨迹与工具返回值。 */
-    private ResultWriter record(String tool, JSONObject args, String status) {
-        JSONObject a = action(tool, args).fluentPut("status", status);
-        return payload -> {
-            a.put("result", summarize(payload));
-            return payload instanceof String s ? s : JSON.toJSONString(payload);
-        };
+    /** 成功：结果同时写进动作轨迹（摘要）与工具返回值（全文）。 */
+    private String ok(String tool, JSONObject args, Object payload) {
+        String s = payload instanceof String str ? str : JSON.toJSONString(payload);
+        // 轨迹里只存摘要，防止 get_account 大 JSON 把决策行撑爆
+        action(tool, args).fluentPut("status", "ok")
+                .fluentPut("result", s.length() > 400 ? s.substring(0, 400) + "…" : JSON.parse(s));
+        return s;
     }
 
     private String fail(String tool, JSONObject args, Exception e) {
@@ -238,16 +238,5 @@ public class TradeTools {
         action(tool, args).fluentPut("status", "error").fluentPut("error", msg);
         log.warn("[TradeTools] {} 失败 simUserId={} msg={}", tool, simUserId, msg);
         return "ERROR: " + msg;
-    }
-
-    /** 轨迹里只存摘要，防止 get_account 大 JSON 把决策行撑爆。 */
-    private static Object summarize(Object payload) {
-        String s = payload instanceof String str ? str : JSON.toJSONString(payload);
-        return s.length() > 400 ? s.substring(0, 400) + "…" : JSON.parse(s);
-    }
-
-    @FunctionalInterface
-    private interface ResultWriter {
-        String toJSONString(Object payload);
     }
 }
