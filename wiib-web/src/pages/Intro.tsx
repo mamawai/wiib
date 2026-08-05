@@ -4,7 +4,10 @@ import { Button } from '../components/ui/button';
 import { Bell } from 'lucide-react';
 
 const HIDE_NOTICE_KEY = 'wiib-notice-hide-date';
+const NOTICE_SEEN_KEY = 'wiib-notice-seen';
 function hideNoticeToday() { localStorage.setItem(HIDE_NOTICE_KEY, new Date().toDateString()); }
+// 「我知道了」= 看过了，以后不再自动拦。必须落标记，否则回首页又被 Home 弹回来，死循环
+function markNoticeSeen() { localStorage.setItem(NOTICE_SEEN_KEY, '1'); }
 
 export function Intro() {
   const navigate = useNavigate();
@@ -102,7 +105,7 @@ export function Intro() {
       <div className="fixed left-0 right-0 bottom-20 md:bottom-6 px-4 md:px-6 z-50">
         <div className="max-w-2xl mx-auto flex gap-3">
           <Button variant="outline" className="flex-1" onClick={() => { hideNoticeToday(); goHome(); }}>今日不展示</Button>
-          <Button className="flex-1" onClick={goHome}>我知道了</Button>
+          <Button className="flex-1" onClick={() => { markNoticeSeen(); goHome(); }}>我知道了</Button>
         </div>
       </div>
     </div>
