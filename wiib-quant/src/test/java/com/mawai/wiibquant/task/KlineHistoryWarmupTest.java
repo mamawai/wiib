@@ -2,9 +2,9 @@ package com.mawai.wiibquant.task;
 
 import com.mawai.wiibcommon.config.BinanceProperties;
 import com.mawai.wiibcommon.market.KlineHistoryStore;
-import com.mawai.wiibquant.agent.quant.service.MacroContextService;
 import org.junit.jupiter.api.Test;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -13,48 +13,38 @@ import static org.assertj.core.api.Assertions.assertThat;
 class KlineHistoryWarmupTest {
 
     @Test
-    void backfillsAllConfiguredSymbolsOverHistoryWindowThenWarmsMacro() {
+    void backfillsAllConfiguredSymbolsOverHistoryWindow() {
         FakeKlineHistoryStore store = new FakeKlineHistoryStore();
-        FakeMacroContextService macro = new FakeMacroContextService(store);
 
-        warmup(store, macro, List.of("BTCUSDT", "ETHUSDT", "SOLUSDT")).run();
+        warmup(store, List.of("BTCUSDT", "ETHUSDT", "SOLUSDT")).run();
 
         assertThat(store.symbols).containsExactly("BTCUSDT", "ETHUSDT", "SOLUSDT");
-        assertThat(store.lastToMs - store.lastFromMs).isEqualTo(MacroContextService.HISTORY.toMillis());
-        assertThat(macro.warmupCalls).isEqualTo(1);
-        // 预热必须发生在全部回补之后，宏观才能读到完整窗口
-        assertThat(macro.backfillsBeforeWarmup).isEqualTo(3);
+        assertThat(store.lastToMs - store.lastFromMs).isEqualTo(Duration.ofDays(90).toMillis());
     }
 
     @Test
-    void singleSymbolFailureContinuesWithOthersAndStillWarmsMacro() {
+    void singleSymbolFailureContinuesWithOthers() {
         FakeKlineHistoryStore store = new FakeKlineHistoryStore();
         store.failSymbol = "BTCUSDT";
-        FakeMacroContextService macro = new FakeMacroContextService(store);
 
-        warmup(store, macro, List.of("BTCUSDT", "ETHUSDT")).run();
+        warmup(store, List.of("BTCUSDT", "ETHUSDT")).run();
 
         assertThat(store.symbols).containsExactly("BTCUSDT", "ETHUSDT");
-        assertThat(macro.warmupCalls).isEqualTo(1);
     }
 
     @Test
-    void warmsMacroEvenWithoutConfiguredSymbols() {
+    void noConfiguredSymbolsIsNoop() {
         FakeKlineHistoryStore store = new FakeKlineHistoryStore();
-        FakeMacroContextService macro = new FakeMacroContextService(store);
 
-        warmup(store, macro, null).run();
+        warmup(store, null).run();
 
         assertThat(store.symbols).isEmpty();
-        assertThat(macro.warmupCalls).isEqualTo(1);
     }
 
-    private static KlineHistoryWarmup warmup(FakeKlineHistoryStore store,
-                                             FakeMacroContextService macro,
-                                             List<String> symbols) {
+    private static KlineHistoryWarmup warmup(FakeKlineHistoryStore store, List<String> symbols) {
         BinanceProperties props = new BinanceProperties();
         props.setSymbols(symbols);
-        return new KlineHistoryWarmup(store, props, macro);
+        return new KlineHistoryWarmup(store, props);
     }
 
     private static final class FakeKlineHistoryStore extends KlineHistoryStore {
@@ -76,23 +66,6 @@ class KlineHistoryWarmupTest {
                 throw new RuntimeException("rest down");
             }
             return 1;
-        }
-    }
-
-    private static final class FakeMacroContextService extends MacroContextService {
-        private final FakeKlineHistoryStore store;
-        private int warmupCalls;
-        private int backfillsBeforeWarmup;
-
-        private FakeMacroContextService(FakeKlineHistoryStore store) {
-            super(null, null);
-            this.store = store;
-        }
-
-        @Override
-        public void warmup() {
-            warmupCalls++;
-            backfillsBeforeWarmup = store.symbols.size();
         }
     }
 }

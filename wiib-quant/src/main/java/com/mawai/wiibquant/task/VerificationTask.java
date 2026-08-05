@@ -2,9 +2,7 @@ package com.mawai.wiibquant.task;
 
 import com.mawai.wiibcommon.constant.QuantConstants;
 import com.mawai.wiibquant.agent.analysis.NarrativeVerificationService;
-import com.mawai.wiibquant.agent.analysis.VolVerificationService;
 import com.mawai.wiibquant.agent.quant.domain.KlineClosedEvent;
-import com.mawai.wiibquant.agent.research.ForecastHorizon;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -12,33 +10,29 @@ import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
-import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * 对账调度（vol 数字轨 + 叙事轨）：事件驱动为主——每根 5m bar 收盘立刻扫该 symbol 的到期预测点，
+ * 对账调度（叙事轨）：事件驱动为主——每根 5m bar 收盘扫到期研判点，
  * "时间一到马上对账"（延迟秒级：刚收盘的 bar 正是对账所需的最后一块数据）；
- * 每小时 cron 只作 WS 断流/漏事件的兜底。两轨服务均幂等，失败下轮自愈。
+ * 每小时 cron 只作 WS 断流/漏事件的兜底。服务幂等，失败下轮自愈。
+ * vol 数字轨已随预测管线下线（2026-08：生产验证被 naive 基线打平/反杀）。
  */
 @Slf4j
 @Component
 @RequiredArgsConstructor
 public class VerificationTask {
 
-    private final VolVerificationService volVerificationService;
     private final NarrativeVerificationService narrativeVerificationService;
 
-    /** 与 QuantSnapshotScheduler 同一个开关：关掉后本轨自动对账停跑，Admin 手动验证走 service 不受影响 */
+    /** 关掉后自动对账停跑。 */
     @Value("${quant.analysis.enabled:true}")
     private boolean analysisEnabled;
 
-    /** 每 symbol 在飞防抖：上一轮没扫完不叠加（幂等，漏了有 cron 兜底）。 */
-    private final Set<String> inFlight = ConcurrentHashMap.newKeySet();
-    /** 叙事扫描是全局的（不分 symbol），单独防抖免得多 symbol 同刻收盘时重复扫。 */
+    /** 叙事扫描是全局的（不分 symbol），防抖免得多 symbol 同刻收盘时重复扫。 */
     private final AtomicBoolean narrativeInFlight = new AtomicBoolean();
 
-    /** 主触发：5m bar 收盘即对账（快照/研判只产于 WATCH_SYMBOLS，其余 symbol 的 bar 不进本轨）。 */
+    /** 主触发：5m bar 收盘即对账。 */
     @EventListener
     public void onKlineClosed(KlineClosedEvent event) {
         if (!analysisEnabled) {
@@ -51,16 +45,7 @@ public class VerificationTask {
         if (!QuantConstants.WATCH_SYMBOLS.contains(symbol)) {
             return;
         }
-        if (!inFlight.add(symbol)) {
-            return;
-        }
-        Thread.startVirtualThread(() -> {
-            try {
-                verifySymbol(symbol);
-            } finally {
-                inFlight.remove(symbol);
-            }
-        });
+        Thread.startVirtualThread(this::verifyNarrative);
     }
 
     /** 兜底 cron：WS 断流/事件丢失时每小时扫平欠账。 */
@@ -69,27 +54,19 @@ public class VerificationTask {
         if (!analysisEnabled) {
             return;
         }
-        for (String symbol : QuantConstants.WATCH_SYMBOLS) {
-            verifySymbol(normalize(symbol));
-        }
+        verifyNarrative();
     }
 
-    private void verifySymbol(String symbol) {
-        for (ForecastHorizon horizon : ForecastHorizon.values()) {
-            try {
-                volVerificationService.verifyDue(symbol, horizon);
-            } catch (Exception e) {
-                log.warn("[Verify] vol对账异常 symbol={} horizon={} msg={}", symbol, horizon, e.getMessage());
-            }
+    private void verifyNarrative() {
+        if (!narrativeInFlight.compareAndSet(false, true)) {
+            return;
         }
-        if (narrativeInFlight.compareAndSet(false, true)) {
-            try {
-                narrativeVerificationService.verifyDue();
-            } catch (Exception e) {
-                log.warn("[Verify] 叙事对账异常 msg={}", e.getMessage());
-            } finally {
-                narrativeInFlight.set(false);
-            }
+        try {
+            narrativeVerificationService.verifyDue();
+        } catch (Exception e) {
+            log.warn("[Verify] 叙事对账异常 msg={}", e.getMessage());
+        } finally {
+            narrativeInFlight.set(false);
         }
     }
 
