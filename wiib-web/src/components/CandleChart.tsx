@@ -838,9 +838,12 @@ export function CandleChart({ symbol, interval, limit = 300, visibleBars = 110, 
       const axisW = chart ? chart.priceScale('right').width() : 0;
 
       // ---- 仓位参考线小签：--------多10x 入场 63000----│y轴│ ----
+      // 价格超出 y 轴可视范围时 priceToCoordinate 不返回 null 而是给界外坐标，
+      // 小签会飘到主图 pane 外（盖工具条/副图），按 pane 0 高度裁掉
+      const paneH = chart ? chart.paneSize(0).height : 0;
       for (const { el: label, price } of posLabelElsRef.current) {
         const y = candle?.priceToCoordinate(price);
-        if (y == null) { label.style.display = 'none'; continue; }
+        if (y == null || y < 0 || y > paneH) { label.style.display = 'none'; continue; }
         label.style.top = `${y}px`;
         label.style.right = `${axisW + 4}px`;
         label.style.display = 'block';
