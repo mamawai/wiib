@@ -95,6 +95,11 @@ public class SimTradeClient {
         return new BigDecimal(String.valueOf(data.get("balance")));
     }
 
+    /** 余额明细（balance + frozenBalance），AI Trader 权益计算用。 */
+    public Map<String, Object> getBalanceDetail(Long userId) {
+        return unwrap(api.balance(userId));
+    }
+
     /** 幂等创建量化账户，返回 userId。 */
     public Long ensureAccount(String username, BigDecimal initialBalance) {
         Map<String, Object> data = unwrap(api.ensureAccount(username, initialBalance));
