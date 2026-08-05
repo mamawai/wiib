@@ -584,6 +584,8 @@ CREATE INDEX IF NOT EXISTS idx_kline_symbol_time ON kline_history (symbol, inter
 -- （Slice3 融合：research 链下序列已并入 factor_history 表，不再单建 market_series_history）
 
 -- ============ quant_snapshot：数值快照（P2a，每5m零LLM预测点，vol_legs_json 含 PIT 档界） ============
+-- [DEPRECATED 2026-08-06] 预测管线已下线（生产17天验证：vol预测被naive基线打平/反杀，fragility无前瞻信息）。
+-- 表停写留档，历史数据保留；新库可不建。
 CREATE TABLE IF NOT EXISTS quant_snapshot (
     id                  BIGSERIAL PRIMARY KEY,
     symbol              VARCHAR(20) NOT NULL,
@@ -626,6 +628,7 @@ CREATE INDEX IF NOT EXISTS idx_quant_deep_analysis_query ON quant_deep_analysis 
 COMMENT ON TABLE quant_deep_analysis IS '深研判(P2b):研判叙事+情景分布+失效条件+无方向态,debate升格为研判生产者不再改写方向数字';
 
 -- ============ quant_vol_verification：vol预测验证（P3，QLIKE vs naive基准 + vol-state命中，PIT档界） ============
+-- [DEPRECATED 2026-08-06] 随 vol 预测管线下线，表停写留档；新库可不建。
 CREATE TABLE IF NOT EXISTS quant_vol_verification (
     id                  BIGSERIAL PRIMARY KEY,
     snapshot_id         BIGINT NOT NULL,
