@@ -2,7 +2,7 @@ import axios from 'axios';
 import type { TnOverview, TnTrade, TnDailyCell, TnEquityPoint, TnFillStats, TnManualOrderReq, TnOrderResult, TnAck } from '../types/testnet';
 import type { BacktestStrategyMeta, BacktestTaskStatus, BacktestEventsPage, BacktestKlinesPage, BacktestResultPayload } from '../types';
 import type { LedgerEntry, LedgerBizTypeOption, PublicTrade, UserProfile, PositionHistoryItem, RankingSort } from '../types';
-import type { User, PageResult, RankingItem, CommentItem, NotificationItem, BuffStatus, UserBuff, BlackjackStatus, GameState, ConvertResult, MinesStatus, MinesGameState, VideoPokerStatus, VideoPokerGameState, CryptoPrice, CryptoOrderRequest, CryptoOrder, CryptoPosition, BStock, FuturesOpenRequest, FuturesCloseRequest, FuturesAddMarginRequest, FuturesReduceMarginRequest, FuturesStopLossRequest, FuturesTakeProfitRequest, FuturesAdjustLeverageRequest, FuturesCrossAccount, WalletTransferPreview, FuturesPosition, FuturesOrder, FuturesBracket, TradeFilterMap, PredictionRound, PredictionBet, PredictionBuyRequest, PredictionBetLive, PredictionPnl, AssetSnapshot, CategoryAverages, BehaviorAnalysisReport, ForceOrder, AiKeyConfig, AiModelAssignment, InviteCode, WorkbenchEvent, QuantDeepAnalysisView, StrategyAccountView, StrategySignalState, FeedStreamHealth, WorkbenchSessionSummary, WorkbenchChatMessage, NewsFlashItem } from '../types';
+import type { User, PageResult, RankingItem, CommentItem, NotificationItem, BuffStatus, UserBuff, BlackjackStatus, GameState, ConvertResult, MinesStatus, MinesGameState, VideoPokerStatus, VideoPokerGameState, CryptoPrice, CryptoOrderRequest, CryptoOrder, CryptoPosition, BStock, FuturesOpenRequest, FuturesCloseRequest, FuturesAddMarginRequest, FuturesReduceMarginRequest, FuturesStopLossRequest, FuturesTakeProfitRequest, FuturesAdjustLeverageRequest, FuturesCrossAccount, WalletTransferPreview, FuturesPosition, FuturesOrder, FuturesBracket, TradeFilterMap, PredictionRound, PredictionBet, PredictionBuyRequest, PredictionBetLive, PredictionPnl, AssetSnapshot, CategoryAverages, BehaviorAnalysisReport, ForceOrder, AiKeyConfig, AiModelAssignment, InviteCode, WorkbenchEvent, QuantDeepAnalysisView, StrategyAccountView, TraderPublicView, TraderOwnerView, TraderDetailView, AiTraderDecisionView, TraderEquityPoint, TraderUpsertRequest, StrategySignalState, FeedStreamHealth, WorkbenchSessionSummary, WorkbenchChatMessage, NewsFlashItem } from '../types';
 
 const api = axios.create({
   baseURL: '/api',
@@ -443,6 +443,22 @@ export const quantApi = {
     api.get<unknown, QuantDeepAnalysisView[]>('/ai/quant/analysis/list', { params: { symbol: symbol || 'BTCUSDT', limit } }),
   /** 重要快讯（quant 侧内存缓存，未过期不打上游） */
   news: () => api.get<unknown, NewsFlashItem[]>('/ai/quant/news'),
+};
+
+// ========== AI Trader 竞技场 ==========
+export const traderApi = {
+  mine: () => api.get<unknown, TraderOwnerView | null>('/ai/trader/mine'),
+  create: (req: TraderUpsertRequest) => api.post<unknown, void>('/ai/trader', req),
+  updateConfig: (req: TraderUpsertRequest) => api.put<unknown, void>('/ai/trader/config', req),
+  start: () => api.post<unknown, void>('/ai/trader/start'),
+  pause: () => api.post<unknown, void>('/ai/trader/pause'),
+  reset: () => api.post<unknown, void>('/ai/trader/reset'),
+  arena: () => api.get<unknown, TraderPublicView[]>('/ai/trader/arena'),
+  detail: (id: number) => api.get<unknown, TraderDetailView>(`/ai/trader/${id}`),
+  decisions: (id: number, limit = 50, before?: number) =>
+    api.get<unknown, AiTraderDecisionView[]>(`/ai/trader/${id}/decisions`, { params: { limit, before } }),
+  equityCurve: (id: number, round?: number) =>
+    api.get<unknown, TraderEquityPoint[]>(`/ai/trader/${id}/equity-curve`, { params: { round } }),
 };
 
 // ========== 策略账户监控 ==========

@@ -680,6 +680,74 @@ export interface StrategySignalState {
   metrics: Record<string, string>;
 }
 
+// ========== AI Trader 竞技场 ==========
+
+/** trader 公开视图（竞技场任何登录用户可见） */
+export interface TraderPublicView {
+  id: number;
+  name: string;
+  model: string;
+  status: 'PAUSED' | 'RUNNING' | 'LIQUIDATED';
+  pausedReason: string | null;
+  symbols: string;
+  intervalCode: string;
+  roundNo: number;
+  equity: number;
+  pnlPct: number;
+  mine: boolean;
+}
+
+/** 主人视图：公开视图 + 配置回显（key 只回尾4位） */
+export interface TraderOwnerView {
+  pub: TraderPublicView;
+  apiProtocol: string;
+  baseUrl: string;
+  customPrompt: string | null;
+  apiKeyTail: string;
+}
+
+/** trader 详情：公开视图 + 实时持仓/挂单 */
+export interface TraderDetailView {
+  trader: TraderPublicView;
+  positions: FuturesPosition[];
+  pendingOrders: FuturesOrder[];
+}
+
+/** 每次唤醒一条决策（竞技场时间线） */
+export interface AiTraderDecisionView {
+  id: number;
+  traderId: number;
+  roundNo: number;
+  wakeTime: number;
+  intervalCode: string;
+  status: 'OK' | 'ERROR' | 'SKIPPED';
+  equity: number | null;
+  reasoning: string | null;
+  /** [{tool,args,status,result/rejected/error}...] */
+  actionsJson: string | null;
+  toolCalls: number;
+  latencyMs: number | null;
+  error: string | null;
+  createdAt: string;
+}
+
+export interface TraderEquityPoint {
+  wakeTime: number;
+  equity: number;
+}
+
+/** 创建/改配置入参（apiKey 改配置时传空=不换） */
+export interface TraderUpsertRequest {
+  name: string;
+  symbols: string;
+  intervalCode: string;
+  customPrompt: string | null;
+  apiProtocol: string;
+  baseUrl: string;
+  model: string;
+  apiKey: string;
+}
+
 /** 重要快讯（BlockBeats 缓存透传，plain 为脱 HTML 纯文本） */
 export interface NewsFlashItem {
   id: number;

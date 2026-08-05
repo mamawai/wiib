@@ -93,6 +93,7 @@ export function Layout({ children }: Props) {
                 资金流水跟持仓是两件事，藏在别的页面里找不着 */}
             <HeaderNavItem to="/ledger" label="账单" />
             <HeaderNavItem to="/ai" label="AI" />
+            <HeaderNavItem to="/arena" label="竞技场" />
             <HeaderNavItem to="/ranking" label="排行" />
             <HeaderNavItem to="/games" label="游戏" />
             <HeaderNavItem to="/testnet" label="模拟盘" />
