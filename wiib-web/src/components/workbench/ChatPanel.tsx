@@ -10,7 +10,6 @@ import type { WorkbenchSessionSummary } from '../../types';
 
 const AGENT_CN: Record<string, string> = {
   market_agent: '市场专家',
-  quant_agent: '量化专家',
   news_agent: '新闻专家',
   supervisor: '调度中枢',
 };

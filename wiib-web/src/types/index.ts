@@ -605,22 +605,6 @@ export interface FeedStreamHealth {
 }
 
 // ========== P7 研判工作台 ==========
-/** 快照时间线曲线点（/ai/quant/snapshots/series） */
-export interface QuantSnapshotSeriesPoint {
-  closeTime: number;
-  lastPrice: number;
-  h6SigmaBps: number | null;
-  h12SigmaBps: number | null;
-  h24SigmaBps: number | null;
-  volState: string | null;
-  fragilityScore: number | null;
-  fragilityLevel: string | null;
-  /** 各腿已验证实际波幅 |return| bps；到期才有，故尾部按各自腿长天然缺（H24 缺最多） */
-  realizedH6AbsBps: number | null;
-  realizedH12AbsBps: number | null;
-  realizedH24AbsBps: number | null;
-}
-
 /** 深研判（quant_deep_analysis 实体透传） */
 export interface QuantDeepAnalysisView {
   id: number;
@@ -638,26 +622,6 @@ export interface QuantDeepAnalysisView {
   judgeReasoning: string;
   newsContext: string | null;
   createdAt: string;
-}
-
-/** 记分卡（/ai/quant/scorecard） */
-export interface ScorecardHorizon {
-  horizon: string;
-  samples: number;
-  avgQlike: number;
-  avgBaselineQlike: number;
-  /** (baseline-forecast)/baseline，>0=跑赢基准 */
-  qlikeImprovement: number;
-  qlikeWinRate: number;
-  volStateHitRate: number;
-}
-export interface Scorecard {
-  symbol: string;
-  windowDays: number;
-  runningDays: number;
-  totalSamples: number;
-  horizons: ScorecardHorizon[];
-  note: string | null;
 }
 
 /** 工作台 SSE 事件（与 ChatWorkbenchController 协议一一对应） */
@@ -714,25 +678,6 @@ export interface StrategySignalState {
   symbol: string;
   state: string;
   metrics: Record<string, string>;
-}
-
-/** 最新数值快照（quant_snapshot 实体透传，/ai/quant/snapshots/latest） */
-export interface QuantSnapshotView {
-  id: number;
-  symbol: string;
-  closeTime: number;
-  lastPrice: number;
-  /** {H6:{sigmaBps,percentile,tier,volState,lowCut,highCut,regime,regimeConfidence},H12,H24} */
-  volLegsJson: string;
-  regime: string | null;
-  regimeConfidence: number | null;
-  fragilityScore: number;
-  fragilityLevel: string;
-  fragilityDirection: string;
-  fragilityHeadline: string;
-  signalPanelJson: string;
-  qualityFlagsJson: string;
-  createdAt: string;
 }
 
 /** 重要快讯（BlockBeats 缓存透传，plain 为脱 HTML 纯文本） */

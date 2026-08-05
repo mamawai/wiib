@@ -1,6 +1,5 @@
 import { useState, useCallback } from 'react';
 import type { ReactNode } from 'react';
-import { Link } from 'react-router-dom';
 import { aiAgentApi } from '../api';
 import { useToast } from '../components/ui/use-toast';
 import { Button } from '../components/ui/button';
@@ -8,7 +7,7 @@ import { Workbench } from '../components/workbench/Workbench';
 import { cn } from '../lib/utils';
 import {
   BarChart3, Bomb, Brain, BrainCircuit, CheckCircle2, Coins, Dices, Gem,
-  Rocket, ShieldAlert, Target, Trophy, User, Zap,
+  Rocket, ShieldAlert, Target, User, Zap,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { BehaviorAnalysisReport } from '../types';
@@ -86,9 +85,6 @@ export function AiAgent() {
       <div className="rounded-lg border border-border bg-card px-4 py-2.5 flex items-center gap-2.5 text-primary text-xs font-bold">
         <Zap className="w-4 h-4 shrink-0" />
         投资有风险，当前分析结果仅供参考不构成任何建议
-        <Link to="/scorecard" className="ml-auto hidden sm:flex items-center gap-1 hover:underline shrink-0">
-          <Trophy className="w-3.5 h-3.5" /> 预测战绩
-        </Link>
       </div>
 
       {/* Tab：内凹滑槽 + 浮起选中块（拟物分段控件） */}

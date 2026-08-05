@@ -24,7 +24,6 @@ export function Admin() {
   const { user } = useUserStore();
   const { toast } = useToast();
   const [actionLoading, setActionLoading] = useState<string | null>(null);
-  const [quantSymbol, setQuantSymbol] = useState('BTCUSDT');
   const [interestRateDecimal, setInterestRateDecimal] = useState<number | null>(null);
   const [interestRatePct, setInterestRatePct] = useState('');
   const [rateLoading, setRateLoading] = useState(false);
@@ -179,17 +178,6 @@ export function Admin() {
     }
   };
 
-  const handleMessageAction = async (action: () => Promise<string>, name: string) => {
-    setActionLoading(name);
-    try {
-      const message = await action();
-      toast(message, 'success');
-    } catch (e) {
-      toast((e as Error).message || '操作失败', 'error');
-    } finally {
-      setActionLoading(null);
-    }
-  };
 
   const maskKey = (key: string) => {
     if (key.length <= 8) return '****';
@@ -473,17 +461,6 @@ export function Admin() {
                   <Button variant="outline" className="h-9 text-xs" onClick={() => handleAction(adminApi.bankruptcyCheck, 'bankruptcyCheck')} disabled={actionLoading !== null}>执行爆仓检查</Button>
                   <Button variant="outline" className="h-9 text-xs" onClick={() => handleAction(adminApi.accrueInterest, 'accrueInterest')} disabled={actionLoading !== null}>手动计息</Button>
                   <Button variant="outline" className="h-9 text-xs" onClick={() => handleAction(adminApi.assetSnapshot, 'assetSnapshot')} disabled={actionLoading !== null}>资产快照</Button>
-                </div>
-              </div>
-              {/* AI 量化 */}
-              <div>
-                <div className="text-xs text-muted-foreground mb-2">AI 量化</div>
-                <div className="space-y-2">
-                  <Input value={quantSymbol} onChange={e => setQuantSymbol(e.target.value.toUpperCase())} placeholder="币种，如 BTCUSDT" className="h-9" />
-                  <div className="grid grid-cols-2 gap-2">
-                    <Button variant="outline" className="h-9 text-xs" onClick={() => { const sym = quantSymbol.trim(); if (sym) void handleMessageAction(() => adminApi.triggerQuant(sym), 'triggerQuant'); }} disabled={actionLoading !== null || !quantSymbol.trim()}>触发量化分析</Button>
-                    <Button variant="outline" className="h-9 text-xs" onClick={() => { const sym = quantSymbol.trim(); if (sym) void handleMessageAction(() => adminApi.triggerQuantVerification(sym), 'triggerQuantVerification'); }} disabled={actionLoading !== null || !quantSymbol.trim()}>触发预测验证</Button>
-                  </div>
                 </div>
               </div>
             </CardContent>

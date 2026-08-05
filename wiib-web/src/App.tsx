@@ -25,7 +25,6 @@ import { Intro } from './pages/Intro';
 import { Me } from './pages/Me';
 import { Prediction } from './pages/Prediction';
 import { AiAgent } from './pages/AiAgent';
-import { Scorecard } from './pages/Scorecard';
 import { Strategies } from './pages/Strategies';
 import { Backtest } from './pages/Backtest';
 import { TestnetMonitor } from './pages/TestnetMonitor';
@@ -96,7 +95,6 @@ function App() {
                   <Route path="/videopoker" element={<VideoPoker />} />
                   <Route path="/prediction" element={<Prediction />} />
                   <Route path="/ai" element={<AiAgent />} />
-                  <Route path="/scorecard" element={<Scorecard />} />
                   <Route path="/strategies" element={<Strategies />} />
                   <Route path="/backtest" element={<Backtest />} />
                   <Route path="/testnet" element={<TestnetMonitor />} />

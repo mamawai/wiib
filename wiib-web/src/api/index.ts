@@ -2,7 +2,7 @@ import axios from 'axios';
 import type { TnOverview, TnTrade, TnDailyCell, TnEquityPoint, TnFillStats, TnManualOrderReq, TnOrderResult, TnAck } from '../types/testnet';
 import type { BacktestStrategyMeta, BacktestTaskStatus, BacktestEventsPage, BacktestKlinesPage, BacktestResultPayload } from '../types';
 import type { LedgerEntry, LedgerBizTypeOption, PublicTrade, UserProfile, PositionHistoryItem, RankingSort } from '../types';
-import type { User, PageResult, RankingItem, CommentItem, NotificationItem, BuffStatus, UserBuff, BlackjackStatus, GameState, ConvertResult, MinesStatus, MinesGameState, VideoPokerStatus, VideoPokerGameState, CryptoPrice, CryptoOrderRequest, CryptoOrder, CryptoPosition, BStock, FuturesOpenRequest, FuturesCloseRequest, FuturesAddMarginRequest, FuturesReduceMarginRequest, FuturesStopLossRequest, FuturesTakeProfitRequest, FuturesAdjustLeverageRequest, FuturesCrossAccount, WalletTransferPreview, FuturesPosition, FuturesOrder, FuturesBracket, TradeFilterMap, PredictionRound, PredictionBet, PredictionBuyRequest, PredictionBetLive, PredictionPnl, AssetSnapshot, CategoryAverages, BehaviorAnalysisReport, ForceOrder, AiKeyConfig, AiModelAssignment, InviteCode, WorkbenchEvent, QuantSnapshotView, QuantSnapshotSeriesPoint, QuantDeepAnalysisView, Scorecard, StrategyAccountView, StrategySignalState, FeedStreamHealth, WorkbenchSessionSummary, WorkbenchChatMessage, NewsFlashItem } from '../types';
+import type { User, PageResult, RankingItem, CommentItem, NotificationItem, BuffStatus, UserBuff, BlackjackStatus, GameState, ConvertResult, MinesStatus, MinesGameState, VideoPokerStatus, VideoPokerGameState, CryptoPrice, CryptoOrderRequest, CryptoOrder, CryptoPosition, BStock, FuturesOpenRequest, FuturesCloseRequest, FuturesAddMarginRequest, FuturesReduceMarginRequest, FuturesStopLossRequest, FuturesTakeProfitRequest, FuturesAdjustLeverageRequest, FuturesCrossAccount, WalletTransferPreview, FuturesPosition, FuturesOrder, FuturesBracket, TradeFilterMap, PredictionRound, PredictionBet, PredictionBuyRequest, PredictionBetLive, PredictionPnl, AssetSnapshot, CategoryAverages, BehaviorAnalysisReport, ForceOrder, AiKeyConfig, AiModelAssignment, InviteCode, WorkbenchEvent, QuantDeepAnalysisView, StrategyAccountView, StrategySignalState, FeedStreamHealth, WorkbenchSessionSummary, WorkbenchChatMessage, NewsFlashItem } from '../types';
 
 const api = axios.create({
   baseURL: '/api',
@@ -181,10 +181,6 @@ export const adminApi = {
   listAssignments: () => api.get<unknown, AiModelAssignment[]>('/admin/ai-agent/assignments'),
   saveAssignments: (assignments: AiModelAssignment[]) =>
     api.post<unknown, void>('/admin/ai-agent/assignments', assignments),
-  triggerQuant: (symbol: string) =>
-    api.post<unknown, string>('/admin/ai-agent/quant/trigger', null, { params: { symbol } }),
-  triggerQuantVerification: (symbol: string) =>
-    api.post<unknown, string>('/admin/ai-agent/quant/verify/trigger', null, { params: { symbol } }),
   // feed WS 流健康：进面板拉快照 + 手动重试（实时更新走 STOMP /topic/feed/streams）
   feedStreams: () => api.get<unknown, FeedStreamHealth[]>('/monitor/streams'),
   retryFeedStream: (name: string) =>
@@ -441,16 +437,10 @@ export const workbenchApi = {
 };
 
 export const quantApi = {
-  latestSnapshot: (symbol?: string) =>
-    api.get<unknown, QuantSnapshotView>('/ai/quant/snapshots/latest', { params: { symbol: symbol || 'BTCUSDT' } }),
-  snapshotSeries: (symbol?: string, hours = 24) =>
-    api.get<unknown, QuantSnapshotSeriesPoint[]>('/ai/quant/snapshots/series', { params: { symbol: symbol || 'BTCUSDT', hours } }),
   latestAnalysis: (symbol?: string) =>
     api.get<unknown, QuantDeepAnalysisView>('/ai/quant/analysis/latest', { params: { symbol: symbol || 'BTCUSDT' } }),
   analysisList: (symbol?: string, limit = 20) =>
     api.get<unknown, QuantDeepAnalysisView[]>('/ai/quant/analysis/list', { params: { symbol: symbol || 'BTCUSDT', limit } }),
-  scorecard: (symbol?: string, days = 7) =>
-    api.get<unknown, Scorecard>('/ai/quant/scorecard', { params: { symbol: symbol || 'BTCUSDT', days } }),
   /** 重要快讯（quant 侧内存缓存，未过期不打上游） */
   news: () => api.get<unknown, NewsFlashItem[]>('/ai/quant/news'),
 };
