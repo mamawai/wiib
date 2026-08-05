@@ -826,3 +826,51 @@ COMMENT ON COLUMN user_ledger.ref_id IS '关联单号，账单可点进对应订
 CREATE INDEX IF NOT EXISTS idx_ledger_user_time ON user_ledger(user_id, id DESC);
 -- 按类型筛选
 CREATE INDEX IF NOT EXISTS idx_ledger_user_biz ON user_ledger(user_id, biz_type, id DESC);
+
+-- ============ AI Trader：用户BYOK自主交易代理（2026-08，公开竞技场） ============
+CREATE TABLE IF NOT EXISTS ai_trader (
+    id              BIGSERIAL PRIMARY KEY,
+    user_id         BIGINT NOT NULL UNIQUE,
+    name            VARCHAR(32) NOT NULL,
+    status          VARCHAR(16) NOT NULL DEFAULT 'PAUSED',
+    paused_reason   VARCHAR(255),
+    symbols         VARCHAR(255) NOT NULL,
+    interval_code   VARCHAR(8) NOT NULL DEFAULT '1h',
+    custom_prompt   TEXT,
+    api_protocol    VARCHAR(16) NOT NULL DEFAULT 'openai',
+    base_url        VARCHAR(255) NOT NULL,
+    model           VARCHAR(128) NOT NULL,
+    api_key_enc     VARCHAR(1024) NOT NULL,
+    sim_user_id     BIGINT,
+    round_no        INT NOT NULL DEFAULT 1,
+    consecutive_failures INT NOT NULL DEFAULT 0,
+    created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+COMMENT ON TABLE ai_trader IS 'AI Trader：用户BYOK自主交易代理（每用户1个，独立sim子账户，公开竞技场）';
+COMMENT ON COLUMN ai_trader.status IS 'PAUSED/RUNNING/LIQUIDATED';
+COMMENT ON COLUMN ai_trader.symbols IS '交易币种白名单子集，逗号分隔（须在binance.symbols范围内）';
+COMMENT ON COLUMN ai_trader.interval_code IS '唤醒K线级别 15m/1h/4h/1d（1m/5m禁止：烧穿用户token也挤爆调度）';
+COMMENT ON COLUMN ai_trader.api_key_enc IS 'AES-GCM密文base64(iv+cipher)，密钥走环境变量WIIB_TRADER_KEY_SECRET';
+COMMENT ON COLUMN ai_trader.sim_user_id IS '当前局sim子账户userId，每局独立，重置开新账户';
+COMMENT ON COLUMN ai_trader.round_no IS '局数：爆仓/手动重置+1开新局，历史留档';
+
+CREATE TABLE IF NOT EXISTS ai_trader_decision (
+    id              BIGSERIAL PRIMARY KEY,
+    trader_id       BIGINT NOT NULL,
+    round_no        INT NOT NULL,
+    wake_time       BIGINT NOT NULL,
+    interval_code   VARCHAR(8) NOT NULL,
+    status          VARCHAR(16) NOT NULL,
+    equity          NUMERIC(20,8),
+    reasoning       TEXT,
+    actions_json    TEXT,
+    tool_calls      INT NOT NULL DEFAULT 0,
+    latency_ms      INT,
+    error           VARCHAR(500),
+    created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_atd_trader_time ON ai_trader_decision(trader_id, wake_time DESC);
+COMMENT ON TABLE ai_trader_decision IS 'AI Trader每次唤醒一行：推理全文+动作(含play_type论点标签)+权益快照——竞技场决策时间线与净值曲线数据源';
+COMMENT ON COLUMN ai_trader_decision.status IS 'OK/ERROR/SKIPPED（上一唤醒未完被跳过）';
+COMMENT ON COLUMN ai_trader_decision.equity IS '唤醒时账户权益USDT';
