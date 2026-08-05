@@ -29,7 +29,13 @@ import { cn, fmtDate, fmtMoney } from '../lib/utils';
 import { orderSideView } from '../lib/orderSide';
 
 const HIDE_NOTICE_KEY = 'wiib-notice-hide-date';
-function shouldShowNotice() { const d = localStorage.getItem(HIDE_NOTICE_KEY); return !d || d !== new Date().toDateString(); }
+const NOTICE_SEEN_KEY = 'wiib-notice-seen';
+// seen = 点过「我知道了」，永久不再自动跳；hide-date 只压当天，明天还提醒一次
+function shouldShowNotice() {
+  if (localStorage.getItem(NOTICE_SEEN_KEY)) return false;
+  const d = localStorage.getItem(HIDE_NOTICE_KEY);
+  return !d || d !== new Date().toDateString();
+}
 
 /** 快捷入口定义。登录后收在总资产看板底部，游客态在页面上单独一行，共用这一份 */
 const QUICK_ENTRIES = [
