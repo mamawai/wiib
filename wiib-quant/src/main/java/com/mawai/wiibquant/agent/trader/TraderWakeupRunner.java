@@ -212,8 +212,13 @@ public class TraderWakeupRunner {
                 .build(ResilientChatService.builder().model(model).forceFirstToolChoice("required").asFactory())
                 .compile();
 
-        String instruction = "新一根 " + trader.getIntervalCode() + " K线已收盘（边界时刻 " + boundaryTime
-                + "）。请按纪律流程分析并给出本轮决策。HOLD 也是完整决策——写明你在等的触发条件。";
+        String snapshot = marketSnapshot(whitelist);
+        String instruction = "新一根 " + trader.getIntervalCode() + " K线已收盘（"
+                + TIME_FMT.format(Instant.ofEpochMilli(boundaryTime)) + "）。"
+                + (snapshot.isEmpty() ? "" : "\n行情快照（细节自己用工具查证）：\n" + snapshot)
+                + "本轮只需回答一个问题：这根K线收盘后，你的计划需要改变吗？"
+                + "先检验上一轮【本轮结论】里的等待条件与各持仓的失效条件，再考虑新机会；"
+                + "最后按纪律用【本轮结论】固定格式收尾。";
         RunnableConfig config = RunnableConfig.builder()
                 .threadId("trader-" + trader.getId() + "-" + boundaryTime).build();
 
@@ -250,6 +255,26 @@ public class TraderWakeupRunner {
             decision.setError("达单轮模型调用上限(" + MAX_MODEL_CALLS + ")，提前收束");
         }
         return outcome.reasoning();
+    }
+
+    /**
+     * 开场行情快照：各币标记价+资金费率，一行一个——把价格水平先钉进模型的世界，
+     * 省下"查户口"的工具轮次；细节与多周期确认仍由模型自己用工具求证。
+     * 单币快照拉取失败就跳过，不挡唤醒。
+     */
+    private String marketSnapshot(Set<String> whitelist) {
+        StringBuilder snap = new StringBuilder();
+        for (String sym : whitelist.stream().sorted().toList()) {
+            try {
+                JSONObject p = JSON.parseObject(binanceRestClient.getPremiumIndex(sym));
+                snap.append("- ").append(sym).append(" 标记价 ")
+                        .append(p.getBigDecimal("markPrice").stripTrailingZeros().toPlainString())
+                        .append("，资金费率 ").append(p.getString("lastFundingRate")).append('\n');
+            } catch (Exception e) {
+                log.debug("[Trader] 行情快照拉取失败 {} msg={}", sym, e.getMessage());
+            }
+        }
+        return snap.toString();
     }
 
     /**

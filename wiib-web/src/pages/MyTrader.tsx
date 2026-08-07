@@ -71,7 +71,8 @@ const TOUR_STEPS: TourStep[] = [
     target: 'prompt',
     title: '交易风格指令',
     body: '平台系统提示词已经写好了角色、纪律和硬性规则，可以展开看全文——和真正喂给 AI 的一字不差。\n\n'
-      + '你写的自定义指令追加在它后面，用来定风格（"只做突破不抄底"这类）。\n\n'
+      + '你写的自定义指令追加在它后面，用来定风格（"只做突破不抄底"这类）。'
+      + '风格与策略上与平台默认冲突时，以你写的为准；仓位规格和硬性规则除外，那由系统强制执行。\n\n'
       + '存库即生效，下一根 K 线就按新的来，不用重启。',
   },
   {
@@ -501,7 +502,7 @@ export function MyTrader() {
 
         <label className="space-y-1 text-xs block">
           <span className="text-muted-foreground font-bold">
-            {form.useDefaultPrompt ? '自定义提示词（追加在平台系统提示词之后）' : '自定义提示词（唯一指令来源，必填）'}
+            {form.useDefaultPrompt ? '自定义提示词（定风格与策略，与平台默认冲突时以你的为准）' : '自定义提示词（唯一指令来源，必填）'}
           </span>
           <textarea value={form.customPrompt ?? ''} onChange={e => set({ customPrompt: e.target.value })} rows={6} maxLength={4000}
                     placeholder="例：只做趋势突破，不抄底不摸顶；单笔风险不超过权益2%；连亏两笔后本日只观望。"
