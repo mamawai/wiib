@@ -158,10 +158,28 @@ public class TraderService {
                 return "模型连通性测试失败：" + connErr;
             }
         }
-        applyConfig(t, req);
-        t.setApiKeyEnc(probe.getApiKeyEnc());
-        t.setUpdatedAt(LocalDateTime.now());
-        traderMapper.updateById(t);
+        // 列级更新只写配置字段：整行 updateById 会把唤醒回路并发写的 status/连败计数盖回快照旧值
+        // （连通性测试要出网数秒，窗口不小）——与 runner 侧"状态回写列级更新"是同一条铁律的两半
+        traderMapper.update(null, new LambdaUpdateWrapper<AiTrader>()
+                .eq(AiTrader::getId, t.getId())
+                .set(AiTrader::getName, probe.getName())
+                .set(AiTrader::getSymbols, probe.getSymbols())
+                .set(AiTrader::getIntervalCode, probe.getIntervalCode())
+                .set(AiTrader::getCustomPrompt, probe.getCustomPrompt())
+                .set(AiTrader::getUseDefaultPrompt, probe.getUseDefaultPrompt())
+                .set(AiTrader::getApiProtocol, probe.getApiProtocol())
+                .set(AiTrader::getBaseUrl, probe.getBaseUrl())
+                .set(AiTrader::getModel, probe.getModel())
+                .set(AiTrader::getApiKeyEnc, probe.getApiKeyEnc())
+                .set(AiTrader::getLeverageMin, probe.getLeverageMin())
+                .set(AiTrader::getLeverageMax, probe.getLeverageMax())
+                .set(AiTrader::getMarginPctMin, probe.getMarginPctMin())
+                .set(AiTrader::getMarginPctMax, probe.getMarginPctMax())
+                .set(AiTrader::getAllowMultiPosition, probe.getAllowMultiPosition())
+                .set(AiTrader::getAllowHedge, probe.getAllowHedge())
+                .set(AiTrader::getAllowSelfAdd, probe.getAllowSelfAdd())
+                .set(AiTrader::getAllowSelfReduce, probe.getAllowSelfReduce())
+                .set(AiTrader::getUpdatedAt, LocalDateTime.now()));
         if (modelChanged) {
             modelFactory.evict(t.getId());
         }

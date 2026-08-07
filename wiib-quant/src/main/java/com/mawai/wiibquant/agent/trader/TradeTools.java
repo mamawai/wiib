@@ -513,8 +513,17 @@ public class TradeTools {
     private String ok(String tool, JSONObject args, Object payload) {
         String s = payload instanceof String str ? str : JSON.toJSONString(payload);
         // 轨迹里只存摘要，防止 get_account 大 JSON 把决策行撑爆
-        action(tool, args).fluentPut("status", "ok")
-                .fluentPut("result", s.length() > 400 ? s.substring(0, 400) + "…" : JSON.parse(s));
+        Object result;
+        if (s.length() > 400) {
+            result = s.substring(0, 400) + "…";
+        } else {
+            try {
+                result = JSON.parse(s);
+            } catch (Exception e) {
+                result = s; // 审批回执等纯文本结果不是 JSON，原样入轨迹
+            }
+        }
+        action(tool, args).fluentPut("status", "ok").fluentPut("result", result);
         return s;
     }
 

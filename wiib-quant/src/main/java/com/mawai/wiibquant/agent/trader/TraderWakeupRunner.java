@@ -249,11 +249,6 @@ public class TraderWakeupRunner {
     }
 
     /**
-     * 权益 = 可用余额 + 冻结 + Σ仓位价值。口径对齐 sim AssetValuationService：
-     * 全仓仓位只计浮盈亏——占用制下保证金从没离开余额钱包，再加 margin 就是同一笔钱计两遍
-     * （曾造成竞技场亏损却显示 +1281 的虚高）；逐仓才是划扣制，margin 住在仓位里要加回。
-     */
-    /**
      * 合并轨迹：顺序骨架来自图上 hook 的全量记录（含数据工具）；交易工具用 TradeTools 的
      * 富记录（结果/拒因）按序替换轻量占位。极端中断时 hook 记录缺失，富记录兜底补尾。
      */
@@ -271,6 +266,11 @@ public class TraderWakeupRunner {
         return merged;
     }
 
+    /**
+     * 权益 = 可用余额 + 冻结 + Σ仓位价值。口径对齐 sim AssetValuationService：
+     * 全仓仓位只计浮盈亏——占用制下保证金从没离开余额钱包，再加 margin 就是同一笔钱计两遍
+     * （曾造成竞技场亏损却显示 +1281 的虚高）；逐仓才是划扣制，margin 住在仓位里要加回。
+     */
     private BigDecimal computeEquity(Long simUserId, List<FuturesPositionDTO> positions) {
         Map<String, Object> balance = simTradeClient.getBalanceDetail(simUserId);
         BigDecimal equity = new BigDecimal(String.valueOf(balance.get("balance")))

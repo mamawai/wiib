@@ -193,6 +193,39 @@ class TraderServiceTest {
         assertThat(err).contains("多空双开");
     }
 
+    /**
+     * 改配置必须列级更新且不碰运行态列：整行 updateById 会把唤醒回路并发写的
+     * status/consecutive_failures 盖回读取时的旧值（连通性测试要出网数秒，窗口不小）——
+     * 与 runner 侧"状态回写列级更新"是同一条铁律的两半。
+     */
+    @Test
+    void updateConfigWritesConfigColumnsOnly() {
+        AiTrader t = new AiTrader();
+        t.setId(7L);
+        t.setUserId(1L);
+        t.setStatus(AiTrader.STATUS_RUNNING);
+        t.setApiProtocol("openai");
+        t.setBaseUrl("https://8.8.8.8");
+        t.setModel("deepseek-chat");
+        t.setApiKeyEnc("enc-stored");
+        when(traderMapper.selectOne(any())).thenReturn(t);
+        when(binanceProperties.getSymbols()).thenReturn(List.of("BTCUSDT"));
+
+        // 模型三件套与 key 都没变 → 不触发连通性测试
+        String err = service.updateConfig(1L, new TraderService.UpsertReq("小虎", "BTCUSDT", "5m", "稳一点",
+                "openai", "https://8.8.8.8", "deepseek-chat", null, true,
+                null, null, null, null, null, null, null, null));
+
+        assertThat(err).isNull();
+        verify(traderMapper, never()).updateById(any(AiTrader.class));
+        ArgumentCaptor<com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<AiTrader>> cap =
+                ArgumentCaptor.forClass(com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper.class);
+        verify(traderMapper).update(org.mockito.ArgumentMatchers.isNull(), cap.capture());
+        String sqlSet = cap.getValue().getSqlSet();
+        assertThat(sqlSet).contains("custom_prompt").contains("api_key_enc");
+        assertThat(sqlSet).doesNotContain("status").doesNotContain("consecutive_failures");
+    }
+
     @Test
     void upstreamErrorTruncatedTo300() {
         when(apiKeyCrypto.encrypt(any())).thenReturn("enc");

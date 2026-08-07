@@ -165,6 +165,26 @@ class TradeToolsTest {
         assertThat(p.getRevisionsJson()).contains("补立");
     }
 
+    /** 审批分流的回执是纯文本非 JSON：必须原样返回给模型，动作轨迹只记一条 ok（不许被当异常转成 ERROR） */
+    @Test
+    void requestReceiptReturnedVerbatimToModel() {
+        when(simTradeClient.getAllPositions(99L)).thenReturn(List.of(longPosition()));
+        when(requestService.submit(any()))
+                .thenReturn("减仓请求已提交给主人确认，本轮不会成交。你的止损单仍在生效，风险有保护");
+        TradeTools noSelfReduce = new TradeTools(simTradeClient, 99L, Set.of("BTCUSDT"),
+                new BigDecimal("10000"), sym -> new BigDecimal("100000"),
+                new TraderPlanStore(planMapper), requestService,
+                new TradeTools.WakeCtx(7L, 1, 1785171600000L,
+                        new TraderRiskConfig(1, 20, new BigDecimal("1"), new BigDecimal("50"),
+                                true, true, true, false)));
+
+        String r = noSelfReduce.closePosition(5L, 0.01, "失效条件触发");
+
+        assertThat(r).contains("已提交给主人确认");
+        assertThat(noSelfReduce.actions()).hasSize(1);
+        assertThat(noSelfReduce.actions().get(0).getString("status")).isEqualTo("ok");
+    }
+
     /** 加仓覆盖：旧论点进修订历史（含理由），持有时长按最初开仓算 */
     @Test
     void upsertExistingPlanKeepsOldThesisAsRevision() {
