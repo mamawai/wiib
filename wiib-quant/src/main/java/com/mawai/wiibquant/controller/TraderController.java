@@ -6,8 +6,12 @@ import com.mawai.wiibcommon.dto.FuturesOrderResponse;
 import com.mawai.wiibcommon.dto.FuturesPositionDTO;
 import com.mawai.wiibcommon.entity.AiTrader;
 import com.mawai.wiibcommon.entity.AiTraderDecision;
+import com.mawai.wiibcommon.entity.AiTraderPlan;
 import com.mawai.wiibcommon.util.Result;
 import com.mawai.wiibquant.agent.strategy.execution.SimTradeClient;
+import com.mawai.wiibquant.agent.trader.TraderPromptAssembler;
+import com.mawai.wiibquant.agent.trader.TraderRequestService;
+import com.mawai.wiibquant.agent.trader.TraderRiskConfig;
 import com.mawai.wiibquant.agent.trader.TraderService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -32,6 +36,8 @@ public class TraderController {
 
     private final TraderService traderService;
     private final SimTradeClient simTradeClient;
+    private final TraderPromptAssembler promptAssembler;
+    private final TraderRequestService requestService;
 
     // ========== 我的 trader ==========
 
@@ -43,7 +49,25 @@ public class TraderController {
 
     /** 主人视图：公开视图 + 配置回显（key 只回尾4位）。 */
     public record TraderOwnerView(TraderPublicView pub, String apiProtocol, String baseUrl,
-                                  String customPrompt, String apiKeyTail) {
+                                  String customPrompt, String apiKeyTail, boolean useDefaultPrompt,
+                                  TraderSpec spec) {
+    }
+
+    /** 仓位规格：配置回显与提示词预览共用一个形状，前端改一处两边同步。 */
+    public record TraderSpec(int leverageMin, int leverageMax,
+                             BigDecimal marginPctMin, BigDecimal marginPctMax,
+                             boolean allowMultiPosition, boolean allowHedge,
+                             boolean allowSelfAdd, boolean allowSelfReduce) {
+        TraderRiskConfig toConfig() {
+            return new TraderRiskConfig(leverageMin, leverageMax, marginPctMin, marginPctMax,
+                    allowMultiPosition, allowHedge, allowSelfAdd, allowSelfReduce);
+        }
+
+        static TraderSpec of(AiTrader t) {
+            TraderRiskConfig c = TraderRiskConfig.of(t);
+            return new TraderSpec(c.leverageMin(), c.leverageMax(), c.marginPctMin(), c.marginPctMax(),
+                    c.allowMultiPosition(), c.allowHedge(), c.allowSelfAdd(), c.allowSelfReduce());
+        }
     }
 
     @GetMapping("/mine")
@@ -54,15 +78,48 @@ public class TraderController {
             return Result.ok(null);
         }
         return Result.ok(new TraderOwnerView(publicView(t, userId),
-                t.getApiProtocol(), t.getBaseUrl(), t.getCustomPrompt(), traderService.keyTail(t)));
+                t.getApiProtocol(), t.getBaseUrl(), t.getCustomPrompt(), traderService.keyTail(t),
+                !Boolean.FALSE.equals(t.getUseDefaultPrompt()), TraderSpec.of(t)));
+    }
+
+    /** 提示词预览的入参：规格项太多，走 POST 带 body 比堆十个 query 参数干净。 */
+    public record PromptPreviewRequest(String intervalCode, String symbols, TraderSpec spec) {
+    }
+
+    @PostMapping("/prompt-template")
+    @Operation(summary = "平台系统提示词预览（与唤醒组装同一份文本）")
+    public Result<String> promptTemplate(@RequestBody PromptPreviewRequest req) {
+        StpUtil.checkLogin();
+        String interval = req.intervalCode() == null || req.intervalCode().isBlank() ? "15m" : req.intervalCode();
+        String symbols = req.symbols() == null || req.symbols().isBlank() ? "BTCUSDT" : req.symbols();
+        TraderRiskConfig cfg = req.spec() == null
+                ? TraderRiskConfig.of(new AiTrader()) : req.spec().toConfig();
+        return Result.ok(promptAssembler.platformTemplate(interval, symbols, cfg));
     }
 
     public record UpsertRequest(String name, String symbols, String intervalCode, String customPrompt,
-                                String apiProtocol, String baseUrl, String model, String apiKey) {
+                                String apiProtocol, String baseUrl, String model, String apiKey,
+                                Boolean useDefaultPrompt, TraderSpec spec) {
         TraderService.UpsertReq toReq() {
+            TraderSpec s = spec;
             return new TraderService.UpsertReq(name, symbols, intervalCode, customPrompt,
-                    apiProtocol, baseUrl, model, apiKey);
+                    apiProtocol, baseUrl, model, apiKey, useDefaultPrompt,
+                    s == null ? null : s.leverageMin(), s == null ? null : s.leverageMax(),
+                    s == null ? null : s.marginPctMin(), s == null ? null : s.marginPctMax(),
+                    s == null ? null : s.allowMultiPosition(), s == null ? null : s.allowHedge(),
+                    s == null ? null : s.allowSelfAdd(), s == null ? null : s.allowSelfReduce());
         }
+    }
+
+    public record ListModelsRequest(String apiProtocol, String baseUrl, String apiKey) {
+    }
+
+    @PostMapping("/models")
+    @Operation(summary = "拉取端点可用模型清单（apiKey传空=用已存key）")
+    public Result<List<String>> listModels(@CurrentUserId long userId, @RequestBody ListModelsRequest req) {
+        TraderService.ListModelsResult r = traderService.listModels(userId,
+                new TraderService.ListModelsReq(req.apiProtocol(), req.baseUrl(), req.apiKey()));
+        return r.error() == null ? Result.ok(r.models()) : Result.fail(r.error());
     }
 
     @PostMapping
@@ -76,6 +133,37 @@ public class TraderController {
     @Operation(summary = "改配置（apiKey传空=不换；提示词改完下一根K线生效）")
     public Result<Void> updateConfig(@CurrentUserId long userId, @RequestBody UpsertRequest req) {
         String err = traderService.updateConfig(userId, req.toReq());
+        return err == null ? Result.ok(null) : Result.fail(err);
+    }
+
+    /** 待确认请求卡片：请求时价随行，前端另配实时价对照，判断价格跑没跑掉。 */
+    public record TraderRequestView(long id, String type, String symbol, String side, long positionId,
+                                    BigDecimal quantity, Integer leverage, BigDecimal requestPrice,
+                                    String reason, long createdAt) {
+    }
+
+    @GetMapping("/requests")
+    @Operation(summary = "我的待确认加仓/减仓请求")
+    public Result<List<TraderRequestView>> requests(@CurrentUserId long userId) {
+        return Result.ok(requestService.myPending(userId).stream()
+                .map(r -> new TraderRequestView(r.getId(), r.getType(), r.getSymbol(), r.getSide(),
+                        r.getPositionId(), r.getQuantity(), r.getLeverage(), r.getRequestPrice(),
+                        r.getReason(),
+                        r.getCreatedAt().atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()))
+                .toList());
+    }
+
+    @PostMapping("/requests/{id}/approve")
+    @Operation(summary = "同意并按市价立即执行")
+    public Result<Void> approveRequest(@CurrentUserId long userId, @PathVariable long id) {
+        String err = requestService.approve(userId, id);
+        return err == null ? Result.ok(null) : Result.fail(err);
+    }
+
+    @PostMapping("/requests/{id}/reject")
+    @Operation(summary = "拒绝（不执行，留档）")
+    public Result<Void> rejectRequest(@CurrentUserId long userId, @PathVariable long id) {
+        String err = requestService.reject(userId, id);
         return err == null ? Result.ok(null) : Result.fail(err);
     }
 
@@ -114,11 +202,12 @@ public class TraderController {
 
     public record TraderDetailView(TraderPublicView trader,
                                    List<FuturesPositionDTO> positions,
-                                   List<FuturesOrderResponse> pendingOrders) {
+                                   List<FuturesOrderResponse> pendingOrders,
+                                   List<AiTraderPlan> plans) {
     }
 
     @GetMapping("/{id}")
-    @Operation(summary = "trader详情（当前持仓与挂单实时现查）")
+    @Operation(summary = "trader详情（当前持仓/挂单实时现查 + 各持仓的交易计划）")
     public Result<TraderDetailView> detail(@PathVariable long id) {
         long viewer = StpUtil.getLoginIdAsLong();
         AiTrader t = traderService.byId(id);
@@ -133,7 +222,8 @@ public class TraderController {
         } catch (Exception e) {
             log.warn("[Trader] 详情持仓查询失败 traderId={} msg={}", id, e.getMessage());
         }
-        return Result.ok(new TraderDetailView(publicView(t, viewer), positions, pending));
+        return Result.ok(new TraderDetailView(publicView(t, viewer), positions, pending,
+                traderService.plans(t)));
     }
 
     @GetMapping("/{id}/decisions")

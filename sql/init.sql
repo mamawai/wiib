@@ -583,37 +583,12 @@ CREATE INDEX IF NOT EXISTS idx_kline_symbol_time ON kline_history (symbol, inter
 
 -- （Slice3 融合：research 链下序列已并入 factor_history 表，不再单建 market_series_history）
 
--- ============ quant_snapshot：数值快照（P2a，每5m零LLM预测点，vol_legs_json 含 PIT 档界） ============
--- [DEPRECATED 2026-08-06] 预测管线已下线（生产17天验证：vol预测被naive基线打平/反杀，fragility无前瞻信息）。
--- 表停写留档，历史数据保留；新库可不建。
-CREATE TABLE IF NOT EXISTS quant_snapshot (
-    id                  BIGSERIAL PRIMARY KEY,
-    symbol              VARCHAR(20) NOT NULL,
-    close_time          BIGINT NOT NULL,
-    last_price          NUMERIC(20, 8),
-    vol_legs_json       JSONB NOT NULL,
-    regime              VARCHAR(20),
-    regime_confidence   DOUBLE PRECISION,
-    fragility_score     INT,
-    fragility_level     VARCHAR(12),
-    fragility_direction VARCHAR(10),
-    fragility_headline  TEXT,
-    signal_panel_json   JSONB,
-    quality_flags_json  JSONB,
-    created_at          TIMESTAMP NOT NULL DEFAULT NOW(),
-    CONSTRAINT uk_quant_snapshot UNIQUE (symbol, close_time)
-);
-CREATE INDEX IF NOT EXISTS idx_quant_snapshot_query ON quant_snapshot (symbol, close_time DESC);
-COMMENT ON TABLE quant_snapshot IS '量化数值快照:每5m零LLM,vol三腿(PIT档界)+regime+脆弱度+信号面板(P2a)';
-COMMENT ON COLUMN quant_snapshot.vol_legs_json IS '三腿预测JSON,lowCut/highCut为预测时点档界,验证侧禁止重算';
-
--- ============ quant_deep_analysis：深研判（P2b，1h定频+哨兵插队门控，Bull∥Bear→Judge 产物） ============
+-- ============ quant_deep_analysis：深研判（工作台对话触发，Bull∥Bear→Judge 产物） ============
 CREATE TABLE IF NOT EXISTS quant_deep_analysis (
     id              BIGSERIAL PRIMARY KEY,
     symbol          VARCHAR(20) NOT NULL,
     close_time      BIGINT NOT NULL,
     trigger_source  VARCHAR(20),
-    snapshot_id     BIGINT,
     narrative       TEXT,
     scenarios_json  JSONB,
     no_direction    BOOLEAN DEFAULT FALSE,
@@ -625,31 +600,9 @@ CREATE TABLE IF NOT EXISTS quant_deep_analysis (
     created_at      TIMESTAMP NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_quant_deep_analysis_query ON quant_deep_analysis (symbol, close_time DESC);
-COMMENT ON TABLE quant_deep_analysis IS '深研判(P2b):研判叙事+情景分布+失效条件+无方向态,debate升格为研判生产者不再改写方向数字';
+COMMENT ON TABLE quant_deep_analysis IS '深研判:研判叙事+情景分布+失效条件+无方向态;定时轨下线后唯一入口=工作台对话(HITL确认后跑)';
 
--- ============ quant_vol_verification：vol预测验证（P3，QLIKE vs naive基准 + vol-state命中，PIT档界） ============
--- [DEPRECATED 2026-08-06] 随 vol 预测管线下线，表停写留档；新库可不建。
-CREATE TABLE IF NOT EXISTS quant_vol_verification (
-    id                  BIGSERIAL PRIMARY KEY,
-    snapshot_id         BIGINT NOT NULL,
-    symbol              VARCHAR(20) NOT NULL,
-    close_time          BIGINT NOT NULL,
-    horizon             VARCHAR(4) NOT NULL,
-    forecast_sigma_bps  INT,
-    baseline_sigma_bps  INT,
-    realized_return_bps INT,
-    qlike               DOUBLE PRECISION,
-    baseline_qlike      DOUBLE PRECISION,
-    vol_state_predicted VARCHAR(8),
-    vol_state_actual    VARCHAR(8),
-    vol_state_hit       BOOLEAN,
-    verified_at         TIMESTAMP NOT NULL DEFAULT NOW(),
-    CONSTRAINT uk_quant_vol_verification UNIQUE (snapshot_id, horizon)
-);
-CREATE INDEX IF NOT EXISTS idx_quant_vol_verification_query ON quant_vol_verification (symbol, close_time DESC);
-COMMENT ON TABLE quant_vol_verification IS 'vol预测验证(P3):QLIKE对照naive基准+vol-state命中(用快照PIT档界,禁止重算);regime刻意不验证(research实证无skill)';
-
--- ============ quant_narrative_verification：叙事对账（Judge三情景概率到期对答案，档界来自挂靠快照PIT） ============
+-- ============ quant_narrative_verification：叙事对账（Judge三情景概率到期对答案，判定界对账时现算） ============
 CREATE TABLE IF NOT EXISTS quant_narrative_verification (
     id                  BIGSERIAL PRIMARY KEY,
     analysis_id         BIGINT NOT NULL,
@@ -671,8 +624,8 @@ CREATE TABLE IF NOT EXISTS quant_narrative_verification (
     CONSTRAINT uk_quant_narrative_verification UNIQUE (analysis_id)
 );
 CREATE INDEX IF NOT EXISTS idx_quant_narrative_verification_query ON quant_narrative_verification (symbol, close_time DESC);
-COMMENT ON TABLE quant_narrative_verification IS '叙事对账:Judge三情景概率12h到期后对真实走势打分(Brier,均匀基线2/3)——快照轨有记分卡,叙事轨同样要战绩';
-COMMENT ON COLUMN quant_narrative_verification.range_cut_bps IS '实际情景判定界=挂靠快照H12腿lowCut(90天|收益|下三分位,基率≈1/3均分),PIT禁止重算';
+COMMENT ON TABLE quant_narrative_verification IS '叙事对账:Judge三情景概率12h到期后对真实走势打分(Brier,均匀基线2/3)——研判有战绩才知道准不准';
+COMMENT ON COLUMN quant_narrative_verification.range_cut_bps IS '实际情景判定界=研判时点前90天|H12收益|下三分位(基率≈1/3均分);对账时从K线现算,只用closeTime前数据保PIT';
 COMMENT ON COLUMN quant_narrative_verification.status IS 'VERIFIED=已对账/SKIPPED=不可对账(缺档界或情景损坏或K线缺口超宽限)';
 
 -- ============ workbench_chat_message：工作台对话历史（展示用；续聊上下文走 langgraph4j 的 lg4j* 表） ============
@@ -837,6 +790,7 @@ CREATE TABLE IF NOT EXISTS ai_trader (
     symbols         VARCHAR(255) NOT NULL,
     interval_code   VARCHAR(8) NOT NULL DEFAULT '1h',
     custom_prompt   TEXT,
+    use_default_prompt BOOLEAN NOT NULL DEFAULT TRUE,
     api_protocol    VARCHAR(16) NOT NULL DEFAULT 'openai',
     base_url        VARCHAR(255) NOT NULL,
     model           VARCHAR(128) NOT NULL,
@@ -844,16 +798,33 @@ CREATE TABLE IF NOT EXISTS ai_trader (
     sim_user_id     BIGINT,
     round_no        INT NOT NULL DEFAULT 1,
     consecutive_failures INT NOT NULL DEFAULT 0,
+    leverage_min    INT NOT NULL DEFAULT 3,
+    leverage_max    INT NOT NULL DEFAULT 20,
+    margin_pct_min  NUMERIC(5,2) NOT NULL DEFAULT 5,
+    margin_pct_max  NUMERIC(5,2) NOT NULL DEFAULT 20,
+    allow_multi_position BOOLEAN NOT NULL DEFAULT TRUE,
+    allow_hedge     BOOLEAN NOT NULL DEFAULT FALSE,
+    allow_self_add  BOOLEAN NOT NULL DEFAULT TRUE,
+    allow_self_reduce BOOLEAN NOT NULL DEFAULT FALSE,
     created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 COMMENT ON TABLE ai_trader IS 'AI Trader：用户BYOK自主交易代理（每用户1个，独立sim子账户，公开竞技场）';
 COMMENT ON COLUMN ai_trader.status IS 'PAUSED/RUNNING/LIQUIDATED';
 COMMENT ON COLUMN ai_trader.symbols IS '交易币种白名单子集，逗号分隔（须在binance.symbols范围内）';
-COMMENT ON COLUMN ai_trader.interval_code IS '唤醒K线级别 15m/1h/4h/1d（1m/5m禁止：烧穿用户token也挤爆调度）';
+COMMENT ON COLUMN ai_trader.interval_code IS '唤醒K线级别 5m/15m/1h/4h/1d（1m禁止；5m烧token快，适合短期测试）';
+COMMENT ON COLUMN ai_trader.use_default_prompt IS '是否使用平台系统提示词（默认true）；false=自定义提示词成为唯一指令来源（护栏仍硬校验）';
 COMMENT ON COLUMN ai_trader.api_key_enc IS 'AES-GCM密文base64(iv+cipher)，密钥走环境变量WIIB_TRADER_KEY_SECRET';
 COMMENT ON COLUMN ai_trader.sim_user_id IS '当前局sim子账户userId，每局独立，重置开新账户';
 COMMENT ON COLUMN ai_trader.round_no IS '局数：爆仓/手动重置+1开新局，历史留档';
+COMMENT ON COLUMN ai_trader.leverage_min IS '杠杆区间下界：模型必须从[min,max]里选，越界护栏拒（不截断——悄悄改值会让模型的止损计算失真）';
+COMMENT ON COLUMN ai_trader.leverage_max IS '杠杆区间上界，1~125；实际可用还受sim按名义价值分档限制，超档由sim拒并回传拒因';
+COMMENT ON COLUMN ai_trader.margin_pct_min IS '单笔保证金占权益%下界；只约束开新仓，加仓量由模型自己斟酌';
+COMMENT ON COLUMN ai_trader.margin_pct_max IS '单笔保证金占权益%上界，0.1~100';
+COMMENT ON COLUMN ai_trader.allow_multi_position IS '允许同时持有多个仓位；false=全账户至多一仓（挂单一并计数，否则挂几单就能绕过）';
+COMMENT ON COLUMN ai_trader.allow_hedge IS '允许同币多空双开；仅在allow_multi_position=true时有意义（双开天然占两个仓位）';
+COMMENT ON COLUMN ai_trader.allow_self_add IS '允许模型自主加仓；false=转成待确认请求，不阻塞本轮唤醒';
+COMMENT ON COLUMN ai_trader.allow_self_reduce IS '允许模型自主减仓/平仓；false=转请求。止损止盈自动触发不受此约束';
 
 CREATE TABLE IF NOT EXISTS ai_trader_decision (
     id              BIGSERIAL PRIMARY KEY,
@@ -866,6 +837,10 @@ CREATE TABLE IF NOT EXISTS ai_trader_decision (
     reasoning       TEXT,
     actions_json    TEXT,
     tool_calls      INT NOT NULL DEFAULT 0,
+    model_calls     INT,
+    prompt_tokens   BIGINT,
+    completion_tokens BIGINT,
+    total_tokens    BIGINT,
     latency_ms      INT,
     error           VARCHAR(500),
     created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -873,4 +848,63 @@ CREATE TABLE IF NOT EXISTS ai_trader_decision (
 CREATE INDEX IF NOT EXISTS idx_atd_trader_time ON ai_trader_decision(trader_id, wake_time DESC);
 COMMENT ON TABLE ai_trader_decision IS 'AI Trader每次唤醒一行：推理全文+动作(含play_type论点标签)+权益快照——竞技场决策时间线与净值曲线数据源';
 COMMENT ON COLUMN ai_trader_decision.status IS 'OK/ERROR/SKIPPED（上一唤醒未完被跳过）';
-COMMENT ON COLUMN ai_trader_decision.equity IS '唤醒时账户权益USDT';
+COMMENT ON COLUMN ai_trader_decision.equity IS '本轮动作落地后的账户权益USDT';
+COMMENT ON COLUMN ai_trader_decision.model_calls IS '本轮模型调用次数：ReAct是循环，一次唤醒会调很多次（上限见ModelCallLimiter）';
+COMMENT ON COLUMN ai_trader_decision.total_tokens IS '本轮全部模型调用的token合计；NULL=上游端点没返回usage（BYOK网关各不相同），不是0';
+
+CREATE TABLE IF NOT EXISTS ai_trader_plan (
+    id              BIGSERIAL PRIMARY KEY,
+    trader_id       BIGINT NOT NULL,
+    round_no        INT NOT NULL,
+    symbol          VARCHAR(20) NOT NULL,
+    side            VARCHAR(8) NOT NULL,
+    play_type       VARCHAR(20),
+    signals_used    VARCHAR(500),
+    invalidation_condition VARCHAR(500) NOT NULL,
+    entry_price     NUMERIC(20,8),
+    stop_loss_price NUMERIC(20,8),
+    take_profit_price NUMERIC(20,8),
+    opened_wake_time BIGINT NOT NULL,
+    revisions_json  TEXT,
+    created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_atp_key UNIQUE (trader_id, round_no, symbol, side)
+);
+COMMENT ON TABLE ai_trader_plan IS 'AI Trader持仓交易计划：开仓立的论点/失效条件/止损止盈快照，每次唤醒原样回注提示词（nof1式plan reinjection）——退出纪律的记忆载体。键(symbol,side)：sim同向开仓自动并入，任意时刻至多一仓，加仓=新论点覆盖';
+COMMENT ON COLUMN ai_trader_plan.invalidation_condition IS '失效条件：什么市场状况证明论点错了（市场条件而非盈亏数字），触发才允许主动平仓';
+COMMENT ON COLUMN ai_trader_plan.stop_loss_price IS '原始止损快照；当前生效止损以sim仓位为准（可能已上移锁盈）';
+COMMENT ON COLUMN ai_trader_plan.opened_wake_time IS '开仓所在唤醒边界(ms)，回注时计算已持有时长';
+COMMENT ON COLUMN ai_trader_plan.revisions_json IS '修订历史追加式JSON [{time,type,change,reason}]：加仓覆盖/移动止盈/移动止损/补立——修改必须留痕带理由，计划本体价格字段永远是原始快照';
+
+-- ============ ai_trader_request：加仓/减仓待主人确认（allow_self_add/reduce 关闭时才产生） ============
+-- 异步不阻塞：模型调工具即落库返回，本轮唤醒照常收尾；主人在"我的trader"页点同意才市价执行。
+-- 不设过期——卡片上同时给"请求时价"和实时价，价格跑没跑掉由人自己看。
+CREATE TABLE IF NOT EXISTS ai_trader_request (
+    id              BIGSERIAL PRIMARY KEY,
+    trader_id       BIGINT NOT NULL,
+    round_no        INT NOT NULL,
+    type            VARCHAR(8) NOT NULL,
+    symbol          VARCHAR(20) NOT NULL,
+    side            VARCHAR(8) NOT NULL,
+    position_id     BIGINT NOT NULL,
+    quantity        NUMERIC(20,8) NOT NULL,
+    leverage        INT,
+    request_price   NUMERIC(20,8) NOT NULL,
+    reason          VARCHAR(500) NOT NULL,
+    status          VARCHAR(10) NOT NULL DEFAULT 'PENDING',
+    executed_result VARCHAR(500),
+    wake_time       BIGINT NOT NULL,
+    decided_at      TIMESTAMP,
+    created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+-- 同仓位同类型至多一条待确认：模型每轮看仓位没动会反复提，不去重就堆满卡片
+CREATE UNIQUE INDEX IF NOT EXISTS uq_atr_pending ON ai_trader_request (position_id, type)
+    WHERE status = 'PENDING';
+CREATE INDEX IF NOT EXISTS idx_atr_trader ON ai_trader_request (trader_id, status, created_at DESC);
+COMMENT ON TABLE ai_trader_request IS 'AI Trader加仓/减仓待确认请求：自主开关关闭时模型的调用转为此表一行，主人点同意才市价执行';
+COMMENT ON COLUMN ai_trader_request.type IS 'ADD=加仓 / REDUCE=减仓或平仓';
+COMMENT ON COLUMN ai_trader_request.position_id IS '目标仓位id（sim侧）；批准时重查存在性，已被止损带走则置失败';
+COMMENT ON COLUMN ai_trader_request.request_price IS '模型发起时的mark快照，与实时价并列展示供主人判断价格是否跑掉';
+COMMENT ON COLUMN ai_trader_request.status IS 'PENDING待确认 / APPROVED已同意(执行结果见executed_result) / REJECTED主人拒绝';
+COMMENT ON COLUMN ai_trader_request.executed_result IS '批准后的执行结果或失败原因（余额不足/仓位已不存在等），不吞';
+COMMENT ON COLUMN ai_trader_request.wake_time IS '发起时所在唤醒边界(ms)，用于回注提示词时说明"这是第几轮提的"';

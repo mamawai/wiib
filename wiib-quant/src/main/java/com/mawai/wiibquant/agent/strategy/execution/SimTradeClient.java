@@ -68,6 +68,11 @@ public class SimTradeClient {
         unwrap(api.setStopLoss(userId, request));
     }
 
+    /** 改持仓止盈单（整组替换语义同止损；AI Trader 有利方向移动目标位用）。 */
+    public void setTakeProfit(Long userId, com.mawai.wiibcommon.dto.FuturesTakeProfitRequest request) {
+        unwrap(api.setTakeProfit(userId, request));
+    }
+
     public FuturesOrderResponse getOrder(Long userId, Long orderId) {
         return unwrap(api.order(userId, orderId));
     }

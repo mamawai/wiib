@@ -7,7 +7,6 @@ import com.mawai.wiibquant.mapper.AiTraderMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.event.EventListener;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -17,10 +16,11 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Semaphore;
 
 /**
- * trader 调度器：5m K线收盘事件当时钟，对齐到各 trader 的 interval 边界触发唤醒。
+ * trader 调度器：5m K线收盘事件当唯一时钟，对齐到各 trader 的 interval 边界触发唤醒。
  * 并发上限 10（信号量）+ 每 trader 互斥（上一唤醒未完 → 记 SKIPPED，要最新信号不排陈旧任务）；
- * 事件是 per-symbol 的，同一边界多币多次触发靠 firedBoundary 去重；
- * 每分钟兜底扫描补 WS 断流漏掉的边界（只补 5 分钟内的新鲜边界，过期不补）。
+ * 事件是 per-symbol 的，同一边界多币多次触发靠 firedBoundary 去重。
+ * 不做兜底补漏：WS/事件断流丢的K线就丢了——陈旧信号唤醒没有意义（迟到事件由唤醒预算兜底：
+ * 距下一边界不足 30s 直接放弃，见 TraderWakeupRunner）。
  */
 @Slf4j
 @Component
@@ -28,10 +28,9 @@ import java.util.concurrent.Semaphore;
 public class TraderScheduler {
 
     static final int MAX_CONCURRENT_WAKEUPS = 10;
-    /** 兜底只补这么新的边界：太旧的信号唤醒无意义 */
-    private static final long FALLBACK_FRESH_MS = 5 * 60_000L;
-    private static final Map<String, Long> INTERVAL_MS = Map.of(
-            "15m", 900_000L, "1h", 3_600_000L, "4h", 14_400_000L, "1d", 86_400_000L);
+    /** interval → 毫秒；TraderWakeupRunner 计算唤醒预算共用同一份 */
+    static final Map<String, Long> INTERVAL_MS = Map.of(
+            "5m", 300_000L, "15m", 900_000L, "1h", 3_600_000L, "4h", 14_400_000L, "1d", 86_400_000L);
 
     private final AiTraderMapper traderMapper;
     private final TraderWakeupRunner runner;
@@ -51,18 +50,6 @@ public class TraderScheduler {
             long boundary = boundaryOf(event.closeTime(), ic);
             if (boundary > 0) {
                 fireInterval(ic, boundary);
-            }
-        }
-    }
-
-    /** 兜底：WS 断流时按墙钟补最近错过的边界（新鲜期内才补）。 */
-    @Scheduled(fixedDelay = 60_000)
-    public void sweepMissedBoundaries() {
-        long now = System.currentTimeMillis();
-        for (Map.Entry<String, Long> e : INTERVAL_MS.entrySet()) {
-            long boundary = now / e.getValue() * e.getValue();
-            if (now - boundary <= FALLBACK_FRESH_MS && boundary > 0) {
-                fireInterval(e.getKey(), boundary);
             }
         }
     }

@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import { Bot, ChevronRight, History, Loader2, MessageSquareText, RotateCcw, Send, ShieldQuestion, Trash2, User } from 'lucide-react';
 import { workbenchApi } from '../../api';
+import { Markdown } from '../Markdown';
 import { cn, fmtDateTime } from '../../lib/utils';
 import { chatStore, type ChatItem } from './chatStore';
 import { BeamCard } from '../fx/BeamCard';
@@ -66,26 +65,6 @@ function HitlCard({ item, onDecide, busy }: {
         </p>
       )}
     </div>
-  );
-}
-
-/** markdown 渲染（assistant 回答）：LLM 输出带格式，元素样式贴拟物风字号体系。 */
-function Markdown({ content }: { content: string }) {
-  return (
-    <ReactMarkdown
-      remarkPlugins={[remarkGfm]}
-      components={{
-        p: (props) => <p className="leading-relaxed mb-1.5 last:mb-0" {...props} />,
-        ul: (props) => <ul className="list-disc pl-4 space-y-0.5 mb-1.5" {...props} />,
-        ol: (props) => <ol className="list-decimal pl-4 space-y-0.5 mb-1.5" {...props} />,
-        code: (props) => <code className="px-1 py-0.5 rounded bg-muted text-[11px] font-mono" {...props} />,
-        pre: (props) => <pre className="p-2.5 rounded-lg bg-muted text-[11px] font-mono overflow-x-auto mb-1.5" {...props} />,
-        table: (props) => <div className="overflow-x-auto mb-1.5"><table className="text-[11px] border-collapse [&_th]:border [&_th]:px-2 [&_th]:py-1 [&_td]:border [&_td]:px-2 [&_td]:py-1" {...props} /></div>,
-        a: (props) => <a className="text-primary underline" target="_blank" rel="noopener noreferrer" {...props} />,
-      }}
-    >
-      {content}
-    </ReactMarkdown>
   );
 }
 

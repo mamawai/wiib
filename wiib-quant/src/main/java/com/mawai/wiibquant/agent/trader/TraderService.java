@@ -6,6 +6,7 @@ import com.mawai.wiibcommon.config.BinanceProperties;
 import com.mawai.wiibcommon.constant.AiProtocols;
 import com.mawai.wiibcommon.entity.AiTrader;
 import com.mawai.wiibcommon.entity.AiTraderDecision;
+import com.mawai.wiibcommon.entity.AiTraderPlan;
 import com.mawai.wiibquant.agent.strategy.execution.SimTradeClient;
 import com.mawai.wiibquant.mapper.AiTraderDecisionMapper;
 import com.mawai.wiibquant.mapper.AiTraderMapper;
@@ -30,7 +31,7 @@ import java.util.Set;
 public class TraderService {
 
     public static final BigDecimal INITIAL_BALANCE = new BigDecimal("10000");
-    private static final Set<String> INTERVALS = Set.of("15m", "1h", "4h", "1d");
+    private static final Set<String> INTERVALS = Set.of("5m", "15m", "1h", "4h", "1d");
 
     private final AiTraderMapper traderMapper;
     private final AiTraderDecisionMapper decisionMapper;
@@ -38,9 +39,58 @@ public class TraderService {
     private final ApiKeyCrypto apiKeyCrypto;
     private final SimTradeClient simTradeClient;
     private final BinanceProperties binanceProperties;
+    private final BaseUrlGuard baseUrlGuard;
+    private final TraderPlanStore planStore;
 
     public record UpsertReq(String name, String symbols, String intervalCode, String customPrompt,
-                            String apiProtocol, String baseUrl, String model, String apiKey) {
+                            String apiProtocol, String baseUrl, String model, String apiKey,
+                            Boolean useDefaultPrompt,
+                            Integer leverageMin, Integer leverageMax,
+                            BigDecimal marginPctMin, BigDecimal marginPctMax,
+                            Boolean allowMultiPosition, Boolean allowHedge,
+                            Boolean allowSelfAdd, Boolean allowSelfReduce) {
+    }
+
+    public record ListModelsReq(String apiProtocol, String baseUrl, String apiKey) {
+    }
+
+    public record ListModelsResult(String error, List<String> models) {
+    }
+
+    /** 拉取端点可用模型清单：key 传空=用已存 key（与改配置语义一致）。 */
+    public ListModelsResult listModels(long userId, ListModelsReq req) {
+        if (req.baseUrl() == null || req.baseUrl().isBlank()) {
+            return new ListModelsResult("baseUrl不能为空", null);
+        }
+        String ssrf = baseUrlGuard.check(req.baseUrl());
+        if (ssrf != null) {
+            return new ListModelsResult(ssrf, null);
+        }
+        String protocol = req.apiProtocol() == null || req.apiProtocol().isBlank()
+                ? AiProtocols.OPENAI : req.apiProtocol().trim().toLowerCase();
+        if (!AiProtocols.isValid(protocol)) {
+            return new ListModelsResult("协议仅支持 openai / responses", null);
+        }
+        String keyEnc;
+        if (req.apiKey() != null && !req.apiKey().isBlank()) {
+            keyEnc = apiKeyCrypto.encrypt(req.apiKey().trim());
+        } else {
+            AiTrader t = mine(userId);
+            if (t == null) {
+                return new ListModelsResult("尚未创建 Trader，请先填写 apiKey", null);
+            }
+            keyEnc = t.getApiKeyEnc();
+        }
+        AiTrader probe = new AiTrader();
+        probe.setApiProtocol(protocol);
+        probe.setBaseUrl(stripTrailingSlash(req.baseUrl().trim()));
+        probe.setApiKeyEnc(keyEnc);
+        try {
+            return new ListModelsResult(null, modelFactory.listModels(probe).stream().sorted().toList());
+        } catch (Exception e) {
+            String msg = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
+            return new ListModelsResult(msg.length() > 300 ? msg.substring(0, 300) : msg, null);
+        }
     }
 
     public AiTrader mine(long userId) {
@@ -153,6 +203,8 @@ public class TraderService {
         }
         int newRound = t.getRoundNo() + 1;
         Long simUserId = simTradeClient.ensureAccount(accountName(userId, newRound), INITIAL_BALANCE);
+        // 旧局计划随旧账户一并作废（新局新账户，计划键含round本不冲突，删掉纯为不留死数据）
+        planStore.deleteAll(t.getId());
         traderMapper.update(null, new LambdaUpdateWrapper<AiTrader>()
                 .eq(AiTrader::getId, t.getId())
                 .set(AiTrader::getRoundNo, newRound)
@@ -187,6 +239,11 @@ public class TraderService {
         return decisionMapper.selectList(q);
     }
 
+    /** 当前局的持仓交易计划（竞技场详情随持仓一并展示）。 */
+    public List<AiTraderPlan> plans(AiTrader t) {
+        return planStore.list(t.getId(), t.getRoundNo());
+    }
+
     /** 净值曲线：(wakeTime, equity) 升序；round 缺省=当前局。 */
     public List<AiTraderDecision> equityCurve(AiTrader t, Integer round) {
         return decisionMapper.selectList(new LambdaQueryWrapper<AiTraderDecision>()
@@ -212,7 +269,11 @@ public class TraderService {
             return "名字必填且不超过32字符";
         }
         if (req.intervalCode() == null || !INTERVALS.contains(req.intervalCode())) {
-            return "K线级别仅支持 15m/1h/4h/1d";
+            return "K线级别仅支持 5m/15m/1h/4h/1d";
+        }
+        String spec = validateSpec(req);
+        if (spec != null) {
+            return spec;
         }
         List<String> whitelist = binanceProperties.getSymbols();
         Set<String> symbols = parseSymbols(req.symbols());
@@ -224,6 +285,10 @@ public class TraderService {
         }
         if (req.baseUrl() == null || req.baseUrl().isBlank()) {
             return "baseUrl不能为空";
+        }
+        String ssrf = baseUrlGuard.check(req.baseUrl());
+        if (ssrf != null) {
+            return ssrf;
         }
         if (req.model() == null || req.model().isBlank()) {
             return "model不能为空";
@@ -239,6 +304,41 @@ public class TraderService {
         if (req.customPrompt() != null && req.customPrompt().length() > 4000) {
             return "自定义提示词不超过4000字符";
         }
+        // 退出平台模板后自定义就是唯一指令来源，空着=模型裸奔
+        if (Boolean.FALSE.equals(req.useDefaultPrompt())
+                && (req.customPrompt() == null || req.customPrompt().isBlank())) {
+            return "已取消平台系统提示词，自定义提示词不能为空";
+        }
+        return null;
+    }
+
+    /**
+     * 仓位规格校验：区间本身要成立，边界不能离谱。
+     * 杠杆上界只卡到 125——实际可用还受 sim 按名义价值分档限制，超档由 sim 拒并把原因回传给模型，
+     * 这里不重复实现一套分档表（quant 进程读不到 sim 的 bracket registry）。
+     */
+    private static String validateSpec(UpsertReq req) {
+        int lmin = req.leverageMin() == null ? TraderRiskConfig.DEF_LEV_MIN : req.leverageMin();
+        int lmax = req.leverageMax() == null ? TraderRiskConfig.DEF_LEV_MAX : req.leverageMax();
+        if (lmin < 1 || lmax > TraderRiskConfig.LEVERAGE_HARD_MAX) {
+            return "杠杆区间须在 1~" + TraderRiskConfig.LEVERAGE_HARD_MAX + " 倍之内";
+        }
+        if (lmin > lmax) {
+            return "杠杆区间下界不能大于上界";
+        }
+        BigDecimal mmin = req.marginPctMin() == null ? TraderRiskConfig.DEF_MARGIN_MIN : req.marginPctMin();
+        BigDecimal mmax = req.marginPctMax() == null ? TraderRiskConfig.DEF_MARGIN_MAX : req.marginPctMax();
+        if (mmin.compareTo(TraderRiskConfig.MARGIN_PCT_HARD_MIN) < 0
+                || mmax.compareTo(TraderRiskConfig.MARGIN_PCT_HARD_MAX) > 0) {
+            return "单笔保证金占比须在 0.1~100% 之内";
+        }
+        if (mmin.compareTo(mmax) > 0) {
+            return "保证金占比下界不能大于上界";
+        }
+        // 双开天然要占两个仓位，单仓模式下勾它是自相矛盾的配置，直接拦在入口
+        if (Boolean.FALSE.equals(req.allowMultiPosition()) && Boolean.TRUE.equals(req.allowHedge())) {
+            return "只允许一个仓位时无法开启多空双开（双开本身需要两个仓位）";
+        }
         return null;
     }
 
@@ -249,9 +349,23 @@ public class TraderService {
         t.setCustomPrompt(req.customPrompt());
         t.setApiProtocol(req.apiProtocol() == null || req.apiProtocol().isBlank()
                 ? AiProtocols.OPENAI : req.apiProtocol().trim().toLowerCase());
-        String baseUrl = req.baseUrl().trim();
-        t.setBaseUrl(baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl);
+        t.setBaseUrl(stripTrailingSlash(req.baseUrl().trim()));
         t.setModel(req.model().trim());
+        t.setUseDefaultPrompt(req.useDefaultPrompt() == null || req.useDefaultPrompt());
+        t.setLeverageMin(req.leverageMin() == null ? TraderRiskConfig.DEF_LEV_MIN : req.leverageMin());
+        t.setLeverageMax(req.leverageMax() == null ? TraderRiskConfig.DEF_LEV_MAX : req.leverageMax());
+        t.setMarginPctMin(req.marginPctMin() == null ? TraderRiskConfig.DEF_MARGIN_MIN : req.marginPctMin());
+        t.setMarginPctMax(req.marginPctMax() == null ? TraderRiskConfig.DEF_MARGIN_MAX : req.marginPctMax());
+        boolean multi = !Boolean.FALSE.equals(req.allowMultiPosition());
+        t.setAllowMultiPosition(multi);
+        // 单仓模式下双开无从谈起，落库直接归位 false，免得开关状态自相矛盾
+        t.setAllowHedge(multi && Boolean.TRUE.equals(req.allowHedge()));
+        t.setAllowSelfAdd(!Boolean.FALSE.equals(req.allowSelfAdd()));
+        t.setAllowSelfReduce(Boolean.TRUE.equals(req.allowSelfReduce()));
+    }
+
+    private static String stripTrailingSlash(String baseUrl) {
+        return baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
     }
 
     private static Set<String> parseSymbols(String symbols) {

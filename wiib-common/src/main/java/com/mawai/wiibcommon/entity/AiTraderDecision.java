@@ -44,6 +44,14 @@ public class AiTraderDecision {
 
     private Integer toolCalls;
 
+    /** 本轮模型调用次数：ReAct 是循环，一次唤醒会调很多次 */
+    private Integer modelCalls;
+
+    /** 本轮全部模型调用的 token 合计；null=上游端点没返回 usage，不是 0 */
+    private Long promptTokens;
+    private Long completionTokens;
+    private Long totalTokens;
+
     private Integer latencyMs;
 
     private String error;

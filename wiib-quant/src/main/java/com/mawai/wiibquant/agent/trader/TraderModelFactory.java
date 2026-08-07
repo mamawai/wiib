@@ -4,6 +4,8 @@ import com.mawai.wiibcommon.constant.AiProtocols;
 import com.mawai.wiibcommon.entity.AiTrader;
 import com.mawai.wiibquant.agent.llm.ResponsesChatModel;
 import com.openai.client.OpenAIClient;
+import com.openai.client.OpenAIClientAsync;
+import com.openai.models.models.Model;
 import io.micrometer.observation.ObservationRegistry;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.messages.UserMessage;
@@ -60,6 +62,17 @@ public class TraderModelFactory {
         cache.remove(traderId);
     }
 
+    /** 拉取端点可用模型清单。两协议的 /models 都是 OpenAI 风格，同一条路；失败原样抛给调用方。 */
+    public List<String> listModels(AiTrader trader) {
+        String apiKey = apiKeyCrypto.decrypt(trader.getApiKeyEnc());
+        // model 参数只在 Azure/GitHub 分支参与 URL 计算，探针还没选模型，占位即可
+        OpenAIClient client = OpenAiSetup.setupSyncClient(
+                trader.getBaseUrl(), apiKey, null, null, null, null,
+                false, false, "list-models", ResponsesChatModel.CALL_TIMEOUT, 3, null, null,
+                observationRegistry, null, List.of());
+        return client.models().list().data().stream().map(Model::id).toList();
+    }
+
     /** 连通性测试：发一条最小请求。成功返回 null，失败返回给用户看的错误摘要。 */
     public String testConnection(AiTrader trader) {
         try {
@@ -83,8 +96,15 @@ public class TraderModelFactory {
                 trader.getBaseUrl(), apiKey, null, null, null, null,
                 false, false, trader.getModel(), ResponsesChatModel.CALL_TIMEOUT, 3, null, null,
                 observationRegistry, null, List.of());
+        // async 也必须显式给：builder 见 openAiClientAsync 为空就拿 options 自建，而 options 里没 key，
+        // SDK 当场抛 "At least one credential source must be specified"（哪怕我们根本不走流式）
+        OpenAIClientAsync clientAsync = OpenAiSetup.setupAsyncClient(
+                trader.getBaseUrl(), apiKey, null, null, null, null,
+                false, false, trader.getModel(), ResponsesChatModel.CALL_TIMEOUT, 3, null, null,
+                observationRegistry, null, List.of());
         return OpenAiChatModel.builder()
                 .openAiClient(client)
+                .openAiClientAsync(clientAsync)
                 .options(OpenAiChatOptions.builder().model(trader.getModel()).build())
                 .observationRegistry(observationRegistry)
                 .build();

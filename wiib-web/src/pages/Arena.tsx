@@ -37,10 +37,11 @@ export function Arena() {
   return (
     <div className="page-shell p-4 md:p-6 space-y-4">
       <div className="flex items-center gap-2.5">
-        <Swords className="w-5 h-5 text-primary" />
-        <h1 className="text-lg font-black">AI Trader 竞技场</h1>
-        <span className="text-[11px] text-muted-foreground">每人一个 AI · 各带 10000U · 按 K 线唤醒自主交易</span>
-        <div className="ml-auto flex items-center gap-2">
+        <Swords className="w-5 h-5 text-primary shrink-0" />
+        <h1 className="text-lg font-black whitespace-nowrap">AI Trader 竞技场</h1>
+        {/* 副标题手机上藏：挤不下，信息也非必需 */}
+        <span className="text-[11px] text-muted-foreground hidden md:inline">每人一个 AI · 各带 10000U · 按 K 线唤醒自主交易</span>
+        <div className="ml-auto flex items-center gap-2 shrink-0">
           <button
             onClick={load}
             className="border border-border hover:bg-surface-hover w-8 h-8 rounded-lg flex items-center justify-center text-muted-foreground hover:text-primary"
@@ -50,7 +51,7 @@ export function Arena() {
           </button>
           <Link
             to="/my-trader"
-            className="border border-border hover:bg-surface-hover rounded-lg px-3 h-8 flex items-center gap-1.5 text-xs font-bold text-primary"
+            className="border border-border hover:bg-surface-hover rounded-lg px-3 h-8 flex items-center gap-1.5 text-xs font-bold text-primary whitespace-nowrap"
           >
             <Plus className="w-3.5 h-3.5" /> 我的 Trader
           </Link>
@@ -70,7 +71,33 @@ export function Arena() {
         </div>
       ) : (
         <div className="rounded-lg pt-card overflow-hidden">
-          <div className="overflow-x-auto">
+          {/* 手机端卡片列：8列表格在小屏只能横拖，改为每人一卡（名次/名字/收益率主视觉，其余次要行） */}
+          <div className="md:hidden divide-y divide-border/60">
+            {traders.map((t, i) => {
+              const st = STATUS_META[t.status] ?? STATUS_META.PAUSED;
+              return (
+                <Link key={t.id} to={`/arena/${t.id}`} className="block px-3.5 py-3 hover:bg-surface-hover active:bg-surface-hover">
+                  <div className="flex items-center gap-2">
+                    <span className="num font-black text-muted-foreground w-5 shrink-0">{i + 1}</span>
+                    <span className="font-black text-sm truncate">{t.name}</span>
+                    {t.mine && <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-primary/15 text-primary shrink-0">我的</span>}
+                    <span className={cn('ml-auto num font-black text-sm shrink-0', t.pnlPct >= 0 ? 'text-gain' : 'text-loss')}>
+                      {t.pnlPct >= 0 ? '+' : ''}{t.pnlPct.toFixed(2)}%
+                    </span>
+                  </div>
+                  <div className="mt-1 pl-7 flex items-center gap-2 text-[11px] text-muted-foreground flex-wrap">
+                    <span className="truncate max-w-[45%]">{t.model}</span>
+                    <span className="shrink-0">{t.intervalCode} · {t.symbols.split(',').map(s => s.replace('USDT', '')).join('/')}</span>
+                    <span className="num shrink-0">权益 {t.equity.toLocaleString()}</span>
+                    <span className="num shrink-0">R{t.roundNo}</span>
+                    <span className={cn('text-[10px] font-bold px-1.5 py-0.5 rounded shrink-0', st.tone)}>{st.label}</span>
+                  </div>
+                </Link>
+              );
+            })}
+          </div>
+
+          <div className="hidden md:block overflow-x-auto">
             <table className="w-full text-xs">
               <thead>
                 <tr className="text-left text-[10px] uppercase text-muted-foreground border-b border-border">

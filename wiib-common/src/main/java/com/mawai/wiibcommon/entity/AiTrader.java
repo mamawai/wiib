@@ -3,6 +3,7 @@ package com.mawai.wiibcommon.entity;
 import com.baomidou.mybatisplus.annotation.*;
 import lombok.Data;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 /**
@@ -34,12 +35,15 @@ public class AiTrader {
     /** 交易币种白名单子集，逗号分隔，如 BTCUSDT,ETHUSDT */
     private String symbols;
 
-    /** 唤醒K线级别：15m/1h/4h/1d */
+    /** 唤醒K线级别：5m/15m/1h/4h/1d */
     private String intervalCode;
 
     /** 用户自定义提示词，追加在平台系统提示词之后；每次唤醒现读现拼，改完下一根K线生效 */
     @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private String customPrompt;
+
+    /** 是否使用平台系统提示词（默认true）；false=自定义提示词成为唯一指令来源（护栏仍硬校验） */
+    private Boolean useDefaultPrompt;
 
     /** 上游协议：openai=/v1/chat/completions，responses=/v1/responses */
     private String apiProtocol;
@@ -59,6 +63,26 @@ public class AiTrader {
 
     /** 连续唤醒失败计数：成功清零，≥5 自动 PAUSED */
     private Integer consecutiveFailures;
+
+    /** 杠杆区间：模型必须从 [min,max] 里选，越界护栏拒。不截断——悄悄改值会让模型的止损计算失真 */
+    private Integer leverageMin;
+    private Integer leverageMax;
+
+    /** 单笔保证金占权益%区间；只约束开新仓，加仓量由模型自己斟酌 */
+    private BigDecimal marginPctMin;
+    private BigDecimal marginPctMax;
+
+    /** 允许同时持有多个仓位；false=全账户至多一仓（挂单一并计数） */
+    private Boolean allowMultiPosition;
+
+    /** 允许同币多空双开；仅在 allowMultiPosition=true 时有意义 */
+    private Boolean allowHedge;
+
+    /** 允许模型自主加仓；false=转待确认请求，不阻塞本轮唤醒 */
+    private Boolean allowSelfAdd;
+
+    /** 允许模型自主减仓/平仓；false=转请求。止损止盈自动触发不受此约束 */
+    private Boolean allowSelfReduce;
 
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdAt;

@@ -14,6 +14,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.model.tool.ToolCallingManager;
 import com.openai.client.OpenAIClient;
+import com.openai.client.OpenAIClientAsync;
 import org.bsc.langgraph4j.GraphStateException;
 import org.bsc.langgraph4j.StateGraph;
 import org.bsc.langgraph4j.prebuilt.MessagesState;
@@ -209,6 +210,12 @@ public class AiAgentRuntimeManager {
                 config.getBaseUrl(), config.getApiKey(), null, null, null, null,
                 false, false, config.getModel(), ResponsesChatModel.CALL_TIMEOUT, 3, null, null,
                 observationRegistry, null, List.of());
+        // async 也必须显式给：builder 见 openAiClientAsync 为空就拿 options 自建，而 options 里没 key，
+        // SDK 当场抛 "At least one credential source must be specified"（哪怕我们根本不走流式）
+        OpenAIClientAsync openAiClientAsync = OpenAiSetup.setupAsyncClient(
+                config.getBaseUrl(), config.getApiKey(), null, null, null, null,
+                false, false, config.getModel(), ResponsesChatModel.CALL_TIMEOUT, 3, null, null,
+                observationRegistry, null, List.of());
 
         OpenAiChatOptions.Builder options = OpenAiChatOptions.builder()
                 .model(config.getModel());
@@ -221,6 +228,7 @@ public class AiAgentRuntimeManager {
         // 翻成发给 API 的工具声明。builder 不传就 new 一个默认的，做的事一模一样
         return OpenAiChatModel.builder()
                 .openAiClient(openAiClient)
+                .openAiClientAsync(openAiClientAsync)
                 .options(options.build())
                 .observationRegistry(observationRegistry)
                 .build();

@@ -5,6 +5,7 @@ import com.mawai.wiibcommon.dto.FuturesOpenRequest;
 import com.mawai.wiibcommon.dto.FuturesOrderResponse;
 import com.mawai.wiibcommon.dto.FuturesPositionDTO;
 import com.mawai.wiibcommon.dto.FuturesStopLossRequest;
+import com.mawai.wiibcommon.dto.FuturesTakeProfitRequest;
 import com.mawai.wiibcommon.entity.User;
 import com.mawai.wiibcommon.enums.ErrorCode;
 import com.mawai.wiibcommon.exception.BizException;
@@ -56,6 +57,13 @@ public class InternalFuturesTradeController {
     @PostMapping("/{userId}/stop-loss")
     public Result<Void> setStopLoss(@PathVariable Long userId, @RequestBody FuturesStopLossRequest request) {
         riskService.setStopLoss(userId, request);
+        return Result.ok();
+    }
+
+    /** 修改止盈（AI Trader 让利润奔跑：有利方向移动目标位）。 */
+    @PostMapping("/{userId}/take-profit")
+    public Result<Void> setTakeProfit(@PathVariable Long userId, @RequestBody FuturesTakeProfitRequest request) {
+        riskService.setTakeProfit(userId, request);
         return Result.ok();
     }
 

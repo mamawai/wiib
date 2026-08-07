@@ -23,7 +23,8 @@ public class ModelCallLimiter implements EdgeHook.WrapCall<MessagesState<Message
 
     /** ReAct 图里 END 的映射键（见 langgraph4j Agent：EdgeMappings.toEND("end")） */
     private static final String GOTO_END = "end";
-    static final String CALL_COUNT_KEY = "model_call_count";
+    /** 最终 state 里可读到本轮模型调用数——调用方据此判断是否被保险丝提前收束 */
+    public static final String CALL_COUNT_KEY = "model_call_count";
 
     private final int runLimit;
 

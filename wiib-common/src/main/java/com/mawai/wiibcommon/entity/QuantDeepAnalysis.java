@@ -21,11 +21,8 @@ public class QuantDeepAnalysis {
 
     private Long closeTime;
 
-    /** 触发源：cron_1h / sentinel / manual / chat（P4 对话触发） */
+    /** 触发源：定时轨下线后只剩 chat（工作台对话，HITL 确认后跑） */
     private String triggerSource;
-
-    /** 锚定的数值快照 id（研判基于该时点的数据） */
-    private Long snapshotId;
 
     /** 研判叙事（人话后果） */
     private String narrative;

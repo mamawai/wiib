@@ -36,4 +36,11 @@ class TraderSchedulerTest {
     void unknownIntervalYieldsMinusOne() {
         assertThat(TraderScheduler.boundaryOf(H1_CLOSE, "3m")).isEqualTo(-1);
     }
+
+    /** 5m 是时钟本身的滴答粒度：任意 5m 收盘都是 5m trader 的边界 */
+    @Test
+    void fiveMinuteBoundary() {
+        assertThat(TraderScheduler.boundaryOf(H1_CLOSE, "5m")).isEqualTo(1785171600000L);
+        assertThat(TraderScheduler.boundaryOf(H1_CLOSE - 300_000, "5m")).isEqualTo(1785171300000L);
+    }
 }

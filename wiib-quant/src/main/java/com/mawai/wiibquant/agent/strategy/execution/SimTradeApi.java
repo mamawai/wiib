@@ -5,6 +5,7 @@ import com.mawai.wiibcommon.dto.FuturesOpenRequest;
 import com.mawai.wiibcommon.dto.FuturesOrderResponse;
 import com.mawai.wiibcommon.dto.FuturesPositionDTO;
 import com.mawai.wiibcommon.dto.FuturesStopLossRequest;
+import com.mawai.wiibcommon.dto.FuturesTakeProfitRequest;
 import com.mawai.wiibcommon.util.Result;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -37,6 +38,9 @@ public interface SimTradeApi {
 
     @PostExchange("/{userId}/stop-loss")
     Result<Void> setStopLoss(@PathVariable Long userId, @RequestBody FuturesStopLossRequest request);
+
+    @PostExchange("/{userId}/take-profit")
+    Result<Void> setTakeProfit(@PathVariable Long userId, @RequestBody FuturesTakeProfitRequest request);
 
     @PostExchange("/{userId}/cancel/{orderId}")
     Result<FuturesOrderResponse> cancel(@PathVariable Long userId, @PathVariable Long orderId);
