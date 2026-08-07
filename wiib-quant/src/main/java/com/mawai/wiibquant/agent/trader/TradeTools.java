@@ -184,7 +184,7 @@ public class TradeTools {
                 openReq.setTakeProfits(List.of(tp));
             }
             FuturesOrderResponse resp = simTradeClient.openPosition(simUserId, openReq);
-            persistPlan(req, mark);
+            persistPlan(req, mark, sameSide != null);
             return ok("open_position", argSummary, JSON.toJSONString(resp));
         } catch (Exception e) {
             return fail("open_position", argSummary, e);
@@ -192,7 +192,7 @@ public class TradeTools {
     }
 
     /** 成交/挂单即落计划（下轮唤醒回注）；写失败只记日志不回错——交易已真实发生，回错误会诱导模型重复开仓。 */
-    private void persistPlan(TradeGuard.OpenReq req, BigDecimal mark) {
+    private void persistPlan(TradeGuard.OpenReq req, BigDecimal mark, boolean isAddOn) {
         try {
             AiTraderPlan plan = new AiTraderPlan();
             plan.setTraderId(ctx.traderId());
@@ -206,7 +206,7 @@ public class TradeTools {
             plan.setStopLossPrice(req.stopLossPrice());
             plan.setTakeProfitPrice(req.takeProfitPrice());
             plan.setOpenedWakeTime(ctx.boundaryTime());
-            planStore.upsert(plan);
+            planStore.upsert(plan, isAddOn);
         } catch (Exception e) {
             log.warn("[TradeTools] 计划落库失败 traderId={} {} msg={}", ctx.traderId(), req.symbol(), e.getMessage());
         }
@@ -258,7 +258,10 @@ public class TradeTools {
             Replace the stop-loss of an open position (positionId from get_account). TIGHTEN ONLY:
             LONG stops may only move UP, SHORT stops only DOWN (relative to the current stop) —
             widening a stop means your thesis is shaken; check your invalidation condition instead.
-            reason is REQUIRED and becomes part of the position's public plan revision history.""")
+            Do NOT slam the stop right next to the current price to force an instant trigger while
+            in loss — that is a panic exit in disguise; if the thesis is invalidated, say so and use
+            close_position instead. reason is REQUIRED and becomes part of the position's public
+            plan revision history.""")
     public String setStopLoss(@ToolParam(description = "Position id from get_account") long positionId,
                               @ToolParam(description = "New stop-loss price") double stopLossPrice,
                               @ToolParam(description = "Quantity in coins covered by the stop") double quantity,
@@ -279,12 +282,13 @@ public class TradeTools {
             // 止损只许收紧：放宽止损=放大风险=移动球门柱；想给仓位更多空间说明论点已动摇，该查失效条件而不是松止损
             boolean isLong = "LONG".equals(pos.getSide());
             BigDecimal newStop = BigDecimal.valueOf(stopLossPrice);
-            BigDecimal loosest = extremePrice(
+            // 基准取最紧那档：sim 是整组替换，比最紧档松的新价会让原有某档变松，一律拒
+            BigDecimal tightest = extremePrice(
                     pos.getStopLosses() == null ? List.of()
                             : pos.getStopLosses().stream().map(FuturesStopLoss::getPrice).toList(), isLong);
-            if (loosest != null && (isLong ? newStop.compareTo(loosest) < 0 : newStop.compareTo(loosest) > 0)) {
+            if (tightest != null && (isLong ? newStop.compareTo(tightest) < 0 : newStop.compareTo(tightest) > 0)) {
                 return rejected("set_stop_loss", args, "止损只许收紧（多单上移/空单下移，当前止损"
-                        + loosest.stripTrailingZeros().toPlainString()
+                        + tightest.stripTrailingZeros().toPlainString()
                         + "）——想给仓位更多空间说明论点已动摇，去检查失效条件");
             }
             FuturesStopLossRequest req = new FuturesStopLossRequest();
@@ -295,7 +299,7 @@ public class TradeTools {
             req.setStopLosses(List.of(item));
             simTradeClient.setStopLoss(simUserId, req);
             revisePlan(pos, "移动止损",
-                    (loosest == null ? "无" : loosest.stripTrailingZeros().toPlainString())
+                    (tightest == null ? "无" : tightest.stripTrailingZeros().toPlainString())
                             + "→" + newStop.stripTrailingZeros().toPlainString(), reason);
             return ok("set_stop_loss", args, "{\"ok\":true}");
         } catch (Exception e) {
@@ -402,7 +406,8 @@ public class TradeTools {
                     : ctx.boundaryTime());
             TraderPlanStore.appendRevision(plan, ctx.boundaryTime(), "补立",
                     "为无计划持仓补立计划", signalsUsed);
-            planStore.upsert(plan);
+            // 前置校验已确认无计划，走 insert 路径；isAddOn=false 语义上也对——补立不是加仓
+            planStore.upsert(plan, false);
             return ok("write_plan", args, "{\"ok\":true}");
         } catch (Exception e) {
             return fail("write_plan", args, e);
@@ -450,7 +455,10 @@ public class TradeTools {
                 .findFirst().orElse(null);
     }
 
-    /** 多单取最高价/空单取最低价（多档止损止盈的"最松/最远"那一档，作为收紧/远离判定基准）。 */
+    /**
+     * 多单取最高价/空单取最低价。作判定基准时含义随场景不同：对止损是"最紧那一档"、对止盈是
+     * "最远那一档"——sim 整组替换语义下按最保守档做基线，替换后才不会比原来任何一档更松/更近。
+     */
     private static BigDecimal extremePrice(List<BigDecimal> prices, boolean isLong) {
         return prices.stream().filter(java.util.Objects::nonNull)
                 .reduce((a, b) -> isLong ? a.max(b) : a.min(b)).orElse(null);

@@ -46,13 +46,22 @@ public class TraderPlanStore {
     }
 
     /**
-     * 开仓/加仓成交或限价挂出即落计划。同键已存在=加仓：新论点上位，旧论点进修订历史
-     * （模型下单前已在提示词里看过旧计划，知情覆盖）；持有时长按最初开仓算。
+     * 开仓/加仓成交或限价挂出即落计划。isAddOn=true（同币同向已有持仓）走加仓覆盖：新论点上位，
+     * 旧论点进修订历史（模型下单前已在提示词里看过旧计划，知情覆盖），持有时长按最初开仓算。
+     * isAddOn=false 但同键旧计划还在＝同轮内平掉后重开（懒清理只在唤醒开头跑）：这是独立新仓
+     * 不是加仓——旧计划已完成使命删掉，仓龄从新仓起算，修订史不继承（仓龄诚实）。
      */
-    public void upsert(AiTraderPlan plan) {
+    public void upsert(AiTraderPlan plan, boolean isAddOn) {
         AiTraderPlan old = find(plan.getTraderId(), plan.getRoundNo(), plan.getSymbol(), plan.getSide());
         if (old == null) {
             mapper.insert(plan);
+            return;
+        }
+        if (!isAddOn) {
+            mapper.deleteById(old.getId());
+            mapper.insert(plan);
+            log.info("[TraderPlan] 同轮重开覆盖旧计划 traderId={} {} {}",
+                    plan.getTraderId(), plan.getSymbol(), plan.getSide());
             return;
         }
         long revisedAt = plan.getOpenedWakeTime() == null ? 0 : plan.getOpenedWakeTime();

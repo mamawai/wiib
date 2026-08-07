@@ -196,7 +196,7 @@ class TradeToolsTest {
         neu.setInvalidationCondition("4h收盘跌破97000");
         neu.setOpenedWakeTime(1785171600000L);
 
-        new TraderPlanStore(planMapper).upsert(neu);
+        new TraderPlanStore(planMapper).upsert(neu, true);
 
         ArgumentCaptor<AiTraderPlan> cap = ArgumentCaptor.forClass(AiTraderPlan.class);
         verify(planMapper).updateById(cap.capture());
@@ -204,5 +204,25 @@ class TradeToolsTest {
         assertThat(p.getInvalidationCondition()).isEqualTo("4h收盘跌破97000");
         assertThat(p.getRevisionsJson()).contains("加仓").contains("1h收盘跌回98000下方");
         assertThat(p.getOpenedWakeTime()).isEqualTo(1785168000000L);
+    }
+
+    /** 同轮内平掉再开同向仓＝重开不是加仓：旧计划删除、仓龄从新仓起算、修订史不继承（仓龄诚实） */
+    @Test
+    void upsertReentryReplacesPlanInsteadOfAddOnRevision() {
+        AiTraderPlan old = existingPlan();
+        when(planMapper.selectOne(any())).thenReturn(old);
+        AiTraderPlan neu = existingPlan();
+        neu.setId(null);
+        neu.setSignalsUsed("重新突破，独立新仓");
+        neu.setOpenedWakeTime(1785171600000L);
+
+        new TraderPlanStore(planMapper).upsert(neu, false);
+
+        verify(planMapper).deleteById(21L);
+        verify(planMapper, never()).updateById(any(AiTraderPlan.class));
+        ArgumentCaptor<AiTraderPlan> cap = ArgumentCaptor.forClass(AiTraderPlan.class);
+        verify(planMapper).insert(cap.capture());
+        assertThat(cap.getValue().getOpenedWakeTime()).isEqualTo(1785171600000L);
+        assertThat(cap.getValue().getRevisionsJson()).isNull();
     }
 }
