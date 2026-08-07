@@ -465,8 +465,9 @@ export const traderApi = {
   reset: () => api.post<unknown, void>('/ai/trader/reset'),
   arena: () => api.get<unknown, TraderPublicView[]>('/ai/trader/arena'),
   detail: (id: number) => api.get<unknown, TraderDetailView>(`/ai/trader/${id}`),
-  decisions: (id: number, limit = 50, before?: number) =>
-    api.get<unknown, AiTraderDecisionView[]>(`/ai/trader/${id}/decisions`, { params: { limit, before } }),
+  /** 决策时间线；round 传空=当前局。必须按局看——局与局是两个独立子账户，混排对不上净值曲线 */
+  decisions: (id: number, limit = 50, before?: number, round?: number) =>
+    api.get<unknown, AiTraderDecisionView[]>(`/ai/trader/${id}/decisions`, { params: { limit, before, round } }),
   equityCurve: (id: number, round?: number) =>
     api.get<unknown, TraderEquityPoint[]>(`/ai/trader/${id}/equity-curve`, { params: { round } }),
 };

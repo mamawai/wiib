@@ -94,7 +94,10 @@ public class TraderPlanStore {
     }
 
     /** 重置开新局：旧局计划随旧账户一并作废。 */
-    public void deleteAll(long traderId) {
-        mapper.delete(new LambdaQueryWrapper<AiTraderPlan>().eq(AiTraderPlan::getTraderId, traderId));
+    /** 只删指定局：历史局的计划是那局决策的公开凭证，不能跟着一起清 */
+    public void deleteRound(long traderId, int roundNo) {
+        mapper.delete(new LambdaQueryWrapper<AiTraderPlan>()
+                .eq(AiTraderPlan::getTraderId, traderId)
+                .eq(AiTraderPlan::getRoundNo, roundNo));
     }
 }

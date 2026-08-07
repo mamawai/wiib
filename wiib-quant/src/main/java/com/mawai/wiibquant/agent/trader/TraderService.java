@@ -7,9 +7,11 @@ import com.mawai.wiibcommon.constant.AiProtocols;
 import com.mawai.wiibcommon.entity.AiTrader;
 import com.mawai.wiibcommon.entity.AiTraderDecision;
 import com.mawai.wiibcommon.entity.AiTraderPlan;
+import com.mawai.wiibcommon.entity.AiTraderRequest;
 import com.mawai.wiibquant.agent.strategy.execution.SimTradeClient;
 import com.mawai.wiibquant.mapper.AiTraderDecisionMapper;
 import com.mawai.wiibquant.mapper.AiTraderMapper;
+import com.mawai.wiibquant.mapper.AiTraderRequestMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -41,6 +43,7 @@ public class TraderService {
     private final BinanceProperties binanceProperties;
     private final BaseUrlGuard baseUrlGuard;
     private final TraderPlanStore planStore;
+    private final AiTraderRequestMapper requestMapper;
 
     public record UpsertReq(String name, String symbols, String intervalCode, String customPrompt,
                             String apiProtocol, String baseUrl, String model, String apiKey,
@@ -203,8 +206,15 @@ public class TraderService {
         }
         int newRound = t.getRoundNo() + 1;
         Long simUserId = simTradeClient.ensureAccount(accountName(userId, newRound), INITIAL_BALANCE);
-        // 旧局计划随旧账户一并作废（新局新账户，计划键含round本不冲突，删掉纯为不留死数据）
-        planStore.deleteAll(t.getId());
+        // 只删本局计划：历史局的计划是那局决策的公开凭证（论点/失效条件/修订史），删了就查不回来了
+        planStore.deleteRound(t.getId(), t.getRoundNo());
+        // 未处理的请求随本局一并作废：换了新账户，那个 positionId 早已不存在，留着也永远处理不掉
+        requestMapper.update(null, new LambdaUpdateWrapper<AiTraderRequest>()
+                .eq(AiTraderRequest::getTraderId, t.getId())
+                .eq(AiTraderRequest::getStatus, AiTraderRequest.STATUS_PENDING)
+                .set(AiTraderRequest::getStatus, AiTraderRequest.STATUS_REJECTED)
+                .set(AiTraderRequest::getExecutedResult, "重置开新局，请求作废")
+                .set(AiTraderRequest::getDecidedAt, LocalDateTime.now()));
         traderMapper.update(null, new LambdaUpdateWrapper<AiTrader>()
                 .eq(AiTrader::getId, t.getId())
                 .set(AiTrader::getRoundNo, newRound)
@@ -228,9 +238,18 @@ public class TraderService {
         return d != null ? d.getEquity() : INITIAL_BALANCE;
     }
 
-    public List<AiTraderDecision> decisions(long traderId, int limit, Long before) {
+    /**
+     * 决策时间线。必须按局过滤：局与局之间是两个互不相干的 sim 子账户（各自注资 10000），
+     * 混排会出现"曲线上没有的决策"，权益数字也在两条基线之间跳。round 传空=当前局。
+     */
+    public List<AiTraderDecision> decisions(long traderId, int limit, Long before, Integer round) {
+        AiTrader t = traderMapper.selectById(traderId);
+        if (t == null) {
+            return List.of();
+        }
         LambdaQueryWrapper<AiTraderDecision> q = new LambdaQueryWrapper<AiTraderDecision>()
                 .eq(AiTraderDecision::getTraderId, traderId)
+                .eq(AiTraderDecision::getRoundNo, round != null ? round : t.getRoundNo())
                 .orderByDesc(AiTraderDecision::getWakeTime)
                 .last("LIMIT " + Math.clamp(limit, 1, 100));
         if (before != null) {

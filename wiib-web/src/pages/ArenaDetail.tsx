@@ -207,16 +207,18 @@ export function ArenaDetail() {
   const [decisions, setDecisions] = useState<AiTraderDecisionView[]>([]);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
+  // null=跟随当前局（会随 detail 刷新自动跟上）；数字=用户选了某一历史局
+  const [round, setRound] = useState<number | null>(null);
 
   const load = useCallback(() => {
     if (!Number.isFinite(traderId)) return;
     void traderApi.detail(traderId).then(setDetail).catch(() => setDetail(null));
-    void traderApi.equityCurve(traderId).then(setCurve).catch(() => setCurve([]));
-    void traderApi.decisions(traderId, 50).then(list => {
+    void traderApi.equityCurve(traderId, round ?? undefined).then(setCurve).catch(() => setCurve([]));
+    void traderApi.decisions(traderId, 50, undefined, round ?? undefined).then(list => {
       setDecisions(list);
       setHasMore(list.length >= 50);
     }).catch(() => setDecisions([]));
-  }, [traderId]);
+  }, [traderId, round]);
 
   useEffect(() => {
     load();
@@ -228,13 +230,13 @@ export function ArenaDetail() {
     const oldest = decisions[decisions.length - 1];
     if (!oldest) return;
     setLoadingMore(true);
-    traderApi.decisions(traderId, 50, oldest.wakeTime)
+    traderApi.decisions(traderId, 50, oldest.wakeTime, round ?? undefined)
       .then(list => {
         setDecisions(prev => [...prev, ...list]);
         setHasMore(list.length >= 50);
       })
       .finally(() => setLoadingMore(false));
-  }, [traderId, decisions]);
+  }, [traderId, decisions, round]);
 
   // 净值曲线复用 EquityChart（累计盈亏口径）：equity-10000 起点归零
   const chartPoints = useMemo<TnEquityPoint[]>(
@@ -243,6 +245,8 @@ export function ArenaDetail() {
 
   const t = detail?.trader;
   const st = t ? (STATUS_META[t.status] ?? STATUS_META.PAUSED) : null;
+  // round=null 表示跟随当前局，落到显示时统一成具体数字
+  const viewingRound = round ?? t?.roundNo ?? 1;
 
   return (
     <div className="page-shell p-4 md:p-6 space-y-4">
@@ -279,7 +283,26 @@ export function ArenaDetail() {
       <div className="grid lg:grid-cols-2 gap-4 items-start">
         <div className="space-y-4">
           <div className="rounded-lg pt-card p-4 space-y-2">
-            <span className="microlabel">本局净值（初始 10000）</span>
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="microlabel">
+                {viewingRound === t?.roundNo ? '本局' : `R${viewingRound}`}净值（初始 10000）
+              </span>
+              {/* 局次切换：每局是独立子账户各自注资 10000，曲线与时间线必须同进同出，不能混排 */}
+              {(t?.roundNo ?? 1) > 1 && (
+                <div className="ml-auto flex gap-1">
+                  {Array.from({ length: t?.roundNo ?? 1 }, (_, i) => i + 1).map(r => (
+                    <button key={r} type="button"
+                            onClick={() => setRound(r === t?.roundNo ? null : r)}
+                            className={cn('px-1.5 h-6 rounded border text-[10px] font-bold num',
+                              r === viewingRound
+                                ? 'border-primary/60 bg-card-2 text-primary'
+                                : 'border-border text-muted-foreground hover:text-foreground')}>
+                      R{r}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
             {chartPoints.length > 1
               ? <EquityChart points={chartPoints} />
               : <div className="py-10 text-center text-xs text-muted-foreground">数据点不足，等它多醒几次</div>}
@@ -287,6 +310,12 @@ export function ArenaDetail() {
 
           <div className="rounded-lg pt-card p-4 space-y-2">
             <span className="microlabel">当前持仓 / 挂单</span>
+            {/* 持仓是实时现查当前账户的，看历史局时这块跟左边的曲线不是同一局，得说清楚 */}
+            {viewingRound !== t?.roundNo && (
+              <p className="text-[10px] text-amber-600">
+                下方持仓属于当前局 R{t?.roundNo}，与你正在查看的 R{viewingRound} 无关
+              </p>
+            )}
             {detail && detail.positions.length === 0 && detail.pendingOrders.length === 0 && (
               <div className="py-6 text-center text-xs text-muted-foreground">空仓观望中</div>
             )}
@@ -336,7 +365,9 @@ export function ArenaDetail() {
         </div>
 
         <div className="rounded-lg pt-card p-4 space-y-2.5">
-          <span className="microlabel">决策时间线 · 看它怎么想</span>
+          <span className="microlabel">
+            决策时间线 · 看它怎么想{viewingRound !== t?.roundNo && ` · R${viewingRound}`}
+          </span>
           {decisions.length === 0 && (
             <div className="py-10 text-center text-xs text-muted-foreground">还没有任何决策，启动后每根K线醒一次</div>
           )}

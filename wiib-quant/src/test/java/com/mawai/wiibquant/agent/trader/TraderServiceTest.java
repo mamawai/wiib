@@ -5,9 +5,11 @@ import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.mawai.wiibcommon.config.BinanceProperties;
 import com.mawai.wiibcommon.entity.AiTrader;
 import com.mawai.wiibcommon.entity.AiTraderDecision;
+import com.mawai.wiibcommon.entity.AiTraderRequest;
 import com.mawai.wiibquant.agent.strategy.execution.SimTradeClient;
 import com.mawai.wiibquant.mapper.AiTraderDecisionMapper;
 import com.mawai.wiibquant.mapper.AiTraderMapper;
+import com.mawai.wiibquant.mapper.AiTraderRequestMapper;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -29,6 +31,7 @@ class TraderServiceTest {
     static void initTableInfoCache() {
         TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""), AiTrader.class);
         TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""), AiTraderDecision.class);
+        TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""), AiTraderRequest.class);
     }
 
     private final AiTraderMapper traderMapper = mock(AiTraderMapper.class);
@@ -36,10 +39,13 @@ class TraderServiceTest {
     private final ApiKeyCrypto apiKeyCrypto = mock(ApiKeyCrypto.class);
     private final BinanceProperties binanceProperties = mock(BinanceProperties.class);
 
+    private final SimTradeClient simTradeClient = mock(SimTradeClient.class);
+    private final TraderPlanStore planStore = mock(TraderPlanStore.class);
+    private final AiTraderRequestMapper requestMapper = mock(AiTraderRequestMapper.class);
+
     private final TraderService service = new TraderService(
             traderMapper, mock(AiTraderDecisionMapper.class), modelFactory, apiKeyCrypto,
-            mock(SimTradeClient.class), binanceProperties, new BaseUrlGuard(""),
-            mock(TraderPlanStore.class));
+            simTradeClient, binanceProperties, new BaseUrlGuard(""), planStore, requestMapper);
 
     /** SSRF 防线必须接进 listModels 入口 */
     @Test
@@ -153,6 +159,25 @@ class TraderServiceTest {
                 100, 50, null, null, null, null, null, null));
 
         assertThat(err).contains("下界不能大于上界");
+    }
+
+    /**
+     * 重置开新局：只清本局的计划，历史局的留着——那是历史决策的公开凭证（论点/失效条件/修订史）。
+     * 顺带把未处理的请求作废：换了新账户，旧 positionId 早已不存在，留着永远处理不掉。
+     */
+    @Test
+    void resetOnlyClearsCurrentRound() {
+        AiTrader t = new AiTrader();
+        t.setId(7L);
+        t.setUserId(1L);
+        t.setRoundNo(3);
+        when(traderMapper.selectOne(any())).thenReturn(t);
+        when(simTradeClient.ensureAccount(any(), any())).thenReturn(99L);
+
+        assertThat(service.reset(1L)).isNull();
+
+        verify(planStore).deleteRound(7L, 3);          // 只删 R3，R1/R2 的计划留着
+        verify(requestMapper).update(any(), any());     // 待确认请求一并作废
     }
 
     /** 单仓 + 双开是自相矛盾的组合（双开本身要两个仓位），入口就拦掉 */

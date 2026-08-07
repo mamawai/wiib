@@ -230,9 +230,10 @@ public class TraderController {
     @Operation(summary = "决策时间线（倒序分页，before传上一页最旧wakeTime）")
     public Result<List<AiTraderDecision>> decisions(@PathVariable long id,
                                                     @RequestParam(defaultValue = "50") int limit,
-                                                    @RequestParam(required = false) Long before) {
+                                                    @RequestParam(required = false) Long before,
+                                                    @RequestParam(required = false) Integer round) {
         StpUtil.checkLogin();
-        return Result.ok(traderService.decisions(id, limit, before));
+        return Result.ok(traderService.decisions(id, limit, before, round));
     }
 
     public record EquityPoint(long wakeTime, BigDecimal equity) {
