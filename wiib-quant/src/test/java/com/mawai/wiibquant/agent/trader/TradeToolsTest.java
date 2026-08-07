@@ -206,9 +206,9 @@ class TradeToolsTest {
         assertThat(p.getOpenedWakeTime()).isEqualTo(1785168000000L);
     }
 
-    /** 同轮内平掉再开同向仓＝重开不是加仓：旧计划删除、仓龄从新仓起算、修订史不继承（仓龄诚实） */
+    /** 同轮内平掉再开同向仓＝重开不是加仓：旧计划归档留档、仓龄从新仓起算、修订史不继承（仓龄诚实） */
     @Test
-    void upsertReentryReplacesPlanInsteadOfAddOnRevision() {
+    void upsertReentryArchivesOldPlanInsteadOfAddOnRevision() {
         AiTraderPlan old = existingPlan();
         when(planMapper.selectOne(any())).thenReturn(old);
         AiTraderPlan neu = existingPlan();
@@ -218,10 +218,16 @@ class TradeToolsTest {
 
         new TraderPlanStore(planMapper).upsert(neu, false);
 
-        verify(planMapper).deleteById(21L);
-        verify(planMapper, never()).updateById(any(AiTraderPlan.class));
+        // 归档不删：论点→结局配对是 learning agent 的复盘原料
+        ArgumentCaptor<AiTraderPlan> archived = ArgumentCaptor.forClass(AiTraderPlan.class);
+        verify(planMapper).updateById(archived.capture());
+        assertThat(archived.getValue().getId()).isEqualTo(21L);
+        assertThat(archived.getValue().getStatus()).isEqualTo(AiTraderPlan.STATUS_CLOSED);
+        assertThat(archived.getValue().getClosedWakeTime()).isEqualTo(1785171600000L);
+
         ArgumentCaptor<AiTraderPlan> cap = ArgumentCaptor.forClass(AiTraderPlan.class);
         verify(planMapper).insert(cap.capture());
+        assertThat(cap.getValue().getStatus()).isEqualTo(AiTraderPlan.STATUS_LIVE);
         assertThat(cap.getValue().getOpenedWakeTime()).isEqualTo(1785171600000L);
         assertThat(cap.getValue().getRevisionsJson()).isNull();
     }

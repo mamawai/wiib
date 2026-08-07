@@ -45,6 +45,13 @@ public class AiTrader {
     /** 是否使用平台系统提示词（默认true）；false=自定义提示词成为唯一指令来源（护栏仍硬校验） */
     private Boolean useDefaultPrompt;
 
+    /**
+     * 复盘笔记：将来由 learning agent 整理写入（限长文本），每次唤醒注入提示词。
+     * trader 侧只读只注入——本字段即记忆学习的接口。ALWAYS：清空笔记=写 null
+     */
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
+    private String memory;
+
     /** 上游协议：openai=/v1/chat/completions，responses=/v1/responses */
     private String apiProtocol;
 

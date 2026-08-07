@@ -1,6 +1,7 @@
 package com.mawai.wiibquant.agent.trader;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.mawai.wiibcommon.dto.FuturesCloseRequest;
 import com.mawai.wiibcommon.dto.FuturesOpenRequest;
 import com.mawai.wiibcommon.dto.FuturesOrderResponse;
@@ -58,6 +59,29 @@ public class TraderRequestService {
                 .eq(AiTraderRequest::getRoundNo, roundNo)
                 .eq(AiTraderRequest::getStatus, AiTraderRequest.STATUS_PENDING)
                 .orderByAsc(AiTraderRequest::getId));
+    }
+
+    /**
+     * 回注提示词用：主人已处理但还没告诉过模型的请求（批/拒+执行结果）。
+     * 反馈闭环的最后一环——不注模型只能从仓位变化倒猜自己的请求是什么下场。
+     */
+    public List<AiTraderRequest> decidedUnnotified(long traderId, int roundNo) {
+        return requestMapper.selectList(new LambdaQueryWrapper<AiTraderRequest>()
+                .eq(AiTraderRequest::getTraderId, traderId)
+                .eq(AiTraderRequest::getRoundNo, roundNo)
+                .ne(AiTraderRequest::getStatus, AiTraderRequest.STATUS_PENDING)
+                .eq(AiTraderRequest::getNotified, false)
+                .orderByAsc(AiTraderRequest::getId));
+    }
+
+    /** 结果已注入本轮提示词，置已通知——每个结果只说一次，不当陈年新闻反复念。 */
+    public void markNotified(List<AiTraderRequest> requests) {
+        if (requests.isEmpty()) {
+            return;
+        }
+        requestMapper.update(null, new LambdaUpdateWrapper<AiTraderRequest>()
+                .in(AiTraderRequest::getId, requests.stream().map(AiTraderRequest::getId).toList())
+                .set(AiTraderRequest::getNotified, true));
     }
 
     /** 主人页面用：我的全部待确认请求。 */

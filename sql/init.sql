@@ -791,6 +791,7 @@ CREATE TABLE IF NOT EXISTS ai_trader (
     interval_code   VARCHAR(8) NOT NULL DEFAULT '1h',
     custom_prompt   TEXT,
     use_default_prompt BOOLEAN NOT NULL DEFAULT TRUE,
+    memory          TEXT,
     api_protocol    VARCHAR(16) NOT NULL DEFAULT 'openai',
     base_url        VARCHAR(255) NOT NULL,
     model           VARCHAR(128) NOT NULL,
@@ -814,6 +815,7 @@ COMMENT ON COLUMN ai_trader.status IS 'PAUSED/RUNNING/LIQUIDATED';
 COMMENT ON COLUMN ai_trader.symbols IS '交易币种白名单子集，逗号分隔（须在binance.symbols范围内）';
 COMMENT ON COLUMN ai_trader.interval_code IS '唤醒K线级别 5m/15m/1h/4h/1d（1m禁止；5m烧token快，适合短期测试）';
 COMMENT ON COLUMN ai_trader.use_default_prompt IS '是否使用平台系统提示词（默认true）；false=自定义提示词成为唯一指令来源（护栏仍硬校验）';
+COMMENT ON COLUMN ai_trader.memory IS '复盘笔记：将来由learning agent整理写入（限长文本），每次唤醒注入提示词——trader侧只读只注入，本列即记忆学习的接口';
 COMMENT ON COLUMN ai_trader.api_key_enc IS 'AES-GCM密文base64(iv+cipher)，密钥走环境变量WIIB_TRADER_KEY_SECRET';
 COMMENT ON COLUMN ai_trader.sim_user_id IS '当前局sim子账户userId，每局独立，重置开新账户';
 COMMENT ON COLUMN ai_trader.round_no IS '局数：爆仓/手动重置+1开新局，历史留档';
@@ -866,15 +868,21 @@ CREATE TABLE IF NOT EXISTS ai_trader_plan (
     take_profit_price NUMERIC(20,8),
     opened_wake_time BIGINT NOT NULL,
     revisions_json  TEXT,
+    status          VARCHAR(8) NOT NULL DEFAULT 'LIVE',
+    closed_wake_time BIGINT,
     created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT uq_atp_key UNIQUE (trader_id, round_no, symbol, side)
+    updated_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+-- 同键同一时刻至多一份存活计划；归档行不占键——同轮重开/跨轮重开都能再立新计划
+CREATE UNIQUE INDEX IF NOT EXISTS uq_atp_live ON ai_trader_plan (trader_id, round_no, symbol, side)
+    WHERE status = 'LIVE';
 COMMENT ON TABLE ai_trader_plan IS 'AI Trader持仓交易计划：开仓立的论点/失效条件/止损止盈快照，每次唤醒原样回注提示词（nof1式plan reinjection）——退出纪律的记忆载体。键(symbol,side)：sim同向开仓自动并入，任意时刻至多一仓，加仓=新论点覆盖';
 COMMENT ON COLUMN ai_trader_plan.invalidation_condition IS '失效条件：什么市场状况证明论点错了（市场条件而非盈亏数字），触发才允许主动平仓';
 COMMENT ON COLUMN ai_trader_plan.stop_loss_price IS '原始止损快照；当前生效止损以sim仓位为准（可能已上移锁盈）';
 COMMENT ON COLUMN ai_trader_plan.opened_wake_time IS '开仓所在唤醒边界(ms)，回注时计算已持有时长';
 COMMENT ON COLUMN ai_trader_plan.revisions_json IS '修订历史追加式JSON [{time,type,change,reason}]：加仓覆盖/移动止盈/移动止损/补立——修改必须留痕带理由，计划本体价格字段永远是原始快照';
+COMMENT ON COLUMN ai_trader_plan.status IS 'LIVE=仓位/挂单存活 CLOSED=已了结归档。归档不删：论点→结局的配对数据是将来learning agent复盘的原料（结局按symbol/side/时间窗join sim已平仓位）';
+COMMENT ON COLUMN ai_trader_plan.closed_wake_time IS '归档时刻(ms)：懒清理发现仓位已了结的唤醒边界/重置时刻，与opened_wake_time围出计划生命期';
 
 -- ============ ai_trader_request：加仓/减仓待主人确认（allow_self_add/reduce 关闭时才产生） ============
 -- 异步不阻塞：模型调工具即落库返回，本轮唤醒照常收尾；主人在"我的trader"页点同意才市价执行。
@@ -893,6 +901,7 @@ CREATE TABLE IF NOT EXISTS ai_trader_request (
     reason          VARCHAR(500) NOT NULL,
     status          VARCHAR(10) NOT NULL DEFAULT 'PENDING',
     executed_result VARCHAR(500),
+    notified        BOOLEAN NOT NULL DEFAULT FALSE,
     wake_time       BIGINT NOT NULL,
     decided_at      TIMESTAMP,
     created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -907,4 +916,5 @@ COMMENT ON COLUMN ai_trader_request.position_id IS '目标仓位id（sim侧）�
 COMMENT ON COLUMN ai_trader_request.request_price IS '模型发起时的mark快照，与实时价并列展示供主人判断价格是否跑掉';
 COMMENT ON COLUMN ai_trader_request.status IS 'PENDING待确认 / APPROVED已同意(执行结果见executed_result) / REJECTED主人拒绝';
 COMMENT ON COLUMN ai_trader_request.executed_result IS '批准后的执行结果或失败原因（余额不足/仓位已不存在等），不吞';
+COMMENT ON COLUMN ai_trader_request.notified IS '处理结果是否已回注给模型：主人批/拒之后的下一次唤醒注入一次并置true——反馈闭环的最后一环，不注模型只能从仓位变化倒猜';
 COMMENT ON COLUMN ai_trader_request.wake_time IS '发起时所在唤醒边界(ms)，用于回注提示词时说明"这是第几轮提的"';

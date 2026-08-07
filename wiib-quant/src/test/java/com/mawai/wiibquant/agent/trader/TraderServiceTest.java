@@ -162,11 +162,11 @@ class TraderServiceTest {
     }
 
     /**
-     * 重置开新局：只清本局的计划，历史局的留着——那是历史决策的公开凭证（论点/失效条件/修订史）。
+     * 重置开新局：本局存活计划归档（不删——论点/失效条件/修订史是公开凭证与复盘原料）。
      * 顺带把未处理的请求作废：换了新账户，旧 positionId 早已不存在，留着永远处理不掉。
      */
     @Test
-    void resetOnlyClearsCurrentRound() {
+    void resetArchivesCurrentRoundPlans() {
         AiTrader t = new AiTrader();
         t.setId(7L);
         t.setUserId(1L);
@@ -176,7 +176,8 @@ class TraderServiceTest {
 
         assertThat(service.reset(1L)).isNull();
 
-        verify(planStore).deleteRound(7L, 3);          // 只删 R3，R1/R2 的计划留着
+        verify(planStore).archiveRound(org.mockito.ArgumentMatchers.eq(7L),
+                org.mockito.ArgumentMatchers.eq(3), org.mockito.ArgumentMatchers.anyLong());
         verify(requestMapper).update(any(), any());     // 待确认请求一并作废
     }
 

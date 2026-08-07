@@ -436,9 +436,9 @@ class TraderWakeupLoopTest {
                 .contains("趋势加速看下一压力位");
     }
 
-    /** 仓位已了结（止损/止盈/平仓殊途同归）→ 计划完成使命，唤醒时懒清理。 */
+    /** 仓位已了结（止损/止盈/平仓殊途同归）→ 计划完成使命，唤醒时懒归档（不删：复盘原料）。 */
     @Test
-    void stalePlanCleanedWhenPositionGone() {
+    void stalePlanArchivedWhenPositionGone() {
         stubHealthyAccount();
         when(simTradeClient.getBalance(99L)).thenReturn(new BigDecimal("10000"));
         AiTraderPlan stale = new AiTraderPlan();
@@ -453,7 +453,36 @@ class TraderWakeupLoopTest {
 
         runner.wake(trader(), 1785171600000L);
 
-        verify(planMapper).deleteById(11L);
+        ArgumentCaptor<AiTraderPlan> cap = ArgumentCaptor.forClass(AiTraderPlan.class);
+        verify(planMapper).updateById(cap.capture());
+        assertThat(cap.getValue().getStatus()).isEqualTo(AiTraderPlan.STATUS_CLOSED);
+        assertThat(cap.getValue().getClosedWakeTime()).isEqualTo(1785171600000L);
+    }
+
+    /** 主人批/拒的结果必须回注一次并置已通知：模型提的请求什么下场，不能让它从仓位变化倒猜。 */
+    @Test
+    void decidedRequestResultInjectedOnceAndMarkedNotified() {
+        stubHealthyAccount();
+        AiTraderRequest done = new AiTraderRequest();
+        done.setId(31L);
+        done.setType(AiTraderRequest.TYPE_REDUCE);
+        done.setSymbol("BTCUSDT");
+        done.setQuantity(new BigDecimal("0.1"));
+        done.setStatus(AiTraderRequest.STATUS_APPROVED);
+        done.setExecutedResult("已成交 0.1 @订单88");
+        when(requestService.decidedUnnotified(7L, 1)).thenReturn(List.of(done));
+        ChatModel model = modelCheckingThenSummary();
+        when(modelFactory.modelFor(any())).thenReturn(model);
+
+        runner.wake(trader(), 1785171600000L);
+
+        ArgumentCaptor<Prompt> prompts = ArgumentCaptor.forClass(Prompt.class);
+        verify(model, atLeastOnce()).call(prompts.capture());
+        String firstCall = prompts.getAllValues().get(0).getInstructions().stream()
+                .map(org.springframework.ai.chat.messages.Message::getText)
+                .reduce("", String::concat);
+        assertThat(firstCall).contains("主人已同意").contains("已成交 0.1");
+        verify(requestService).markNotified(List.of(done));
     }
 
     /** 预算 = 距下一边界−5s，上限600s：唤醒决不占用下一根K线（超时级联跳过的根治）。 */

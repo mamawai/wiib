@@ -61,6 +61,9 @@ public class AiTraderRequest {
     @TableField(updateStrategy = com.baomidou.mybatisplus.annotation.FieldStrategy.ALWAYS)
     private String executedResult;
 
+    /** 处理结果是否已回注给模型：批/拒后的下一次唤醒注入一次并置 true（反馈闭环最后一环） */
+    private Boolean notified;
+
     /** 发起时所在唤醒边界(ms)，回注提示词时说明这是第几轮提的 */
     private Long wakeTime;
 

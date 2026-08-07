@@ -178,19 +178,23 @@ public class TraderWakeupRunner {
                 .orderByDesc(AiTraderDecision::getWakeTime)
                 .last("LIMIT " + RECENT_DECISIONS));
 
-        // 计划懒清理 + 加载：仓位/挂单还活着的计划保留，已了结（止损/止盈/平仓/撤单）的删；存活计划随持仓回注
+        // 计划懒清理 + 加载：仓位/挂单还活着的计划保留，已了结（止损/止盈/平仓/撤单）的归档；存活计划随持仓/挂单回注
+        List<FuturesOrderResponse> pendingOrders = simTradeClient.getPendingOrders(trader.getSimUserId(), null);
         Set<String> liveKeys = new HashSet<>();
         positions.forEach(p -> liveKeys.add(TraderPlanStore.key(p.getSymbol(), p.getSide())));
-        for (FuturesOrderResponse o : simTradeClient.getPendingOrders(trader.getSimUserId(), null)) {
+        for (FuturesOrderResponse o : pendingOrders) {
             if (o.getOrderSide() != null && o.getOrderSide().startsWith("OPEN_")) {
                 liveKeys.add(TraderPlanStore.key(o.getSymbol(), o.getOrderSide().substring("OPEN_".length())));
             }
         }
-        List<AiTraderPlan> plans = planStore.cleanupStale(trader.getId(), trader.getRoundNo(), liveKeys);
+        List<AiTraderPlan> plans = planStore.cleanupStale(trader.getId(), trader.getRoundNo(), liveKeys, boundaryTime);
 
+        List<AiTraderRequest> decided = requestService.decidedUnnotified(trader.getId(), trader.getRoundNo());
         String prompt = promptAssembler.assemble(trader,
-                accountStateJson(equity, positions, plans, boundaryTime,
-                        requestService.pendingOf(trader.getId(), trader.getRoundNo())), recent);
+                accountStateJson(equity, positions, pendingOrders, plans, boundaryTime,
+                        requestService.pendingOf(trader.getId(), trader.getRoundNo()), decided), recent);
+        // 结果说一次就够：注入本轮后置已通知，防同一条回执每轮反复出现
+        requestService.markNotified(decided);
 
         // 全量工具轨迹（含数据工具）：收集器在本方法手里，超时 cancel 也保得住已发生的记录
         ToolCallTraceHook trace = new ToolCallTraceHook();
@@ -286,10 +290,16 @@ public class TraderWakeupRunner {
         return equity.setScale(8, RoundingMode.HALF_UP);
     }
 
-    /** 持仓携带交易计划与当前止损止盈回注：让模型一眼看到"浮亏离止损还远/计划没被证伪"，掐灭恐慌平仓。 */
+    /**
+     * 账户状态一次给足（持仓+计划+挂单+待办与结果）：模型不必再花工具预算查户口，
+     * 预算留给行情求证。持仓携带交易计划与当前止损止盈——让模型一眼看到
+     * "浮亏离止损还远/计划没被证伪"，掐灭恐慌平仓。
+     */
     private static String accountStateJson(BigDecimal equity, List<FuturesPositionDTO> positions,
+                                           List<FuturesOrderResponse> pendingOrders,
                                            List<AiTraderPlan> plans, long boundaryTime,
-                                           List<AiTraderRequest> pendingRequests) {
+                                           List<AiTraderRequest> pendingRequests,
+                                           List<AiTraderRequest> decidedRequests) {
         Map<String, AiTraderPlan> planByKey = new HashMap<>();
         plans.forEach(p -> planByKey.put(TraderPlanStore.key(p.getSymbol(), p.getSide()), p));
         JSONObject out = new JSONObject();
@@ -329,6 +339,45 @@ public class TraderWakeupRunner {
             ps.add(row);
         }
         out.put("positions", ps);
+        // 挂单同样给足：开仓挂单占坑且带着计划（成交后计划全文随持仓回注，这里给轻量版）
+        if (pendingOrders != null && !pendingOrders.isEmpty()) {
+            JSONArray po = new JSONArray();
+            for (FuturesOrderResponse o : pendingOrders) {
+                JSONObject row = new JSONObject()
+                        .fluentPut("orderId", o.getOrderId())
+                        .fluentPut("symbol", o.getSymbol())
+                        .fluentPut("orderSide", o.getOrderSide())
+                        .fluentPut("quantity", o.getQuantity())
+                        .fluentPut("limitPrice", o.getLimitPrice())
+                        .fluentPut("leverage", o.getLeverage());
+                if (o.getOrderSide() != null && o.getOrderSide().startsWith("OPEN_")) {
+                    AiTraderPlan plan = planByKey.get(TraderPlanStore.key(o.getSymbol(),
+                            o.getOrderSide().substring("OPEN_".length())));
+                    if (plan != null) {
+                        row.put("plan", new JSONObject()
+                                .fluentPut("playType", plan.getPlayType())
+                                .fluentPut("invalidationCondition", plan.getInvalidationCondition()));
+                    }
+                }
+                po.add(row);
+            }
+            out.put("pendingOrders", po);
+        }
+        // 已处理请求的结果回注一次：模型提的请求什么下场必须告诉它，不然它只能从仓位变化倒猜
+        if (decidedRequests != null && !decidedRequests.isEmpty()) {
+            JSONArray rr = new JSONArray();
+            for (AiTraderRequest r : decidedRequests) {
+                rr.add(new JSONObject()
+                        .fluentPut("type", r.getType())
+                        .fluentPut("symbol", r.getSymbol())
+                        .fluentPut("quantity", r.getQuantity())
+                        .fluentPut("decision", AiTraderRequest.STATUS_APPROVED.equals(r.getStatus())
+                                ? "主人已同意" : "主人已拒绝")
+                        .fluentPut("result", r.getExecutedResult()));
+            }
+            out.put("requestResults", rr);
+            out.put("requestResultsNote", "你此前请求的处理结果，只通知这一次；仓位变化已反映在 positions 里");
+        }
         // 待确认请求必须回注：不然模型看仓位没动，下一轮还会提同一个请求，卡片越堆越多
         if (pendingRequests != null && !pendingRequests.isEmpty()) {
             JSONArray rs = new JSONArray();

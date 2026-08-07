@@ -19,6 +19,9 @@ import java.time.LocalDateTime;
 @TableName("ai_trader_plan")
 public class AiTraderPlan {
 
+    public static final String STATUS_LIVE = "LIVE";
+    public static final String STATUS_CLOSED = "CLOSED";
+
     @TableId(type = IdType.AUTO)
     private Long id;
 
@@ -56,6 +59,15 @@ public class AiTraderPlan {
      * 修改必须留痕带理由（回注给下轮无记忆的模型看）；计划本体价格字段永远是原始快照，当前生效单在 sim 仓位上。
      */
     private String revisionsJson;
+
+    /**
+     * LIVE=仓位/挂单存活 CLOSED=已了结归档。归档不删：论点→结局的配对数据是将来
+     * learning agent 复盘的原料（结局按 symbol/side/时间窗 join sim 已平仓位）。
+     */
+    private String status;
+
+    /** 归档时刻(ms)：懒清理发现仓位已了结的唤醒边界/重置时刻 */
+    private Long closedWakeTime;
 
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdAt;
