@@ -3,6 +3,8 @@ package com.mawai.wiibquant.agent.trader;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.mawai.wiibcommon.dto.FuturesPositionDTO;
+import com.mawai.wiibcommon.dto.FuturesStopLossRequest;
+import com.mawai.wiibcommon.dto.FuturesTakeProfitRequest;
 import com.mawai.wiibcommon.entity.AiTraderPlan;
 import com.mawai.wiibcommon.entity.FuturesStopLoss;
 import com.mawai.wiibcommon.entity.FuturesTakeProfit;
@@ -18,7 +20,9 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Set;
 
+import static org.assertj.core.api.Assertions.as;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.InstanceOfAssertFactories.BIG_DECIMAL;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
@@ -84,7 +88,7 @@ class TradeToolsTest {
     void stopLossWidenRejected() {
         when(simTradeClient.getAllPositions(99L)).thenReturn(List.of(longPosition()));
 
-        String r = tools.setStopLoss(5L, 94000, 0.01, "给它多一点空间");
+        String r = tools.setStopLoss(5L, 94000, "给它多一点空间");
 
         assertThat(r).startsWith("REJECTED").contains("收紧");
         verify(simTradeClient, never()).setStopLoss(anyLong(), any());
@@ -96,7 +100,7 @@ class TradeToolsTest {
         when(simTradeClient.getAllPositions(99L)).thenReturn(List.of(longPosition()));
         when(planMapper.selectOne(any())).thenReturn(existingPlan());
 
-        String r = tools.setStopLoss(5L, 98000, 0.01, "价格+2R，上移锁保本");
+        String r = tools.setStopLoss(5L, 98000, "价格+2R，上移锁保本");
 
         assertThat(r).contains("ok");
         verify(simTradeClient).setStopLoss(eq(99L), any());
@@ -112,7 +116,7 @@ class TradeToolsTest {
     void takeProfitTowardEntryRejectedForLong() {
         when(simTradeClient.getAllPositions(99L)).thenReturn(List.of(longPosition()));
 
-        String r = tools.setTakeProfit(5L, 105000, 0.01, "想早点落袋");
+        String r = tools.setTakeProfit(5L, 105000, "想早点落袋");
 
         assertThat(r).startsWith("REJECTED").contains("止盈");
         verify(simTradeClient, never()).setTakeProfit(anyLong(), any());
@@ -124,13 +128,53 @@ class TradeToolsTest {
         when(simTradeClient.getAllPositions(99L)).thenReturn(List.of(longPosition()));
         when(planMapper.selectOne(any())).thenReturn(existingPlan());
 
-        String r = tools.setTakeProfit(5L, 120000, 0.01, "趋势加速，目标看下一压力位120000");
+        String r = tools.setTakeProfit(5L, 120000, "趋势加速，目标看下一压力位120000");
 
         assertThat(r).contains("ok");
         verify(simTradeClient).setTakeProfit(eq(99L), any());
         ArgumentCaptor<AiTraderPlan> cap = ArgumentCaptor.forClass(AiTraderPlan.class);
         verify(planMapper).updateById(cap.capture());
         assertThat(cap.getValue().getRevisionsJson()).contains("移动止盈").contains("趋势加速");
+    }
+
+    /**
+     * 止损一律覆盖全仓：本版 trader 的 sl/tp 都是全仓单，覆盖量归代码从仓位现取，
+     * 模型说了不算——它照抄旧数量（加仓后仓位已变大）就会让一半仓位裸奔。
+     */
+    @Test
+    void stopLossAlwaysCoversWholePosition() {
+        FuturesPositionDTO p = longPosition();
+        // 加仓后仓位涨到 0.02，而旧止损档还停在 0.01
+        p.setQuantity(new BigDecimal("0.02"));
+        when(simTradeClient.getAllPositions(99L)).thenReturn(List.of(p));
+        when(planMapper.selectOne(any())).thenReturn(existingPlan());
+
+        String r = tools.setStopLoss(5L, 98000, "价格+2R，上移锁保本");
+
+        assertThat(r).contains("ok");
+        ArgumentCaptor<FuturesStopLossRequest> cap = ArgumentCaptor.forClass(FuturesStopLossRequest.class);
+        verify(simTradeClient).setStopLoss(eq(99L), cap.capture());
+        assertThat(cap.getValue().getStopLosses()).singleElement()
+                .extracting(FuturesStopLossRequest.StopLossItem::getQuantity, as(BIG_DECIMAL))
+                .isEqualByComparingTo("0.02");
+    }
+
+    /** 止盈同理全仓覆盖 */
+    @Test
+    void takeProfitAlwaysCoversWholePosition() {
+        FuturesPositionDTO p = longPosition();
+        p.setQuantity(new BigDecimal("0.02"));
+        when(simTradeClient.getAllPositions(99L)).thenReturn(List.of(p));
+        when(planMapper.selectOne(any())).thenReturn(existingPlan());
+
+        String r = tools.setTakeProfit(5L, 120000, "趋势加速，目标看下一压力位");
+
+        assertThat(r).contains("ok");
+        ArgumentCaptor<FuturesTakeProfitRequest> cap = ArgumentCaptor.forClass(FuturesTakeProfitRequest.class);
+        verify(simTradeClient).setTakeProfit(eq(99L), cap.capture());
+        assertThat(cap.getValue().getTakeProfits()).singleElement()
+                .extracting(FuturesTakeProfitRequest.TakeProfitItem::getQuantity, as(BIG_DECIMAL))
+                .isEqualByComparingTo("0.02");
     }
 
     /** 已有计划的仓不许 write_plan——否则它就是改论点的后门 */

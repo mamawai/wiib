@@ -261,7 +261,8 @@ public class TradeTools {
     }
 
     @Tool(name = "set_stop_loss", description = """
-            Replace the stop-loss of an open position (positionId from get_account). TIGHTEN ONLY:
+            Replace the stop-loss of an open position (positionId from get_account). The new stop
+            always covers the WHOLE position — you do not pass a quantity. TIGHTEN ONLY:
             LONG stops may only move UP, SHORT stops only DOWN (relative to the current stop) —
             widening a stop means your thesis is shaken; check your invalidation condition instead.
             Do NOT slam the stop right next to the current price to force an instant trigger while
@@ -270,12 +271,10 @@ public class TradeTools {
             plan revision history.""")
     public String setStopLoss(@ToolParam(description = "Position id from get_account") long positionId,
                               @ToolParam(description = "New stop-loss price") double stopLossPrice,
-                              @ToolParam(description = "Quantity in coins covered by the stop") double quantity,
                               @ToolParam(description = "Why you move the stop now, e.g. 'price +2R, lock breakeven'") String reason) {
         JSONObject args = new JSONObject()
                 .fluentPut("positionId", positionId)
                 .fluentPut("stopLossPrice", stopLossPrice)
-                .fluentPut("quantity", quantity)
                 .fluentPut("reason", reason);
         try {
             FuturesPositionDTO pos = findPosition(positionId);
@@ -289,7 +288,7 @@ public class TradeTools {
             boolean isLong = "LONG".equals(pos.getSide());
             BigDecimal newStop = BigDecimal.valueOf(stopLossPrice);
             // 基准取最紧那档：sim 是整组替换，比最紧档松的新价会让原有某档变松，一律拒
-            BigDecimal tightest = extremePrice(
+            BigDecimal tightest = TradeGuard.extremePrice(
                     pos.getStopLosses() == null ? List.of()
                             : pos.getStopLosses().stream().map(FuturesStopLoss::getPrice).toList(), isLong);
             if (tightest != null && (isLong ? newStop.compareTo(tightest) < 0 : newStop.compareTo(tightest) > 0)) {
@@ -301,7 +300,9 @@ public class TradeTools {
             req.setPositionId(positionId);
             FuturesStopLossRequest.StopLossItem item = new FuturesStopLossRequest.StopLossItem();
             item.setPrice(newStop);
-            item.setQuantity(BigDecimal.valueOf(quantity));
+            // 覆盖量从仓位现取：本版 sl/tp 都是全仓单，让模型报数量它会照抄旧值，
+            // 加仓后仓位变大而覆盖量没跟上，一半仓位就裸奔了
+            item.setQuantity(pos.getQuantity());
             req.setStopLosses(List.of(item));
             simTradeClient.setStopLoss(simUserId, req);
             revisePlan(pos, "移动止损",
@@ -314,18 +315,17 @@ public class TradeTools {
     }
 
     @Tool(name = "set_take_profit", description = """
-            Replace the take-profit of an open position (positionId from get_account). AWAY ONLY:
+            Replace the take-profit of an open position (positionId from get_account). The new target
+            always covers the WHOLE position — you do not pass a quantity. AWAY ONLY:
             LONG targets may only move UP, SHORT targets only DOWN — lowering a LONG target toward
             price would be a disguised panic exit; to leave early, cite your invalidation condition
             and use close_position instead. reason is REQUIRED (public plan revision history).""")
     public String setTakeProfit(@ToolParam(description = "Position id from get_account") long positionId,
                                 @ToolParam(description = "New take-profit price") double takeProfitPrice,
-                                @ToolParam(description = "Quantity in coins covered by the target") double quantity,
                                 @ToolParam(description = "Why you move the target now, e.g. 'trend accelerating, extend to next resistance'") String reason) {
         JSONObject args = new JSONObject()
                 .fluentPut("positionId", positionId)
                 .fluentPut("takeProfitPrice", takeProfitPrice)
-                .fluentPut("quantity", quantity)
                 .fluentPut("reason", reason);
         try {
             FuturesPositionDTO pos = findPosition(positionId);
@@ -338,7 +338,7 @@ public class TradeTools {
             // 止盈只许远离入场：把目标降到现价上方一点点秒触发＝"止盈带走"马甲下的恐慌平仓
             boolean isLong = "LONG".equals(pos.getSide());
             BigDecimal newTarget = BigDecimal.valueOf(takeProfitPrice);
-            BigDecimal farthest = extremePrice(
+            BigDecimal farthest = TradeGuard.extremePrice(
                     pos.getTakeProfits() == null ? List.of()
                             : pos.getTakeProfits().stream().map(FuturesTakeProfit::getPrice).toList(), isLong);
             if (farthest != null && (isLong ? newTarget.compareTo(farthest) < 0 : newTarget.compareTo(farthest) > 0)) {
@@ -350,7 +350,8 @@ public class TradeTools {
             req.setPositionId(positionId);
             FuturesTakeProfitRequest.TakeProfitItem item = new FuturesTakeProfitRequest.TakeProfitItem();
             item.setPrice(newTarget);
-            item.setQuantity(BigDecimal.valueOf(quantity));
+            // 同 set_stop_loss：全仓覆盖，量归代码取
+            item.setQuantity(pos.getQuantity());
             req.setTakeProfits(List.of(item));
             simTradeClient.setTakeProfit(simUserId, req);
             revisePlan(pos, "移动止盈",
@@ -403,7 +404,7 @@ public class TradeTools {
             plan.setSignalsUsed(signalsUsed);
             plan.setInvalidationCondition(invalidationCondition);
             plan.setEntryPrice(pos.getEntryPrice());
-            plan.setStopLossPrice(extremePrice(pos.getStopLosses() == null ? List.of()
+            plan.setStopLossPrice(TradeGuard.extremePrice(pos.getStopLosses() == null ? List.of()
                     : pos.getStopLosses().stream().map(FuturesStopLoss::getPrice).toList(), isLong));
             plan.setTakeProfitPrice(targetPrice == null ? null : BigDecimal.valueOf(targetPrice));
             // 持有时长按仓位真实开仓时间算，不是补立时刻——补立不能"清零仓龄"
@@ -459,15 +460,6 @@ public class TradeTools {
         return simTradeClient.getAllPositions(simUserId).stream()
                 .filter(p -> p.getId() != null && p.getId() == positionId)
                 .findFirst().orElse(null);
-    }
-
-    /**
-     * 多单取最高价/空单取最低价。作判定基准时含义随场景不同：对止损是"最紧那一档"、对止盈是
-     * "最远那一档"——sim 整组替换语义下按最保守档做基线，替换后才不会比原来任何一档更松/更近。
-     */
-    private static BigDecimal extremePrice(List<BigDecimal> prices, boolean isLong) {
-        return prices.stream().filter(java.util.Objects::nonNull)
-                .reduce((a, b) -> isLong ? a.max(b) : a.min(b)).orElse(null);
     }
 
     /** 有计划就留修订；没有计划（旧仓）不强求——write_plan 是它的补救路径。 */

@@ -51,6 +51,16 @@ public final class TradeGuard {
     }
 
     /**
+     * 多单取最高价/空单取最低价。作判定基准时含义随场景不同：对止损是"最紧那一档"、对止盈是
+     * "最远那一档"——sim 整组替换语义下按最保守档做基线，替换后才不会比原来任何一档更松/更近。
+     * 批准加仓给新增部分补挂保护单时也照抄这一档（本版 sl/tp 都是全仓单，正常只有一档）。
+     */
+    public static BigDecimal extremePrice(List<BigDecimal> prices, boolean isLong) {
+        return prices.stream().filter(java.util.Objects::nonNull)
+                .reduce((a, b) -> isLong ? a.max(b) : a.min(b)).orElse(null);
+    }
+
+    /**
      * 返回 null=放行；否则给模型看的中文拒绝原因。
      *
      * @param cfg      主人设的仓位规格（区间是允许集合，越界拒不截断）

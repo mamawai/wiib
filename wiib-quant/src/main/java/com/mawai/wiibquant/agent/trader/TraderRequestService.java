@@ -9,6 +9,8 @@ import com.mawai.wiibcommon.dto.FuturesPositionDTO;
 import com.mawai.wiibcommon.entity.AiTrader;
 import com.mawai.wiibcommon.entity.AiTraderRequest;
 import com.mawai.wiibcommon.entity.FuturesPosition;
+import com.mawai.wiibcommon.entity.FuturesStopLoss;
+import com.mawai.wiibcommon.entity.FuturesTakeProfit;
 import com.mawai.wiibquant.agent.strategy.execution.SimTradeClient;
 import com.mawai.wiibquant.mapper.AiTraderMapper;
 import com.mawai.wiibquant.mapper.AiTraderRequestMapper;
@@ -127,9 +129,12 @@ public class TraderRequestService {
                 requestMapper.updateById(r);
                 return null;
             }
-            FuturesOrderResponse resp = AiTraderRequest.TYPE_ADD.equals(r.getType())
-                    ? doAdd(t, r) : doReduce(t, r, pos);
-            r.setExecutedResult("已成交 " + r.getQuantity().stripTrailingZeros().toPlainString()
+            boolean isAdd = AiTraderRequest.TYPE_ADD.equals(r.getType());
+            // 仓位可能已被部分平掉，减仓量先钳到现有量；回执照这个实际量写——
+            // 这条回执会原样注入下一轮提示词当事实，虚报数字模型就按错的仓位算后面一切
+            BigDecimal executedQty = isAdd ? r.getQuantity() : r.getQuantity().min(pos.getQuantity());
+            FuturesOrderResponse resp = isAdd ? doAdd(t, r, pos) : doReduce(r, t, executedQty);
+            r.setExecutedResult("已成交 " + executedQty.stripTrailingZeros().toPlainString()
                     + " @订单" + resp.getOrderId());
             revisePlan(t, r, pos);
         } catch (Exception e) {
@@ -141,7 +146,14 @@ public class TraderRequestService {
         return null;
     }
 
-    private FuturesOrderResponse doAdd(AiTrader t, AiTraderRequest r) {
+    /**
+     * 批准加仓：必须给新增部分补挂保护单，价格照抄仓位现有档。
+     * sim 的 mergeSlList/mergeTpList 见 added 为空就整段返回 null＝不改库——不带保护单的话，
+     * 仓位翻倍而覆盖量原地不动，新增那部分直接裸奔。合并后 旧覆盖+加仓量=新全仓量，正好补齐。
+     * 不用模型下单时给的止损价：加仓请求是异步等主人点头的，那会儿报的价到成交时早不合时宜；
+     * 想收紧止损，加仓后单独调 set_stop_loss（全仓覆盖）才是正路。
+     */
+    private FuturesOrderResponse doAdd(AiTrader t, AiTraderRequest r, FuturesPositionDTO pos) {
         FuturesOpenRequest open = new FuturesOpenRequest();
         open.setSymbol(r.getSymbol());
         open.setSide(r.getSide());
@@ -151,14 +163,33 @@ public class TraderRequestService {
         open.setQuantity(r.getQuantity());
         open.setLeverage(r.getLeverage());
         open.setMemo("ai_trader:APPROVED_ADD");
+        boolean isLong = "LONG".equals(pos.getSide());
+        BigDecimal stop = TradeGuard.extremePrice(prices(pos.getStopLosses(), FuturesStopLoss::getPrice), isLong);
+        if (stop != null) {
+            FuturesOpenRequest.StopLoss sl = new FuturesOpenRequest.StopLoss();
+            sl.setPrice(stop);
+            sl.setQuantity(r.getQuantity());
+            open.setStopLosses(List.of(sl));
+        }
+        // 止盈非必挂：原仓没有目标位就别硬造一个
+        BigDecimal target = TradeGuard.extremePrice(prices(pos.getTakeProfits(), FuturesTakeProfit::getPrice), isLong);
+        if (target != null) {
+            FuturesOpenRequest.TakeProfit tp = new FuturesOpenRequest.TakeProfit();
+            tp.setPrice(target);
+            tp.setQuantity(r.getQuantity());
+            open.setTakeProfits(List.of(tp));
+        }
         return simTradeClient.openPosition(t.getSimUserId(), open);
     }
 
-    private FuturesOrderResponse doReduce(AiTrader t, AiTraderRequest r, FuturesPositionDTO pos) {
+    private static <T> List<BigDecimal> prices(List<T> orders, java.util.function.Function<T, BigDecimal> price) {
+        return orders == null ? List.of() : orders.stream().map(price).toList();
+    }
+
+    /** qty 是调用方已按现有仓位钳过的实际平仓量。 */
+    private FuturesOrderResponse doReduce(AiTraderRequest r, AiTrader t, BigDecimal qty) {
         FuturesCloseRequest close = new FuturesCloseRequest();
         close.setPositionId(r.getPositionId());
-        // 仓位可能已被部分平掉，请求量超了就按现有全平，避免 sim 直接抛数量非法
-        BigDecimal qty = r.getQuantity().min(pos.getQuantity());
         close.setQuantity(qty);
         close.setOrderType("MARKET");
         return simTradeClient.closePosition(t.getSimUserId(), close);
