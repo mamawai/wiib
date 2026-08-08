@@ -75,7 +75,12 @@ function tradeArgsSummary(a: ActionRow): string {
 /** 单条决策卡：时间/权益 + 数据工具chip + 交易动作行（参数/拒因） + 推理 markdown 折叠——竞技场的观赏核心。 */
 function DecisionCard({ d }: { d: AiTraderDecisionView }) {
   const [open, setOpen] = useState(false);
-  const meta = DECISION_STATUS[d.status] ?? DECISION_STATUS.OK;
+  // 复盘行不是交易决策，徽章与配色单独一套：learning agent 的每日日志，时间线上要一眼认出
+  const meta = d.kind === 'REVIEW'
+    ? (d.status === 'OK'
+        ? { label: '📓 每日复盘', tone: 'bg-violet-500/15 text-violet-500' }
+        : { label: '📓 复盘失败', tone: 'bg-loss/15 text-loss' })
+    : DECISION_STATUS[d.status] ?? DECISION_STATUS.OK;
   const actions = useMemo<ActionRow[]>(() => {
     try {
       return d.actionsJson ? JSON.parse(d.actionsJson) as ActionRow[] : [];
@@ -90,7 +95,8 @@ function DecisionCard({ d }: { d: AiTraderDecisionView }) {
   const preview = reasoning.replace(/[#*`]/g, '').replace(/\s+/g, ' ').slice(0, 120) + (reasoning.length > 120 ? '…' : '');
 
   return (
-    <div className="rounded-md border border-border bg-card p-3 space-y-2">
+    <div className={cn('rounded-md border bg-card p-3 space-y-2',
+      d.kind === 'REVIEW' ? 'border-violet-500/35 bg-violet-500/[0.04]' : 'border-border')}>
       <div className="flex items-center gap-2 flex-wrap">
         <span className={cn('text-[10px] font-bold px-1.5 py-0.5 rounded', meta.tone)}>{meta.label}</span>
         {/* 警报唤醒凸显：这条不是例行K线节奏，是哨兵在极端波动时叫醒的 */}
@@ -102,11 +108,14 @@ function DecisionCard({ d }: { d: AiTraderDecisionView }) {
           <span className="text-[11px] text-muted-foreground">权益 <span className="num font-bold text-foreground">{fmtNum(d.equity)}</span></span>
         )}
         <span className="ml-auto text-[10px] text-muted-foreground/70 num">
-          {d.latencyMs != null && `${(d.latencyMs / 1000).toFixed(1)}s · `}
-          {d.toolCalls}次工具
-          {d.modelCalls != null && ` · ${d.modelCalls}次模型`}
-          {/* token 为 null＝上游端点没报 usage，显示「—」而不是 0：0 会被读成"这轮没花钱" */}
-          {d.modelCalls != null && ` · ${d.totalTokens == null ? '— ' : fmtTokens(d.totalTokens)}tokens`}
+          {[
+            d.latencyMs != null && `${(d.latencyMs / 1000).toFixed(1)}s`,
+            // 复盘无工具（单次调用），不显示"0次工具"占位
+            d.kind !== 'REVIEW' && `${d.toolCalls}次工具`,
+            d.modelCalls != null && `${d.modelCalls}次模型`,
+            // token 为 null＝上游端点没报 usage，显示「—」而不是 0：0 会被读成"这轮没花钱"
+            d.modelCalls != null && `${d.totalTokens == null ? '— ' : fmtTokens(d.totalTokens)}tokens`,
+          ].filter(Boolean).join(' · ')}
         </span>
       </div>
 

@@ -98,7 +98,7 @@ const DEFAULT_SPEC: TraderSpec = {
 const EMPTY_FORM: TraderUpsertRequest = {
   name: '', symbols: 'BTCUSDT', intervalCode: '15m', customPrompt: '',
   apiProtocol: 'openai', baseUrl: '', model: '', apiKey: '', useDefaultPrompt: true,
-  spec: DEFAULT_SPEC, alertEnabled: true, alertThresholdMult: 1,
+  spec: DEFAULT_SPEC, alertEnabled: true, alertThresholdMult: 1, reviewEnabled: true,
 };
 
 /**
@@ -131,6 +131,7 @@ export function MyTrader() {
           baseUrl: v.baseUrl, model: v.pub.model, apiKey: '', useDefaultPrompt: v.useDefaultPrompt,
           spec: v.spec ?? DEFAULT_SPEC,
           alertEnabled: v.alertEnabled ?? true, alertThresholdMult: v.alertThresholdMult ?? 1,
+          reviewEnabled: v.reviewEnabled ?? true,
         });
         loadRequests();
       }
@@ -431,6 +432,17 @@ export function MyTrader() {
               .map(s => `${s.replace('USDT', '')} ${(ALERT_BASE[s] * Math.max(1, form.alertThresholdMult)).toFixed(2)}%`)
               .join(' · ') || '未选币种'}
           </p>
+        </div>
+
+        {/* 每日复盘：learning agent 在日线边界读全天交易痕迹，复盘上时间线、教训写进记忆笔记 */}
+        <div className="space-y-2 rounded-lg border border-border/60 bg-card-2/40 p-3">
+          <div className="flex items-baseline justify-between">
+            <span className="microlabel">每日复盘</span>
+            <span className="text-[10px] text-muted-foreground">复盘公开上时间线；记忆笔记之后每次唤醒自动注入</span>
+          </div>
+          <SpecToggle checked={form.reviewEnabled} onChange={v => set({ reviewEnabled: v })}
+                      label="启用每日复盘"
+                      hint="日线边界自动跑一次（烧你的 key，单次调用）；当天无交易自动跳过；关掉只停复盘，已有笔记照常注入" />
         </div>
 
         <div className="space-y-3" data-tour="byok">
