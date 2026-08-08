@@ -64,8 +64,19 @@ class ReviewRunnerTest {
         return t;
     }
 
+    /** 上一期复盘行：窗口起点 + 本期要承接检验的全文 */
+    private AiTraderDecision priorReview() {
+        AiTraderDecision d = new AiTraderDecision();
+        d.setWakeTime(BOUNDARY - 86_400_000L);
+        d.setReasoning("""
+                【本期复盘】
+                战绩：起始权益 10200.00 → 期末权益 10000.00
+                下期纪律：1. 突破必须等回踩确认 2. 单日最多开两笔""");
+        return d;
+    }
+
     private void stubMaterial() {
-        when(assembler.lastSuccessfulReviewWake(7L, 1)).thenReturn(BOUNDARY - 86_400_000L);
+        when(assembler.lastReview(7L, 1)).thenReturn(priorReview());
         when(assembler.hasNewMaterial(eq(7L), eq(1), anyLong(), anyLong())).thenReturn(true);
         when(assembler.assemble(any(), anyLong(), anyLong())).thenReturn(
                 new ReviewMaterialAssembler.ReviewMaterial(
@@ -148,6 +159,16 @@ class ReviewRunnerTest {
         assertThat(all).contains("【战绩表】").contains("止损带走")
                 .contains("等待：跌破100500减仓").contains("1h价格路径");
         assertThat(all).contains("追高是我的老毛病");
+        // 观望对账的对照物有边界：范围外（尤其开局前）的价格不算证据，否则首篇复盘会拿开局前行情自证
+        assertThat(all).contains("覆盖范围内的价格").contains("开局前");
+        // 闭环：上一期复盘全文在场 + 本期必须给上期纪律逐条结账（只回注上一期，不堆全部历史）
+        assertThat(all).contains("【上一期复盘】").contains("突破必须等回踩确认");
+        assertThat(all).contains("上期纪律先结账").contains("逐条对照");
+        // 滚动继承：下一期只看得到这一篇，所以这一篇必须自带全部有效认知，
+        // 否则"只回注上一期"就会把更早的教训丢掉
+        assertThat(all).contains("这篇复盘是滚动的").contains("只会看到这一篇")
+                .contains("仍然成立的教训与纪律要继承");
+        assertThat(all).contains("独立看懂");
     }
 
     @Test
@@ -187,7 +208,7 @@ class ReviewRunnerTest {
 
     @Test
     void noMaterialSkipsWithoutModelCallOrRow() {
-        when(assembler.lastSuccessfulReviewWake(7L, 1)).thenReturn(null);
+        when(assembler.lastReview(7L, 1)).thenReturn(null);
         when(assembler.hasNewMaterial(eq(7L), eq(1), anyLong(), anyLong())).thenReturn(false);
 
         runner.review(trader(), BOUNDARY);

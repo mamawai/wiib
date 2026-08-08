@@ -8,7 +8,8 @@ import com.mawai.wiibcommon.dto.FuturesPositionDTO;
 import com.mawai.wiibcommon.entity.AiTrader;
 import com.mawai.wiibcommon.entity.AiTraderDecision;
 import com.mawai.wiibcommon.entity.AiTraderPlan;
-import com.mawai.wiibcommon.market.BinanceRestClient;
+import com.mawai.wiibcommon.market.KlineBar;
+import com.mawai.wiibcommon.market.KlineHistoryStore;
 import com.mawai.wiibquant.agent.strategy.execution.SimTradeClient;
 import com.mawai.wiibquant.mapper.AiTraderDecisionMapper;
 import com.mawai.wiibquant.mapper.AiTraderPlanMapper;
@@ -41,6 +42,8 @@ public class ReviewMaterialAssembler {
     private static final BigDecimal INITIAL_BALANCE = new BigDecimal("10000");
     /** 时间线条目上限：5m 档一天 288 轮全文注入烧不起；有动作的行优先保全，早段 HOLD 被省略 */
     static final int MAX_TIMELINE_ENTRIES = 80;
+    /** 价格路径回看上限(小时)：窗口通常一天，首篇复盘 fromMs=0 时靠它兜住 */
+    private static final int MAX_PATH_HOURS = 48;
     /** 已平仓位拉取上限：窗口通常一天，远超一天可能的成交笔数 */
     private static final int CLOSED_FETCH_LIMIT = 200;
     /** 只进摘编的交易动作工具（get_account 是查户口不是动作） */
@@ -53,23 +56,26 @@ public class ReviewMaterialAssembler {
     private final AiTraderDecisionMapper decisionMapper;
     private final AiTraderPlanMapper planMapper;
     private final SimTradeClient simTradeClient;
-    private final BinanceRestClient binanceRestClient;
+    private final KlineHistoryStore historyStore;
 
     /** 四块素材文本 + 已了结笔数（调用方日志用） */
     public record ReviewMaterial(String statsBlock, String tradesBlock,
                                  String timelineBlock, String pricePathBlock, int closedTrades) {
     }
 
-    /** 上次成功复盘的 wake_time；无 → null（素材窗口=本局开始）。 */
-    public Long lastSuccessfulReviewWake(long traderId, int roundNo) {
-        AiTraderDecision d = decisionMapper.selectOne(new LambdaQueryWrapper<AiTraderDecision>()
+    /**
+     * 上一期成功的复盘行；无 → null（本局首篇，素材窗口从本局开始算）。
+     * 一次查询两用：wake_time 定素材窗口起点，reasoning 全文回注给本期承接检验——
+     * 上期立的"下期纪律"必须有人管，不然每期各写各的，闭环是断的。
+     */
+    public AiTraderDecision lastReview(long traderId, int roundNo) {
+        return decisionMapper.selectOne(new LambdaQueryWrapper<AiTraderDecision>()
                 .eq(AiTraderDecision::getTraderId, traderId)
                 .eq(AiTraderDecision::getRoundNo, roundNo)
                 .eq(AiTraderDecision::getKind, AiTraderDecision.KIND_REVIEW)
                 .eq(AiTraderDecision::getStatus, AiTraderDecision.STATUS_OK)
                 .orderByDesc(AiTraderDecision::getWakeTime)
                 .last("LIMIT 1"));
-        return d == null ? null : d.getWakeTime();
     }
 
     /** 窗口内有无新交易素材（TRADE/ALERT 的 OK 行）——无素材跳过复盘，不白烧钱。 */
@@ -376,64 +382,94 @@ public class ReviewMaterialAssembler {
 
     // ==================== 各币价格路径 ====================
 
+    /**
+     * 价格路径走本地 kline_history 的 5m 现聚合成 1h：复盘看的全是已收盘行情，本地就有
+     * （feed 每根 5m 收盘落库），没理由为此打外网——外网抖一下这个币就没了对照物。
+     * 与哨兵阈值校准、策略回测同源。
+     * 48h 上限兜住首篇复盘（fromMs=0）：真实覆盖范围写进块头，观望对账拿错对照物结论就是假的。
+     */
     private String pricePathBlock(AiTrader t, long fromMs, long toMs) {
-        StringBuilder sb = new StringBuilder("【各币1h价格路径】（观望对账的对照物）\n");
+        long effectiveFrom = Math.max(fromMs, toMs - MAX_PATH_HOURS * 3_600_000L);
+        StringBuilder sb = new StringBuilder("【各币1h价格路径】（观望对账的对照物；覆盖 "
+                + TIME_FMT.format(Instant.ofEpochMilli(effectiveFrom)) + " → "
+                + TIME_FMT.format(Instant.ofEpochMilli(toMs)) + "）\n");
+        if (fromMs == 0) {
+            sb.append("注意：本局首篇复盘，这段路径可能早于开局时刻——开局前的价格只作背景，不作对账依据\n");
+        }
         for (String symbol : t.getSymbols().split(",")) {
             symbol = symbol.trim();
             if (symbol.isEmpty()) {
                 continue;
             }
-            try {
-                int hours = (int) Math.min(48, (toMs - fromMs) / 3_600_000L + 2);
-                JSONArray arr = JSON.parseArray(binanceRestClient.getKlines(symbol, "1h", hours, toMs));
-                List<JSONArray> rows = new ArrayList<>();
-                for (int i = 0; i < arr.size(); i++) {
-                    JSONArray k = arr.getJSONArray(i);
-                    long openTime = k.getLongValue(0);
-                    if (openTime >= fromMs && openTime < toMs) {
-                        rows.add(k);
-                    }
-                }
-                if (rows.isEmpty()) {
-                    sb.append("- ").append(symbol).append(": 窗口内无K线数据\n");
-                    continue;
-                }
-                BigDecimal open = rows.get(0).getBigDecimal(1);
-                BigDecimal close = rows.get(rows.size() - 1).getBigDecimal(4);
-                BigDecimal high = null;
-                BigDecimal low = null;
-                long highAt = 0;
-                long lowAt = 0;
-                StringBuilder closes = new StringBuilder();
-                for (JSONArray k : rows) {
-                    BigDecimal h = k.getBigDecimal(2);
-                    BigDecimal l = k.getBigDecimal(3);
-                    if (high == null || h.compareTo(high) > 0) {
-                        high = h;
-                        highAt = k.getLongValue(0);
-                    }
-                    if (low == null || l.compareTo(low) < 0) {
-                        low = l;
-                        lowAt = k.getLongValue(0);
-                    }
-                    closes.append(closes.isEmpty() ? "" : "→").append(plain(k.getBigDecimal(4)));
-                }
-                BigDecimal pct = open.signum() > 0
-                        ? close.subtract(open).multiply(BigDecimal.valueOf(100)).divide(open, 2, RoundingMode.HALF_UP)
-                        : BigDecimal.ZERO;
-                sb.append("- ").append(symbol).append(": 开 ").append(plain(open))
-                        .append(" → 收 ").append(plain(close)).append("（").append(signed(pct)).append("%）")
-                        .append("；最高 ").append(plain(high)).append("（").append(TIME_FMT.format(Instant.ofEpochMilli(highAt)))
-                        .append("）最低 ").append(plain(low)).append("（").append(TIME_FMT.format(Instant.ofEpochMilli(lowAt)))
-                        .append("）\n  1h收盘: ").append(closes).append('\n');
-            } catch (Exception e) {
-                String msg = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
-                sb.append("- ").append(symbol).append(": 行情获取失败（")
-                        .append(msg.length() > 80 ? msg.substring(0, 80) : msg)
-                        .append("），观望对账按可得信息进行\n");
+            List<KlineBar> hourly = hourlyBars(symbol, effectiveFrom, toMs);
+            if (hourly.isEmpty()) {
+                sb.append("- ").append(symbol).append(": 窗口内无K线数据\n");
+                continue;
             }
+            BigDecimal open = hourly.get(0).open();
+            BigDecimal close = hourly.get(hourly.size() - 1).close();
+            BigDecimal high = null;
+            BigDecimal low = null;
+            long highAt = 0;
+            long lowAt = 0;
+            StringBuilder closes = new StringBuilder();
+            for (KlineBar k : hourly) {
+                if (high == null || k.high().compareTo(high) > 0) {
+                    high = k.high();
+                    highAt = k.openTime();
+                }
+                if (low == null || k.low().compareTo(low) < 0) {
+                    low = k.low();
+                    lowAt = k.openTime();
+                }
+                closes.append(closes.isEmpty() ? "" : "→").append(plain(k.close()));
+            }
+            BigDecimal pct = open.signum() > 0
+                    ? close.subtract(open).multiply(BigDecimal.valueOf(100)).divide(open, 2, RoundingMode.HALF_UP)
+                    : BigDecimal.ZERO;
+            sb.append("- ").append(symbol).append(": 开 ").append(plain(open))
+                    .append(" → 收 ").append(plain(close)).append("（").append(signed(pct)).append("%）")
+                    .append("；最高 ").append(plain(high)).append("（").append(TIME_FMT.format(Instant.ofEpochMilli(highAt)))
+                    .append("）最低 ").append(plain(low)).append("（").append(TIME_FMT.format(Instant.ofEpochMilli(lowAt)))
+                    .append("）\n  1h收盘: ").append(closes).append('\n');
         }
         return sb.toString();
+    }
+
+    /**
+     * 本地 5m 现聚合成 1h：按整点分组，开=组内首根开、高/低=组内极值、收=组内末根收。
+     * 不足 12 根的组照算（库里有缺口或窗口边界切在半路），价格路径要的是形状不是完整性。
+     */
+    private List<KlineBar> hourlyBars(String symbol, long fromMs, long toMs) {
+        List<KlineBar> bars = historyStore.load(symbol, KlineHistoryStore.DEFAULT_INTERVAL, fromMs, toMs);
+        List<KlineBar> out = new ArrayList<>();
+        long curHour = -1;
+        BigDecimal open = null;
+        BigDecimal high = null;
+        BigDecimal low = null;
+        BigDecimal close = null;
+        long closeTime = 0;
+        for (KlineBar b : bars) {
+            long hour = b.openTime() - Math.floorMod(b.openTime(), 3_600_000L);
+            if (hour != curHour) {
+                if (curHour >= 0) {
+                    out.add(new KlineBar(curHour, closeTime, open, high, low, close, BigDecimal.ZERO));
+                }
+                curHour = hour;
+                open = b.open();
+                high = b.high();
+                low = b.low();
+            } else {
+                high = high.max(b.high());
+                low = low.min(b.low());
+            }
+            close = b.close();
+            closeTime = b.closeTime();
+        }
+        if (curHour >= 0) {
+            out.add(new KlineBar(curHour, closeTime, open, high, low, close, BigDecimal.ZERO));
+        }
+        return out;
     }
 
     // ==================== 小工具 ====================

@@ -8,7 +8,8 @@ import com.mawai.wiibcommon.entity.AiTraderDecision;
 import com.mawai.wiibcommon.entity.AiTraderPlan;
 import com.mawai.wiibcommon.entity.FuturesStopLoss;
 import com.mawai.wiibcommon.entity.FuturesTakeProfit;
-import com.mawai.wiibcommon.market.BinanceRestClient;
+import com.mawai.wiibcommon.market.KlineBar;
+import com.mawai.wiibcommon.market.KlineHistoryStore;
 import com.mawai.wiibquant.agent.strategy.execution.SimTradeClient;
 import com.mawai.wiibquant.mapper.AiTraderDecisionMapper;
 import com.mawai.wiibquant.mapper.AiTraderPlanMapper;
@@ -50,10 +51,10 @@ class ReviewMaterialAssemblerTest {
     private final AiTraderDecisionMapper decisionMapper = mock(AiTraderDecisionMapper.class);
     private final AiTraderPlanMapper planMapper = mock(AiTraderPlanMapper.class);
     private final SimTradeClient simTradeClient = mock(SimTradeClient.class);
-    private final BinanceRestClient binanceRestClient = mock(BinanceRestClient.class);
+    private final KlineHistoryStore historyStore = mock(KlineHistoryStore.class);
 
     private final ReviewMaterialAssembler assembler = new ReviewMaterialAssembler(
-            decisionMapper, planMapper, simTradeClient, binanceRestClient);
+            decisionMapper, planMapper, simTradeClient, historyStore);
 
     private AiTrader trader() {
         AiTrader t = new AiTrader();
@@ -260,31 +261,74 @@ class ReviewMaterialAssemblerTest {
 
     // ==================== 价格路径 ====================
 
-    @Test
-    void pricePathSummarizesHourlyOhlc() {
-        // [openTime, open, high, low, close, ...]
-        when(binanceRestClient.getKlines(eq("BTCUSDT"), eq("1h"), anyInt(), anyLong())).thenReturn("""
-                [[%d,"61000","61500","60800","61200","0",0,"0",0,"0","0","0"],
-                 [%d,"61200","64000","61100","63500","0",0,"0",0,"0","0","0"]]"""
-                .formatted(FROM, FROM + 3600_000));
-        when(decisionMapper.selectOne(any())).thenReturn(null);
-
-        ReviewMaterialAssembler.ReviewMaterial m = assembler.assemble(trader(), FROM, TO);
-
-        // 开=首根open 收=末根close 高=64000 低=60800，涨跌幅 (63500-61000)/61000=+4.10%
-        assertThat(m.pricePathBlock()).contains("61000").contains("63500")
-                .contains("64000").contains("60800").contains("+4.10%");
+    /** 5m bar 造数：一根 5m 的 OHLC */
+    private static KlineBar bar5m(long openTime, String o, String h, String l, String c) {
+        return new KlineBar(openTime, openTime + 300_000L - 1,
+                new BigDecimal(o), new BigDecimal(h), new BigDecimal(l), new BigDecimal(c), BigDecimal.ZERO);
     }
 
+    /**
+     * 本地 5m 现聚合成 1h：开=组内首根开、高/低=组内极值、收=组内末根收。
+     * 这块是观望对账的对照物，聚合错一位复盘的价格证据就是假的。
+     */
     @Test
-    void pricePathFailureDoesNotBlockAssembly() {
-        when(binanceRestClient.getKlines(any(), any(), anyInt(), anyLong()))
-                .thenThrow(new IllegalStateException("binance 503"));
+    void pricePathAggregates5mIntoHourly() {
+        when(historyStore.load(eq("BTCUSDT"), eq("5m"), anyLong(), anyLong())).thenReturn(List.of(
+                // 第一个整点：开61000 高61500 低60800 收61200
+                bar5m(FROM, "61000", "61200", "60800", "61100"),
+                bar5m(FROM + 300_000L, "61100", "61500", "61000", "61200"),
+                // 第二个整点：开61200 高64000 低61100 收63500
+                bar5m(FROM + 3600_000L, "61200", "62000", "61100", "61900"),
+                bar5m(FROM + 3900_000L, "61900", "64000", "61800", "63500")));
         when(decisionMapper.selectOne(any())).thenReturn(null);
 
         ReviewMaterialAssembler.ReviewMaterial m = assembler.assemble(trader(), FROM, TO);
 
-        assertThat(m.pricePathBlock()).contains("获取失败");
+        // 开=61000 收=63500 高=64000 低=60800，涨跌幅 (63500-61000)/61000=+4.10%
+        assertThat(m.pricePathBlock()).contains("61000").contains("63500")
+                .contains("64000").contains("60800").contains("+4.10%");
+        // 逐小时收盘只该有两根（每组末根收），不是四根 5m
+        assertThat(m.pricePathBlock()).contains("1h收盘: 61200→63500");
+    }
+
+    /**
+     * 本局首篇复盘 fromMs=0，价格路径回看上限 48h，很可能早于本局开局——
+     * 块头必须把真实覆盖范围写出来并点明可能含开局前行情，否则模型会拿开局前的价格
+     * 给"等待条件"做观望对账（对账的对照物错了，结论就是假的）。
+     */
+    @Test
+    void firstReviewPricePathDeclaresRangeAndPreRoundRisk() {
+        when(historyStore.load(eq("BTCUSDT"), eq("5m"), anyLong(), anyLong()))
+                .thenReturn(List.of(bar5m(TO - 300_000L, "61000", "61500", "60800", "61200")));
+        when(decisionMapper.selectOne(any())).thenReturn(null);
+
+        ReviewMaterialAssembler.ReviewMaterial m = assembler.assemble(trader(), 0L, TO);
+
+        assertThat(m.pricePathBlock()).contains("覆盖").contains("开局前");
+    }
+
+    /** 常规窗口的复盘：块头照样标覆盖范围，但不该有开局前警示 */
+    @Test
+    void regularReviewPricePathDeclaresRangeOnly() {
+        when(historyStore.load(eq("BTCUSDT"), eq("5m"), anyLong(), anyLong()))
+                .thenReturn(List.of(bar5m(FROM, "61000", "61500", "60800", "61200")));
+        when(decisionMapper.selectOne(any())).thenReturn(null);
+
+        ReviewMaterialAssembler.ReviewMaterial m = assembler.assemble(trader(), FROM, TO);
+
+        assertThat(m.pricePathBlock()).contains("覆盖").doesNotContain("开局前");
+    }
+
+    /** 库里这段没数据（缺口/新币）：写明无数据，不挡其余三块素材 */
+    @Test
+    void pricePathMissingDataDoesNotBlockAssembly() {
+        when(historyStore.load(any(), any(), anyLong(), anyLong())).thenReturn(List.of());
+        when(decisionMapper.selectOne(any())).thenReturn(null);
+
+        ReviewMaterialAssembler.ReviewMaterial m = assembler.assemble(trader(), FROM, TO);
+
+        assertThat(m.pricePathBlock()).contains("无K线数据");
+        assertThat(m.statsBlock()).contains("【战绩表】");
     }
 
     // ==================== 素材有无与上次复盘定位 ====================
@@ -297,13 +341,16 @@ class ReviewMaterialAssemblerTest {
     }
 
     @Test
-    void lastSuccessfulReviewWakeReturnsNullWhenNone() {
+    void lastReviewReturnsNullWhenNone() {
         when(decisionMapper.selectOne(any())).thenReturn(null);
-        assertThat(assembler.lastSuccessfulReviewWake(7L, 1)).isNull();
+        assertThat(assembler.lastReview(7L, 1)).isNull();
 
         AiTraderDecision review = new AiTraderDecision();
         review.setWakeTime(FROM);
+        review.setReasoning("【本期复盘】上期纪律：无上期纪律");
         when(decisionMapper.selectOne(any())).thenReturn(review);
-        assertThat(assembler.lastSuccessfulReviewWake(7L, 1)).isEqualTo(FROM);
+        // 一次查询两用：窗口起点 + 回注本期承接检验的全文
+        assertThat(assembler.lastReview(7L, 1).getWakeTime()).isEqualTo(FROM);
+        assertThat(assembler.lastReview(7L, 1).getReasoning()).contains("上期纪律");
     }
 }

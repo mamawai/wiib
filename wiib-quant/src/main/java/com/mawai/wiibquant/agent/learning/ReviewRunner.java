@@ -57,8 +57,8 @@ public class ReviewRunner {
 
     /** 日线边界复盘入口：素材窗口=(上次成功REVIEW, 本边界]；无新交易素材静默跳过不白烧钱。 */
     public void review(AiTrader trader, long boundaryMs) {
-        Long last = assembler.lastSuccessfulReviewWake(trader.getId(), trader.getRoundNo());
-        long fromMs = last == null ? 0 : last;
+        AiTraderDecision last = assembler.lastReview(trader.getId(), trader.getRoundNo());
+        long fromMs = last == null ? 0 : last.getWakeTime();
         if (!assembler.hasNewMaterial(trader.getId(), trader.getRoundNo(), fromMs, boundaryMs)) {
             log.info("[Review] 无新交易素材跳过 traderId={} boundary={}", trader.getId(), boundaryMs);
             return;
@@ -75,7 +75,7 @@ public class ReviewRunner {
             ReviewMaterialAssembler.ReviewMaterial material = assembler.assemble(trader, fromMs, boundaryMs);
             UsageTrackingChatModel model = new UsageTrackingChatModel(modelFactory.modelFor(trader));
             String output = callWithTimeout(model,
-                    userPrompt(trader, material, fromMs, boundaryMs), d);
+                    userPrompt(trader, material, fromMs, boundaryMs, last), d);
             if (output == null || output.isBlank()) {
                 throw new IllegalStateException("模型输出为空");
             }
@@ -169,19 +169,29 @@ public class ReviewRunner {
                 你是一名职业加密货币合约交易员。现在是每日复盘时间——给自己写交易日志，写给明天\
                 醒来的自己看。第一人称，只回答一个问题：这期我哪里错了、哪里对了、下期改什么。
 
-                用户消息里是系统整理的本期硬事实（战绩表/已了结交易配对表/决策时间线/价格路径）\
-                与你此前的记忆笔记。规则：
+                用户消息里是系统整理的本期硬事实（战绩表/已了结交易配对表/决策时间线/价格路径）、\
+                上一期复盘（若有）与你此前的记忆笔记。规则：
                 - 战绩表数字只许原样复述，禁止自行计算或美化
+                - 上期纪律先结账：把上一期复盘立的每条"下期纪律"拿本期硬事实逐条对照，\
+                做到没做到都要给具体交易为证；没做到的要说清是忘了、还是当时判断它不适用。\
+                没有上一期就写"本局首篇，无上期纪律"
+                - 这篇复盘是滚动的：下一期你只会看到这一篇，看不到更早的任何一篇。所以上一期里\
+                仍然成立的教训与纪律要继承进来接着写，已被本期证伪或已经改掉的删掉——写完之后\
+                只看这一篇，就应该知道到目前为止的全部认知。条数上限是硬的，继承和新增一起挤，\
+                挤不下就说明旧的那条已经不如新的重要了
                 - 先找错误再找亮点；每条教训必须引用具体交易与数字，不引用数字的教训视为没有教训
                 - 观望对账：把时间线里每条"等待"条件与价格路径逐条对照，判命中/未命中必须引用具体价格，\
-                再判该行动没行动/该等没等
+                再判该行动没行动/该等没等。只认价格路径块头标注的覆盖范围内的价格——\
+                范围外（尤其开局前）的行情不构成"当时该不该动"的证据
                 - 所有输出使用中文，严格按以下两段格式，两段标题都必须出现：
 
                 【本期复盘】
                 战绩：<复述战绩表数字>
-                逐笔教训：≤5 条，先错误后亮点，每条引用具体交易与数字
+                上期纪律：逐条 → 做到/没做到 + 本期具体交易为证；本局首篇写"无上期纪律"
+                逐笔教训：≤5 条，先错误后亮点，每条引用具体交易与数字；\
+                上一期里仍然成立的教训继承进来接着算条数
                 观望对账：逐条等待条件 → 命中/未命中 + 价格证据 → 该行动没行动/该等没等
-                下期纪律：≤3 条，可执行的具体改动
+                下期纪律：≤3 条，可执行的具体改动；上期没做到但仍该守的原样留下，别偷偷换掉
 
                 【记忆更新】
                 <旧笔记与本期教训浓缩后的完整新笔记，≤2000字；过时的删、仍有效的留；\
@@ -189,7 +199,7 @@ public class ReviewRunner {
     }
 
     private static String userPrompt(AiTrader trader, ReviewMaterialAssembler.ReviewMaterial m,
-                                     long fromMs, long toMs) {
+                                     long fromMs, long toMs, AiTraderDecision lastReview) {
         String from = fromMs == 0 ? "本局开始" : TIME_FMT.format(Instant.ofEpochMilli(fromMs));
         StringBuilder sb = new StringBuilder();
         sb.append("复盘窗口：").append(from).append(" → ")
@@ -198,10 +208,19 @@ public class ReviewRunner {
         sb.append(m.tradesBlock()).append('\n');
         sb.append(m.timelineBlock()).append('\n');
         sb.append(m.pricePathBlock()).append('\n');
+        // 只回注上一期全文（不是全部历史）：每篇复盘都已经把它的上一篇吸收进去了，所以
+        // 给最近这一篇＝给了全部历史的滚动浓缩。把每期都堆进来只会越喂越长，模型抓不住重点
+        if (lastReview != null && lastReview.getReasoning() != null && !lastReview.getReasoning().isBlank()) {
+            sb.append("【上一期复盘】（").append(TIME_FMT.format(Instant.ofEpochMilli(lastReview.getWakeTime())))
+                    .append("，你能看到的唯一一篇历史复盘：逐条检验它的下期纪律，")
+                    .append("并把其中仍然成立的教训继承进本期）\n")
+                    .append(lastReview.getReasoning()).append("\n\n");
+        }
         sb.append("【你此前的记忆笔记】\n");
         sb.append(trader.getMemory() == null || trader.getMemory().isBlank()
                 ? "（尚无——这是本局第一篇复盘）" : trader.getMemory()).append('\n');
         sb.append("\n现在写这一期的复盘日志：先对照硬事实检讨，再把记忆笔记续写压缩成新版。")
+                .append("写出来的【本期复盘】要能独立看懂——它是下一期唯一能看到的历史。")
                 .append("严格按两段固定格式输出。");
         return sb.toString();
     }

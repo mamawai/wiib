@@ -8,7 +8,8 @@ import com.mawai.wiibcommon.entity.AiTrader;
 import com.mawai.wiibcommon.entity.AiTraderDecision;
 import com.mawai.wiibcommon.entity.AiTraderPlan;
 import com.mawai.wiibcommon.entity.FuturesStopLoss;
-import com.mawai.wiibcommon.market.BinanceRestClient;
+import com.mawai.wiibcommon.market.KlineBar;
+import com.mawai.wiibcommon.market.KlineHistoryStore;
 import com.mawai.wiibquant.agent.strategy.execution.SimTradeClient;
 import com.mawai.wiibquant.agent.trader.TraderModelFactory;
 import com.mawai.wiibquant.mapper.AiTraderDecisionMapper;
@@ -58,12 +59,12 @@ class ReviewLoopTest {
     private final AiTraderDecisionMapper decisionMapper = mock(AiTraderDecisionMapper.class);
     private final AiTraderPlanMapper planMapper = mock(AiTraderPlanMapper.class);
     private final SimTradeClient simTradeClient = mock(SimTradeClient.class);
-    private final BinanceRestClient binanceRestClient = mock(BinanceRestClient.class);
+    private final KlineHistoryStore historyStore = mock(KlineHistoryStore.class);
     private final TraderModelFactory modelFactory = mock(TraderModelFactory.class);
     private final AiTraderMapper traderMapper = mock(AiTraderMapper.class);
 
     private final ReviewRunner runner = new ReviewRunner(
-            new ReviewMaterialAssembler(decisionMapper, planMapper, simTradeClient, binanceRestClient),
+            new ReviewMaterialAssembler(decisionMapper, planMapper, simTradeClient, historyStore),
             modelFactory, traderMapper, decisionMapper);
 
     private AiTrader trader() {
@@ -115,7 +116,7 @@ class ReviewLoopTest {
         plan.setClosedWakeTime(FROM + 21_600_000);
         when(planMapper.selectList(any())).thenReturn(List.of(plan));
 
-        // decisionMapper 调用顺序：lastSuccessfulReviewWake(selectOne#1)→statsBlock前值(selectOne#2)
+        // decisionMapper 调用顺序：lastReview(selectOne#1)→statsBlock前值(selectOne#2)
         // →权益序列(selectList#1)→时间线(selectList#2)；hasNewMaterial 走 selectCount
         when(decisionMapper.selectOne(any())).thenReturn(null, null);
         when(decisionMapper.selectCount(any())).thenReturn(2L);
@@ -126,8 +127,13 @@ class ReviewLoopTest {
                                 "【本轮结论】\n判断：突破确认\n动作：开多BTCUSDT\n等待：无"),
                         okTradeRow(FROM + 18_000_000, "9989",
                                 "【本轮结论】\n判断：止损离场\n动作：HOLD\n等待：99000上方站稳再进")));
-        when(binanceRestClient.getKlines(eq("BTCUSDT"), eq("1h"), anyInt(), anyLong())).thenReturn("""
-                [[%d,"100000","100300","98800","99100","0",0,"0",0,"0","0","0"]]""".formatted(FROM + 3600_000));
+        // 真本地库路径：5m bar 进去，组装器现聚合成 1h
+        long h = FROM + 3600_000;
+        when(historyStore.load(eq("BTCUSDT"), eq("5m"), anyLong(), anyLong())).thenReturn(List.of(
+                new KlineBar(h, h + 299_999L, new BigDecimal("100000"), new BigDecimal("100300"),
+                        new BigDecimal("99900"), new BigDecimal("100100"), BigDecimal.ZERO),
+                new KlineBar(h + 300_000L, h + 599_999L, new BigDecimal("100100"), new BigDecimal("100200"),
+                        new BigDecimal("98800"), new BigDecimal("99100"), BigDecimal.ZERO)));
 
         ChatModel model = mock(ChatModel.class);
         when(model.call(any(Prompt.class))).thenReturn(new ChatResponse(List.of(new Generation(
