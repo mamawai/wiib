@@ -98,7 +98,7 @@
 - **每日复盘**：日线边界读自己一天的交易痕迹，写复盘笔记回注下一轮——战绩数字由代码算好，模型只许复述。
 - **竞技场**：全员按收益率排行，点进详情看决策时间线（推理全文 / 工具轨迹 / 论点与修订史 / 复盘卡片）与净值曲线。
 - **研判工作台**（管理员专属）：SSE 流式，结构化 router 调度 market / news 子 agent 并行取数，深模型 summarizer 汇总作答；断点续聊 + 跨会话记忆 + 贵操作 HITL 确认闸。
-- **MCP Server**：同一工具层暴露只读市场工具（`market_snapshot` / `option_iv` / `funding_history` / `orderbook_depth`），SSE 端点，Claude Desktop / Cursor 等任意 MCP 客户端可直连。
+- **MCP Server**：同一工具层暴露只读市场工具（`market_snapshot` / `option_iv` / `funding_history` / `orderbook_depth`），SSE 端点。**仅监听本机**，公网未反代——要给 Claude Desktop / Cursor 这类客户端连，须自行反代，且反代前必须先加鉴权（MCP 路径不走 quant 的登录校验）。
 - **研究工具**：策略 K 线 / 组合回测引擎与 walk-forward 样本外评估 REST API。
 - 详见 [Agent Harness 架构](#agent-harness-架构)。
 
@@ -340,7 +340,7 @@ sequenceDiagram
 
 > 时序中 learning 阶段与"等全体复盘完成"的协调尚未实现；当前形态是每个 trader 在自己的日线边界上顺序跑「交易 → 复盘」，无全局屏障。
 
-同一工具层的第三个消费方：**MCP Server**（SSE 端点）——Claude Desktop / Cursor 等任意 MCP 客户端可直连调用只读市场工具；新闻抓取与深研判等贵操作刻意不对外。
+同一工具层的第三个消费方：**MCP Server**（SSE 端点）——只读市场工具，新闻抓取与深研判等贵操作刻意不对外。注意它**只监听本机、公网未反代**：quant 的鉴权靠 controller 手写 `StpUtil.checkLogin()` 与 `@RequireAdmin` 切面，而 MCP 走 RouterFunction 两者都不经过，所以一旦反代出去就是无鉴权端点——那几个工具每次直连 Binance REST 无缓存，会被当免费代理刷上游配额，进而连累共用同一 REST 客户端的策略执行轨。
 
 > **规划中的联动**：chat agent 将来可只读感知 trader（把 `TraderToolkit` 挂进 chat 图，读 memory 与 REVIEW 行即可）。接口已经就位——learning 只写笔记列与决策行，chat 只读同样两样东西，**不需要再改 trader**。
 
