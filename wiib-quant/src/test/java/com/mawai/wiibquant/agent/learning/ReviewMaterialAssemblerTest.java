@@ -138,6 +138,37 @@ class ReviewMaterialAssemblerTest {
         assertThat(m.statsBlock()).contains("+1.00%");
     }
 
+    /**
+     * 战绩表块头写着"代码统计，只许原样复述，禁止自行计算"，但已平仓位是先取最近 200 条再按窗口过滤，
+     * 无分页无溢出检测——5m 档一天成交超 200 笔时这份"硬事实"本身就是错的，而模型被明令不许核算，
+     * 错数字会原样进 memory 长期传播。取回条数顶到上限时必须在块头说清楚这是不完全统计。
+     */
+    @Test
+    void statsWarnsWhenClosedFetchHitsLimit() {
+        List<FuturesPositionDTO> full = new ArrayList<>();
+        for (int i = 0; i < ReviewMaterialAssembler.CLOSED_FETCH_LIMIT; i++) {
+            full.add(closedPos("LONG", "100000", "100100", "10", FROM + 60_000, FROM + 120_000));
+        }
+        when(simTradeClient.getClosedPositions(eq(99L), anyInt())).thenReturn(full);
+        when(decisionMapper.selectOne(any())).thenReturn(null);
+
+        ReviewMaterialAssembler.ReviewMaterial m = assembler.assemble(trader(), FROM, TO);
+
+        assertThat(m.statsBlock()).contains("不完全统计").contains("200");
+    }
+
+    /** 没顶到上限就别乱贴警示——常规复盘的战绩表得是干净的硬事实 */
+    @Test
+    void statsHasNoTruncationWarningBelowLimit() {
+        when(simTradeClient.getClosedPositions(eq(99L), anyInt())).thenReturn(List.of(
+                closedPos("LONG", "100000", "103000", "300", FROM + 3600_000, FROM + 7200_000)));
+        when(decisionMapper.selectOne(any())).thenReturn(null);
+
+        ReviewMaterialAssembler.ReviewMaterial m = assembler.assemble(trader(), FROM, TO);
+
+        assertThat(m.statsBlock()).doesNotContain("不完全统计");
+    }
+
     // ==================== 配对表与了结方式 ====================
 
     @Test
@@ -234,6 +265,21 @@ class ReviewMaterialAssemblerTest {
         assertThat(m.timelineBlock()).contains("1h收盘跌破100500减仓");
         assertThat(m.timelineBlock()).contains("警报");
         assertThat(m.timelineBlock()).contains("1 轮 ERROR");
+    }
+
+    /** 转成待确认请求的动作没有成交，摘编里必须标出来——否则复盘会把"提了个请求"当成"平了仓" */
+    @Test
+    void timelineMarksPendingActionsAsAwaitingApproval() {
+        String pendingAction = "[{\"tool\":\"close_position\",\"args\":{\"positionId\":5,\"quantity\":0.01},"
+                + "\"status\":\"pending\",\"result\":\"减仓请求已提交给主人确认\"}]";
+        when(decisionMapper.selectOne(any())).thenReturn(null);
+        when(decisionMapper.selectList(any())).thenReturn(List.of(), List.of(
+                okRow(FROM + 3600_000, AiTraderDecision.KIND_TRADE,
+                        "【本轮结论】\n判断：失效条件触发\n动作：申请减仓\n等待：主人确认", pendingAction)));
+
+        ReviewMaterialAssembler.ReviewMaterial m = assembler.assemble(trader(), FROM, TO);
+
+        assertThat(m.timelineBlock()).contains("close_position").contains("待确认");
     }
 
     @Test

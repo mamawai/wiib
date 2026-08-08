@@ -3,6 +3,7 @@ package com.mawai.wiibquant.agent.llm;
 import org.bsc.langgraph4j.prebuilt.MessagesState;
 import org.bsc.langgraph4j.state.AppenderChannel;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.SystemMessage;
@@ -11,6 +12,7 @@ import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
+import org.springframework.ai.chat.prompt.Prompt;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -121,6 +123,76 @@ class ConversationSummarizerTest {
         boolean hasResponse = compressed.stream().anyMatch(m -> m instanceof ToolResponseMessage t
                 && t.getResponses().stream().anyMatch(r -> "call_1".equals(r.id())));
         assertThat(hasCall).isEqualTo(hasResponse);
+    }
+
+    // ===== 摘要输入必须含工具结果内容 =====
+
+    /**
+     * ToolResponseMessage.getText() 恒为空串（构造时传的就是 ""），真内容在 responseData()；
+     * AssistantMessage 的 toolCalls().arguments() 同样不进文本。而阈值估算恰恰把这两样都算进去了——
+     * 压缩是被工具结果的体积撑触发的，扔掉的却正是工具结果，行情数字和研判结论全没。
+     */
+    @Test
+    void summaryInputCarriesToolResultPayload() {
+        stubSummary("摘要");
+        List<Message> messages = new ArrayList<>();
+        messages.add(new UserMessage("BTC 现在怎么样"));
+        messages.add(AssistantMessage.builder().content("")
+                .toolCalls(List.of(new AssistantMessage.ToolCall("call_1", "function", "market_snapshot",
+                        "{\"symbol\":\"BTCUSDT\"}"))).build());
+        messages.add(ToolResponseMessage.builder().responses(List.of(
+                new ToolResponseMessage.ToolResponse("call_1", "market_snapshot",
+                        "{\"markPrice\":95000,\"fundingRate\":0.0001}"))).build());
+        for (int i = 0; i < 10; i++) {
+            messages.add(new AssistantMessage("闲聊填充把体积撑过阈值" + i));
+        }
+
+        summarizer(50, 2).applyBefore("agent", stateOf(messages), null).join();
+
+        ArgumentCaptor<Prompt> prompt = ArgumentCaptor.forClass(Prompt.class);
+        verify(summaryModel).call(prompt.capture());
+        String input = prompt.getValue().getInstructions().getFirst().getText();
+        assertThat(input).contains("95000").contains("market_snapshot").contains("BTCUSDT");
+    }
+
+    /** 超长工具回包要截断：摘要输入本身不能反被深研判回包撑爆 */
+    @Test
+    void oversizedToolPayloadIsTruncatedInSummaryInput() {
+        String huge = "行情".repeat(5000);
+        String text = ConversationSummarizer.textOf(ToolResponseMessage.builder().responses(List.of(
+                new ToolResponseMessage.ToolResponse("call_1", "deep_analysis", huge))).build());
+
+        assertThat(text).contains("deep_analysis").contains("截断");
+        assertThat(text.length()).isLessThan(huge.length() / 2);
+    }
+
+    // ===== 摘要不许套摘要 =====
+
+    /**
+     * 上次压缩产出的摘要落在 index 1，下次压缩必然把它再压一遍。除首条用户消息外没有原文锚点，
+     * 3~4 次后早期事实基本消失且无法归因。已是摘要的那条要被认出来原样保留，只压新增的原文。
+     */
+    @Test
+    void previousSummaryIsKeptVerbatimNotRecompressed() {
+        stubSummary("本次新增要点");
+        List<Message> messages = new ArrayList<>();
+        messages.add(new UserMessage("最初的诉求：帮我盯BTC"));
+        messages.add(new SystemMessage("## 早前对话摘要：\n用户在 92000 附近建了多单"));
+        for (int i = 0; i < 20; i++) {
+            messages.add(new AssistantMessage("新一轮对话内容填充把体积撑过阈值" + i));
+        }
+
+        List<Message> compressed = compressedOf(
+                summarizer(50, 3).applyBefore("agent", stateOf(messages), null).join());
+
+        ArgumentCaptor<Prompt> prompt = ArgumentCaptor.forClass(Prompt.class);
+        verify(summaryModel).call(prompt.capture());
+        // 老摘要不进这次的压缩输入——二次压缩正是早期事实消失的原因
+        assertThat(prompt.getValue().getInstructions().getFirst().getText()).doesNotContain("92000");
+        // 但它原样活在新的摘要消息里，与本次新增分段可辨
+        assertThat(compressed).hasSize(1 + 1 + 3);
+        assertThat(compressed.get(1)).isInstanceOf(SystemMessage.class);
+        assertThat(compressed.get(1).getText()).contains("92000").contains("本次新增要点");
     }
 
     @Test

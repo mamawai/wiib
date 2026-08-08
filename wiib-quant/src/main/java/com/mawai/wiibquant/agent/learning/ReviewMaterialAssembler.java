@@ -45,7 +45,7 @@ public class ReviewMaterialAssembler {
     /** 价格路径回看上限(小时)：窗口通常一天，首篇复盘 fromMs=0 时靠它兜住 */
     private static final int MAX_PATH_HOURS = 48;
     /** 已平仓位拉取上限：窗口通常一天，远超一天可能的成交笔数 */
-    private static final int CLOSED_FETCH_LIMIT = 200;
+    static final int CLOSED_FETCH_LIMIT = 200;
     /** 只进摘编的交易动作工具（get_account 是查户口不是动作） */
     private static final Set<String> ACTION_TOOLS = Set.of(
             "open_position", "close_position", "set_stop_loss",
@@ -91,8 +91,12 @@ public class ReviewMaterialAssembler {
     }
 
     public ReviewMaterial assemble(AiTrader trader, long fromMs, long toMs) {
-        List<FuturesPositionDTO> closed = closedInWindow(trader.getSimUserId(), fromMs, toMs);
-        String stats = statsBlock(trader, fromMs, toMs, closed);
+        // 已平仓位是"最近N条"，取满上限就说明可能被截断——战绩表得把这件事说出来，
+        // 不能一边宣称"硬事实、禁止自行计算"一边给不完整的数字
+        List<FuturesPositionDTO> fetched = simTradeClient.getClosedPositions(trader.getSimUserId(), CLOSED_FETCH_LIMIT);
+        boolean maybeTruncated = fetched.size() >= CLOSED_FETCH_LIMIT;
+        List<FuturesPositionDTO> closed = inWindow(fetched, fromMs, toMs);
+        String stats = statsBlock(trader, fromMs, toMs, closed, maybeTruncated);
         String trades = tradesBlock(trader, closed, fromMs, toMs);
         String timeline = timelineBlock(trader, fromMs, toMs);
         String pricePath = pricePathBlock(trader, fromMs, toMs);
@@ -101,7 +105,8 @@ public class ReviewMaterialAssembler {
 
     // ==================== 战绩表 ====================
 
-    private String statsBlock(AiTrader t, long fromMs, long toMs, List<FuturesPositionDTO> closed) {
+    private String statsBlock(AiTrader t, long fromMs, long toMs, List<FuturesPositionDTO> closed,
+                              boolean maybeTruncated) {
         // 起始权益 = 窗口起点前最后一条带权益的决策行；开局首次复盘无前值 → 初始资金
         AiTraderDecision prior = decisionMapper.selectOne(new LambdaQueryWrapper<AiTraderDecision>()
                 .eq(AiTraderDecision::getTraderId, t.getId())
@@ -143,6 +148,10 @@ public class ReviewMaterialAssembler {
                 .filter(java.util.Objects::nonNull).reduce(BigDecimal.ZERO, BigDecimal::add);
 
         StringBuilder sb = new StringBuilder("【战绩表】（代码统计，只许原样复述，禁止自行计算）\n");
+        if (maybeTruncated) {
+            sb.append("注意：本期成交笔数可能超出统计上限 ").append(CLOSED_FETCH_LIMIT)
+                    .append(" 笔，以下已了结相关数字为不完全统计——可以据此谈倾向，别当成完整战绩下定论\n");
+        }
         sb.append("起始权益 ").append(start.setScale(2, RoundingMode.HALF_UP))
                 .append(" → 期末权益 ").append(end.setScale(2, RoundingMode.HALF_UP))
                 .append("，期间收益率 ").append(signed(returnPct)).append("%\n");
@@ -341,8 +350,10 @@ public class ReviewMaterialAssembler {
                         }
                     }
                 }
+                // pending＝转成待主人确认的请求，本轮并没有成交，摘编里不标就成了"平了仓"的假事实
                 String outcome = a.containsKey("rejected") ? "→被拒"
-                        : "error".equals(a.getString("status")) ? "→失败" : "";
+                        : "error".equals(a.getString("status")) ? "→失败"
+                        : "pending".equals(a.getString("status")) ? "→待确认" : "";
                 parts.add(tool + "(" + brief + ")" + outcome);
             }
             return String.join("；", parts);
@@ -474,8 +485,8 @@ public class ReviewMaterialAssembler {
 
     // ==================== 小工具 ====================
 
-    private List<FuturesPositionDTO> closedInWindow(Long simUserId, long fromMs, long toMs) {
-        return simTradeClient.getClosedPositions(simUserId, CLOSED_FETCH_LIMIT).stream()
+    private static List<FuturesPositionDTO> inWindow(List<FuturesPositionDTO> fetched, long fromMs, long toMs) {
+        return fetched.stream()
                 .filter(p -> p.getUpdatedAt() != null)
                 .filter(p -> {
                     long closedAt = msOf(p.getUpdatedAt());
