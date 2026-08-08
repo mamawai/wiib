@@ -406,9 +406,16 @@ public class ResponsesChatModel implements ChatModel {
 
     // ========== 响应解析 ==========
 
-    private ChatResponse parseResponse(JSONObject response) {
-        if ("failed".equals(response.getString("status"))) {
+    ChatResponse parseResponse(JSONObject response) {
+        String status = response.getString("status");
+        if ("failed".equals(status)) {
             throw new NonTransientAiException("Responses API 失败: " + extractErrorMessage(response));
+        }
+        // incomplete = 服务端截断（多为 max_output_tokens 到顶），output 里只有半截正文。
+        // 当正常收尾发 STOP 的话，被腰斩的【本轮结论】会以 status=OK 落库，下一轮还被当
+        // "上一轮的承诺"回注给模型做检验基准。与流式路径（response.incomplete）同口径判失败
+        if ("incomplete".equals(status)) {
+            throw new NonTransientAiException("Responses API 截断: " + extractErrorMessage(response));
         }
         JSONArray output = response.getJSONArray("output");
         String text = extractOutputText(output);

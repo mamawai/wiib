@@ -32,6 +32,7 @@ import org.bsc.langgraph4j.RunnableConfig;
 import org.bsc.langgraph4j.prebuilt.MessagesState;
 import org.bsc.langgraph4j.serializer.StateSerializer;
 import org.bsc.langgraph4j.spring.ai.agent.ReactAgent;
+import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatModel;
@@ -266,8 +267,7 @@ public class TraderWakeupRunner {
             MessagesState<Message> state = graph
                     .invoke(Map.of("messages", List.of(new UserMessage(instruction))), config)
                     .orElseThrow(() -> new IllegalStateException("图执行无返回状态"));
-            return new SessionOutcome(
-                    state.lastMessage().map(Message::getText).orElse(""),
+            return new SessionOutcome(finalReasoning(state.messages()),
                     state.<Number>value(ModelCallLimiter.CALL_COUNT_KEY).map(Number::intValue).orElse(0));
         });
         Thread.startVirtualThread(task);
@@ -292,6 +292,21 @@ public class TraderWakeupRunner {
             decision.setError("达单轮模型调用上限(" + MAX_MODEL_CALLS + ")，提前收束");
         }
         return outcome.reasoning();
+    }
+
+    /**
+     * 决策正文：往前找最近一条有正文的助手消息，而不是死盯最后一条。
+     * 保险丝在工具边收束时，末尾是纯 tool_call 的助手消息 + 未执行占位回执，正文都是空的——
+     * 死盯最后一条就会写出 status=OK 却一个字没有的决策行，时间线上与正常决策无从区分。
+     */
+    private static String finalReasoning(List<Message> messages) {
+        for (int i = messages.size() - 1; i >= 0; i--) {
+            if (messages.get(i) instanceof AssistantMessage assistant
+                    && assistant.getText() != null && !assistant.getText().isBlank()) {
+                return assistant.getText();
+            }
+        }
+        return "本轮模型全程只在调用工具，没有产出决策正文。";
     }
 
     /** 例行唤醒开场白：单问题框架 + 行情快照锚定价格水平。 */

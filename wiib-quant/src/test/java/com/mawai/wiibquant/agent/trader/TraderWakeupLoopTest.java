@@ -202,21 +202,29 @@ class TraderWakeupLoopTest {
         assertThat(d.getToolCalls()).isGreaterThanOrEqualTo(1);
     }
 
-    /** 调用上限到顶不许默默截断：决策行必须标注提前收束（否则时间线上像正常决策） */
-    @Test
-    void callCapAnnotatedOnDecision() {
-        stubHealthyAccount();
+    /**
+     * 永远只想再查一次账户、永不给总结的模型 → 只能靠保险丝收束（每轮独立 call id，同真实模型口径）。
+     * contentOf 决定第 i 轮的正文——真实 Responses 调工具那一轮正文往往就是空串。
+     */
+    private ChatModel modelLoopingToolCalls(java.util.function.IntFunction<String> contentOf) {
         ChatModel model = mock(ChatModel.class);
         when(model.getOptions()).thenReturn(ToolCallingChatOptions.builder().build());
-        // 永远只想再查一次账户，永不给总结 → 只能靠保险丝收束（每轮独立 id，同真实模型口径）
         AtomicInteger n = new AtomicInteger();
         when(model.call(any(Prompt.class))).thenAnswer(inv -> {
             int i = n.incrementAndGet();
-            AssistantMessage call = AssistantMessage.builder().content("再查一次(" + i + ")")
+            AssistantMessage call = AssistantMessage.builder().content(contentOf.apply(i))
                     .toolCalls(List.of(new AssistantMessage.ToolCall("c" + i, "function", "get_account", "{}")))
                     .build();
             return new ChatResponse(List.of(new Generation(call)));
         });
+        return model;
+    }
+
+    /** 调用上限到顶不许默默截断：决策行必须标注提前收束（否则时间线上像正常决策） */
+    @Test
+    void callCapAnnotatedOnDecision() {
+        stubHealthyAccount();
+        ChatModel model = modelLoopingToolCalls(i -> "再查一次(" + i + ")");
         when(modelFactory.modelFor(any())).thenReturn(model);
 
         runner.wake(trader(), 1785171600000L);
@@ -225,6 +233,40 @@ class TraderWakeupLoopTest {
         verify(decisionMapper).insert(dec.capture());
         assertThat(dec.getValue().getStatus()).isEqualTo(AiTraderDecision.STATUS_OK);
         assertThat(dec.getValue().getError()).contains("上限");
+    }
+
+    /**
+     * 保险丝收束时最后一条是纯 tool_call（正文空）：取正文不能只看最后一条，
+     * 否则决策行 status=OK 却一个字都没有——竞技场时间线上就是一条没有正文的"正常决策"。
+     * 往前找最近一条有正文的助手消息。
+     */
+    @Test
+    void callCapFallsBackToLastTextualReasoning() {
+        stubHealthyAccount();
+        // 首轮留下正文，其后全是空正文的纯 tool_call
+        ChatModel model = modelLoopingToolCalls(i -> i == 1 ? "账户没问题，倾向继续持有等突破确认。" : "");
+        when(modelFactory.modelFor(any())).thenReturn(model);
+
+        runner.wake(trader(), 1785171600000L);
+
+        ArgumentCaptor<AiTraderDecision> dec = ArgumentCaptor.forClass(AiTraderDecision.class);
+        verify(decisionMapper).insert(dec.capture());
+        assertThat(dec.getValue().getStatus()).isEqualTo(AiTraderDecision.STATUS_OK);
+        assertThat(dec.getValue().getReasoning()).contains("倾向继续持有");
+    }
+
+    /** 全程一个字都没说过：给一句说明而不是留空串——空串在时间线上无法与"模型真没话说"区分 */
+    @Test
+    void callCapWithoutAnyTextGivesExplanationNotBlank() {
+        stubHealthyAccount();
+        ChatModel model = modelLoopingToolCalls(i -> "");
+        when(modelFactory.modelFor(any())).thenReturn(model);
+
+        runner.wake(trader(), 1785171600000L);
+
+        ArgumentCaptor<AiTraderDecision> dec = ArgumentCaptor.forClass(AiTraderDecision.class);
+        verify(decisionMapper).insert(dec.capture());
+        assertThat(dec.getValue().getReasoning()).isNotBlank();
     }
 
     /**
