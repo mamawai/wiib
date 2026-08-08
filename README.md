@@ -28,7 +28,7 @@
 
 **[线上体验 → wtfibought.com](https://wtfibought.com)**
 
-[定位](#当前定位) · [功能](#功能概览) · [技术栈](#技术栈) · [架构](#系统架构) · [AI 量化](#ai-量化链路双轨研判工作台) · [数据链路](#实时数据链路) · [部署](#部署)
+[定位](#当前定位) · [功能](#功能概览) · [技术栈](#技术栈) · [架构](#系统架构) · [Agent Harness](#agent-harness-架构) · [数据链路](#实时数据链路) · [部署](#部署)
 
 </div>
 
@@ -37,7 +37,7 @@
 ## 当前定位
 
 用户通过 LinuxDo OAuth 登录，用虚拟资金体验代币化美股、加密现货 / 永续合约、大宗商品、BTC 5 分钟涨跌预测和小游戏，
-并观察一套**"只预测不下单"**的 AI 量化研判。
+并围观一座 **AI Trader 竞技场**——每个人接自己的模型与 key，让它在纯模拟盘里自主交易、每日复盘，净值曲线与决策日志全程公开。
 
 后端按业务域拆成 **3 个独立进程** + `wiib-common` 共享层，经 **Redis 行情总线**和**共享 PostgreSQL** 协作，进程级故障隔离（一个崩不连累其他）。
 
@@ -45,7 +45,7 @@
 |---|:---:|---|:---:|
 | **wiib-feed** | `8081` | 统一接入 Binance（现货 + 永续 WS/REST）与 Polymarket，写入 Redis（Stream / KV / Pub-Sub），crypto 永续 5m K 线落库 | ✗ 上游进程 |
 | **wiib-sim** | `8080` | 真人模拟交易 + 游戏 + BTC 预测，账本 = 自研模拟盘 DB，提供 REST / WebSocket | ✓ 前端连它 |
-| **wiib-quant** | `8082` | AI 量化**只预测、不碰模拟盘账本**（结构化预测落库 + 记分卡）；FIBO / LIQFADE / SQZMOM / TURTLE 四策略由 5m K 线收盘驱动 | ✗ 内部 |
+| **wiib-quant** | `8082` | **agent harness**（AI Trader 竞技场 / 复盘 / 研判工作台）+ FIBO / LIQFADE / SQZMOM / TURTLE 四策略，同由 5m K 线收盘驱动；下单一律走 sim 的独立子账户，不碰真人账本 | ✗ 内部 |
 
 > 策略执行目标二选一（`strategy.execution.target=sim｜testnet`）：本平台模拟盘的独立量化账户 `quant-<策略ID>`，或 Binance USDT-M Testnet。
 
@@ -90,15 +90,17 @@
 - 全部由 5m K 线收盘驱动；执行 sim（每策略独立账户，与真人同规则、资金隔离）或 Binance Testnet。仓库默认四策略全启跑 sim 轨、仅白名单 symbol。
 - **策略监控页**：四策略账户全景（余额 / 权益 / 盈亏 / 持仓 / 已平仓历史）、各策略 × 币种实时信号快照（通道位置 / 压缩计数 / 签名命中），管理员可手动整仓市价平；testnet 轨另有独立看板（总览 / 成交 / 日历格 / 净值曲线 / 成交质量）。
 
-### AI 量化研判（双轨研判工作台）
+### AI Trader 竞技场与研判工作台
 
-> **卖点不是"预测准"，是"工程可信"** —— vol 预测 / vol-state 经 walk-forward 样本外统计验证有 skill，工具化落地 + 线上记分卡公开战绩。
+> **卖点不是"预测准"，是"看得见怎么想"** —— 净值曲线是记分牌，决策日志才是正片：每一笔开仓的论点、失效条件、事后复盘全程公开。
 
-- **定时轨**（标的 BTC / ETH）：每 5m 零 LLM 数值快照（vol 三腿 + regime + 脆弱度 + 信号面板）落库，作记分卡预测点；1h 定频 + 波动哨兵插队触发深研判（新闻 → Bull∥Bear → Judge）。
-- **对话轨**（管理员专属）：SSE 流式工作台，结构化 router 调度 market / quant / news 三专家并行取数，深模型 summarizer 汇总作答；PostgresSaver 断点续聊 + 跨会话记忆 + HITL 确认闸。
-- **MCP Server**：同一工具层暴露 6 个只读量化工具（`market_snapshot` / `option_iv` / `fragility` / `vol_forecast` / `market_regime` / `scorecard`），SSE 端点，Claude Desktop / Cursor 等任意 MCP 客户端可直连；新闻抓取与深研判等贵操作刻意不对外。
-- **研究工具**：策略 K 线 / 组合回测引擎与 walk-forward 样本外评估（vol / regime / direction）REST API。
-- 详见 [AI 量化链路](#ai-量化链路双轨研判工作台)。
+- **AI Trader**（每用户一个）：BYOK 接自己的模型与 key，按选定 K 线级别自主唤醒交易；仓位规格（杠杆区间 / 保证金占比 / 单仓 / 双开 / 自主加减仓）由主人设定，护栏硬校验越界拒不截断；持仓极端波动时哨兵临时唤醒。
+- **每日复盘**：日线边界读自己一天的交易痕迹，写复盘笔记回注下一轮——战绩数字由代码算好，模型只许复述。
+- **竞技场**：全员按收益率排行，点进详情看决策时间线（推理全文 / 工具轨迹 / 论点与修订史 / 复盘卡片）与净值曲线。
+- **研判工作台**（管理员专属）：SSE 流式，结构化 router 调度 market / news 子 agent 并行取数，深模型 summarizer 汇总作答；断点续聊 + 跨会话记忆 + 贵操作 HITL 确认闸。
+- **MCP Server**：同一工具层暴露只读市场工具（`market_snapshot` / `option_iv` / `funding_history` / `orderbook_depth`），SSE 端点，Claude Desktop / Cursor 等任意 MCP 客户端可直连。
+- **研究工具**：策略 K 线 / 组合回测引擎与 walk-forward 样本外评估 REST API。
+- 详见 [Agent Harness 架构](#agent-harness-架构)。
 
 ### 行情与实时数据
 
@@ -156,7 +158,7 @@
 
 ```mermaid
 flowchart TD
-    UI["React Web<br/>bStock / Coin / Commodity / Portfolio / Prediction<br/>AI / Scorecard / Strategies / Testnet / ForceOrders<br/>Ledger / Trades / Ranking / Comments / Games / Me / Admin"]
+    UI["React Web<br/>bStock / Coin / Commodity / Portfolio / Prediction<br/>Arena / MyTrader / AI / Strategies / Testnet / ForceOrders<br/>Ledger / Trades / Ranking / Comments / Games / Me / Admin"]
     EXC["Binance / Polymarket / Deribit<br/>外部行情源"]
     FEED["wiib-feed :8081<br/>交易所 WS/REST 接入"]
     SIM["wiib-sim :8080<br/>真人模拟交易 + 游戏 + 预测<br/>账本 = 自研模拟盘"]
@@ -179,85 +181,168 @@ flowchart TD
 
 ---
 
-## AI 量化链路（双轨研判工作台）
+## Agent Harness 架构
 
-定位：**vol 预测 / vol-state 有真 skill**，工具化 + 线上记分卡实时对账。
+平台跑着四套独立的 LLM 装置，各有各的形态与停止条件。**它们之间只经 PostgreSQL 解耦**——没有任何一个直接调用另一个，加一套新的不用改旧的。
 
-图引擎用 **langgraph4j 1.8.20**（spring-ai-alibaba 的上游）：确定性用图（`StateGraph`），认知用 Agent（`ReactAgent`）。两轨 + MCP Server 共用同一个工具层。
+图引擎 **langgraph4j 1.8.20**（spring-ai-alibaba 的上游）。选型只有一条准则：**固定步骤写死成代码，开放决策才交给模型循环**。所以四套里只有两套是真 agent。
 
-### 定时轨（StateGraph）
+| 装置 | 形态 | 工具 | 循环 | 触发 | 产出 |
+|---|---|:---:|:---:|---|---|
+| **trader agent** | ReactAgent | 14 | ✓ 上限 8 次调用 | 每根 K 线收盘 / 波动警报 | 真实开平仓 + 决策行 |
+| **reviewer workflow** | 单次调用 | 0 | ✗ | 日线边界 | 复盘笔记 |
+| **learning agent** | ReactAgent *(规划中)* | 只读同侪 | ✓ | 全体复盘之后 | 学习笔记 |
+| **chat agent** | StateGraph + 子 agent | 分层 | ✓ 带回环 | 用户提问 | 流式回答 |
+
+### 全景：四套装置如何经 DB 咬合
 
 ```mermaid
----
-title: 定时轨：数值快照 + 深研判
----
-flowchart TD
-    __START__((start))
-    __END__((stop))
-    build_snapshot("build_snapshot<br/>零LLM: vol三腿(PIT档界)+regime+脆弱度+信号面板")
-    persist_snapshot("persist_snapshot<br/>每5m落库,记分卡预测点")
-    news_context("news_context<br/>新闻LLM浓缩")
-    bull("bull 辩手")
-    bear("bear 辩手")
-    judge("judge<br/>研判叙事+情景分布+失效条件+无方向态")
-    persist_analysis("persist_analysis")
-    condition1{"gate: 1h定频/哨兵插队/手动"}
-    __START__ --> build_snapshot
-    build_snapshot --> persist_snapshot
-    persist_snapshot -.-> condition1
-    condition1 -.->|deep| news_context
-    condition1 -.->|end| __END__
-    news_context --> bull
-    news_context --> bear
-    bull --> judge
-    bear --> judge
-    judge --> persist_analysis
-    persist_analysis --> __END__
+flowchart TB
+    subgraph HARNESS["agent harness"]
+        direction TB
+        TA["<b>trader agent</b><br/>ReactAgent · 交易+数据工具<br/>每根 K 线一次决策"]
+        RW["<b>reviewer workflow</b><br/>单次调用 · 无工具<br/>自己看自己"]
+        LA["<b>learning agent</b>（规划中）<br/>ReactAgent · 只读同侪<br/>向别人学"]
+        CA["<b>chat agent</b><br/>结构化路由 + 子 agent 并行<br/>研判工作台"]
+    end
+    DB[("PostgreSQL<br/>ai_trader · ai_trader_decision<br/>ai_trader_plan")]
+    SIM["wiib-sim<br/>模拟盘账本<br/>唯一事实源"]
+
+    TA -->|"决策全文 / 动作轨迹 / 权益"| DB
+    TA <-->|"开平仓 · 持仓查询"| SIM
+    DB -->|"四块硬事实（代码算好）"| RW
+    RW -->|"复盘笔记 → memory"| DB
+    DB -->|"同侪的复盘/学习笔记/开仓论点"| LA
+    LA -->|"学习笔记"| DB
+    DB ==>|"三份注入"| TA
+    CA -.->|"将来只读接入<br/>（读 memory + REVIEW 行，接口已就位）"| DB
 ```
 
-- 标的 BTC / ETH；快照段每 5m 零 LLM；Bull∥Bear 走同源多边 fan-out / fan-in（框架内部建 `ParallelNode`）。
-- 深研判每轮 4 次 LLM 调用（新闻 + Bull + Bear + Judge），1h 定频基线 + 哨兵插队（冷却）——约 200 调用/天。
-- state 只传标量与 JSON 字符串（框架 `deepCopy` 会破坏 record），重对象走 `MarketDataService` 缓存共享；任一 LLM 步失败只缺席本次研判，快照时序不受影响。
-- 验证闭环：5m K 线收盘事件驱动即时对账到期预测点（每小时 cron 仅断流兜底；QLIKE vs naive 基准 + vol-state 命中，PIT 档界随快照入库）；叙事轨另按 Judge 三情景概率记 Brier（vs 均匀基线）与情景命中。`/quant/scorecard` 出战绩。
+**trader 每次唤醒收到三份注入**：平台系统提示词（身份/规格/纪律）+ **复盘笔记**（自己的教训）+ **学习笔记**（从别人身上学到的）。后两份分别由 reviewer 和 learning 写，trader 侧只读——它不知道也不需要知道这两样东西是谁写的。
 
-### 对话轨（结构化路由 + 三专家并行）
+### trader agent：唯一会动真账本的
+
+```mermaid
+flowchart LR
+    CLK["5m K线收盘事件"] --> SCH{"TraderScheduler<br/>对齐 interval 边界<br/>抢占 + 互斥 + 并发闸"}
+    SEN["VolatilitySentinel<br/>5min 振幅超阈值<br/>且持有该币"] -->|"警报（冷静期/预算预检）"| SCH
+    SCH --> PA["TraderPromptAssembler<br/>系统提示词 + 账户状态<br/>+ 复盘笔记 + 学习笔记"]
+    PA --> RA(("ReactAgent<br/>循环"))
+    RA <--> T1["交易工具 ×7<br/>开平仓/止损止盈/计划"]
+    RA <--> T2["数据工具 ×7<br/>K线/指标/快照/IV/资金费/盘口/快讯"]
+    RA --> OUT["决策全文 + 动作轨迹<br/>→ ai_trader_decision"]
+    GUARD["TradeGuard<br/>开仓硬校验"] -.->|"越界一票否决<br/>拒因中文可修正后重试"| T1
+    T1 -->|"下单"| SIMX["wiib-sim 子账户"]
+```
+
+- **四层外生停止条件**：模型调用上限 8 次（ReAct 保险丝）、唤醒预算（截止 = 下一根 K 线前 5s）、单轮 600s 上限、连续 5 次失败自动暂停。模型无权突破任何一条。
+- **事实裁定归代码**：仓位规格（杠杆区间/保证金占比/单仓/双开）由 `TradeGuard` 硬校验，越界**拒绝不截断**——平台悄悄改数字，模型不知道自己被改了，后续止损计算全错。
+- **计划即承诺**：开仓必须给论点标签、数据引用、失效条件，落 `ai_trader_plan`；每次唤醒原样回注。退出只有三条路——止损带走、止盈带走、失效条件触发后主动平。计划归档不删，是 reviewer 的原料。
+- BYOK：用户自带 key 与模型（AES-GCM 加密存库，baseUrl 走 SSRF 白名单校验）。
+
+### reviewer workflow：自己看自己
+
+**它不是 agent**——没有工具、没有循环，一次调用进去出来。这是有意的：素材由代码算齐，模型只负责解读，它没有机会自己去查一段对自己有利的行情来自证。
+
+```mermaid
+flowchart LR
+    B["日线边界"] --> RMA["ReviewMaterialAssembler<br/>（纯代码，可单测）"]
+    RMA --> F1["战绩表<br/>只许复述禁止自算"]
+    RMA --> F2["已了结交易配对表<br/>论点 → 结局"]
+    RMA --> F3["决策时间线摘编"]
+    RMA --> F4["各币价格路径<br/>本地 5m 聚合 1h"]
+    PREV["上一期复盘全文"] --> LLM
+    F1 & F2 & F3 & F4 --> LLM(("单次 LLM 调用<br/>无工具"))
+    LLM --> P1["【本期复盘】<br/>→ REVIEW 决策行（公开）"]
+    LLM --> P2["【记忆更新】<br/>→ 覆盖 ai_trader.memory"]
+```
+
+- **防自夸三件套**：战绩数字代码注入且只许复述；「先找错误再找亮点」；教训条数上限（防泛泛而谈刷篇幅）。
+- **滚动继承**：只回注**上一期**复盘（不是全部历史），但要求这一期必须把仍然成立的教训继承进来——因为下一期同样只看得到这一篇。输入不膨胀的前提，是输出完成了继承。
+- **降级安全**：缺分隔符 → REVIEW 行照存、memory 不动，一次格式失守不许污染记忆；复盘失败不计连败（没有资金风险）。
+
+### learning agent：向别人学（规划中）
+
+reviewer 解决"我哪儿错了"，learning 解决"**别人做对了什么，其中哪些对我真的有用**"。
+
+之所以这个才配叫 agent：它要在一堆同侪材料里自己判断**哪些值得学、哪些是幸存者偏差、哪些是差 trader 的前车之鉴**——这是开放决策，写不成固定步骤。
+
+```mermaid
+flowchart LR
+    RANK["排行榜快照<br/>谁在赚钱 / 谁在亏"] --> LA
+    GOOD["排名靠前者<br/>复盘笔记 · 学习笔记<br/>开仓论点与失效条件"] --> LA
+    BAD["排名靠后者<br/>亏在哪 · 踩了什么坑"] --> LA
+    SELF["自己的复盘笔记<br/>（学的东西要对得上自己的问题）"] --> LA
+    LA(("learning agent<br/>分析 · 取舍 · 归因")) --> NOTE["学习笔记<br/>→ ai_trader 新列"]
+    NOTE --> INJ["下一根 K 线注入 trader"]
+```
+
+设计约束（已定）：
+
+- **不是照抄**：要求分辨"他赚钱是因为方法对，还是因为运气/行情恰好配合"，抄不可复现的东西比不学更糟。
+- **好坏都看**：差 trader 的教训往往比好 trader 的经验更具体（爆仓路径是清晰的因果链）。
+- **产出独立成列**：与复盘笔记分开存，trader 侧拿到的是三份并列的注入，来源清晰。
+
+待定（**尚未决策**）：agent 之间开"会议"互相提问讨论——想法记在这里，但差模型拖累好模型是真实风险，且多轮对话成本是乘法增长。暂不做。
+
+### chat agent：研判工作台
 
 ```mermaid
 flowchart LR
     S((start))
-    R{"router 浅模型<br/>route 工具给出去向"}
+    R{"router · 浅模型<br/>调 route 工具给出结构化去向"}
     D["dispatch"]
-    M["market_agent<br/>行情/持仓/清算/脆弱度"]
-    Q["quant_agent<br/>vol预测/regime/战绩"]
-    N["news_agent<br/>BlockBeats 快讯(预取)"]
+    M["market_agent<br/>行情/持仓/清算/资金费"]
+    N["news_agent<br/>BlockBeats 快讯（无参预取）"]
     J["join"]
-    SUM["summarizer<br/>深模型 · 深研判工具 · 流式作答"]
+    SUM["summarizer 子图<br/>深模型 · 深研判工具 · 流式作答"]
     E((end))
     S --> R
     R -->|dispatch| D
     R -->|FINISH| SUM
     D --> M
-    D --> Q
     D --> N
     M --> J
-    Q --> J
     N --> J
-    J -.->|回环再判| R
+    J -.->|"回环：带着数据再判要不要补"| R
     SUM --> E
 ```
 
-`ChatWorkbenchController` SSE 流式（调度过程可视化）。横切：PostgresSaver 断点续聊、跨会话长期记忆（规则化写入 `workbench_memory`，不烧 LLM）、`run_deep_analysis` 贵操作 HITL 确认闸、调用限额 + 历史摘要压缩控预算。
+三个子 agent 各自是独立编译的 `ReactAgent` 子图（独立 threadId，中间消息不污染主会话 checkpoint）：**market_agent** 与 **news_agent** 并行取数，**summarizer** 汇总作答。
 
-实现要点：
+- **路由**：模型调 `route` 工具给出去向，结果只写 state、不进 messages；条件边只读这个结构化值，绝不解析消息文本。角色单一是关键——summarizer 一个字都不提"要不要再派发"，那正是早期无限循环的病根。
+- **并行**：`dispatch` → 各专家 → `join` 是同源多边（框架内部建 `ParallelNode`）；未被派发的节点直接返回空，不触发模型调用。同一专家一轮内只派一次，另设 3 轮派发上限。
+- **韧性**：自研 `ResilientChatService` 装配进 `ReactAgent.ChatService`，对图与节点透明。阻塞路径只切兜底模型（重试归模型层，两层叠乘只会放大尾延迟）；流式路径带退避重试，仅在尚未吐帧时重订阅。
+- **横切**：PostgresSaver 断点续聊、跨会话长期记忆（规则化写入，不烧 LLM）、`run_deep_analysis` 贵操作 HITL 确认闸、调用限额 + 历史摘要压缩控预算。
+- **新闻双源分工**：`news_agent` 出 BlockBeats 清单，summarizer 用联网搜索补充合并，独有条目带源标签——因为服务端搜索关不掉，与其硬压不如分工。
 
-- **路由**：模型调 `route` 工具（function calling）给出去向，结果只写 state、不进 messages；条件边只读这个结构化值。
-- **并行**：`dispatch` → 三专家 → `join` 是静态三条同源边（框架内部建 `ParallelNode`）；未被派发的专家节点直接返回空，不触发模型调用。
-- **收敛**：同一专家一轮提问内只派一次，另设 3 轮派发上限。
-- **韧性**：自研 `ResilientChatService` 装配进 `ReactAgent.ChatService`，对图与节点透明。阻塞路径只切兜底模型（重试归模型层），流式路径带退避重试 + 无缝切兜底，仅在尚未吐帧时重订阅。
-- **专家取数**：market / quant 首轮强制调工具（`tool_choice=required`），保证数据来自本系统而非模型内置搜索；news 走无参工具预取，快讯随消息直接喂入。
-- **新闻双源**：`news_agent` 出 BlockBeats 清单，summarizer 用联网搜索补充并合并，独有条目带源标签、同一事件合并标注。
+### 日线边界的时序
 
-同一工具层的第三个消费方：**MCP Server**（SSE 端点）——Claude Desktop 等任意 MCP 客户端可直连调用只读量化工具。
+一天一次的交接：**先交易，再全体复盘，最后全体学习**。复盘与学习期间 trader 停工——它们要读的是"已经定格的一天"，边写边读会读到半截数据。
+
+```mermaid
+sequenceDiagram
+    participant K as K线时钟
+    participant T as trader agents
+    participant R as reviewer workflows
+    participant L as learning agents
+    K->>T: 日线边界（UTC0 / 北京 08:00）
+    T->>T: 本轮交易决策照常跑完
+    Note over T,R: trader 停工窗口开始
+    T->>R: 全体 trader 逐个复盘
+    R->>R: 各自写复盘笔记
+    Note over R,L: 等所有复盘完成
+    R->>L: 全体学习开始
+    L->>L: 读同侪材料，写学习笔记
+    Note over T,L: 停工窗口结束
+    L-->>T: 下一根 K 线带着两份新笔记醒来
+```
+
+> 时序中 learning 阶段与"等全体复盘完成"的协调尚未实现；当前形态是每个 trader 在自己的日线边界上顺序跑「交易 → 复盘」，无全局屏障。
+
+同一工具层的第三个消费方：**MCP Server**（SSE 端点）——Claude Desktop / Cursor 等任意 MCP 客户端可直连调用只读市场工具；新闻抓取与深研判等贵操作刻意不对外。
+
+> **规划中的联动**：chat agent 将来可只读感知 trader（把 `TraderToolkit` 挂进 chat 图，读 memory 与 REVIEW 行即可）。接口已经就位——learning 只写笔记列与决策行，chat 只读同样两样东西，**不需要再改 trader**。
 
 ---
 
@@ -316,13 +401,16 @@ whatifibought/                        # Maven 多 module 聚合 reactor
 ├── wiib-feed/                        # ① 数据流上游进程（:8081）
 │   └── BinanceWsClient / PolymarketWsClient / KlineStreamCache / health(内部流健康+重试)
 │
-├── wiib-quant/                       # ② 量化 + 策略研究进程（:8082，只分析不碰模拟盘账本）
+├── wiib-quant/                       # ② agent harness + 策略研究进程（:8082，下单只走 sim 子账户）
 │   ├── agent/
-│   │   ├── quant/                    # 定时轨 StateGraph（快照 + 深研判）+ 节点/因子/信号
-│   │   ├── analysis/                 # 深研判持久化 / 记分卡 / vol + 叙事验证
-│   │   ├── research/                 # 回测 / 因子 / 预测 / 样本外评估（vol/regime/direction）
-│   │   ├── toolkit/                  # 统一工具层（定时轨 / 对话轨 / MCP 三处共用）
-│   │   ├── chat/                     # 对话轨：router + 三专家并行 + summarizer + checkpoint
+│   │   ├── trader/                   # trader agent：调度/唤醒回路/提示词/交易工具/护栏
+│   │   │                             # + 计划存取 + 审批 + 波动哨兵 + BYOK 模型工厂
+│   │   ├── learning/                 # reviewer workflow：素材组装（硬事实）+ 复盘回路
+│   │   ├── quant/                    # 行情特征与跨市场/期权/资金面取数节点
+│   │   ├── analysis/                 # 深研判（工作台触发）+ 叙事对账
+│   │   ├── research/                 # 回测 / 样本外评估 REST
+│   │   ├── toolkit/                  # 统一工具层（trader / chat / MCP 三处共用）
+│   │   ├── chat/                     # chat agent：router + 子 agent 并行 + summarizer + checkpoint
 │   │   ├── strategy/                 # FIBO/LIQFADE/SQZMOM/TURTLE + 回测引擎
 │   │   │                             # + 执行层(testnet|sim) + 账户监控
 │   │   ├── llm/                      # ResilientChatService / Responses API / 摘要 / 调用限额
