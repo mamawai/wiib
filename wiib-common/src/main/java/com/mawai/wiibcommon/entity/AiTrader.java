@@ -35,7 +35,7 @@ public class AiTrader {
     /** 交易币种白名单子集，逗号分隔，如 BTCUSDT,ETHUSDT */
     private String symbols;
 
-    /** 唤醒K线级别：5m/15m/1h/4h/1d */
+    /** 唤醒K线级别：5m/15m/1h/4h（1d 已下线） */
     private String intervalCode;
 
     /** 用户自定义提示词，追加在平台系统提示词之后；每次唤醒现读现拼，改完下一根K线生效 */
@@ -46,7 +46,7 @@ public class AiTrader {
     private Boolean useDefaultPrompt;
 
     /**
-     * 复盘笔记：将来由 learning agent 整理写入（限长文本），每次唤醒注入提示词。
+     * 复盘笔记：由 learning agent 每日复盘整理写入（限长文本），每次唤醒注入提示词。
      * trader 侧只读只注入——本字段即记忆学习的接口。ALWAYS：清空笔记=写 null
      */
     @TableField(updateStrategy = FieldStrategy.ALWAYS)

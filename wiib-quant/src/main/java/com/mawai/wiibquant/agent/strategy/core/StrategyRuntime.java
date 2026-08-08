@@ -142,8 +142,8 @@ public class StrategyRuntime {
     }
 
     private WindowedMarketView seedView(String symbol) {
-        // 策略篮子币(SOL/DOGE/XRP)不在 WATCH_SYMBOLS，watchdog 不回填它们——seed 前自补 SEED_BARS
-        // 窗口，否则冷启动空视图，SQZMOM(4H) 要实时攒几天才有信号且重启清零。
+        // feed 只落运行期的新 bar，冷启动/停机段的历史没人管（启动回补是异步的，seed 时未必跑完）——
+        // seed 前自补 SEED_BARS 窗口，否则冷启动空视图，SQZMOM(4H) 要实时攒几天才有信号且重启清零。
         // 用 backfillMissing：库已齐时零 REST（只查 open_time 找洞）；冷库/有洞才翻页。
         // 旧 backfill 无脑整窗打网，insertIgnore 虽幂等但 9 页×N币白耗配额（日志行数=0 即此）。
         long now = System.currentTimeMillis();

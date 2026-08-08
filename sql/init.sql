@@ -821,7 +821,7 @@ COMMENT ON COLUMN ai_trader.review_enabled IS '每日复盘开关：learning age
 COMMENT ON COLUMN ai_trader.alert_enabled IS '波动哨兵警报开关（仅1h/4h档生效）：5分钟振幅超过 币基准阈值×灵敏度系数 且持有该币仓位/挂单时临时唤醒';
 COMMENT ON COLUMN ai_trader.alert_threshold_mult IS '警报灵敏度系数≥1.0只能调高：生效阈值=每币基准(BTC0.6/ETH0.8/XRP0.8/SOL0.9/DOGE1.0%)×本系数，180天历史校准见VolatilitySentinel';
 COMMENT ON COLUMN ai_trader.use_default_prompt IS '是否使用平台系统提示词（默认true）；false=自定义提示词成为唯一指令来源（护栏仍硬校验）';
-COMMENT ON COLUMN ai_trader.memory IS '复盘笔记：将来由learning agent整理写入（限长文本），每次唤醒注入提示词——trader侧只读只注入，本列即记忆学习的接口';
+COMMENT ON COLUMN ai_trader.memory IS '复盘笔记：learning agent每日复盘整理写入（限长文本，≤2000字覆盖写），每次唤醒注入提示词——trader侧只读只注入，本列即记忆学习的接口';
 COMMENT ON COLUMN ai_trader.api_key_enc IS 'AES-GCM密文base64(iv+cipher)，密钥走环境变量WIIB_TRADER_KEY_SECRET';
 COMMENT ON COLUMN ai_trader.sim_user_id IS '当前局sim子账户userId，每局独立，重置开新账户';
 COMMENT ON COLUMN ai_trader.round_no IS '局数：爆仓/手动重置+1开新局，历史留档';
@@ -889,7 +889,7 @@ COMMENT ON COLUMN ai_trader_plan.invalidation_condition IS '失效条件：什�
 COMMENT ON COLUMN ai_trader_plan.stop_loss_price IS '原始止损快照；当前生效止损以sim仓位为准（可能已上移锁盈）';
 COMMENT ON COLUMN ai_trader_plan.opened_wake_time IS '开仓所在唤醒边界(ms)，回注时计算已持有时长';
 COMMENT ON COLUMN ai_trader_plan.revisions_json IS '修订历史追加式JSON [{time,type,change,reason}]：加仓覆盖/移动止盈/移动止损/补立——修改必须留痕带理由，计划本体价格字段永远是原始快照';
-COMMENT ON COLUMN ai_trader_plan.status IS 'LIVE=仓位/挂单存活 CLOSED=已了结归档。归档不删：论点→结局的配对数据是将来learning agent复盘的原料（结局按symbol/side/时间窗join sim已平仓位）';
+COMMENT ON COLUMN ai_trader_plan.status IS 'LIVE=仓位/挂单存活 CLOSED=已了结归档。归档不删：论点→结局的配对数据是learning agent每日复盘的原料（结局按symbol/side/时间窗join sim已平仓位）';
 COMMENT ON COLUMN ai_trader_plan.closed_wake_time IS '归档时刻(ms)：懒清理发现仓位已了结的唤醒边界/重置时刻，与opened_wake_time围出计划生命期';
 
 -- ============ ai_trader_request：加仓/减仓待主人确认（allow_self_add/reduce 关闭时才产生） ============

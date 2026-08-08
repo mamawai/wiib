@@ -44,7 +44,7 @@ public class TraderScheduler {
 
     private final Semaphore slots = new Semaphore(MAX_CONCURRENT_WAKEUPS);
     private final Set<Long> inFlight = ConcurrentHashMap.newKeySet();
-    /** 每 trader 最近已触发的边界时刻：多 symbol 同刻收盘/事件与兜底双路都靠它去重 */
+    /** 每 trader 最近已触发的边界时刻：多个 watch 币在同一刻收盘会各发一次事件，靠它去重 */
     private final Map<Long, Long> firedBoundary = new ConcurrentHashMap<>();
     /** 每 trader 最近一次唤醒起始时刻（例行+警报都记）：警报冷静期的基准；重启清零无所谓 */
     private final Map<Long, Long> lastWakeAt = new ConcurrentHashMap<>();
@@ -76,7 +76,7 @@ public class TraderScheduler {
     }
 
     private void fireTrader(AiTrader trader, long boundary) {
-        // 原子抢占本边界：多 symbol 事件/兜底并发到达时只有一个赢家，输家静默返回（不是SKIPPED）
+        // 原子抢占本边界：多 symbol 事件并发到达时只有一个赢家，输家静默返回（不是SKIPPED）
         boolean[] won = new boolean[1];
         firedBoundary.compute(trader.getId(), (id, prev) -> {
             if (prev == null || prev < boundary) {

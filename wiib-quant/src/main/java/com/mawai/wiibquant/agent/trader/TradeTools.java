@@ -108,8 +108,11 @@ public class TradeTools {
 
     @Tool(name = "open_position", description = """
             Open a futures position on your sim account. Hard rules (violations are rejected with a
-            reason you can fix): leverage 1-20, margin (=quantity*price/leverage) at most 50% of equity,
-            per-trade risk (=|entry-stopLoss|*quantity) at most your configured percent of equity,
+            reason you can fix, and the rejection tells you the exact allowed range): leverage must land
+            INSIDE the range your owner configured — it is a range, not a ceiling, so picking too low is
+            rejected too; when opening a NEW position the margin (=quantity*price/leverage) must land
+            inside the configured percent-of-equity band (adds are exempt); same-symbol leverage must
+            match any position or pending order already on that symbol;
             LIMIT price within 5% of mark, stopLossPrice REQUIRED and on the correct side.
             playType is your thesis label: BREAKOUT/PULLBACK/REVERSAL/TREND_FOLLOW/RANGE/NEWS/FUNDING/OTHER.
             signalsUsed: one sentence citing the concrete data fields your thesis rests on.
@@ -119,7 +122,7 @@ public class TradeTools {
                                @ToolParam(description = "LONG or SHORT") String side,
                                @ToolParam(description = "MARKET or LIMIT") String orderType,
                                @ToolParam(description = "Position size in coins, e.g. 0.01") double quantity,
-                               @ToolParam(description = "Leverage 1-20") int leverage,
+                               @ToolParam(description = "Leverage; must land inside the range your owner configured (see system prompt)") int leverage,
                                @ToolParam(description = "Limit price; required for LIMIT, ignored for MARKET", required = false) Double limitPrice,
                                @ToolParam(description = "Stop-loss price, REQUIRED") double stopLossPrice,
                                @ToolParam(description = "Take-profit price, optional", required = false) Double takeProfitPrice,

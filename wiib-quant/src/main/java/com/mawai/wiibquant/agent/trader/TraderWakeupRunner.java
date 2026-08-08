@@ -247,9 +247,9 @@ public class TraderWakeupRunner {
                 .toolsFromObject(indicatorToolkit)
                 .toolsFromObject(marketToolkit)
                 .toolsFromObject(newsToolkit)
-                // 首轮强制调工具：不看数据不许决策；弱模型不支持 tool_choice 会以 ERROR 落库并最终自动暂停
                 .addExecuteToolsHook(new ModelCallLimiter(MAX_MODEL_CALLS))
                 .addExecuteToolsHook(trace)
+                // 首轮强制调工具：不看数据不许决策；弱模型不支持 tool_choice 会以 ERROR 落库并最终自动暂停
                 .build(ResilientChatService.builder().model(model).forceFirstToolChoice("required").asFactory())
                 .compile();
 

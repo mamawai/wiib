@@ -21,7 +21,7 @@ const TOUR_STEPS: TourStep[] = [
     target: 'interval',
     title: '多久醒一次',
     body: '每根这个级别的 K 线收盘时，AI 被唤醒一次，看行情、做决定。\n'
-      + '两次唤醒之间它是"睡着"的，但止损止盈单会照常自动触发。\n\n'
+      + '两次唤醒之间它基本是睡着的（止损止盈单照常自动触发），只有极端波动才会被哨兵临时叫醒。\n\n'
       + '选 15m 起步。5m 意味着一天叫醒它 288 次——你的 API key 在烧钱，双边手续费也在磨损本金。',
   },
   {
@@ -129,9 +129,9 @@ export function MyTrader() {
           name: v.pub.name, symbols: v.pub.symbols, intervalCode: v.pub.intervalCode,
           customPrompt: v.customPrompt ?? '', apiProtocol: v.apiProtocol,
           baseUrl: v.baseUrl, model: v.pub.model, apiKey: '', useDefaultPrompt: v.useDefaultPrompt,
-          spec: v.spec ?? DEFAULT_SPEC,
-          alertEnabled: v.alertEnabled ?? true, alertThresholdMult: v.alertThresholdMult ?? 1,
-          reviewEnabled: v.reviewEnabled ?? true,
+          spec: v.spec,
+          alertEnabled: v.alertEnabled, alertThresholdMult: v.alertThresholdMult,
+          reviewEnabled: v.reviewEnabled,
         });
         loadRequests();
       }
@@ -565,7 +565,7 @@ export function MyTrader() {
         </button>
 
         <p className="text-[10px] leading-relaxed text-muted-foreground border-l-2 border-border pl-2.5">
-          规则：每根 K 线唤醒一次，你的 key 你的 token 钱；仓位规格你说了算（杠杆/保证金区间、仓位数、双开、
+          规则：每根 K 线唤醒一次（极端波动可能被临时叫醒，每日还有一次复盘），你的 key 你的 token 钱；仓位规格你说了算（杠杆/保证金区间、仓位数、双开、
           能否自主加减仓），AI 只能遵守不得评价，越界的调用当场被拒；强制止损+失效条件、止损只许收紧。
           开仓即立交易计划，每次唤醒原样喂回，退出只认止损/止盈/失效条件三条路。
           模拟盘不涉真实资金，竞技场决策日志与计划修订历史公开可见。别指望它赚钱——看它怎么想才是重点。

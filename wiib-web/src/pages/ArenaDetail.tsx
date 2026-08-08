@@ -335,7 +335,7 @@ export function ArenaDetail() {
             {detail?.positions.map(p => {
               const isLong = p.side === 'LONG';
               // 计划按 (symbol, side) 一对一挂在持仓下：sim 同向自动并仓，任意时刻至多一仓
-              const plan = detail.plans?.find(pl => pl.symbol === p.symbol && pl.side === p.side);
+              const plan = detail.plans.find(pl => pl.symbol === p.symbol && pl.side === p.side);
               return (
                 <div key={p.id} className="rounded-md border border-border bg-card p-2.5 text-[11px]">
                   <div className="flex items-center gap-2 flex-wrap">
@@ -383,7 +383,7 @@ export function ArenaDetail() {
             决策时间线 · 看它怎么想{viewingRound !== t?.roundNo && ` · R${viewingRound}`}
           </span>
           {decisions.length === 0 && (
-            <div className="py-10 text-center text-xs text-muted-foreground">还没有任何决策，启动后每根K线醒一次</div>
+            <div className="py-10 text-center text-xs text-muted-foreground">还没有任何决策，启动后每根K线醒一次，每日复盘另记一条</div>
           )}
           {/* 内层滚动只给桌面双栏用；手机上单栏堆叠，双层滚动是灾难，跟页面自然滚 */}
           <div className="space-y-2.5 lg:max-h-[70vh] lg:overflow-y-auto lg:pr-1">

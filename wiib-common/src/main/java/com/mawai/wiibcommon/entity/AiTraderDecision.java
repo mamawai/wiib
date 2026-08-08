@@ -46,7 +46,7 @@ public class AiTraderDecision {
     /** AI 最终回复全文——竞技场观赏核心 */
     private String reasoning;
 
-    /** 本次执行的交易动作列表 JSON：[{tool,args摘要,result/rejectReason}...]，含结构化论点标签 */
+    /** 本轮全部工具调用 JSON：[{tool,args,status,result/rejected/error}...]，交易动作带结构化论点标签 */
     private String actionsJson;
 
     private Integer toolCalls;

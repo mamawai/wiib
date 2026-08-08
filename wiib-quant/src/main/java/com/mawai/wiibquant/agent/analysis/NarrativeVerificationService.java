@@ -42,7 +42,7 @@ public class NarrativeVerificationService {
 
     private static final int BATCH_LIMIT = 200;
     private static final long HORIZON_MS = ForecastHorizon.H12.millis();
-    /** K线缺口自愈宽限：到期超过此时长仍无K线则放弃对账（watchdog 回补窗口远小于它）。 */
+    /** K线缺口自愈宽限：到期超过此时长仍无K线则放弃对账（feed 正常时 5m bar 收盘即落库，留洞只可能是断流）。 */
     private static final long KLINE_GIVE_UP_MS = 24 * 3_600_000L;
 
     /** 档界历史窗口与最小样本量：与原快照生产线 90 天 / 30天×288根 同口径。 */

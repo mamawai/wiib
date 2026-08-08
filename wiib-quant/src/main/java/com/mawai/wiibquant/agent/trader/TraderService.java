@@ -403,10 +403,9 @@ public class TraderService {
         t.setLeverageMax(req.leverageMax() == null ? TraderRiskConfig.DEF_LEV_MAX : req.leverageMax());
         t.setMarginPctMin(req.marginPctMin() == null ? TraderRiskConfig.DEF_MARGIN_MIN : req.marginPctMin());
         t.setMarginPctMax(req.marginPctMax() == null ? TraderRiskConfig.DEF_MARGIN_MAX : req.marginPctMax());
-        boolean multi = !Boolean.FALSE.equals(req.allowMultiPosition());
-        t.setAllowMultiPosition(multi);
-        // 单仓模式下双开无从谈起，落库直接归位 false，免得开关状态自相矛盾
-        t.setAllowHedge(multi && Boolean.TRUE.equals(req.allowHedge()));
+        t.setAllowMultiPosition(!Boolean.FALSE.equals(req.allowMultiPosition()));
+        // 单仓+双开这个自相矛盾的组合，validateSpec 已经在入口拒掉了，这里不必再判一次
+        t.setAllowHedge(Boolean.TRUE.equals(req.allowHedge()));
         t.setAllowSelfAdd(!Boolean.FALSE.equals(req.allowSelfAdd()));
         t.setAllowSelfReduce(Boolean.TRUE.equals(req.allowSelfReduce()));
         t.setAlertEnabled(!Boolean.FALSE.equals(req.alertEnabled()));
