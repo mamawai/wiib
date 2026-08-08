@@ -93,20 +93,18 @@ public class TraderRequestService {
         return t == null ? List.of() : pendingOf(t.getId(), t.getRoundNo());
     }
 
-    /** 主人拒绝：不执行，留档。 */
+    /** 主人拒绝：不执行，留档。同样走抢状态——否则"先同意已下单、再点拒绝"会把状态改花。 */
     public String reject(long userId, long requestId) {
-        AiTraderRequest r = ownedPending(userId, requestId);
-        if (r == null) {
+        if (ownedPending(userId, requestId) == null) {
             return "请求不存在或已处理";
         }
-        r.setStatus(AiTraderRequest.STATUS_REJECTED);
-        r.setDecidedAt(LocalDateTime.now());
-        requestMapper.updateById(r);
-        return null;
+        return claim(requestId, AiTraderRequest.STATUS_REJECTED) ? null : "请求不存在或已处理";
     }
 
     /**
      * 主人同意：市价即时执行。
+     * 先抢状态再执行：双击"同意"或两个标签页同点时，read-then-execute 两边都能读到 PENDING
+     * 各下一笔市价单把仓位翻倍——而加仓路径本就豁免保证金区间校验，直接越过主人配的上限。
      * 执行前重查仓位——从模型提交到主人点同意之间，仓位可能已被止损带走，这时不能静默吞掉。
      */
     public String approve(long userId, long requestId) {
@@ -118,15 +116,16 @@ public class TraderRequestService {
         if (t == null || t.getSimUserId() == null) {
             return "trader 账户不可用";
         }
-        r.setStatus(AiTraderRequest.STATUS_APPROVED);
-        r.setDecidedAt(LocalDateTime.now());
+        // 抢不到就是别人已经处理过了：直接走人，一笔单都不许下
+        if (!claim(requestId, AiTraderRequest.STATUS_APPROVED)) {
+            return "请求不存在或已处理";
+        }
         try {
             FuturesPositionDTO pos = simTradeClient.getAllPositions(t.getSimUserId()).stream()
                     .filter(p -> p.getId() != null && p.getId().equals(r.getPositionId()))
                     .findFirst().orElse(null);
             if (pos == null) {
-                r.setExecutedResult("仓位已不存在（多半被止损/止盈带走），未执行");
-                requestMapper.updateById(r);
+                writeResult(r, "仓位已不存在（多半被止损/止盈带走），未执行");
                 return null;
             }
             boolean isAdd = AiTraderRequest.TYPE_ADD.equals(r.getType());
@@ -134,16 +133,32 @@ public class TraderRequestService {
             // 这条回执会原样注入下一轮提示词当事实，虚报数字模型就按错的仓位算后面一切
             BigDecimal executedQty = isAdd ? r.getQuantity() : r.getQuantity().min(pos.getQuantity());
             FuturesOrderResponse resp = isAdd ? doAdd(t, r, pos) : doReduce(r, t, executedQty);
-            r.setExecutedResult("已成交 " + executedQty.stripTrailingZeros().toPlainString()
+            writeResult(r, "已成交 " + executedQty.stripTrailingZeros().toPlainString()
                     + " @订单" + resp.getOrderId());
             revisePlan(t, r, pos);
         } catch (Exception e) {
             // 余额不足/步长不合规等：写进结果给主人看，不吞
-            r.setExecutedResult("执行失败：" + e.getMessage());
+            writeResult(r, "执行失败：" + e.getMessage());
             log.warn("[TraderRequest] 批准执行失败 requestId={} msg={}", requestId, e.getMessage());
         }
-        requestMapper.updateById(r);
         return null;
+    }
+
+    /** 抢状态：PENDING→目标状态的条件更新，只有影响到行的那一次返回 true，并发的另一次落空。 */
+    private boolean claim(long requestId, String status) {
+        return requestMapper.update(null, new LambdaUpdateWrapper<AiTraderRequest>()
+                .eq(AiTraderRequest::getId, requestId)
+                .eq(AiTraderRequest::getStatus, AiTraderRequest.STATUS_PENDING)
+                .set(AiTraderRequest::getStatus, status)
+                .set(AiTraderRequest::getDecidedAt, LocalDateTime.now())) > 0;
+    }
+
+    /** 执行结果单列回写：状态已由 claim 定死，整行 updateById 会把并发改动（如 notified）一起盖掉。 */
+    private void writeResult(AiTraderRequest r, String result) {
+        r.setExecutedResult(result);
+        requestMapper.update(null, new LambdaUpdateWrapper<AiTraderRequest>()
+                .eq(AiTraderRequest::getId, r.getId())
+                .set(AiTraderRequest::getExecutedResult, result));
     }
 
     /**

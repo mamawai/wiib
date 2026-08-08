@@ -72,10 +72,14 @@ public class TradeTools {
         return actions;
     }
 
+    // 描述只客观说"返回什么"，不下行为指令：系统提示词明说账户状态每轮已注入、
+    // 让把调用预算花在行情求证上，这里再写 ALWAYS check 就是两条强指令打架
     @Tool(name = "get_account", description = """
             Get your full account state: available balance, open positions (with id, side, quantity,
             entry price, leverage, unrealized PnL, liquidation price, current stop-loss/take-profit)
-            and pending limit orders. ALWAYS check this before trading decisions.""")
+            and pending limit orders. This same state is already injected into your prompt every
+            round, so you normally do not need to call this; use it only to re-read positionIds or
+            to confirm the account after your own trades within this round.""")
     public String getAccount() {
         try {
             JSONObject out = new JSONObject();
@@ -124,7 +128,9 @@ public class TradeTools {
                                @ToolParam(description = "Position size in coins, e.g. 0.01") double quantity,
                                @ToolParam(description = "Leverage; must land inside the range your owner configured (see system prompt)") int leverage,
                                @ToolParam(description = "Limit price; required for LIMIT, ignored for MARKET", required = false) Double limitPrice,
-                               @ToolParam(description = "Stop-loss price, REQUIRED") double stopLossPrice,
+                               // 必须是包装类型：primitive 漏传会被绑成 0.0，护栏的 null 检查就成了摆设，
+                               // LONG 的方向校验「0 >= 入场价」为假直接放行——裸多单就是这么开出去的
+                               @ToolParam(description = "Stop-loss price, REQUIRED") Double stopLossPrice,
                                @ToolParam(description = "Take-profit price, optional", required = false) Double takeProfitPrice,
                                @ToolParam(description = "Thesis label: BREAKOUT/PULLBACK/REVERSAL/TREND_FOLLOW/RANGE/NEWS/FUNDING/OTHER") String playType,
                                @ToolParam(description = "One sentence citing concrete data behind this trade") String signalsUsed,
@@ -132,7 +138,7 @@ public class TradeTools {
         TradeGuard.OpenReq req = new TradeGuard.OpenReq(symbol, side, orderType,
                 BigDecimal.valueOf(quantity), leverage,
                 limitPrice == null ? null : BigDecimal.valueOf(limitPrice),
-                BigDecimal.valueOf(stopLossPrice),
+                stopLossPrice == null ? null : BigDecimal.valueOf(stopLossPrice),
                 takeProfitPrice == null ? null : BigDecimal.valueOf(takeProfitPrice),
                 playType, signalsUsed, invalidationCondition);
         JSONObject argSummary = openArgs(req);
@@ -169,7 +175,7 @@ public class TradeTools {
             ask.setRequestPrice(mark);
             ask.setReason(req.signalsUsed());
             ask.setWakeTime(ctx.boundaryTime());
-            return ok("open_position", argSummary, requestService.submit(ask));
+            return pending("open_position", argSummary, requestService.submit(ask));
         }
         try {
             FuturesOpenRequest openReq = new FuturesOpenRequest();
@@ -250,7 +256,7 @@ public class TradeTools {
                 ask.setRequestPrice(markPrice.apply(pos.getSymbol()));
                 ask.setReason(reason);
                 ask.setWakeTime(ctx.boundaryTime());
-                return ok("close_position", args, requestService.submit(ask));
+                return pending("close_position", args, requestService.submit(ask));
             }
             FuturesCloseRequest req = new FuturesCloseRequest();
             req.setPositionId(positionId);
@@ -287,9 +293,20 @@ public class TradeTools {
             if (reason == null || reason.isBlank()) {
                 return rejected("set_stop_loss", args, "必须给reason：说明为什么现在移动止损（会进公开修订历史）");
             }
-            // 止损只许收紧：放宽止损=放大风险=移动球门柱；想给仓位更多空间说明论点已动摇，该查失效条件而不是松止损
             boolean isLong = "LONG".equals(pos.getSide());
             BigDecimal newStop = BigDecimal.valueOf(stopLossPrice);
+            // 先校验站在现价哪一侧：止损挂到现价另一侧，下一tick就是市价平仓——比放宽止损更恶劣的
+            // 恐慌平仓马甲。这条不能挂在"有基线"的前提下：仓位从没挂过止损时基线为null，
+            // 只许收紧整条判定被短路，任意价格都能放行
+            BigDecimal mark = markPrice.apply(pos.getSymbol());
+            if (isLong ? newStop.compareTo(mark) >= 0 : newStop.compareTo(mark) <= 0) {
+                return rejected("set_stop_loss", args, "止损价站错边：当前现价"
+                        + mark.stripTrailingZeros().toPlainString() + "，"
+                        + (isLong ? "LONG止损必须低于现价" : "SHORT止损必须高于现价")
+                        + "，你给的" + newStop.stripTrailingZeros().toPlainString()
+                        + "会立刻触发＝变相市价平仓。真想离场就检查失效条件后用 close_position 说明理由");
+            }
+            // 止损只许收紧：放宽止损=放大风险=移动球门柱；想给仓位更多空间说明论点已动摇，该查失效条件而不是松止损
             // 基准取最紧那档：sim 是整组替换，比最紧档松的新价会让原有某档变松，一律拒
             BigDecimal tightest = TradeGuard.extremePrice(
                     pos.getStopLosses() == null ? List.of()
@@ -338,9 +355,19 @@ public class TradeTools {
             if (reason == null || reason.isBlank()) {
                 return rejected("set_take_profit", args, "必须给reason：说明为什么现在移动目标位（会进公开修订历史）");
             }
-            // 止盈只许远离入场：把目标降到现价上方一点点秒触发＝"止盈带走"马甲下的恐慌平仓
             boolean isLong = "LONG".equals(pos.getSide());
             BigDecimal newTarget = BigDecimal.valueOf(takeProfitPrice);
+            // 同 set_stop_loss：目标位站到现价另一侧就是秒触发的"止盈带走"马甲，
+            // 且原仓没挂过止盈时基线为null，只许远离那条判定同样管不住
+            BigDecimal mark = markPrice.apply(pos.getSymbol());
+            if (isLong ? newTarget.compareTo(mark) <= 0 : newTarget.compareTo(mark) >= 0) {
+                return rejected("set_take_profit", args, "止盈价站错边：当前现价"
+                        + mark.stripTrailingZeros().toPlainString() + "，"
+                        + (isLong ? "LONG止盈必须高于现价" : "SHORT止盈必须低于现价")
+                        + "，你给的" + newTarget.stripTrailingZeros().toPlainString()
+                        + "会立刻触发＝变相市价平仓。想提前离场请检查失效条件并用 close_position 说明理由");
+            }
+            // 止盈只许远离入场：把目标降到现价上方一点点秒触发＝"止盈带走"马甲下的恐慌平仓
             BigDecimal farthest = TradeGuard.extremePrice(
                     pos.getTakeProfits() == null ? List.of()
                             : pos.getTakeProfits().stream().map(FuturesTakeProfit::getPrice).toList(), isLong);
@@ -481,6 +508,15 @@ public class TradeTools {
     private String rejected(String tool, JSONObject args, String reason) {
         action(tool, args).fluentPut("rejected", reason);
         return "REJECTED: " + reason;
+    }
+
+    /**
+     * 转成待主人确认的请求：没有成交。轨迹状态必须与 ok 区分开——
+     * 记成 ok 模型会当已成交继续推进（接着给并不存在的新仓挂止损），账面与实际脱节。
+     */
+    private String pending(String tool, JSONObject args, String receipt) {
+        action(tool, args).fluentPut("status", "pending").fluentPut("result", receipt);
+        return "PENDING（本次调用未成交，已转为待主人确认的请求，不要按已成交继续推进）: " + receipt;
     }
 
     @Tool(name = "cancel_order", description = "Cancel a pending limit order by orderId (from get_account pendingOrders).")

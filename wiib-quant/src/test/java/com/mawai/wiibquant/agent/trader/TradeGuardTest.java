@@ -33,6 +33,12 @@ class TradeGuardTest {
                 null, new BigDecimal("95000"), null, "BREAKOUT", "突破前高", "1h收盘跌回98000下方");
     }
 
+    /** 空单基准：止损在入场价上方 */
+    private TradeGuard.OpenReq baseShort() {
+        return new TradeGuard.OpenReq("BTCUSDT", "SHORT", "MARKET", new BigDecimal("0.1"), 10,
+                null, new BigDecimal("105000"), null, "BREAKOUT", "跌破前低", "1h收盘站回102000上方");
+    }
+
     @Test
     void validOpenPasses() {
         assertThat(validateOpen(base(), EQUITY, MARK, WL, cfg(), List.of())).isNull();
@@ -195,5 +201,38 @@ class TradeGuardTest {
     void stopLossOnWrongSideRejected() {
         assertThat(validateOpen(base().withStopLossPrice(new BigDecimal("105000")),
                 EQUITY, MARK, WL, cfg(), List.of())).contains("止损价方向错误");
+    }
+
+    // ---------- 止损价本身的合法性 ----------
+
+    /**
+     * 模型漏传 stopLossPrice 时工具层曾把它绑成 0（primitive 默认值），LONG 的方向校验
+     * 「0 >= 入场价」为假直接放行——开出止损价为 0（永不触发）的裸多单。零/负数必须先一票拒。
+     */
+    @Test
+    void nonPositiveStopLossRejectedForLong() {
+        String zero = validateOpen(base().withStopLossPrice(BigDecimal.ZERO),
+                EQUITY, MARK, WL, cfg(), List.of());
+        // 拒因要能让模型自行修正：说清必须为正数，并给出合法区间
+        assertThat(zero).contains("止损价必须为正数").contains("100000");
+        assertThat(validateOpen(base().withStopLossPrice(new BigDecimal("-1")),
+                EQUITY, MARK, WL, cfg(), List.of())).contains("止损价必须为正数");
+    }
+
+    /** SHORT 侥幸被方向校验挡下，但拒因说"方向错误"会误导模型去调价，实际是参数漏传 */
+    @Test
+    void nonPositiveStopLossRejectedForShort() {
+        assertThat(validateOpen(baseShort().withStopLossPrice(BigDecimal.ZERO),
+                EQUITY, MARK, WL, cfg(), List.of()))
+                .contains("止损价必须为正数").contains("100000");
+    }
+
+    /** 缺失止损（工具层 Double 为 null）：修好 primitive 后这条路径才真正可达 */
+    @Test
+    void missingStopLossRejected() {
+        assertThat(validateOpen(base().withStopLossPrice(null), EQUITY, MARK, WL, cfg(), List.of()))
+                .contains("必须设置止损价");
+        assertThat(validateOpen(baseShort().withStopLossPrice(null), EQUITY, MARK, WL, cfg(), List.of()))
+                .contains("必须设置止损价");
     }
 }

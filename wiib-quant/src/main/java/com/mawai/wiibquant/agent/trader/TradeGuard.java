@@ -147,6 +147,15 @@ public final class TradeGuard {
         if (req.stopLossPrice() == null) {
             return "必须设置止损价（每笔交易先想好在哪认错）";
         }
+        // 零/负必须挡在方向校验之前：LONG 的「0 >= 入场价」为假会直接放行，
+        // 开出止损价为0（永不触发）的裸单——真实成因多半是重试时漏传了这个参数
+        if (req.stopLossPrice().signum() <= 0) {
+            return "止损价必须为正数，你给了" + req.stopLossPrice().stripTrailingZeros().toPlainString()
+                    + "（多半是重试时漏传了stopLossPrice）：入场参考"
+                    + entryRef.stripTrailingZeros().toPlainString() + "，"
+                    + (isLong ? "LONG止损须落在0与入场价之间，例如 " + pctOf(entryRef, "0.98")
+                    : "SHORT止损须高于入场价，例如 " + pctOf(entryRef, "1.02"));
+        }
         if (isLong ? req.stopLossPrice().compareTo(entryRef) >= 0
                 : req.stopLossPrice().compareTo(entryRef) <= 0) {
             return "止损价方向错误：" + (isLong ? "LONG止损须低于入场价" : "SHORT止损须高于入场价")
@@ -158,6 +167,12 @@ public final class TradeGuard {
             return "止盈价方向错误：" + (isLong ? "LONG止盈须高于入场价" : "SHORT止盈须低于入场价");
         }
         return null;
+    }
+
+    /** 拒因里给个可直接照抄的止损建议价（入场价的某个比例）。 */
+    private static String pctOf(BigDecimal entryRef, String factor) {
+        return entryRef.multiply(new BigDecimal(factor))
+                .setScale(2, RoundingMode.HALF_UP).stripTrailingZeros().toPlainString();
     }
 
     /**

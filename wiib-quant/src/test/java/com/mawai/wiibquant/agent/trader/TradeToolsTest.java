@@ -111,6 +111,77 @@ class TradeToolsTest {
         assertThat(cap.getValue().getStopLossPrice()).isEqualByComparingTo("95000");
     }
 
+    // ---------- 无基线时的方向校验：只许收紧管不住"第一次挂" ----------
+
+    /**
+     * 仓位原本没挂止损时 tightest 为 null，"只许收紧"整条判定被短路，任意价格放行。
+     * 把 LONG 止损设在现价之上，下一 tick 立刻市价平仓——正是工具描述里明令禁止的
+     * "panic exit in disguise"。方向校验必须独立于基线存在与否。
+     */
+    @Test
+    void stopLossAboveMarkRejectedForLongWithoutBaseline() {
+        FuturesPositionDTO p = longPosition();
+        p.setStopLosses(List.of());
+        when(simTradeClient.getAllPositions(99L)).thenReturn(List.of(p));
+
+        String r = tools.setStopLoss(5L, 105000, "先挂上面看看");
+
+        assertThat(r).startsWith("REJECTED").contains("现价");
+        verify(simTradeClient, never()).setStopLoss(anyLong(), any());
+    }
+
+    /** 有基线也拦：105000 比现有止损 95000 更"紧"，但在现价之上照样是秒触发的伪装平仓 */
+    @Test
+    void stopLossAboveMarkRejectedEvenWhenTighterThanBaseline() {
+        when(simTradeClient.getAllPositions(99L)).thenReturn(List.of(longPosition()));
+
+        String r = tools.setStopLoss(5L, 105000, "收紧一点");
+
+        assertThat(r).startsWith("REJECTED").contains("现价");
+        verify(simTradeClient, never()).setStopLoss(anyLong(), any());
+    }
+
+    /** 空单反过来：止损挂到现价之下＝立刻市价买回平仓 */
+    @Test
+    void stopLossBelowMarkRejectedForShortWithoutBaseline() {
+        FuturesPositionDTO p = longPosition();
+        p.setSide("SHORT");
+        p.setStopLosses(List.of());
+        when(simTradeClient.getAllPositions(99L)).thenReturn(List.of(p));
+
+        String r = tools.setStopLoss(5L, 95000, "锁一点利润");
+
+        assertThat(r).startsWith("REJECTED").contains("现价");
+        verify(simTradeClient, never()).setStopLoss(anyLong(), any());
+    }
+
+    /** 方向对的首次补挂必须放行——给裸奔仓位补保护单是该鼓励的动作 */
+    @Test
+    void firstStopLossOnUnprotectedPositionPasses() {
+        FuturesPositionDTO p = longPosition();
+        p.setStopLosses(List.of());
+        when(simTradeClient.getAllPositions(99L)).thenReturn(List.of(p));
+        when(planMapper.selectOne(any())).thenReturn(existingPlan());
+
+        String r = tools.setStopLoss(5L, 97000, "裸奔仓位补挂保护");
+
+        assertThat(r).contains("ok");
+        verify(simTradeClient).setStopLoss(eq(99L), any());
+    }
+
+    /** 止盈同理：无基线时把 LONG 目标挂到现价下方＝"止盈带走"马甲下的秒平仓 */
+    @Test
+    void takeProfitBelowMarkRejectedForLongWithoutBaseline() {
+        FuturesPositionDTO p = longPosition();
+        p.setTakeProfits(List.of());
+        when(simTradeClient.getAllPositions(99L)).thenReturn(List.of(p));
+
+        String r = tools.setTakeProfit(5L, 95000, "落袋为安");
+
+        assertThat(r).startsWith("REJECTED").contains("现价");
+        verify(simTradeClient, never()).setTakeProfit(anyLong(), any());
+    }
+
     /** 多单下调止盈=把目标降到现价上方一点点秒触发="止盈带走"马甲下的恐慌平仓，拒 */
     @Test
     void takeProfitTowardEntryRejectedForLong() {
@@ -177,6 +248,21 @@ class TradeToolsTest {
                 .isEqualByComparingTo("0.02");
     }
 
+    /**
+     * 工具描述不许和系统提示词对着干：提示词写的是"账户情况已经给足，无需 get_account 复查，
+     * 把工具调用预算花在行情求证上"，描述里再写 ALWAYS check 就是两条强指令打架——
+     * 模型要么白烧保险丝预算复查账户，要么开始整体折价工具描述的权威性。
+     */
+    @Test
+    void getAccountDescriptionDoesNotContradictSystemPrompt() throws Exception {
+        String desc = TradeTools.class.getMethod("getAccount")
+                .getAnnotation(org.springframework.ai.tool.annotation.Tool.class).description();
+
+        assertThat(desc).doesNotContain("ALWAYS");
+        // 只客观描述返回什么 + 点明账户状态每轮已注入，通常不必再调
+        assertThat(desc).contains("already");
+    }
+
     /** 已有计划的仓不许 write_plan——否则它就是改论点的后门 */
     @Test
     void writePlanRejectedWhenPlanExists() {
@@ -224,14 +310,32 @@ class TradeToolsTest {
                                 true, true, true, true)));
 
         String r = strict.openPosition(null, "SHORT", "MARKET", 0.64, 20,
-                null, 64980, 64640.0, "BREAKOUT", "突破", "收回箱体");
+                null, 64980.0, 64640.0, "BREAKOUT", "突破", "收回箱体");
 
         assertThat(r).startsWith("REJECTED").contains("白名单").contains("完整给出全部参数");
     }
 
-    /** 审批分流的回执是纯文本非 JSON：必须原样返回给模型，动作轨迹只记一条 ok（不许被当异常转成 ERROR） */
+    /**
+     * 真跑事故复现：模型重试时丢参数。stopLossPrice 曾是 primitive double，漏传绑成 0.0，
+     * 护栏的 null 检查永不触发、LONG 的方向校验「0 >= 入场价」为假——直接放行一张
+     * 止损价为0（永不触发）的裸多单，工具还回执成功。必须拒。
+     */
     @Test
-    void requestReceiptReturnedVerbatimToModel() {
+    void missingStopLossRejectedInsteadOfOpeningNakedLong() {
+        String r = tools.openPosition("BTCUSDT", "LONG", "MARKET", 0.01, 10,
+                null, null, 110000.0, "BREAKOUT", "突破前高", "1h收盘跌回箱体内");
+
+        assertThat(r).startsWith("REJECTED").contains("止损");
+        verify(simTradeClient, never()).openPosition(anyLong(), any());
+    }
+
+    /**
+     * 转请求不是成交：回执原样带给模型（纯文本非 JSON，不许被当异常转成 ERROR），
+     * 但开头必须先说清"未成交"，动作轨迹也得记成 pending 而不是 ok——
+     * 记成 ok 模型会当已平仓继续推进（例如给并不存在的新仓挂止损），账面与实际脱节。
+     */
+    @Test
+    void reduceTurnedIntoRequestIsMarkedPendingNotOk() {
         when(simTradeClient.getAllPositions(99L)).thenReturn(List.of(longPosition()));
         when(requestService.submit(any()))
                 .thenReturn("减仓请求已提交给主人确认，本轮不会成交。你的止损单仍在生效，风险有保护");
@@ -244,9 +348,32 @@ class TradeToolsTest {
 
         String r = noSelfReduce.closePosition(5L, 0.01, "失效条件触发");
 
-        assertThat(r).contains("已提交给主人确认");
+        assertThat(r).startsWith("PENDING").contains("未成交").contains("已提交给主人确认");
         assertThat(noSelfReduce.actions()).hasSize(1);
-        assertThat(noSelfReduce.actions().get(0).getString("status")).isEqualTo("ok");
+        assertThat(noSelfReduce.actions().get(0).getString("status")).isEqualTo("pending");
+        verify(simTradeClient, never()).closePosition(anyLong(), any());
+    }
+
+    /** 加仓转请求同理：没成交就不许回 ok */
+    @Test
+    void addTurnedIntoRequestIsMarkedPendingNotOk() {
+        when(simTradeClient.getAllPositions(99L)).thenReturn(List.of(longPosition()));
+        when(requestService.submit(any()))
+                .thenReturn("加仓请求已提交给主人确认，本轮不会成交。继续做你该做的其余判断，结果下一轮揭晓");
+        TradeTools noSelfAdd = new TradeTools(simTradeClient, 99L, Set.of("BTCUSDT"),
+                new BigDecimal("10000"), sym -> new BigDecimal("100000"),
+                new TraderPlanStore(planMapper), requestService,
+                new TradeTools.WakeCtx(7L, 1, 1785171600000L,
+                        new TraderRiskConfig(1, 20, new BigDecimal("1"), new BigDecimal("50"),
+                                true, true, false, true)));
+
+        String r = noSelfAdd.openPosition("BTCUSDT", "LONG", "MARKET", 0.01, 10,
+                null, 95000.0, null, "PULLBACK", "回踩确认支撑", "1h收盘跌破97000");
+
+        assertThat(r).startsWith("PENDING").contains("未成交");
+        assertThat(noSelfAdd.actions()).hasSize(1);
+        assertThat(noSelfAdd.actions().get(0).getString("status")).isEqualTo("pending");
+        verify(simTradeClient, never()).openPosition(anyLong(), any());
     }
 
     /** 加仓覆盖：旧论点进修订历史（含理由），持有时长按最初开仓算 */

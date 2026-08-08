@@ -11,6 +11,10 @@ import com.mawai.wiibcommon.entity.FuturesTakeProfit;
 import com.mawai.wiibquant.agent.strategy.execution.SimTradeClient;
 import com.mawai.wiibquant.mapper.AiTraderMapper;
 import com.mawai.wiibquant.mapper.AiTraderRequestMapper;
+import com.baomidou.mybatisplus.core.MybatisConfiguration;
+import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
+import org.apache.ibatis.builder.MapperBuilderAssistant;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
@@ -21,6 +25,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -30,6 +36,12 @@ import static org.mockito.Mockito.when;
  * 所以批准的加仓若不自带止损，仓位翻倍而覆盖量原地不动，一半仓位裸奔。
  */
 class TraderRequestServiceTest {
+
+    /** 状态回写走 LambdaUpdateWrapper，字段名解析要靠这份缓存（Spring 启动时才自动建） */
+    @BeforeAll
+    static void initTableInfoCache() {
+        TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""), AiTraderRequest.class);
+    }
 
     private final AiTraderRequestMapper requestMapper = mock(AiTraderRequestMapper.class);
     private final AiTraderMapper traderMapper = mock(AiTraderMapper.class);
@@ -83,6 +95,8 @@ class TraderRequestServiceTest {
         when(requestMapper.selectById(11L)).thenReturn(r);
         when(traderMapper.selectById(7L)).thenReturn(trader());
         when(simTradeClient.getAllPositions(99L)).thenReturn(List.of(position()));
+        // PENDING→APPROVED 的条件更新抢到了这一行（affected=1），后续才允许真下单
+        when(requestMapper.update(any(), any())).thenReturn(1);
     }
 
     /**
@@ -121,6 +135,7 @@ class TraderRequestServiceTest {
         when(traderMapper.selectById(7L)).thenReturn(trader());
         when(simTradeClient.getAllPositions(99L)).thenReturn(List.of(p));
         when(simTradeClient.openPosition(anyLong(), any())).thenReturn(new FuturesOrderResponse());
+        when(requestMapper.update(any(), any())).thenReturn(1);
 
         service.approve(3L, 11L);
 
@@ -158,10 +173,49 @@ class TraderRequestServiceTest {
         when(requestMapper.selectById(11L)).thenReturn(r);
         when(traderMapper.selectById(7L)).thenReturn(trader());
         when(simTradeClient.getAllPositions(99L)).thenReturn(List.of());
+        when(requestMapper.update(any(), any())).thenReturn(1);
 
         service.approve(3L, 11L);
 
         assertThat(r.getExecutedResult()).contains("已不存在");
-        verify(requestMapper).updateById(r);
+        // 状态回写一律列级更新：整行 updateById 会把并发改动（如 notified）一起盖掉
+        verify(requestMapper, never()).updateById(any(AiTraderRequest.class));
+    }
+
+    /**
+     * 双击"同意"或两个标签页同时点：read-then-execute 无 CAS 时两次都能通过校验各下一笔市价单，
+     * 仓位翻倍——而加仓路径本就豁免保证金区间校验，直接越过主人配的 marginPctMax。
+     * 只有把 PENDING 抢成 APPROVED 的那一次才许执行，抢不到直接返回不下单。
+     */
+    @Test
+    void concurrentApproveExecutesOrderOnlyOnce() {
+        // 每次 selectById 给一份全新的 PENDING 行——真实并发下两个请求各读各的，
+        // 都看到 PENDING（复用同一个实例会被上一次的内存改动掩盖掉这个竞态）
+        when(requestMapper.selectById(11L)).thenAnswer(inv -> request(AiTraderRequest.TYPE_ADD, "0.01"));
+        when(traderMapper.selectById(7L)).thenReturn(trader());
+        when(simTradeClient.getAllPositions(99L)).thenReturn(List.of(position()));
+        when(simTradeClient.openPosition(anyLong(), any())).thenReturn(new FuturesOrderResponse());
+        // 只有第一次条件更新抢得到行；之后（含执行结果回写、第二次点同意）都是 0
+        when(requestMapper.update(any(), any())).thenReturn(1, 0);
+
+        service.approve(3L, 11L);
+        String second = service.approve(3L, 11L);
+
+        verify(simTradeClient, times(1)).openPosition(anyLong(), any());
+        assertThat(second).contains("已处理");
+    }
+
+    /** 抢不到状态时连仓位都不该查——早返回，别把已被别人处理的请求又走一遍执行前置 */
+    @Test
+    void losingApproveRaceDoesNotTouchSim() {
+        AiTraderRequest r = request(AiTraderRequest.TYPE_REDUCE, "0.01");
+        when(requestMapper.selectById(11L)).thenReturn(r);
+        when(traderMapper.selectById(7L)).thenReturn(trader());
+        when(requestMapper.update(any(), any())).thenReturn(0);
+
+        assertThat(service.approve(3L, 11L)).contains("已处理");
+
+        verify(simTradeClient, never()).closePosition(anyLong(), any());
+        verify(simTradeClient, never()).getAllPositions(anyLong());
     }
 }
