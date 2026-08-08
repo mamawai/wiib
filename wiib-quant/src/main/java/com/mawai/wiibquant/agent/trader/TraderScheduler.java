@@ -2,6 +2,7 @@ package com.mawai.wiibquant.agent.trader;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.mawai.wiibcommon.entity.AiTrader;
+import com.mawai.wiibquant.agent.learning.ReviewRunner;
 import com.mawai.wiibquant.agent.quant.domain.KlineClosedEvent;
 import com.mawai.wiibquant.mapper.AiTraderMapper;
 import lombok.RequiredArgsConstructor;
@@ -36,6 +37,7 @@ public class TraderScheduler {
 
     private final AiTraderMapper traderMapper;
     private final TraderWakeupRunner runner;
+    private final ReviewRunner reviewRunner;
 
     /** 警报冷静期：距该 trader 上一次任何唤醒（例行/警报）不足 5 分钟不再警报 */
     static final long ALERT_COOLDOWN_MS = 5 * 60_000L;
@@ -98,6 +100,12 @@ public class TraderScheduler {
                 slots.acquire();
                 try {
                     runner.wake(trader, boundary);
+                    // 日线边界的例行唤醒完成后同线程接复盘：先交易后复盘、共用互斥绝不并行；
+                    // 上轮未完抢不到锁时本日复盘随例行一起跳过，明天再来（无害）。
+                    // 无素材/失败语义都在 ReviewRunner 内部，这里只管准入与时序
+                    if (boundary % INTERVAL_MS.get("1d") == 0 && !Boolean.FALSE.equals(trader.getReviewEnabled())) {
+                        reviewRunner.review(trader, boundary);
+                    }
                 } finally {
                     slots.release();
                 }
