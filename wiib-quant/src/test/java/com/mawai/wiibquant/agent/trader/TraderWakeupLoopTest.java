@@ -39,6 +39,7 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -46,6 +47,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -374,6 +376,60 @@ class TraderWakeupLoopTest {
         ArgumentCaptor<AiTraderDecision> dec = ArgumentCaptor.forClass(AiTraderDecision.class);
         verify(decisionMapper).insert(dec.capture());
         assertThat(dec.getValue().getEquity()).isEqualByComparingTo("9995");
+    }
+
+    /**
+     * 会话已成功 = 这轮就是 OK：动作后的权益刷新是锦上添花，sim 抖一下不许把整轮判 ERROR、
+     * 更不许计连败（连 5 次自动 PAUSED，而每一轮其实都成功、单也都下出去了）。
+     * 权益回落到会话开始前那次快照。
+     */
+    @Test
+    void equityRefreshFailureKeepsRoundOk() {
+        stubHealthyAccount();
+        // getBalanceDetail 只有 computeEquity 在调（TradeTools 走的是 getBalance），
+        // 所以第二次调用 = 动作后的权益刷新，精准打在那一步上
+        when(simTradeClient.getBalanceDetail(99L))
+                .thenReturn(Map.of("balance", "10000", "frozenBalance", "0"))
+                .thenThrow(new RuntimeException("sim 502"));
+        ChatModel model = modelCheckingThenSummary();
+        when(modelFactory.modelFor(any())).thenReturn(model);
+
+        runner.wake(trader(), 1785171600000L);
+
+        ArgumentCaptor<AiTraderDecision> dec = ArgumentCaptor.forClass(AiTraderDecision.class);
+        verify(decisionMapper).insert(dec.capture());
+        assertThat(dec.getValue().getStatus()).isEqualTo(AiTraderDecision.STATUS_OK);
+        assertThat(dec.getValue().getReasoning()).contains("本轮 HOLD");
+        assertThat(dec.getValue().getEquity()).isEqualByComparingTo("10000"); // 刷新前的快照
+        verify(traderMapper, never()).update(any(), any()); // 没有 recordFailure，连败不涨
+    }
+
+    /**
+     * 决策行落库后的收尾 DB 操作（clearFailures）抖一下，不许把同一个 decision 再 insert 一次：
+     * MP 自增主键 insert 后会把 id 回填进实体，二次 insert 必撞主键，异常直接逃出唤醒回路——
+     * 调度器的虚拟线程只 catch InterruptedException，兜不住。
+     */
+    @Test
+    void decisionInsertedOnceWhenPostInsertDbFails() {
+        stubHealthyAccount();
+        ChatModel model = modelCheckingThenSummary();
+        when(modelFactory.modelFor(any())).thenReturn(model);
+        // 照搬 MP + 真库的行为：insert 成功回填自增 id，带着 id 再 insert 就是主键冲突
+        when(decisionMapper.insert(any(AiTraderDecision.class))).thenAnswer(inv -> {
+            AiTraderDecision d = inv.getArgument(0);
+            if (d.getId() != null) {
+                throw new RuntimeException("Duplicate entry '" + d.getId() + "' for key 'PRIMARY'");
+            }
+            d.setId(1234L);
+            return 1;
+        });
+        when(traderMapper.update(any(), any())).thenThrow(new RuntimeException("连接池耗尽"));
+        AiTrader t = trader();
+        t.setConsecutiveFailures(2); // >0 才会真走 clearFailures 的列级更新
+
+        assertThatCode(() -> runner.wake(t, 1785171600000L)).doesNotThrowAnyException();
+
+        verify(decisionMapper, times(1)).insert(any(AiTraderDecision.class));
     }
 
     /** 开仓成功 → 计划落库：论点/失效条件/止损止盈快照 + 开仓所在唤醒边界。 */

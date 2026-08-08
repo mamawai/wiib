@@ -69,7 +69,11 @@ public class VolatilitySentinel implements MessageListener {
     private final SimTradeClient simTradeClient;
     private final TraderScheduler scheduler;
 
-    /** 窗口仅由 Redis 监听线程访问（容器单线程分发）；采样/重臂时间戳用并发表守稳 */
+    /**
+     * 全都要并发安全：Redis 容器是线程池分发（见 RedisMessageConfig，4~16 线程）、所有币又共用
+     * 一个 PRICE channel，同一 symbol 的两个 tick 会真并发进来。1s 采样门是非原子的
+     * get-then-put，挡不住，所以窗口自己 synchronized 守（见 PriceWindow）
+     */
     private final Map<String, PriceWindow> windows = new ConcurrentHashMap<>();
     private final Map<String, Long> lastSampleAt = new ConcurrentHashMap<>();
     private final Map<String, Long> lastFiredAt = new ConcurrentHashMap<>();
@@ -166,21 +170,27 @@ public class VolatilitySentinel implements MessageListener {
         }
     }
 
-    /** 5 分钟滚动窗口（1s 采样）：振幅 (max−min)/min 与方向（窗口首价 vs 现价）。 */
+    /**
+     * 5 分钟滚动窗口（1s 采样）：振幅 (max−min)/min 与方向（窗口首价 vs 现价）。
+     * 全部方法 synchronized——tick 由线程池并发喂进来，裸 ArrayDeque 会被写坏：
+     * 迭代撞到被 poll 空的槽抛 CME、驱逐时 peekFirst 被别的线程 poll 走抛 NPE，
+     * 而这些异常在 onMessage 里被吞成 debug 日志，表面无事、实则窗口静默损坏。
+     * 窗口至多 300 个 tick，锁开销可忽略，不值得上并发结构。
+     */
     static final class PriceWindow {
         private record Tick(long at, BigDecimal price) {
         }
 
         private final ArrayDeque<Tick> ticks = new ArrayDeque<>();
 
-        void add(long now, BigDecimal price) {
+        synchronized void add(long now, BigDecimal price) {
             ticks.addLast(new Tick(now, price));
             while (!ticks.isEmpty() && ticks.peekFirst().at() < now - WINDOW_MS) {
                 ticks.pollFirst();
             }
         }
 
-        BigDecimal amplitudePct() {
+        synchronized BigDecimal amplitudePct() {
             if (ticks.size() < 2) {
                 return BigDecimal.ZERO;
             }
@@ -197,7 +207,7 @@ public class VolatilitySentinel implements MessageListener {
                     .divide(min, 4, RoundingMode.HALF_UP);
         }
 
-        String direction() {
+        synchronized String direction() {
             if (ticks.size() < 2) {
                 return "波动";
             }

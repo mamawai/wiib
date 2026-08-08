@@ -154,9 +154,16 @@ public class TraderWakeupRunner {
             String reasoning = runAgentSession(trader, boundaryTime, budgetSeconds, positions, equity, decision, trigger);
             decision.setStatus(AiTraderDecision.STATUS_OK);
             decision.setReasoning(reasoning);
-            // 动作都落地了再记权益：本轮开平仓立刻体现在净值曲线，否则要等下一根K线才现形
-            decision.setEquity(computeEquity(trader.getSimUserId(),
-                    simTradeClient.getAllPositions(trader.getSimUserId())));
+            // 动作都落地了再记权益：本轮开平仓立刻体现在净值曲线，否则要等下一根K线才现形。
+            // 单独 try：会话成功 = 这轮就是成功，刷新只是锦上添花。sim 抖一下若翻进外层 catch，
+            // 决策全文会被丢掉、整轮判 ERROR 还计连败——连 5 次自动 PAUSED，可每轮其实都下过单了
+            try {
+                decision.setEquity(computeEquity(trader.getSimUserId(),
+                        simTradeClient.getAllPositions(trader.getSimUserId())));
+            } catch (Exception e) {
+                log.warn("[Trader] 动作后权益刷新失败，沿用唤醒前快照 traderId={} equity={} msg={}",
+                        trader.getId(), equity, e.getMessage());
+            }
             decision.setLatencyMs((int) (System.currentTimeMillis() - start));
             decisionMapper.insert(decision);
             clearFailures(trader);
@@ -164,6 +171,13 @@ public class TraderWakeupRunner {
             String msg = e instanceof TimeoutException ? "唤醒超时(" + budgetSeconds + "s)"
                     : e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
             log.warn("[Trader] 唤醒失败 traderId={} boundary={} msg={}", trader.getId(), boundaryTime, msg);
+            // 决策行已经落库了（异常出在 insert 之后的收尾，如 clearFailures/markLiquidated 的列级更新）：
+            // 这一轮本身是成功的，不该改写成 ERROR 更不该计连败；而且 MP 自增主键 insert 后已把 id
+            // 回填进这个对象，同一个对象再 insert 必撞主键，异常会直接逃出唤醒回路——调度器的
+            // 虚拟线程只 catch InterruptedException，兜不住。只留日志。
+            if (decision.getId() != null) {
+                return;
+            }
             decision.setStatus(AiTraderDecision.STATUS_ERROR);
             decision.setError(msg.length() > 500 ? msg.substring(0, 500) : msg);
             decision.setLatencyMs((int) (System.currentTimeMillis() - start));
