@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import {
-  ArrowDownRight, ArrowUpRight, Bot, ChevronDown, ChevronLeft, ChevronUp, ClipboardList, Loader2, RefreshCcw,
+  ArrowDownRight, ArrowUpRight, Bot, ChevronDown, ChevronLeft, ChevronUp, ClipboardList, Loader2, NotebookPen,
+  RefreshCcw, Zap,
 } from 'lucide-react';
 import { traderApi } from '../api';
 import { EquityChart } from '../components/EquityChart';
@@ -78,8 +79,8 @@ function DecisionCard({ d }: { d: AiTraderDecisionView }) {
   // 复盘行不是交易决策，徽章与配色单独一套：learning agent 的每日日志，时间线上要一眼认出
   const meta = d.kind === 'REVIEW'
     ? (d.status === 'OK'
-        ? { label: '📓 每日复盘', tone: 'bg-violet-500/15 text-violet-500' }
-        : { label: '📓 复盘失败', tone: 'bg-loss/15 text-loss' })
+        ? { label: '每日复盘', tone: 'bg-violet-500/15 text-violet-500' }
+        : { label: '复盘失败', tone: 'bg-loss/15 text-loss' })
     : DECISION_STATUS[d.status] ?? DECISION_STATUS.OK;
   const actions = useMemo<ActionRow[]>(() => {
     try {
@@ -98,10 +99,14 @@ function DecisionCard({ d }: { d: AiTraderDecisionView }) {
     <div className={cn('rounded-md border bg-card p-3 space-y-2',
       d.kind === 'REVIEW' ? 'border-violet-500/35 bg-violet-500/[0.04]' : 'border-border')}>
       <div className="flex items-center gap-2 flex-wrap">
-        <span className={cn('text-[10px] font-bold px-1.5 py-0.5 rounded', meta.tone)}>{meta.label}</span>
+        <span className={cn('inline-flex items-center gap-0.5 text-[10px] font-bold px-1.5 py-0.5 rounded', meta.tone)}>
+          {d.kind === 'REVIEW' && <NotebookPen className="w-3 h-3" />}{meta.label}
+        </span>
         {/* 警报唤醒凸显：这条不是例行K线节奏，是哨兵在极端波动时叫醒的 */}
         {d.kind === 'ALERT' && (
-          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-600">⚡波动警报</span>
+          <span className="inline-flex items-center gap-0.5 text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-600">
+            <Zap className="w-3 h-3" />波动警报
+          </span>
         )}
         <span className="text-[11px] num text-muted-foreground">{fmtDateTime(d.wakeTime)}</span>
         {d.equity != null && (
