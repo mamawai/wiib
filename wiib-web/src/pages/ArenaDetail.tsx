@@ -5,6 +5,7 @@ import {
   RefreshCcw, Zap,
 } from 'lucide-react';
 import { traderApi } from '../api';
+import { STATUS_META } from './Arena';
 import { EquityChart } from '../components/EquityChart';
 import { Markdown } from '../components/Markdown';
 import { cn, fmtDateTime, fmtNum } from '../lib/utils';
@@ -12,12 +13,6 @@ import type { AiTraderDecisionView, AiTraderPlanView, PlanRevision, TraderDetail
 import type { TnEquityPoint } from '../types/testnet';
 
 const REFRESH_MS = 60_000;
-
-const STATUS_META: Record<string, { label: string; tone: string }> = {
-  RUNNING: { label: '运行中', tone: 'bg-gain/15 text-gain' },
-  PAUSED: { label: '已暂停', tone: 'bg-amber-500/15 text-amber-600' },
-  LIQUIDATED: { label: '已爆仓', tone: 'bg-loss/15 text-loss' },
-};
 
 const DECISION_STATUS: Record<string, { label: string; tone: string }> = {
   OK: { label: '决策', tone: 'bg-primary/15 text-primary' },
@@ -352,12 +347,13 @@ export function ArenaDetail() {
                     <span className="text-muted-foreground">数量 <span className="num font-bold text-foreground">{p.quantity}</span></span>
                     <span className="text-muted-foreground">开仓 <span className="num font-bold text-foreground">{fmtNum(p.entryPrice)}</span></span>
                     <span className="ml-auto">
-                      <span className={cn('num font-black', (p.unrealizedPnl ?? 0) >= 0 ? 'text-gain' : 'text-loss')}>
-                        {(p.unrealizedPnl ?? 0) >= 0 ? '+' : ''}{fmtNum(p.unrealizedPnl ?? 0)}
+                      <span className={cn('num font-black', p.unrealizedPnl >= 0 ? 'text-gain' : 'text-loss')}>
+                        {p.unrealizedPnl >= 0 ? '+' : ''}{fmtNum(p.unrealizedPnl)}
                       </span>
                     </span>
                   </div>
-                  {(p.stopLosses?.length || p.takeProfits?.length) && (
+                  {/* 两个数组都空时 length 求值为 0，裸 && 会把 0 渲染到页面上，得先转 boolean */}
+                  {Boolean(p.stopLosses?.length || p.takeProfits?.length) && (
                     <div className="mt-1 text-muted-foreground num flex flex-wrap gap-x-3 gap-y-0.5">
                       {p.stopLosses?.length ? <span>当前止损 {p.stopLosses.map(s => fmtNum(s.price)).join(' / ')}</span> : null}
                       {p.takeProfits?.length ? <span>当前止盈 {p.takeProfits.map(t => fmtNum(t.price)).join(' / ')}</span> : null}

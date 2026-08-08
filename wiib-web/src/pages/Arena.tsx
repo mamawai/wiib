@@ -7,7 +7,8 @@ import type { TraderPublicView } from '../types';
 
 const REFRESH_MS = 60_000;
 
-const STATUS_META: Record<string, { label: string; tone: string }> = {
+/** trader 运行状态徽章（竞技场排行与详情页共用一份，别再各抄各的） */
+export const STATUS_META: Record<string, { label: string; tone: string }> = {
   RUNNING: { label: '运行中', tone: 'bg-gain/15 text-gain' },
   PAUSED: { label: '已暂停', tone: 'bg-amber-500/15 text-amber-600' },
   LIQUIDATED: { label: '已爆仓', tone: 'bg-loss/15 text-loss' },

@@ -5,7 +5,7 @@ import { traderApi } from '../api';
 import { GuidedTour, type TourStep } from '../components/GuidedTour';
 import { useCryptoStream } from '../hooks/useCryptoStream';
 import { useToast } from '../components/ui/use-toast';
-import { cn, fmtNum } from '../lib/utils';
+import { cn, fmtNum, fmtRelative } from '../lib/utils';
 import type { TraderOwnerView, TraderRequestView, TraderSpec, TraderUpsertRequest } from '../types';
 
 const TOUR_SEEN_KEY = 'wiib-trader-tour-seen';
@@ -614,7 +614,7 @@ function RequestCard({ r, onDecide, busy, disabled }: {
         <span className="text-muted-foreground">{r.side === 'LONG' ? '多' : '空'}</span>
         <span className="num">{r.quantity}</span>
         {r.leverage != null && <span className="text-muted-foreground num">{r.leverage}x</span>}
-        <span className="ml-auto text-[10px] text-muted-foreground">{relTime(r.createdAt)}</span>
+        <span className="ml-auto text-[10px] text-muted-foreground">{fmtRelative(r.createdAt)}</span>
       </div>
 
       <div className="flex items-center gap-4 text-[11px]">
@@ -648,10 +648,3 @@ function RequestCard({ r, onDecide, busy, disabled }: {
   );
 }
 
-function relTime(ts: number): string {
-  const min = Math.max(0, Math.floor((Date.now() - ts) / 60000));
-  if (min < 1) {
-    return '刚刚';
-  }
-  return min < 60 ? `${min} 分钟前` : `${Math.floor(min / 60)} 小时前`;
-}
