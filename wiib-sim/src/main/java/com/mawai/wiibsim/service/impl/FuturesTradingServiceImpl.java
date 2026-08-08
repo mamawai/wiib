@@ -867,6 +867,10 @@ public class FuturesTradingServiceImpl implements FuturesTradingService {
             dto.setEntryPrice(pos.getEntryPrice());
             dto.setMargin(pos.getMargin());
             dto.setFundingFeeTotal(pos.getFundingFeeTotal());
+            // 全平不清保护单列表（只有部分平仓会改写），随行带出：AI Trader复盘据此推断了结方式
+            // （closedPrice越过止损价=止损带走/越过止盈价=止盈带走/带内=主动平仓）
+            dto.setStopLosses(pos.getStopLosses());
+            dto.setTakeProfits(pos.getTakeProfits());
             dto.setStatus(pos.getStatus());
             dto.setClosedPrice(pos.getClosedPrice());
             dto.setClosedPnl(pos.getClosedPnl());
