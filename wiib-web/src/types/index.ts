@@ -705,6 +705,10 @@ export interface TraderOwnerView {
   apiKeyTail: string;
   useDefaultPrompt: boolean;
   spec: TraderSpec;
+  /** 波动哨兵警报开关（仅 1h/4h 档生效） */
+  alertEnabled: boolean;
+  /** 警报灵敏度系数 >=1 只能调高：生效阈值 = 每币基准 x 系数 */
+  alertThresholdMult: number;
 }
 
 /**
@@ -784,6 +788,8 @@ export interface AiTraderDecisionView {
   roundNo: number;
   wakeTime: number;
   intervalCode: string;
+  /** TRADE=例行K线唤醒 ALERT=波动哨兵警报唤醒 */
+  kind: 'TRADE' | 'ALERT';
   status: 'OK' | 'ERROR' | 'SKIPPED';
   equity: number | null;
   reasoning: string | null;
@@ -818,6 +824,8 @@ export interface TraderUpsertRequest {
   apiKey: string;
   useDefaultPrompt: boolean;
   spec: TraderSpec;
+  alertEnabled: boolean;
+  alertThresholdMult: number;
 }
 
 /** 重要快讯（BlockBeats 缓存透传，plain 为脱 HTML 纯文本） */

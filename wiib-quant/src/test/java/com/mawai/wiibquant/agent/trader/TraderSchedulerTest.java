@@ -1,13 +1,76 @@
 package com.mawai.wiibquant.agent.trader;
 
+import com.mawai.wiibcommon.entity.AiTrader;
+import com.mawai.wiibquant.mapper.AiTraderMapper;
 import org.junit.jupiter.api.Test;
 
+import java.math.BigDecimal;
+
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.after;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.timeout;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 
 class TraderSchedulerTest {
 
     // 2026-08-05 09:00:00 UTC 整点前 1ms —— Binance closeTime 口径 xx:59:59.999
     private static final long H1_CLOSE = 1785171599999L;
+    private static final long H1_BOUNDARY = 1785171600000L;
+
+    private final AiTraderMapper traderMapper = mock(AiTraderMapper.class);
+    private final TraderWakeupRunner runner = mock(TraderWakeupRunner.class);
+
+    private AiTrader trader1h() {
+        AiTrader t = new AiTrader();
+        t.setId(7L);
+        t.setIntervalCode("1h");
+        return t;
+    }
+
+    private AlertTrigger trig() {
+        return new AlertTrigger("BTCUSDT", new BigDecimal("1.2"), new BigDecimal("63120"), "下跌", H1_BOUNDARY);
+    }
+
+    // ---------- 警报唤醒准入 ----------
+
+    @Test
+    void alertWakePassesAdmissionAndRunsRunner() {
+        TraderScheduler s = new TraderScheduler(traderMapper, runner);
+        s.nowMs = () -> H1_BOUNDARY + 600_000L; // 1h 周期中段，预算充足
+
+        AlertTrigger trig = trig();
+        s.tryAlertWake(trader1h(), trig);
+
+        verify(runner, timeout(2_000)).wakeAlert(any(AiTrader.class), any(AlertTrigger.class));
+    }
+
+    /** 冷静期从任何唤醒算起：刚醒过的 trader 5 分钟内不再被警报打扰 */
+    @Test
+    void alertBlockedDuringCooldown() {
+        TraderScheduler s = new TraderScheduler(traderMapper, runner);
+        s.nowMs = () -> H1_BOUNDARY + 600_000L;
+
+        s.tryAlertWake(trader1h(), trig());
+        verify(runner, timeout(2_000)).wakeAlert(any(), any());
+
+        s.tryAlertWake(trader1h(), trig());
+        verify(runner, after(300).times(1)).wakeAlert(any(), any()); // 第二次被冷静期拦下
+    }
+
+    /** 例行唤醒将至（距边界<30s）警报不抢戏：马上就有新鲜K线信号 */
+    @Test
+    void alertBlockedWhenRoutineWakeImminent() {
+        TraderScheduler s = new TraderScheduler(traderMapper, runner);
+        s.nowMs = () -> H1_BOUNDARY + 3_590_000L; // 距下一 1h 边界仅 10s
+
+        s.tryAlertWake(trader1h(), trig());
+
+        verify(runner, after(300).never()).wakeAlert(any(), any());
+    }
 
     @Test
     void alignedCloseYieldsBoundary() {

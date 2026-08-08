@@ -93,6 +93,10 @@ function DecisionCard({ d }: { d: AiTraderDecisionView }) {
     <div className="rounded-md border border-border bg-card p-3 space-y-2">
       <div className="flex items-center gap-2 flex-wrap">
         <span className={cn('text-[10px] font-bold px-1.5 py-0.5 rounded', meta.tone)}>{meta.label}</span>
+        {/* 警报唤醒凸显：这条不是例行K线节奏，是哨兵在极端波动时叫醒的 */}
+        {d.kind === 'ALERT' && (
+          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-600">⚡波动警报</span>
+        )}
         <span className="text-[11px] num text-muted-foreground">{fmtDateTime(d.wakeTime)}</span>
         {d.equity != null && (
           <span className="text-[11px] text-muted-foreground">权益 <span className="num font-bold text-foreground">{fmtNum(d.equity)}</span></span>

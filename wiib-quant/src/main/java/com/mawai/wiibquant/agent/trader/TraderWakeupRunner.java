@@ -105,7 +105,6 @@ public class TraderWakeupRunner {
     }
 
     public void wake(AiTrader trader, long boundaryTime) {
-        long start = System.currentTimeMillis();
         long intervalMs = TraderScheduler.INTERVAL_MS.getOrDefault(trader.getIntervalCode(), 300_000L);
         long budgetSeconds = wakeBudgetSeconds(boundaryTime, intervalMs, nowMs.getAsLong());
         AiTraderDecision decision = baseDecision(trader, boundaryTime);
@@ -117,6 +116,31 @@ public class TraderWakeupRunner {
             log.warn("[Trader] 触发过晚放弃 traderId={} boundary={} budget={}s", trader.getId(), boundaryTime, budgetSeconds);
             return;
         }
+        doWake(trader, boundaryTime, budgetSeconds, decision, null);
+    }
+
+    /**
+     * 波动哨兵警报唤醒：kind=ALERT、wake_time=触发时刻（非K线边界）；
+     * 预算截止仍是下一例行边界−5s——警报绝不占用下一根K线。
+     */
+    public void wakeAlert(AiTrader trader, AlertTrigger trigger) {
+        long intervalMs = TraderScheduler.INTERVAL_MS.getOrDefault(trader.getIntervalCode(), 3_600_000L);
+        long now = nowMs.getAsLong();
+        long boundary = now - Math.floorMod(now, intervalMs);
+        long budgetSeconds = wakeBudgetSeconds(boundary, intervalMs, now);
+        if (budgetSeconds < MIN_WAKE_SECONDS) {
+            // 调度器已预检，这里兜底：例行将至警报静默放弃，不写决策行（SKIPPED 只属于例行调度）
+            log.info("[Trader] 例行将至警报放弃 traderId={} {}", trader.getId(), trigger.symbol());
+            return;
+        }
+        AiTraderDecision decision = baseDecision(trader, trigger.triggeredAt());
+        decision.setKind(AiTraderDecision.KIND_ALERT);
+        doWake(trader, trigger.triggeredAt(), budgetSeconds, decision, trigger);
+    }
+
+    private void doWake(AiTrader trader, long boundaryTime, long budgetSeconds,
+                        AiTraderDecision decision, AlertTrigger trigger) {
+        long start = System.currentTimeMillis();
         try {
             List<FuturesPositionDTO> positions = simTradeClient.getAllPositions(trader.getSimUserId());
             BigDecimal equity = computeEquity(trader.getSimUserId(), positions);
@@ -127,7 +151,7 @@ public class TraderWakeupRunner {
                 return;
             }
 
-            String reasoning = runAgentSession(trader, boundaryTime, budgetSeconds, positions, equity, decision);
+            String reasoning = runAgentSession(trader, boundaryTime, budgetSeconds, positions, equity, decision, trigger);
             decision.setStatus(AiTraderDecision.STATUS_OK);
             decision.setReasoning(reasoning);
             // 动作都落地了再记权益：本轮开平仓立刻体现在净值曲线，否则要等下一根K线才现形
@@ -156,10 +180,10 @@ public class TraderWakeupRunner {
         decisionMapper.insert(d);
     }
 
-    /** ReactAgent 会话：返回模型最终文本；动作轨迹随 decision 一并写入。 */
+    /** ReactAgent 会话：返回模型最终文本；动作轨迹随 decision 一并写入。trigger 非空=警报唤醒（只换开场白）。 */
     private String runAgentSession(AiTrader trader, long boundaryTime, long budgetSeconds,
                                    List<FuturesPositionDTO> positions, BigDecimal equity,
-                                   AiTraderDecision decision) throws Exception {
+                                   AiTraderDecision decision, AlertTrigger trigger) throws Exception {
         // 包一层用量统计：ReAct 一轮要调模型很多次，包在最外层才收得全。
         // 工厂里的实例是跨唤醒缓存的，装饰器必须每轮新建，否则用量会跨轮累加
         UsageTrackingChatModel model = new UsageTrackingChatModel(modelFactory.modelFor(trader));
@@ -212,13 +236,9 @@ public class TraderWakeupRunner {
                 .build(ResilientChatService.builder().model(model).forceFirstToolChoice("required").asFactory())
                 .compile();
 
-        String snapshot = marketSnapshot(whitelist);
-        String instruction = "新一根 " + trader.getIntervalCode() + " K线已收盘（"
-                + TIME_FMT.format(Instant.ofEpochMilli(boundaryTime)) + "）。"
-                + (snapshot.isEmpty() ? "" : "\n行情快照（细节自己用工具查证）：\n" + snapshot)
-                + "本轮只需回答一个问题：这根K线收盘后，你的计划需要改变吗？"
-                + "先检验上一轮【本轮结论】里的等待条件与各持仓的失效条件，再考虑新机会；"
-                + "最后按纪律用【本轮结论】固定格式收尾。";
+        String instruction = trigger != null
+                ? alertInstruction(trader, trigger, recent)
+                : routineInstruction(trader, boundaryTime, marketSnapshot(whitelist));
         RunnableConfig config = RunnableConfig.builder()
                 .threadId("trader-" + trader.getId() + "-" + boundaryTime).build();
 
@@ -255,6 +275,37 @@ public class TraderWakeupRunner {
             decision.setError("达单轮模型调用上限(" + MAX_MODEL_CALLS + ")，提前收束");
         }
         return outcome.reasoning();
+    }
+
+    /** 例行唤醒开场白：单问题框架 + 行情快照锚定价格水平。 */
+    private String routineInstruction(AiTrader trader, long boundaryTime, String snapshot) {
+        return "新一根 " + trader.getIntervalCode() + " K线已收盘（"
+                + TIME_FMT.format(Instant.ofEpochMilli(boundaryTime)) + "）。"
+                + (snapshot.isEmpty() ? "" : "\n行情快照（细节自己用工具查证）：\n" + snapshot)
+                + "本轮只需回答一个问题：这根K线收盘后，你的计划需要改变吗？"
+                + "先检验上一轮【本轮结论】里的等待条件与各持仓的失效条件，再考虑新机会；"
+                + "最后按纪律用【本轮结论】固定格式收尾。";
+    }
+
+    /**
+     * 警报唤醒开场白：事实全代码注入（振幅/方向/上次唤醒时间/距例行还有多久），
+     * 反锚定是灵魂——被波动惊醒正是恐慌平仓的高发场景，必须明说"未收盘不作数、
+     * 止损在岗、不因被叫醒而必须动作"。
+     */
+    private String alertInstruction(AiTrader trader, AlertTrigger trig, List<AiTraderDecision> recent) {
+        long intervalMs = TraderScheduler.INTERVAL_MS.getOrDefault(trader.getIntervalCode(), 3_600_000L);
+        long toNextMin = Math.max(1, (intervalMs - Math.floorMod(trig.triggeredAt(), intervalMs)) / 60_000);
+        String lastWake = recent.isEmpty() ? "本局还没有过唤醒"
+                : "在 " + TIME_FMT.format(Instant.ofEpochMilli(recent.get(0).getWakeTime()))
+                        + "（约 " + Math.max(1, (trig.triggeredAt() - recent.get(0).getWakeTime()) / 60_000) + " 分钟前）";
+        return "⚠️ 行情波动警报（非例行唤醒）：" + trig.symbol() + " 5分钟内波动 "
+                + trig.amplitudePct().stripTrailingZeros().toPlainString() + "%（方向：" + trig.direction()
+                + "，现价 " + trig.price().stripTrailingZeros().toPlainString() + "）。\n"
+                + "你上次唤醒" + lastWake + "，距下一次例行唤醒还有约 " + toNextMin + " 分钟。\n"
+                + "注意：当前 " + trader.getIntervalCode() + " K线尚未收盘——你的收盘制失效条件此刻不作数，"
+                + "求证请用已收盘的 5m/15m K线。你的止损单仍在自动保护你。\n"
+                + "本次只需回答一个问题：这次波动是否动摇了你的持仓计划？计划未被动摇 → HOLD 并说明理由；"
+                + "不因为被叫醒而必须动作。最后仍用【本轮结论】固定格式收尾。";
     }
 
     /**
@@ -438,6 +489,7 @@ public class TraderWakeupRunner {
         d.setRoundNo(trader.getRoundNo());
         d.setWakeTime(boundaryTime);
         d.setIntervalCode(trader.getIntervalCode());
+        d.setKind(AiTraderDecision.KIND_TRADE);
         d.setToolCalls(0);
         return d;
     }

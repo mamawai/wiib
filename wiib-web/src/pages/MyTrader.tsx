@@ -85,7 +85,9 @@ const TOUR_STEPS: TourStep[] = [
 ];
 
 const SYMBOL_OPTIONS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'DOGEUSDT', 'XRPUSDT'];
-const INTERVAL_OPTIONS = ['5m', '15m', '1h', '4h', '1d'];
+const INTERVAL_OPTIONS = ['5m', '15m', '1h', '4h'];
+/** 波动哨兵每币基准阈值%（平台下限，只能经系数调高）——与后端 VolatilitySentinel 同一份数字 */
+const ALERT_BASE: Record<string, number> = { BTCUSDT: 0.6, ETHUSDT: 0.8, XRPUSDT: 0.8, SOLUSDT: 0.9, DOGEUSDT: 1.0 };
 
 const DEFAULT_SPEC: TraderSpec = {
   leverageMin: 3, leverageMax: 20, marginPctMin: 5, marginPctMax: 20,
@@ -96,7 +98,7 @@ const DEFAULT_SPEC: TraderSpec = {
 const EMPTY_FORM: TraderUpsertRequest = {
   name: '', symbols: 'BTCUSDT', intervalCode: '15m', customPrompt: '',
   apiProtocol: 'openai', baseUrl: '', model: '', apiKey: '', useDefaultPrompt: true,
-  spec: DEFAULT_SPEC,
+  spec: DEFAULT_SPEC, alertEnabled: true, alertThresholdMult: 1,
 };
 
 /**
@@ -128,6 +130,7 @@ export function MyTrader() {
           customPrompt: v.customPrompt ?? '', apiProtocol: v.apiProtocol,
           baseUrl: v.baseUrl, model: v.pub.model, apiKey: '', useDefaultPrompt: v.useDefaultPrompt,
           spec: v.spec ?? DEFAULT_SPEC,
+          alertEnabled: v.alertEnabled ?? true, alertThresholdMult: v.alertThresholdMult ?? 1,
         });
         loadRequests();
       }
@@ -400,6 +403,34 @@ export function MyTrader() {
                           hint="关＝减仓/平仓需你确认；止损止盈仍自动触发，风险有保护" />
             </div>
           </div>
+        </div>
+
+        {/* 波动哨兵：极端行情临时唤醒（例行K线唤醒的补充）——只对 1h/4h 档生效 */}
+        <div className="space-y-2 rounded-lg border border-border/60 bg-card-2/40 p-3">
+          <div className="flex items-baseline justify-between">
+            <span className="microlabel">波动警报（仅 1h/4h 档生效）</span>
+            <span className="text-[10px] text-muted-foreground">5 分钟振幅超阈值且持有该币仓位/挂单时临时唤醒</span>
+          </div>
+          <div className="grid sm:grid-cols-2 gap-3 items-start">
+            <SpecToggle checked={form.alertEnabled} onChange={v => set({ alertEnabled: v })}
+                        label="启用波动警报"
+                        hint="唤醒后 5 分钟冷静期；例行唤醒将至时警报自动让路" />
+            <label className="space-y-1 text-xs">
+              <span className="text-muted-foreground font-bold">灵敏度系数（≥1.0，越大警报越少）</span>
+              <input type="number" min={1} step={0.1} value={form.alertThresholdMult}
+                     onChange={e => set({ alertThresholdMult: Number(e.target.value) })}
+                     disabled={!form.alertEnabled}
+                     className="w-full h-9 rounded-lg border border-border bg-card-2 px-3 text-xs num disabled:opacity-45" />
+            </label>
+          </div>
+          <p className="text-[10px] leading-relaxed text-muted-foreground">
+            生效阈值 = 币基准 × 系数。平台基准（180 天历史校准，只能调高）：
+            {SYMBOL_OPTIONS.map(s => `${s.replace('USDT', '')} ${ALERT_BASE[s]}%`).join(' · ')}。
+            按当前系数 {form.alertThresholdMult >= 1 ? form.alertThresholdMult.toFixed(1) : '1.0'}：
+            {SYMBOL_OPTIONS.filter(s => selected.has(s))
+              .map(s => `${s.replace('USDT', '')} ${(ALERT_BASE[s] * Math.max(1, form.alertThresholdMult)).toFixed(2)}%`)
+              .join(' · ') || '未选币种'}
+          </p>
         </div>
 
         <div className="space-y-3" data-tour="byok">

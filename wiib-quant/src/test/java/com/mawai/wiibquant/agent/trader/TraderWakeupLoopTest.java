@@ -536,6 +536,36 @@ class TraderWakeupLoopTest {
         assertThat(dec.getValue().getToolCalls()).isGreaterThanOrEqualTo(1);
     }
 
+    /** 波动警报唤醒：kind=ALERT、wake_time=触发时刻；开场白含警报事实与反锚定（未收盘不作数/不必动作） */
+    @Test
+    void alertWakeUsesAlertInstructionAndKind() {
+        stubHealthyAccount();
+        when(simTradeClient.getAllPositions(99L)).thenReturn(List.of(crossPosition("1000", "-5")));
+        when(simTradeClient.getBalance(99L)).thenReturn(new BigDecimal("9995"));
+        when(simTradeClient.getBalanceDetail(99L)).thenReturn(Map.of("balance", "9995", "frozenBalance", "0"));
+        ChatModel model = modelCheckingThenSummary();
+        when(modelFactory.modelFor(any())).thenReturn(model);
+        long triggeredAt = 1785171600000L + 600_000L; // 1h 边界后 10 分钟哨兵触发
+        runner.nowMs = () -> triggeredAt;
+
+        runner.wakeAlert(trader(), new AlertTrigger("BTCUSDT", new BigDecimal("1.2"),
+                new BigDecimal("63120"), "下跌", triggeredAt));
+
+        ArgumentCaptor<AiTraderDecision> dec = ArgumentCaptor.forClass(AiTraderDecision.class);
+        verify(decisionMapper).insert(dec.capture());
+        assertThat(dec.getValue().getKind()).isEqualTo(AiTraderDecision.KIND_ALERT);
+        assertThat(dec.getValue().getWakeTime()).isEqualTo(triggeredAt);
+        assertThat(dec.getValue().getStatus()).isEqualTo(AiTraderDecision.STATUS_OK);
+
+        ArgumentCaptor<Prompt> prompts = ArgumentCaptor.forClass(Prompt.class);
+        verify(model, atLeastOnce()).call(prompts.capture());
+        String firstCall = prompts.getAllValues().get(0).getInstructions().stream()
+                .map(org.springframework.ai.chat.messages.Message::getText)
+                .reduce("", String::concat);
+        assertThat(firstCall).contains("行情波动警报").contains("1.2%").contains("下跌")
+                .contains("尚未收盘").contains("不因为被叫醒而必须动作");
+    }
+
     @Test
     void skippedWakeLeavesTrace() {
         runner.recordSkipped(trader(), 1785171600000L);

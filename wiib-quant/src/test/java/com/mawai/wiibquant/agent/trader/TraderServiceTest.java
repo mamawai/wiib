@@ -130,9 +130,23 @@ class TraderServiceTest {
 
         String err = service.create(1L, new TraderService.UpsertReq("小虎", "BTCUSDT", "5m", " ",
                 "openai", "https://8.8.8.8", "deepseek-chat", "sk-x", false,
-                null, null, null, null, null, null, null, null));
+                null, null, null, null, null, null, null, null, null, null));
 
         assertThat(err).contains("自定义提示词");
+    }
+
+    /** 警报灵敏度系数只能 ≥1.0：系数<1 等于把每币基准阈值（平台下限）调低 */
+    @Test
+    void alertMultBelowOneRejected() {
+        when(binanceProperties.getSymbols()).thenReturn(List.of("BTCUSDT"));
+        when(traderMapper.selectOne(any())).thenReturn(null);
+
+        String err = service.create(1L, new TraderService.UpsertReq("小虎", "BTCUSDT", "5m", null,
+                "openai", "https://8.8.8.8", "deepseek-chat", "sk-x", true,
+                null, null, null, null, null, null, null, null,
+                true, new java.math.BigDecimal("0.5")));
+
+        assertThat(err).contains("不能低于 1.0");
     }
 
     /** 杠杆上界卡在 125：再往上 sim 的分档表也接不住 */
@@ -143,7 +157,7 @@ class TraderServiceTest {
 
         String err = service.create(1L, new TraderService.UpsertReq("小虎", "BTCUSDT", "5m", null,
                 "openai", "https://8.8.8.8", "deepseek-chat", "sk-x", true,
-                50, 200, null, null, null, null, null, null));
+                50, 200, null, null, null, null, null, null, null, null));
 
         assertThat(err).contains("杠杆区间");
     }
@@ -156,7 +170,7 @@ class TraderServiceTest {
 
         String err = service.create(1L, new TraderService.UpsertReq("小虎", "BTCUSDT", "5m", null,
                 "openai", "https://8.8.8.8", "deepseek-chat", "sk-x", true,
-                100, 50, null, null, null, null, null, null));
+                100, 50, null, null, null, null, null, null, null, null));
 
         assertThat(err).contains("下界不能大于上界");
     }
@@ -189,7 +203,7 @@ class TraderServiceTest {
 
         String err = service.create(1L, new TraderService.UpsertReq("小虎", "BTCUSDT", "5m", null,
                 "openai", "https://8.8.8.8", "deepseek-chat", "sk-x", true,
-                null, null, null, null, false, true, null, null));
+                null, null, null, null, false, true, null, null, null, null));
 
         assertThat(err).contains("多空双开");
     }
@@ -215,7 +229,7 @@ class TraderServiceTest {
         // 模型三件套与 key 都没变 → 不触发连通性测试
         String err = service.updateConfig(1L, new TraderService.UpsertReq("小虎", "BTCUSDT", "5m", "稳一点",
                 "openai", "https://8.8.8.8", "deepseek-chat", null, true,
-                null, null, null, null, null, null, null, null));
+                null, null, null, null, null, null, null, null, null, null));
 
         assertThat(err).isNull();
         verify(traderMapper, never()).updateById(any(AiTrader.class));

@@ -807,13 +807,17 @@ CREATE TABLE IF NOT EXISTS ai_trader (
     allow_hedge     BOOLEAN NOT NULL DEFAULT FALSE,
     allow_self_add  BOOLEAN NOT NULL DEFAULT TRUE,
     allow_self_reduce BOOLEAN NOT NULL DEFAULT FALSE,
+    alert_enabled   BOOLEAN NOT NULL DEFAULT TRUE,
+    alert_threshold_mult NUMERIC(4,2) NOT NULL DEFAULT 1.0,
     created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 COMMENT ON TABLE ai_trader IS 'AI Trader：用户BYOK自主交易代理（每用户1个，独立sim子账户，公开竞技场）';
 COMMENT ON COLUMN ai_trader.status IS 'PAUSED/RUNNING/LIQUIDATED';
 COMMENT ON COLUMN ai_trader.symbols IS '交易币种白名单子集，逗号分隔（须在binance.symbols范围内）';
-COMMENT ON COLUMN ai_trader.interval_code IS '唤醒K线级别 5m/15m/1h/4h/1d（1m禁止；5m烧token快，适合短期测试）';
+COMMENT ON COLUMN ai_trader.interval_code IS '唤醒K线级别 5m/15m/1h/4h（1d已下线；5m烧token快，适合短期测试）';
+COMMENT ON COLUMN ai_trader.alert_enabled IS '波动哨兵警报开关（仅1h/4h档生效）：5分钟振幅超过 币基准阈值×灵敏度系数 且持有该币仓位/挂单时临时唤醒';
+COMMENT ON COLUMN ai_trader.alert_threshold_mult IS '警报灵敏度系数≥1.0只能调高：生效阈值=每币基准(BTC0.6/ETH0.8/XRP0.8/SOL0.9/DOGE1.0%)×本系数，180天历史校准见VolatilitySentinel';
 COMMENT ON COLUMN ai_trader.use_default_prompt IS '是否使用平台系统提示词（默认true）；false=自定义提示词成为唯一指令来源（护栏仍硬校验）';
 COMMENT ON COLUMN ai_trader.memory IS '复盘笔记：将来由learning agent整理写入（限长文本），每次唤醒注入提示词——trader侧只读只注入，本列即记忆学习的接口';
 COMMENT ON COLUMN ai_trader.api_key_enc IS 'AES-GCM密文base64(iv+cipher)，密钥走环境变量WIIB_TRADER_KEY_SECRET';
@@ -834,6 +838,7 @@ CREATE TABLE IF NOT EXISTS ai_trader_decision (
     round_no        INT NOT NULL,
     wake_time       BIGINT NOT NULL,
     interval_code   VARCHAR(8) NOT NULL,
+    kind            VARCHAR(8) NOT NULL DEFAULT 'TRADE',
     status          VARCHAR(16) NOT NULL,
     equity          NUMERIC(20,8),
     reasoning       TEXT,
@@ -850,6 +855,7 @@ CREATE TABLE IF NOT EXISTS ai_trader_decision (
 CREATE INDEX IF NOT EXISTS idx_atd_trader_time ON ai_trader_decision(trader_id, wake_time DESC);
 COMMENT ON TABLE ai_trader_decision IS 'AI Trader每次唤醒一行：推理全文+动作(含play_type论点标签)+权益快照——竞技场决策时间线与净值曲线数据源';
 COMMENT ON COLUMN ai_trader_decision.status IS 'OK/ERROR/SKIPPED（上一唤醒未完被跳过）';
+COMMENT ON COLUMN ai_trader_decision.kind IS 'TRADE=例行K线唤醒 ALERT=波动哨兵警报唤醒（wake_time=触发时刻非边界）；learning agent的REVIEW将来共用';
 COMMENT ON COLUMN ai_trader_decision.equity IS '本轮动作落地后的账户权益USDT';
 COMMENT ON COLUMN ai_trader_decision.model_calls IS '本轮模型调用次数：ReAct是循环，一次唤醒会调很多次（上限见ModelCallLimiter）';
 COMMENT ON COLUMN ai_trader_decision.total_tokens IS '本轮全部模型调用的token合计；NULL=上游端点没返回usage（BYOK网关各不相同），不是0';

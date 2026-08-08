@@ -52,6 +52,12 @@ public class AiTrader {
     @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private String memory;
 
+    /** 波动哨兵警报开关（仅 1h/4h 档生效） */
+    private Boolean alertEnabled;
+
+    /** 警报灵敏度系数 ≥1.0 只能调高：生效阈值 = 每币基准 × 本系数 */
+    private BigDecimal alertThresholdMult;
+
     /** 上游协议：openai=/v1/chat/completions，responses=/v1/responses */
     private String apiProtocol;
 

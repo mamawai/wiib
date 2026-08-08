@@ -28,17 +28,27 @@ import java.util.concurrent.Semaphore;
 public class TraderScheduler {
 
     static final int MAX_CONCURRENT_WAKEUPS = 10;
-    /** interval → 毫秒；TraderWakeupRunner 计算唤醒预算共用同一份 */
+    /** interval → 毫秒；TraderWakeupRunner 计算唤醒预算共用同一份。1d 只留数学（learning 日线边界用），不再是唤醒档位 */
     static final Map<String, Long> INTERVAL_MS = Map.of(
             "5m", 300_000L, "15m", 900_000L, "1h", 3_600_000L, "4h", 14_400_000L, "1d", 86_400_000L);
+    /** 例行唤醒只遍历四档（1d 档位已下线，存量 1d trader 自然停摆） */
+    static final Set<String> WAKE_INTERVALS = Set.of("5m", "15m", "1h", "4h");
 
     private final AiTraderMapper traderMapper;
     private final TraderWakeupRunner runner;
+
+    /** 警报冷静期：距该 trader 上一次任何唤醒（例行/警报）不足 5 分钟不再警报 */
+    static final long ALERT_COOLDOWN_MS = 5 * 60_000L;
 
     private final Semaphore slots = new Semaphore(MAX_CONCURRENT_WAKEUPS);
     private final Set<Long> inFlight = ConcurrentHashMap.newKeySet();
     /** 每 trader 最近已触发的边界时刻：多 symbol 同刻收盘/事件与兜底双路都靠它去重 */
     private final Map<Long, Long> firedBoundary = new ConcurrentHashMap<>();
+    /** 每 trader 最近一次唤醒起始时刻（例行+警报都记）：警报冷静期的基准；重启清零无所谓 */
+    private final Map<Long, Long> lastWakeAt = new ConcurrentHashMap<>();
+
+    /** 墙钟注入点：警报准入的冷静期/预算预检要可测 */
+    java.util.function.LongSupplier nowMs = System::currentTimeMillis;
 
     /** 主触发：任意 watch 币的 5m 收盘都是一次时钟滴答。 */
     @EventListener
@@ -46,7 +56,7 @@ public class TraderScheduler {
         if (!"5m".equalsIgnoreCase(event.interval())) {
             return;
         }
-        for (String ic : INTERVAL_MS.keySet()) {
+        for (String ic : WAKE_INTERVALS) {
             long boundary = boundaryOf(event.closeTime(), ic);
             if (boundary > 0) {
                 fireInterval(ic, boundary);
@@ -82,11 +92,54 @@ public class TraderScheduler {
             log.info("[TraderSched] 上轮未完跳过 traderId={} boundary={}", trader.getId(), boundary);
             return;
         }
+        lastWakeAt.put(trader.getId(), nowMs.getAsLong());
         Thread.startVirtualThread(() -> {
             try {
                 slots.acquire();
                 try {
                     runner.wake(trader, boundary);
+                } finally {
+                    slots.release();
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            } finally {
+                inFlight.remove(trader.getId());
+            }
+        });
+    }
+
+    /**
+     * 波动哨兵警报唤醒准入（唤醒治理全在调度器）：冷静期→预算预检→互斥，全过才真唤醒。
+     * 任一环节不过都静默放弃只留日志——警报是补充不是义务，SKIPPED 决策行只属于例行调度。
+     */
+    public void tryAlertWake(AiTrader trader, AlertTrigger trigger) {
+        long now = nowMs.getAsLong();
+        Long last = lastWakeAt.get(trader.getId());
+        if (last != null && now - last < ALERT_COOLDOWN_MS) {
+            return;
+        }
+        Long intervalMs = INTERVAL_MS.get(trader.getIntervalCode());
+        if (intervalMs == null) {
+            return;
+        }
+        // 例行唤醒将至就不抢戏：马上有新鲜K线信号，警报没有增量价值
+        long boundary = now - Math.floorMod(now, intervalMs);
+        if (TraderWakeupRunner.wakeBudgetSeconds(boundary, intervalMs, now) < TraderWakeupRunner.MIN_WAKE_SECONDS) {
+            log.info("[TraderSched] 例行唤醒将至，警报放弃 traderId={} {}", trader.getId(), trigger.symbol());
+            return;
+        }
+        if (!inFlight.add(trader.getId())) {
+            return;
+        }
+        lastWakeAt.put(trader.getId(), now);
+        log.info("[TraderSched] 波动警报唤醒 traderId={} {} 振幅{}% {}",
+                trader.getId(), trigger.symbol(), trigger.amplitudePct(), trigger.direction());
+        Thread.startVirtualThread(() -> {
+            try {
+                slots.acquire();
+                try {
+                    runner.wakeAlert(trader, trigger);
                 } finally {
                     slots.release();
                 }

@@ -33,7 +33,8 @@ import java.util.Set;
 public class TraderService {
 
     public static final BigDecimal INITIAL_BALANCE = new BigDecimal("10000");
-    private static final Set<String> INTERVALS = Set.of("5m", "15m", "1h", "4h", "1d");
+    /** 唤醒档位四档（1d 已下线：一天一醒的观赏性与反馈密度都撑不起一个档位） */
+    private static final Set<String> INTERVALS = Set.of("5m", "15m", "1h", "4h");
 
     private final AiTraderMapper traderMapper;
     private final AiTraderDecisionMapper decisionMapper;
@@ -51,7 +52,8 @@ public class TraderService {
                             Integer leverageMin, Integer leverageMax,
                             BigDecimal marginPctMin, BigDecimal marginPctMax,
                             Boolean allowMultiPosition, Boolean allowHedge,
-                            Boolean allowSelfAdd, Boolean allowSelfReduce) {
+                            Boolean allowSelfAdd, Boolean allowSelfReduce,
+                            Boolean alertEnabled, BigDecimal alertThresholdMult) {
     }
 
     public record ListModelsReq(String apiProtocol, String baseUrl, String apiKey) {
@@ -179,6 +181,8 @@ public class TraderService {
                 .set(AiTrader::getAllowHedge, probe.getAllowHedge())
                 .set(AiTrader::getAllowSelfAdd, probe.getAllowSelfAdd())
                 .set(AiTrader::getAllowSelfReduce, probe.getAllowSelfReduce())
+                .set(AiTrader::getAlertEnabled, probe.getAlertEnabled())
+                .set(AiTrader::getAlertThresholdMult, probe.getAlertThresholdMult())
                 .set(AiTrader::getUpdatedAt, LocalDateTime.now()));
         if (modelChanged) {
             modelFactory.evict(t.getId());
@@ -306,7 +310,7 @@ public class TraderService {
             return "名字必填且不超过32字符";
         }
         if (req.intervalCode() == null || !INTERVALS.contains(req.intervalCode())) {
-            return "K线级别仅支持 5m/15m/1h/4h/1d";
+            return "K线级别仅支持 5m/15m/1h/4h";
         }
         String spec = validateSpec(req);
         if (spec != null) {
@@ -376,6 +380,10 @@ public class TraderService {
         if (Boolean.FALSE.equals(req.allowMultiPosition()) && Boolean.TRUE.equals(req.allowHedge())) {
             return "只允许一个仓位时无法开启多空双开（双开本身需要两个仓位）";
         }
+        // 警报阈值只能调高：系数<1 等于把每币基准（平台下限）调低
+        if (req.alertThresholdMult() != null && req.alertThresholdMult().compareTo(BigDecimal.ONE) < 0) {
+            return "警报灵敏度系数不能低于 1.0（阈值只能调高不能调低）";
+        }
         return null;
     }
 
@@ -399,6 +407,8 @@ public class TraderService {
         t.setAllowHedge(multi && Boolean.TRUE.equals(req.allowHedge()));
         t.setAllowSelfAdd(!Boolean.FALSE.equals(req.allowSelfAdd()));
         t.setAllowSelfReduce(Boolean.TRUE.equals(req.allowSelfReduce()));
+        t.setAlertEnabled(!Boolean.FALSE.equals(req.alertEnabled()));
+        t.setAlertThresholdMult(req.alertThresholdMult() == null ? BigDecimal.ONE : req.alertThresholdMult());
     }
 
     private static String stripTrailingSlash(String baseUrl) {
