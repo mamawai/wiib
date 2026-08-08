@@ -128,13 +128,14 @@ public final class TradeGuard {
             BigDecimal pct = margin.multiply(new BigDecimal("100"))
                     .divide(equity, 4, RoundingMode.HALF_UP);
             if (pct.compareTo(cfg.marginPctMin()) < 0 || pct.compareTo(cfg.marginPctMax()) > 0) {
+                // 占比原样展示不四舍五入：9.995% 若显示成"10.00%超出10~15%"是自相矛盾，模型会懵
                 return "开仓保证金" + margin.setScale(0, RoundingMode.HALF_UP) + "占权益"
-                        + pct.setScale(2, RoundingMode.HALF_UP) + "%，超出主人设定的"
+                        + pct.stripTrailingZeros().toPlainString() + "%，超出主人设定的"
                         + cfg.marginPctMin().stripTrailingZeros().toPlainString() + "~"
                         + cfg.marginPctMax().stripTrailingZeros().toPlainString() + "%区间。"
                         + req.leverage() + "倍杠杆下数量应在 "
-                        + qtyFor(cfg.marginPctMin(), equity, req.leverage(), entryRef) + " ~ "
-                        + qtyFor(cfg.marginPctMax(), equity, req.leverage(), entryRef) + " 之间";
+                        + qtyFor(cfg.marginPctMin(), equity, req.leverage(), entryRef, RoundingMode.CEILING) + " ~ "
+                        + qtyFor(cfg.marginPctMax(), equity, req.leverage(), entryRef, RoundingMode.FLOOR) + " 之间";
             }
         }
         if (req.stopLossPrice() == null) {
@@ -153,11 +154,16 @@ public final class TradeGuard {
         return null;
     }
 
-    /** 拒因里把该配多少数量直接算给模型，省一轮试错 */
-    private static String qtyFor(BigDecimal marginPct, BigDecimal equity, int leverage, BigDecimal entryRef) {
+    /**
+     * 拒因里把该配多少数量直接算给模型，省一轮试错。
+     * 下界向上取整、上界向下取整：模型会照抄提示数字重试（一晚 8 次贴边拒绝的实测教训——
+     * HALF_UP 算出的下界被模型截位后又低于下界，陷入拒绝循环）。
+     */
+    private static String qtyFor(BigDecimal marginPct, BigDecimal equity, int leverage,
+                                 BigDecimal entryRef, RoundingMode mode) {
         return equity.multiply(marginPct).divide(new BigDecimal("100"), 8, RoundingMode.HALF_UP)
                 .multiply(BigDecimal.valueOf(leverage))
-                .divide(entryRef, 6, RoundingMode.HALF_UP)
+                .divide(entryRef, 6, mode)
                 .stripTrailingZeros().toPlainString();
     }
 

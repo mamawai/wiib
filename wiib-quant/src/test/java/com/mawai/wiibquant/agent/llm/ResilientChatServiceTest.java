@@ -103,6 +103,23 @@ class ResilientChatServiceTest {
         assertThat(options.getToolContext()).isNull();
     }
 
+    /**
+     * SDK 重试盲区的唯一豁免：响应体读到一半被掐（OpenAIInvalidDataException，如 HTTP/2 stream reset）
+     * SDK 的 maxRetries 不管这类失败——这里单次重试救整轮唤醒，不与 SDK 重试叠乘。
+     */
+    @Test
+    void 响应读取中断单次重试() {
+        when(primary.call(any(Prompt.class)))
+                .thenThrow(new com.openai.errors.OpenAIInvalidDataException("Error reading response",
+                        new java.io.IOException("stream was reset: CANCEL")))
+                .thenReturn(responseOf("重试成功"));
+
+        ChatResponse result = service(null).execute(ASK);
+
+        verify(primary, times(2)).call(any(Prompt.class));
+        assertThat(result.getResult().getOutput().getText()).isEqualTo("重试成功");
+    }
+
     @Test
     void 主模型正常时不碰兜底() {
         when(primary.call(any(Prompt.class))).thenReturn(responseOf("主模型回答"));

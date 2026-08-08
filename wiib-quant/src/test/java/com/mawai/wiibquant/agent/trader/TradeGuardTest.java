@@ -55,18 +55,50 @@ class TradeGuardTest {
 
     // ---------- 保证金区间 ----------
 
+    /**
+     * 一晚 8 次贴边拒绝的实测教训：拒因里的提示数量必须照抄可过——
+     * 下界向上取整、上界向下取整，模型复制建议值重试不能再次被拒陷入循环。
+     */
+    @Test
+    void marginHintQuantitiesAreCopyPasteSafe() {
+        // 0.05×100000/10=500=5%，低于 cfg 里改设的 10~15 下界 → 拒并给建议数量
+        TraderRiskConfig tight = new TraderRiskConfig(5, 20, new BigDecimal("10"), new BigDecimal("15"),
+                true, false, true, false);
+        String reject = validateOpen(base().withQuantity(new BigDecimal("0.05")),
+                EQUITY, MARK, WL, tight, List.of());
+        java.util.regex.Matcher m = java.util.regex.Pattern
+                .compile("数量应在 (\\S+) ~ (\\S+) 之间").matcher(reject);
+        assertThat(m.find()).isTrue();
+
+        assertThat(validateOpen(base().withQuantity(new BigDecimal(m.group(1))),
+                EQUITY, MARK, WL, tight, List.of())).isNull();
+        assertThat(validateOpen(base().withQuantity(new BigDecimal(m.group(2))),
+                EQUITY, MARK, WL, tight, List.of())).isNull();
+    }
+
+    /** 9.995% 不许四舍五入显示成"10.00%超出10~15%区间"的自相矛盾——占比原样展示 */
+    @Test
+    void marginPctDisplayedWithoutMisleadingRounding() {
+        TraderRiskConfig tight = new TraderRiskConfig(5, 20, new BigDecimal("10"), new BigDecimal("15"),
+                true, false, true, false);
+        // 0.09995×100000/10=999.5 → 9.995%，贴着下界差一丝
+        String r = validateOpen(base().withQuantity(new BigDecimal("0.09995")),
+                EQUITY, MARK, WL, tight, List.of());
+        assertThat(r).contains("9.995%").doesNotContain("10%，超出");
+    }
+
     /** 0.02×100000/10=200=权益2% < 下界5% → 拒，且把该配的数量算给模型 */
     @Test
     void marginBelowMinRejected() {
         String r = validateOpen(base().withQuantity(new BigDecimal("0.02")), EQUITY, MARK, WL, cfg(), List.of());
-        assertThat(r).contains("2.00%").contains("数量应在");
+        assertThat(r).contains("占权益2%").contains("数量应在");
     }
 
     /** 0.3×100000/10=3000=30% > 上界20% → 拒 */
     @Test
     void marginAboveMaxRejected() {
         assertThat(validateOpen(base().withQuantity(new BigDecimal("0.3")), EQUITY, MARK, WL, cfg(), List.of()))
-                .contains("30.00%");
+                .contains("占权益30%");
     }
 
     /** 边界含端点：0.05×100000/10=500=正好5% → 放行 */
@@ -146,7 +178,7 @@ class TradeGuardTest {
     void sameSidePendingOrderIsNotAnAddOn() {
         List<TradeGuard.PosSnap> pending = List.of(new TradeGuard.PosSnap("BTCUSDT", "LONG", 10, false));
         assertThat(validateOpen(base().withQuantity(new BigDecimal("0.5")), EQUITY, MARK, WL, cfg(), pending))
-                .contains("50.00%");
+                .contains("占权益50%");
     }
 
     // ---------- 与配置无关的既有护栏 ----------

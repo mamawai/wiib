@@ -165,6 +165,26 @@ class TradeToolsTest {
         assertThat(p.getRevisionsJson()).contains("补立");
     }
 
+    /**
+     * 真跑事故复现：模型重试时丢了 symbol 参数，空 symbol 打到上游拉回全市场数组炸掉解析。
+     * 白名单必须挡在行情查询之前——模型要收到的是可修正的拒因，不是解析异常。
+     */
+    @Test
+    void blankSymbolRejectedBeforeMarketFetch() {
+        TradeTools strict = new TradeTools(simTradeClient, 99L, Set.of("BTCUSDT"),
+                new BigDecimal("10000"),
+                sym -> { throw new IllegalStateException("不该发起行情查询"); },
+                new TraderPlanStore(planMapper), requestService,
+                new TradeTools.WakeCtx(7L, 1, 1785171600000L,
+                        new TraderRiskConfig(1, 20, new BigDecimal("1"), new BigDecimal("50"),
+                                true, true, true, true)));
+
+        String r = strict.openPosition(null, "SHORT", "MARKET", 0.64, 20,
+                null, 64980, 64640.0, "BREAKOUT", "突破", "收回箱体");
+
+        assertThat(r).startsWith("REJECTED").contains("白名单").contains("完整给出全部参数");
+    }
+
     /** 审批分流的回执是纯文本非 JSON：必须原样返回给模型，动作轨迹只记一条 ok（不许被当异常转成 ERROR） */
     @Test
     void requestReceiptReturnedVerbatimToModel() {

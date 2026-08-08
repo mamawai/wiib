@@ -133,6 +133,12 @@ public class TradeTools {
                 takeProfitPrice == null ? null : BigDecimal.valueOf(takeProfitPrice),
                 playType, signalsUsed, invalidationCondition);
         JSONObject argSummary = openArgs(req);
+        // 白名单挡在行情查询之前：模型重试时会丢参数（真实发生过），空 symbol 打到上游
+        // 会拉回全市场 premiumIndex 数组炸掉解析，模型收到的就不是可修正的拒因了
+        if (symbol == null || !symbolWhitelist.contains(symbol)) {
+            return rejected("open_position", argSummary, "symbol不在白名单内，可交易: " + symbolWhitelist
+                    + "，你给了" + symbol + "。重试时必须完整给出全部参数，不能只给改动项");
+        }
         BigDecimal mark;
         try {
             mark = markPrice.apply(symbol);
@@ -537,6 +543,10 @@ public class TradeTools {
 
     private String fail(String tool, JSONObject args, Exception e) {
         String msg = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
+        // 上游异常可能拖着整段响应体（曾见全市场premiumIndex数组进拒因），截断防烧token防撑爆轨迹
+        if (msg.length() > 300) {
+            msg = msg.substring(0, 300) + "…";
+        }
         action(tool, args).fluentPut("status", "error").fluentPut("error", msg);
         log.warn("[TradeTools] {} 失败 simUserId={} msg={}", tool, simUserId, msg);
         return "ERROR: " + msg;

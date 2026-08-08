@@ -1,5 +1,6 @@
 package com.mawai.wiibquant.agent.llm;
 
+import com.openai.errors.OpenAIInvalidDataException;
 import lombok.extern.slf4j.Slf4j;
 import org.bsc.langgraph4j.spring.ai.agent.ReactAgent;
 import org.bsc.langgraph4j.spring.ai.agent.ReactAgentBuilder;
@@ -32,7 +33,10 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * 韧性分层（两条路径职责不同，别再往回加）：
  * <ul>
  *   <li><b>阻塞 execute</b>：只兜底不重试。重试归模型层——ResponsesChatModel 自带退避、
- *       OpenAI 走 SDK 的 maxRetries；这里再来一轮就是 3×3=9 次，纯放大尾延迟</li>
+ *       OpenAI 走 SDK 的 maxRetries；这里再来一轮就是 3×3=9 次，纯放大尾延迟。
+ *       唯一豁免：{@link OpenAIInvalidDataException}（响应体读到一半被掐，HTTP/2 stream reset 等）
+ *       是 SDK 重试的盲区——maxRetries 只管请求层（连接失败/429/5xx），读响应失败它不管，
+ *       这一类单次重试，不与 SDK 叠乘（真跑一晚实测：一次 reset 废掉整轮唤醒还计入连败）</li>
  *   <li><b>流式 streamingExecute</b>：重试在这一层。模型层的流式路径不做重试，
  *       错误发生在订阅期只能在流水线上处理</li>
  * </ul>
@@ -144,13 +148,23 @@ public class ResilientChatService implements ReactAgent.ChatService {
     public ChatResponse execute(List<Message> messages) {
         List<Message> withSystem = withSystem(messages);
         try {
-            return primaryModel.call(promptOf(withSystem, chatOptions));
+            return callPrimary(withSystem);
         } catch (RuntimeException e) {
             if (fallbackModel == null) {
                 throw e;
             }
             log.warn("主模型调用失败（模型层已重试过），切换兜底模型: {}", e.toString());
             return fallbackModel.call(promptOf(withSystem, fallbackOptions()));
+        }
+    }
+
+    /** SDK 重试盲区的单次补救：读响应失败（类头注释的唯一豁免）再试一次，其余异常原样抛。 */
+    private ChatResponse callPrimary(List<Message> withSystem) {
+        try {
+            return primaryModel.call(promptOf(withSystem, chatOptions));
+        } catch (OpenAIInvalidDataException e) {
+            log.warn("响应读取中断（SDK 不重试此类失败），单次重试: {}", e.toString());
+            return primaryModel.call(promptOf(withSystem, chatOptions));
         }
     }
 
