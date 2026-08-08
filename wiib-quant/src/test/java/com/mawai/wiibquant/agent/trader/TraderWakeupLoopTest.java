@@ -566,6 +566,24 @@ class TraderWakeupLoopTest {
                 .contains("尚未收盘").contains("不因为被叫醒而必须动作");
     }
 
+    /** recent 回注窗口排除 REVIEW 行：复盘产出已进 memory 不许挤占 5 条窗口；ALERT 是真实交易决策必须保留 */
+    @Test
+    void recentDecisionsQueryExcludesReviewRows() {
+        stubHealthyAccount();
+        ChatModel model = modelCheckingThenSummary();
+        when(modelFactory.modelFor(any())).thenReturn(model);
+
+        runner.wake(trader(), 1785171600000L);
+
+        @SuppressWarnings({"unchecked", "rawtypes"})
+        ArgumentCaptor<com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<AiTraderDecision>> q =
+                ArgumentCaptor.forClass((Class) com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper.class);
+        verify(decisionMapper).selectList(q.capture());
+        // 条件里必须带 kind <> REVIEW；不能反过来 kind = TRADE（会把 ALERT 行也挤出窗口）
+        assertThat(q.getValue().getSqlSegment()).contains("kind <>");
+        assertThat(q.getValue().getParamNameValuePairs()).containsValue(AiTraderDecision.KIND_REVIEW);
+    }
+
     @Test
     void skippedWakeLeavesTrace() {
         runner.recordSkipped(trader(), 1785171600000L);

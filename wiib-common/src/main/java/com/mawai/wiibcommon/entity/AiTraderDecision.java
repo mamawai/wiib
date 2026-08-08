@@ -20,6 +20,7 @@ public class AiTraderDecision {
 
     public static final String KIND_TRADE = "TRADE";
     public static final String KIND_ALERT = "ALERT";
+    public static final String KIND_REVIEW = "REVIEW";
 
     @TableId(type = IdType.AUTO)
     private Long id;
@@ -33,7 +34,7 @@ public class AiTraderDecision {
 
     private String intervalCode;
 
-    /** TRADE=例行K线唤醒 ALERT=波动哨兵警报唤醒；learning agent 的 REVIEW 将来共用此列 */
+    /** TRADE=例行K线唤醒 ALERT=波动哨兵警报唤醒 REVIEW=learning agent复盘（reasoning=复盘全文，无equity） */
     private String kind;
 
     /** OK / ERROR / SKIPPED（上一唤醒未完被跳过） */

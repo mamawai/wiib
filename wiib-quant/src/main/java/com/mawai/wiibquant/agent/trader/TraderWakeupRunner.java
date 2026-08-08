@@ -195,9 +195,12 @@ public class TraderWakeupRunner {
                 planStore, requestService,
                 new TradeTools.WakeCtx(trader.getId(), trader.getRoundNo(), boundaryTime, risk));
 
+        // REVIEW 行排除在回注窗口外（复盘产出已进 memory）；ALERT 是真实交易决策必须保留——
+        // 警报轮可能刚动过仓位，开场白的"上次唤醒"也取自本列表第一条
         List<AiTraderDecision> recent = decisionMapper.selectList(new LambdaQueryWrapper<AiTraderDecision>()
                 .eq(AiTraderDecision::getTraderId, trader.getId())
                 .eq(AiTraderDecision::getRoundNo, trader.getRoundNo())
+                .ne(AiTraderDecision::getKind, AiTraderDecision.KIND_REVIEW)
                 .lt(AiTraderDecision::getWakeTime, boundaryTime)
                 .orderByDesc(AiTraderDecision::getWakeTime)
                 .last("LIMIT " + RECENT_DECISIONS));
