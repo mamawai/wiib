@@ -302,9 +302,11 @@ class MarketDataServiceTest {
     /**
      * 按"带异常"筛而不按文案筛，改文案也不会失配。
      * <p>
-     * 限定语别丢：本测试只走 assemble()，这条路上带 throwable 的日志只有 join() 那条
-     * （MarketDataService.rawCached 的"取数失败"也带 throwable，但不在这条路上）。
-     * findFirst() 是顺序敏感的——哪天这个测试类里的用例开始走 rawCached，筛出来就是错的那条且静默通过。
+     * 限定语别丢：<b>装了 appender 的那条用例</b>只走 assemble()，这条路上带 throwable 的日志
+     * 只有 join() 那条。MarketDataService.rawCached 的"取数失败"同样带 throwable——
+     * 本类别处确实有走到它的用例，只是那些用例没装 appender，所以筛不到一起。
+     * findFirst() 是顺序敏感的：哪天装了 appender 的用例也走 rawCached，就会筛出错的那条，
+     * 断言当场红（除非那条恰好也是 SOE），而不是筛错了还悄悄绿。
      */
     private static String waiterFailureCause(ListAppender<ILoggingEvent> logs) {
         return logs.list.stream()

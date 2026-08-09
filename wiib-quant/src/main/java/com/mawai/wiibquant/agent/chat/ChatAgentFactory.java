@@ -334,7 +334,14 @@ public class ChatAgentFactory {
      * 而 {@code CompiledGraph.maxIterations} 默认 25，所以 <b>L 最大只能取 7</b>
      * （L=7 实测通过、L=8 抛 "Maximum number of iterations (25) reached!"）。
      * 这还是最省的那条路：一旦跑起专家轮（dispatch + 并行 + join + 回环 router）预算更少。
-     * 要用更大的 L 就得同时调 {@code compiled.setMaxIterations(n)}。
+     * 要用更大的 L 就得同时抬硬顶（编译期 {@code CompileConfig.builder().recursionLimit(n)}，
+     * 或事后 {@code compiled.setMaxIterations(n)}）。
+     * <p>
+     * <b>注意专家图的账不一样，两个数都实测过，别当成有一处写错了</b>：
+     * {@link #expertGraph} 没有 {@code .streaming(true)}，非流式模型节点只吃 1 次迭代，
+     * 一轮 {@code 2} 次、共 {@code 2L+3} → L≤11（实测 11 通过、12 抛硬顶）。
+     * 而 {@code run-model-call-limit} 这<b>一个</b>配置同时喂着两张图，所以取值要按更紧的
+     * summarizer 来（≤7 自动同时满足专家侧）。
      */
     static List<EdgeHook.WrapCall<MessagesState<Message>>> summarizerToolHooks(int limit) {
         return List.of(new ModelCallLimiter(limit));
@@ -473,8 +480,8 @@ public class ChatAgentFactory {
      *       底层的 StreamingChatGenerator（{@code WithEmbed.cancel()} 只 cancel 栈里实现了该接口的项）。
      *       本仓从不 cancel 图生成器——{@code ChatWorkbenchController.run()} 断连后是<b>故意</b>
      *       继续消费到底好落历史的，所以现在没有影响；哪天真要支持中止，这里得补上</li>
-     *   <li>流出错、或收尾时 resultValue 不是 Map，就原样放行不合并：压缩这一次白做，
-     *       下次模型调用会重新压。是有意的降级——这条路上再加补救只会把一次失败放大成两次</li>
+     *   <li>流出错就原样放行不合并：压缩这一次白做，下次模型调用会重新压。
+     *       是有意的降级——这条路上再加补救只会把一次失败放大成两次</li>
      * </ul>
      */
     @SuppressWarnings("unchecked")

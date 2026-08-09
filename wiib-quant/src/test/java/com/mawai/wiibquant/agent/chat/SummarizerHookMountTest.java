@@ -51,8 +51,14 @@ class SummarizerHookMountTest {
 
     /**
      * 测试用的调用上限。故意远小于生产默认的 12：框架把 START 也算一次迭代，
-     * ReAct 一轮吃 2L+3 次（保险丝跳 END 后还要吐 END、给 done 两次），而硬顶是 25——
-     * L 最大只能取 11，写 12 会在保险丝已经生效之后被框架的 "Maximum number of iterations" 掐掉。
+     * summarizer 一轮 ReAct 吃 3 次（流式模型节点占 2 次——交回 embed 生成器一次、
+     * 合并 resultValue 一次——加工具节点 1 次），共 {@code 3L+3}，而硬顶 25 → <b>L 最大只能取 7</b>
+     * （实测 L=7 通过、L=8 抛 "Maximum number of iterations (25) reached!"）。
+     * 写 12 会在保险丝已经生效之后被硬顶掐掉，属假失败。3×3+3=12，余量足。
+     * <p>
+     * 别和 {@link ExpertCallLimitTest} 那边的 {@code 2L+3} / {@code L≤11} 对照着以为有一处是错的：
+     * 两张图的预算本来就不同，专家图没有 {@code .streaming(true)}，非流式模型节点只占 1 次迭代。
+     * 两个数都实测过。
      */
     private static final int LIMIT = 3;
 
@@ -139,7 +145,10 @@ class SummarizerHookMountTest {
 
     /**
      * 压缩开着的时候 token 必须照样逐帧到达前端——这是本次改动真正危及、也是用户唯一看得见的东西。
-     * 上面那条只断言最终 state：把生成器抽干再交回、或者换个 key 塞回去，它照样绿而 SSE 直接哑掉。
+     * 上面那条只断言最终 state：把生成器抽干再交回，它照样绿而 SSE 直接哑掉（实测过）。
+     * <p>
+     * （"换个 key 把生成器塞回去"不在此列：框架是按 value 找生成器的，那条路帧照流、
+     * 这条测试也照样绿；它被否掉的理由是别的——要往 state 塞 schema 外的合成键。）
      */
     @Test
     void 压缩开着时token仍逐帧推送() throws Exception {
