@@ -36,6 +36,10 @@ class MarketDataServiceTest {
     private static final String ONE_KLINE = "[[1,\"1\",\"2\",\"1\",\"1.5\",\"10\",2,\"15\",5,\"6\"]]";
     private static final String WS_DEPTH = "{\"bids\":[[\"1\",\"1\"]],\"asks\":[[\"2\",\"1\"]]}";
 
+    /** 拨表用的基准时刻。固定值而非 currentTimeMillis：年龄上限的边界用例不该受运行时刻影响 */
+    private static final long T0 = 1_700_000_000_000L;
+    private static final long HOUR_MS = 3_600_000L;
+
     private final BinanceRestClient binanceRestClient = mock(BinanceRestClient.class);
     private final ForceOrderService forceOrderService = mock(ForceOrderService.class);
     private final DepthStreamCache depthStreamCache = mock(DepthStreamCache.class);
@@ -216,7 +220,9 @@ class MarketDataServiceTest {
 
     /**
      * 熔断冷却 120s 比 TTL 60s 长：取不到新数据时资金费必须兜过期那份，
-     * 否则内存里明明躺着够用的数据却要黑掉 60 秒（资金费 8h 才结算一次，过期无所谓）。
+     * 否则内存里明明躺着够用的数据却要黑掉 60 秒（资金费 8h 才结算一次，这点过期无所谓）。
+     * <p>
+     * "无所谓"只在兜底上限之内成立，超了照样返回 null，见 {@link #资金费缓存超过8小时后不再兜()}。
      */
     @Test
     void 资金费取不到新数据时兜过期缓存() {
@@ -248,7 +254,10 @@ class MarketDataServiceTest {
 
     /**
      * 熔断期（上游返回 null）必须回退到过期缓存：不兜的话资金费上下文一 null 就把整条
-     * funding_history 拖垮，历史那边的兜底跟着白做——两者共用同一个熔断器，同进同退。
+     * funding_history 拖垮，历史那边的兜底跟着白做——两者共用同一个熔断器，会同时进入熔断。
+     * <p>
+     * 但<b>不同时到期</b>：两边的兜底上限是两个数（premium 15min / funding 8h），
+     * 所以整机停摆时先空掉的一定是 premium。别把这里读成"同进同退"。
      */
     @Test
     void 资金费上下文取不到新数据时兜过期缓存() {
@@ -270,6 +279,106 @@ class MarketDataServiceTest {
         when(binanceRestClient.getPremiumIndex("BTCUSDT")).thenReturn(null);
 
         assertThat(service(60_000).premiumIndex("BTCUSDT")).isNull();
+    }
+
+    /**
+     * 兜过期不是无限期的：资金费超过 8 小时就跨了结算周期，那份数据是实质错误的，
+     * 宁可当没有（走 available:false），也不能拿上一周期的费率冒充本周期。
+     * <p>
+     * 拨表而不是真等：{@code nowMs} 同时管 TTL 和年龄上限，一次拨表就复刻了生产上
+     * "TTL 过期 → 重取 → 熔断中取不到 → 看年龄" 这条完整路径。
+     */
+    @Test
+    void 资金费缓存超过8小时后不再兜() {
+        when(binanceRestClient.getFundingRateHistory("BTCUSDT", 30))
+                .thenReturn("[{\"fundingRate\":\"0.0001\"}]")
+                .thenReturn(null); // 第二次模拟熔断中
+        MarketDataService service = service(60_000);
+        service.nowMs = () -> T0;
+
+        assertThat(service.fundingHistory("BTCUSDT")).contains("0.0001"); // 这一步把缓存写在 T0
+        service.nowMs = () -> T0 + 8 * HOUR_MS + 1; // 越线 1ms：钉的是"越线之后不兜"
+
+        assertThat(service.fundingHistory("BTCUSDT")).isNull();
+    }
+
+    /**
+     * 边界点本身：年龄<b>恰好等于</b>上限时不兜（判据是严格小于）。
+     * <p>
+     * 单独一条是因为上面那条越线 1ms、下面那条差 1 秒，都够不到这个点——
+     * 把 {@code <} 写成 {@code <=} 时它俩全绿。别指望盘口那条老用例代劳：
+     * 它走真实时钟且 {@code maxStale=0}，两次调用落在同一毫秒、age 恰好为 0 才顺带红的，
+     * 机器慢一点就漏。
+     */
+    @Test
+    void 资金费缓存年龄恰好等于上限时不再兜() {
+        when(binanceRestClient.getFundingRateHistory("BTCUSDT", 30))
+                .thenReturn("[{\"fundingRate\":\"0.0001\"}]")
+                .thenReturn(null);
+        MarketDataService service = service(60_000);
+        service.nowMs = () -> T0;
+
+        assertThat(service.fundingHistory("BTCUSDT")).contains("0.0001");
+        service.nowMs = () -> T0 + 8 * HOUR_MS;
+
+        assertThat(service.fundingHistory("BTCUSDT")).isNull();
+    }
+
+    /**
+     * 上限之内还是要兜：熔断冷却 120s 比 TTL 60s 长，不兜等于内存里躺着够用的数据却白黑掉 60 秒。
+     * 卡在差 1 秒不满 8 小时，防的是"上限判断写反 / 写成恒不兜"——那样 serve-stale 就整个废了。
+     */
+    @Test
+    void 资金费缓存不满8小时仍然兜() {
+        when(binanceRestClient.getFundingRateHistory("BTCUSDT", 30))
+                .thenReturn("[{\"fundingRate\":\"0.0001\"}]")
+                .thenReturn(null);
+        MarketDataService service = service(60_000);
+        service.nowMs = () -> T0;
+
+        String first = service.fundingHistory("BTCUSDT");
+        service.nowMs = () -> T0 + 8 * HOUR_MS - 1000;
+
+        assertThat(service.fundingHistory("BTCUSDT")).isEqualTo(first);
+    }
+
+    /** 标记价是实时价，上限只有一刻钟：超了就是拿旧价冒充现价，宁可报不可用 */
+    @Test
+    void 资金费上下文缓存超过15分钟后不再兜() {
+        when(binanceRestClient.getPremiumIndex("BTCUSDT"))
+                .thenReturn("{\"markPrice\":\"100\"}")
+                .thenReturn(null);
+        MarketDataService service = service(60_000);
+        service.nowMs = () -> T0;
+
+        assertThat(service.premiumIndex("BTCUSDT")).contains("100");
+        service.nowMs = () -> T0 + 15 * 60_000L + 1;
+
+        assertThat(service.premiumIndex("BTCUSDT")).isNull();
+    }
+
+    /**
+     * 两个调用点各传各的上限，不是同一个数：挑 1 小时这个点——对资金费（8h）还在窗口内，
+     * 对标记价（15min）早就超龄了。上面三条其实已经间接钉住，这条把契约摆在明面上：
+     * 谁把两处并成一个常量，这里当场红。
+     */
+    @Test
+    void 资金费与资金费上下文的兜底上限不是同一个数() {
+        when(binanceRestClient.getFundingRateHistory("BTCUSDT", 30))
+                .thenReturn("[{\"fundingRate\":\"0.0001\"}]")
+                .thenReturn(null);
+        when(binanceRestClient.getPremiumIndex("BTCUSDT"))
+                .thenReturn("{\"markPrice\":\"100\"}")
+                .thenReturn(null);
+        MarketDataService service = service(60_000);
+        service.nowMs = () -> T0;
+        service.fundingHistory("BTCUSDT");
+        service.premiumIndex("BTCUSDT");
+
+        service.nowMs = () -> T0 + HOUR_MS;
+
+        assertThat(service.fundingHistory("BTCUSDT")).contains("0.0001"); // 8h 内，照兜
+        assertThat(service.premiumIndex("BTCUSDT")).isNull();            // 15min 外，不兜
     }
 
     /** 盘口反过来：agent 拿它挂限价单，宁可报不可用也不能喂两分钟前的挂单墙 */

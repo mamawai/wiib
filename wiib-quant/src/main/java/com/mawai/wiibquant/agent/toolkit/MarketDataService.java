@@ -14,11 +14,13 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 
 /**
@@ -29,6 +31,12 @@ import java.util.function.Supplier;
 @Slf4j
 @Service
 public class MarketDataService {
+
+    /** 资金费历史的兜底上限：8 小时结算一次，同一周期内这个值本就没变过；超了就是跨周期的错数 */
+    private static final long FUNDING_MAX_STALE_MS = Duration.ofHours(8).toMillis();
+
+    /** 资金费上下文的兜底上限：里面装着标记价，是实时价；一刻钟前的还能当"大致现价"，再久就是误导 */
+    private static final long PREMIUM_MAX_STALE_MS = Duration.ofMinutes(15).toMillis();
 
     private final BinanceRestClient binanceRestClient;
     private final DepthStreamCache depthStreamCache;
@@ -43,6 +51,12 @@ public class MarketDataService {
     private record Cached(String value, long at) {}
 
     private final Map<String, Cached> rawCache = new ConcurrentHashMap<>();
+
+    /**
+     * rawCache 的老化墙钟，可注入只为让"超龄不再兜"测得了——真等 8 小时不现实。
+     * 作用范围仅限 {@link #rawCached}；assemble 那条整装缓存仍读 {@code Instant.now()}，本次不动它。
+     */
+    LongSupplier nowMs = System::currentTimeMillis;
 
     public MarketDataService(BinanceRestClient binanceRestClient,
                              ForceOrderService forceOrderService,
@@ -96,24 +110,26 @@ public class MarketDataService {
 
     /**
      * 资金费历史（近 30 条）。失败返回 null，调用方按"数据不可用"处理。
-     * 取不到新数据时兜过期那份：资金费 8 小时才结算一次，两分钟前的历史与实时没有差别，
-     * 而熔断冷却 120s 比 TTL 60s 长，不兜就会白白黑掉中间那 60 秒。
+     * 取不到新数据时兜过期那份，但只兜 8 小时以内的：资金费 8 小时才结算一次，同一个周期内这个值
+     * 本就没变过，兜它无害；而熔断冷却 120s 比 TTL 60s 长，不兜就会白白黑掉中间那 60 秒。
+     * 超过 8 小时就跨周期了，那个数是实质错误的，当没有数据处理（走调用方既有的 available:false）。
      * <p>
-     * 这份兜底要真生效，得和 {@link #premiumIndex} 同进同退：两者共用同一个熔断器，
-     * funding_history 工具是"历史 + 资金费上下文"一起出的，任一边空了整条工具就报不可用。
+     * 这 8 小时在 funding_history 工具那条路上大半够不着：工具是"历史 + 资金费上下文"一起出的，
+     * 而 {@link #premiumIndex} 只兜 15 分钟，两者共用同一个熔断器，premium 先一步空掉整条工具
+     * 就报不可用了。也就是说停摆超过一刻钟，历史这边兜再久也露不出来。
      */
     public String fundingHistory(String symbol) {
         String normalized = QuantConstants.normalizeSymbolLenient(symbol);
-        return rawCached("funding:" + normalized, true,
+        return rawCached("funding:" + normalized, FUNDING_MAX_STALE_MS,
                 () -> binanceRestClient.getFundingRateHistory(normalized, 30));
     }
 
     /**
      * 资金费上下文（下次结算时间 / 上次费率 / 标记价）。仅供 @Tool 层给 LLM 读，失败返回 null。
      * <p>
-     * 允许兜过期那份：这三个字段在资金费语境下陈旧几分钟无害——费率按 8 小时结算，
-     * 两分钟前的值与实时没有差别。反过来若不兜，熔断期这里一 null 就把整条 funding_history
-     * 拖垮，历史那边的兜底也就白做了。
+     * 允许兜过期那份，上限 15 分钟——比资金费历史短一个量级，因为这里装着标记价，是实时价格。
+     * 一刻钟内的价当"大致现价"给模型读还行，总比告诉它"没数据"强（不兜的话熔断期这里一 null
+     * 就把整条 funding_history 拖垮，历史那边的兜底也就白做了）；再久就是拿旧价冒充现价，宁可报不可用。
      * <p>
      * <b>算钱的路径不许走这里</b>：trader 下单量（TraderWakeupRunner）和结算价
      * （FuturesSettlementServiceImpl）各自直调 BinanceRestClient 取实时 markPrice，
@@ -121,7 +137,7 @@ public class MarketDataService {
      */
     public String premiumIndex(String symbol) {
         String normalized = QuantConstants.normalizeSymbolLenient(symbol);
-        return rawCached("premium:" + normalized, true,
+        return rawCached("premium:" + normalized, PREMIUM_MAX_STALE_MS,
                 () -> binanceRestClient.getPremiumIndex(normalized));
     }
 
@@ -137,30 +153,35 @@ public class MarketDataService {
         if (ws != null) {
             return ws;
         }
-        // 盘口不兜过期数据：agent 拿它挂限价单，BTC 一分钟就能走 0.1~0.3%，宁可报不可用
-        return rawCached("depth:" + normalized, false,
+        // 盘口一点过期数据都不兜（maxStale=0）：agent 拿它挂限价单，BTC 一分钟就能走 0.1~0.3%，宁可报不可用
+        return rawCached("depth:" + normalized, 0,
                 () -> binanceRestClient.getFuturesOrderbook(normalized, 10));
     }
 
     /**
-     * 裸 REST 取数 + TTL 缓存。
-     * @param serveStale 取不到新数据（熔断/网络故障）时是否回退到过期条目——只对老化慢的数据开
+     * 裸 REST 取数 + TTL 缓存。这里有两个时间概念，别混：
+     * {@code ttlMillis}(60s) 是新鲜期，没过就直接返回、压根不发请求；
+     * {@code maxStale} 只在"过了 TTL 且取新数据失败"时才登场，管这条旧数据还顶不顶得住。
+     *
+     * @param maxStale 兜底的年龄上限，从写进缓存那一刻起算的<b>总年龄</b>（毫秒），0 = 不兜。
+     *                 超龄按没有数据返回 null，走调用方既有的 available:false 降级链。
+     *                 超龄条目仍留在 map 里（本层不淘汰），只是不会再被返回
      */
-    private String rawCached(String key, boolean serveStale, Supplier<String> loader) {
+    private String rawCached(String key, long maxStale, Supplier<String> loader) {
         Cached hit = rawCache.get(key);
-        if (hit != null && Instant.now().toEpochMilli() - hit.at() < ttlMillis) {
+        if (hit != null && nowMs.getAsLong() - hit.at() < ttlMillis) {
             return hit.value();
         }
         try {
             String value = loader.get();
             if (value != null) {
-                rawCache.put(key, new Cached(value, Instant.now().toEpochMilli()));
+                rawCache.put(key, new Cached(value, nowMs.getAsLong()));
                 return value;
             }
         } catch (Exception e) {
             log.warn("[Toolkit] 取数失败 key={}", key, e);
         }
-        return serveStale && hit != null ? hit.value() : null;
+        return hit != null && nowMs.getAsLong() - hit.at() < maxStale ? hit.value() : null;
     }
 
     private boolean fresh(MarketAssembly cached) {
