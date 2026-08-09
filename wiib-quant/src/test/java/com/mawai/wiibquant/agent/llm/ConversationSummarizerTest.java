@@ -3,6 +3,9 @@ package com.mawai.wiibquant.agent.llm;
 import org.bsc.langgraph4j.prebuilt.MessagesState;
 import org.bsc.langgraph4j.state.AppenderChannel;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.ArgumentCaptor;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
@@ -15,8 +18,13 @@ import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.chat.prompt.Prompt;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -193,6 +201,130 @@ class ConversationSummarizerTest {
         assertThat(compressed).hasSize(1 + 1 + 3);
         assertThat(compressed.get(1)).isInstanceOf(SystemMessage.class);
         assertThat(compressed.get(1).getText()).contains("92000").contains("本次新增要点");
+    }
+
+    // ===== 真实历史形状 × 保留条数：切点不许拆散配对（必现，毫秒级，不烧钱） =====
+
+    /**
+     * 形状取自 {@code ConversationSummarizerRealRunTest} 历次真跑的日志（2026-08-09~10，同一套五轮剧本），
+     * 记法与那边的形状日志一致，{@code #n} 是配对编号。每个形状都用生产代码推演出的压缩后条数
+     * 与日志实录的 {@code 压缩 N 条 → M 条} 对过账，对不上的不收。
+     * <p>
+     * 与上面那条 {@link #cutoffNeverSeparatesToolCallFromItsResponse} 不重复：那条是合成形状，
+     * 历史里<b>没有 index 1 的摘要消息</b>；真实形状里首条用户消息与老摘要会被 {@code compress}
+     * 提到头部，切点与"被提头的两条"之间的相互作用只有这里覆盖得到。
+     * <p>
+     * <b>采集环境要注意</b>：这批形状是在 market 专家全线不可用（Binance 请求 451 地域封锁）
+     * 时采的，所以行情专家每轮只贡献一条"数据不可用"的短消息。正常生产下专家消息更长、条数不变，
+     * 形状骨架仍然成立；但别把它当"典型生产历史"的样本去推断别的结论。
+     */
+    private static final Map<String, String> REAL_SHAPES = new LinkedHashMap<>(Map.of(
+            // run1 第3轮首次压缩的输入：理想切点 9-4=5 正好夹在 调用(4)/回执(5) 之间，守卫必须回退
+            "run1-R3-首压", "用户 摘要 用户 助手 调用#1 回执#1 助手 用户 助手",
+            // run1 第3轮二次压缩的输入：两组配对，一组已在头部、一组刚落在尾部
+            "run1-R3-次压", "用户 摘要 调用#1 回执#1 助手 用户 助手 调用#2 回执#2",
+            "run1-R4-压缩", "用户 摘要 用户 助手 调用#1 回执#1 助手 用户",
+            "run1-R5-压缩", "用户 摘要 调用#1 回执#1 助手 用户 助手 用户 助手 助手",
+            "run4-R3-压缩", "用户 摘要 用户 助手 调用#1 回执#1 助手 用户 助手 助手",
+            // 一轮内两组配对，是全部真跑日志里最丰富的形状。理想切点 13-4=9 落在两组之间、本来就安全，
+            // 日志实录 压缩 13 条 → 6 条（=keep+2，守卫没被逼出来）；但 keep=3 会切在 调用#2/回执#2
+            // 之间、keep=8 会切在 调用#1/回执#1 之间，这个形状因此一个人贡献两个杀手 keep
+            "run6-R4-压缩", "用户 摘要 用户 助手 调用#1 回执#1 助手 用户 助手 调用#2 回执#2 助手 用户"));
+
+    private static Stream<Arguments> realShapesCrossKeep() {
+        // keep 扫 2..8：每个形状都至少有一个 keep 让理想切点正好切断配对（跳过配对检查就红）
+        return REAL_SHAPES.entrySet().stream().flatMap(shape ->
+                IntStream.rangeClosed(2, 8).mapToObj(keep ->
+                        Arguments.of(shape.getKey(), shape.getValue(), keep)));
+    }
+
+    @ParameterizedTest(name = "{0} keep={2}")
+    @MethodSource("realShapesCrossKeep")
+    void realHistoryShapesNeverLeaveAnOrphanToolResponse(String label, String spec, int keep) {
+        stubSummary("摘要");
+        List<Message> messages = shapeOf(spec);
+
+        Map<String, Object> update = summarizer(1, keep).applyBefore("agent", stateOf(messages), null).join();
+        if (update.isEmpty()) {
+            return; // 没触发压缩（历史比保留数还短 / 无新原文可压）：没产出就没有孤儿
+        }
+
+        List<Message> compressed = compressedOf(update);
+        // 只查"回执找不到调用"：compress 是严格前缀切、提头的两条带不了 toolCalls，
+        // 所以反方向的孤儿构造不出来（详见真跑类 recordPairingViolation 的注释）
+        assertThat(responseIds(compressed))
+                .as("%s keep=%d 的切点把工具回执和它的调用切开了，压出：%s", label, keep, labelOf(compressed))
+                .isSubsetOf(callIds(compressed));
+    }
+
+    /**
+     * 钉死"这批 fixture 里确实存在理想切点会切断配对的组合"。
+     * 没有这条，上面那组参数化用例哪天被改得再也逼不出守卫、也会一直绿着当摆设。
+     * <p>
+     * 判据是条数：压缩后恒为 {@code 首条用户消息 + 摘要 + (size-cutoff)}，用理想切点就是 {@code keep+2}，
+     * 多出来的每一条都是守卫往前挪的步数。run1 那次真跑日志记的正是 {@code 压缩 9 条 → 7 条}。
+     */
+    @Test
+    void realShapeActuallyForcesTheGuardToBackOff() {
+        stubSummary("摘要");
+        List<Message> messages = shapeOf(REAL_SHAPES.get("run1-R3-首压"));
+
+        List<Message> compressed = compressedOf(
+                summarizer(1, 4).applyBefore("agent", stateOf(messages), null).join());
+
+        assertThat(compressed).hasSize(4 + 3); // keep+2 是理想切点；多这一条 = 守卫退了一步
+        assertThat(responseIds(compressed)).isEqualTo(callIds(compressed));
+    }
+
+    /** 按形状记法造消息。{@code 调用#1 / 回执#1} 用同一个 call id 配对。 */
+    private static List<Message> shapeOf(String spec) {
+        List<Message> messages = new ArrayList<>();
+        String[] tokens = spec.split(" ");
+        for (int i = 0; i < tokens.length; i++) {
+            String token = tokens[i];
+            int hash = token.indexOf('#');
+            String kind = hash < 0 ? token : token.substring(0, hash);
+            String callId = hash < 0 ? null : "call_" + token.substring(hash + 1);
+            messages.add(switch (kind) {
+                case "用户" -> new UserMessage("用户提问填充内容" + i);
+                case "摘要" -> new SystemMessage("## 早前对话摘要：\n── 第1段 ──\n上一轮压缩留下的要点");
+                case "助手" -> new AssistantMessage("助手回复填充内容拉高体积" + i);
+                case "调用" -> AssistantMessage.builder().content("")
+                        .toolCalls(List.of(new AssistantMessage.ToolCall(callId, "function",
+                                "run_deep_analysis", "{\"symbol\":\"BTCUSDT\"}"))).build();
+                case "回执" -> ToolResponseMessage.builder().responses(List.of(
+                        new ToolResponseMessage.ToolResponse(callId, "run_deep_analysis",
+                                "{\"status\":\"PENDING_APPROVAL\"}"))).build();
+                default -> throw new IllegalArgumentException("未知形状标记: " + token);
+            });
+        }
+        return messages;
+    }
+
+    private static String labelOf(List<Message> messages) {
+        return messages.stream().map(message -> switch (message) {
+            case AssistantMessage assistant when !assistant.getToolCalls().isEmpty() -> "调用";
+            case AssistantMessage ignored -> "助手";
+            case ToolResponseMessage ignored -> "回执";
+            case UserMessage ignored -> "用户";
+            default -> "系统";
+        }).collect(Collectors.joining("·"));
+    }
+
+    private static Set<String> callIds(List<Message> messages) {
+        return messages.stream()
+                .filter(AssistantMessage.class::isInstance).map(AssistantMessage.class::cast)
+                .flatMap(assistant -> assistant.getToolCalls().stream())
+                .map(AssistantMessage.ToolCall::id)
+                .collect(Collectors.toSet());
+    }
+
+    private static Set<String> responseIds(List<Message> messages) {
+        return messages.stream()
+                .filter(ToolResponseMessage.class::isInstance).map(ToolResponseMessage.class::cast)
+                .flatMap(toolResponse -> toolResponse.getResponses().stream())
+                .map(ToolResponseMessage.ToolResponse::id)
+                .collect(Collectors.toSet());
     }
 
     @Test
