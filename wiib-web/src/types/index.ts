@@ -629,7 +629,8 @@ export type WorkbenchEvent =
   | { type: 'agent_start'; node: string; agent: string }
   | { type: 'token'; text: string; agent: string; role: 'answer' | 'process' }
   | { type: 'progress'; text: string }
-  | { type: 'hitl_request'; sessionId: string; symbol: string; reason: string; resumeMessage: string }
+  // requestId：这张卡的唯一标识，点同意/拒绝时原样回传，服务端据此确认"点的是哪张卡"
+  | { type: 'hitl_request'; sessionId: string; symbol: string; reason: string; requestId: string; resumeMessage: string }
   | { type: 'done'; sessionId: string; answer: string }
   | { type: 'error'; message: string };
 

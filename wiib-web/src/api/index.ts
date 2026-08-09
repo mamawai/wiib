@@ -421,8 +421,9 @@ export const workbenchApi = {
     if (!response.ok) throw new Error(`请求失败: ${response.status}`);
     await streamWorkbenchEvents(response, onEvent);
   },
-  approve: (sessionId: string, approved: boolean) =>
-    api.post<unknown, void>('/ai/workbench/approve', { sessionId, approved }),
+  /** requestId 从 hitl_request 事件原样回传：卡片被新请求覆盖后点它，服务端会拒掉 */
+  approve: (sessionId: string, approved: boolean, requestId: string) =>
+    api.post<unknown, void>('/ai/workbench/approve', { sessionId, approved, requestId }),
   /** 历史会话列表（标题=首条提问，按最后活跃倒序） */
   sessions: () => api.get<unknown, WorkbenchSessionSummary[]>('/ai/workbench/sessions'),
   /** 会话是否还在后台跑（切页/刷新回来判断，结束后拉历史补答案） */

@@ -79,6 +79,8 @@ public class ChatWorkbenchController {
     public static class ApprovalRequest {
         private String sessionId;
         private boolean approved;
+        /** 从 hitl_request 事件原样回传，唯一标识"点的是哪张卡" */
+        private String requestId;
     }
 
     @PostMapping(value = "/chat", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
@@ -153,19 +155,23 @@ public class ChatWorkbenchController {
         if (sessionId == null || !sessionId.startsWith("wb-" + userId + "-")) {
             return Result.fail("会话不存在或无权限");
         }
-        // 过渡：前端还没回传 requestId，先从服务端记录里取——等价于不比对，与改造前行为一致。
-        // Task 10 换成前端从 hitl_request 事件原样回传
-        String requestId = approvalRegistry.peekPending(sessionId)
-                .map(ApprovalRegistry.PendingRequest::requestId).orElse("");
-        if (request.isApproved()) {
-            approvalRegistry.approve(sessionId, requestId);
-        } else {
-            approvalRegistry.reject(sessionId, requestId);
-        }
-        return Result.ok(null);
+        // 标识对不上 = 用户点的是被新请求覆盖掉的旧卡片。
+        // 此时若照批，用户看着"深研判 BTC"点的同意会授权给新请求里的别的标的。
+        // 用 UUID 不用时间戳：两次登记之间是微秒级，同一毫秒内时间戳比对恒成立、等于没比
+        boolean ok = request.isApproved()
+                ? approvalRegistry.approve(sessionId, request.getRequestId())
+                : approvalRegistry.reject(sessionId, request.getRequestId());
+        return ok ? Result.ok(null) : Result.fail("该确认请求已失效，请重新发起");
     }
 
-    private void run(SseChannel channel, long userId, String sessionId, String message) {
+    /**
+     * 一轮对话的全过程。包私有而非 private：HITL 的两条链路钉子
+     *（{@code ChatWorkbenchHitlTest}）要真跑这段并看它发出去的 SSE 事件，
+     * 而 {@link #chat} 自己 new emitter、事件出不来。
+     */
+    void run(SseChannel channel, long userId, String sessionId, String message) {
+        // 本轮开跑的时刻：结尾只发"这一轮新登记"的确认卡，见下面 hitl_request 那段
+        long turnStartedAt = System.currentTimeMillis();
         // 答案流/过程流分离：专家的结论是"工作过程"（前端折叠展示、不落历史），
         // 只有 summarizer 的汇总才是答案——否则单专家问题会"专家一遍+汇总一遍"重复输出
         StringBuilder answer = new StringBuilder();
@@ -223,12 +229,18 @@ public class ChatWorkbenchController {
                 }
             }
 
-            // HITL：本轮 agent 触发了贵操作待确认 → 弹确认卡（approve 后前端自动补发继续指令）
-            approvalRegistry.peekPending(sessionId).ifPresent(pendingRequest ->
-                    channel.send("hitl_request", new JSONObject()
+            // HITL：本轮 agent 触发了贵操作待确认 → 弹确认卡（approve 后前端自动补发继续指令）。
+            // 只发本轮新登记的那张：pending 是 approve/reject 才摘的，用户不点、接着问下一个问题的话
+            // 它会一直躺在那儿——不筛的话每轮结束都再弹一遍同一张卡。
+            // 筛"本轮新登记"而不是"发完就删"：删了用户回头点那张旧卡就成了"已失效"，
+            // 而他点的其实是唯一还在服务端挂着的那条请求，照批是对的
+            approvalRegistry.peekPending(sessionId)
+                    .filter(pendingRequest -> pendingRequest.requestedAt() >= turnStartedAt)
+                    .ifPresent(pendingRequest -> channel.send("hitl_request", new JSONObject()
                             .fluentPut("sessionId", sessionId)
                             .fluentPut("symbol", pendingRequest.symbol())
                             .fluentPut("reason", pendingRequest.reason())
+                            .fluentPut("requestId", pendingRequest.requestId())
                             .fluentPut("resumeMessage", "已确认，请继续执行深度研判")));
 
             // 极端场景（调用上限截停等）supervisor 没产出汇总，退专家结论，答案不至于丢
@@ -290,7 +302,7 @@ public class ChatWorkbenchController {
      * 锁是必须的——SseEmitter.send 非线程安全，心跳线程与主流线程并发写会让帧交错损坏。
      * 锁在实例上而非 Controller 上，各会话互不阻塞。
      */
-    private static final class SseChannel {
+    static final class SseChannel {
         private final SseEmitter emitter;
         private final AtomicBoolean closed = new AtomicBoolean(false);
         private final Object writeLock = new Object();

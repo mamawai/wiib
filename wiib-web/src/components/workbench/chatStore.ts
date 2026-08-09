@@ -15,7 +15,8 @@ export type ChatItem =
   | { kind: 'agent'; node: string; agent: string }
   // 长工具阶段进度（深研判等）：最新一条亮着转圈，后续事件到达即熄灭
   | { kind: 'progress'; text: string; active: boolean }
-  | { kind: 'hitl'; symbol: string; reason: string; resumeMessage: string; status: 'pending' | 'approved' | 'rejected' }
+  // requestId 存在 item 上：hitlDecide 按 index 取回本条再原样回传，服务端据此确认"点的是哪张卡"
+  | { kind: 'hitl'; symbol: string; reason: string; requestId: string; resumeMessage: string; status: 'pending' | 'approved' | 'rejected' }
   | { kind: 'error'; message: string };
 
 export interface ChatState {
@@ -111,7 +112,7 @@ function handleEvent(e: WorkbenchEvent) {
       break;
     case 'hitl_request':
       updateItems(prev => [...prev, {
-        kind: 'hitl', symbol: e.symbol, reason: e.reason,
+        kind: 'hitl', symbol: e.symbol, reason: e.reason, requestId: e.requestId,
         resumeMessage: e.resumeMessage, status: 'pending',
       }]);
       break;
@@ -207,7 +208,7 @@ async function openSession(sid: string) {
 async function hitlDecide(index: number, approved: boolean) {
   const item = state.items[index];
   if (item?.kind !== 'hitl' || !state.sessionId) return;
-  await workbenchApi.approve(state.sessionId, approved);
+  await workbenchApi.approve(state.sessionId, approved, item.requestId);
   updateItems(prev => prev.map((it, i) =>
     i === index && it.kind === 'hitl' ? { ...it, status: approved ? 'approved' : 'rejected' } : it,
   ));
