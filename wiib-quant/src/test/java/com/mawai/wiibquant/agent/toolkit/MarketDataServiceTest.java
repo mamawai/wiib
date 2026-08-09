@@ -286,6 +286,7 @@ class MarketDataServiceTest {
         assertThat(second).isNull();
     }
 
+    /** 等待者的根因不进任何返回值，只落在 join() 那条 warn 日志里，装个 appender 才验得到 */
     private ListAppender<ILoggingEvent> captureServiceLogs() {
         ListAppender<ILoggingEvent> appender = new ListAppender<>();
         appender.start();
@@ -298,9 +299,10 @@ class MarketDataServiceTest {
         ((Logger) LoggerFactory.getLogger(MarketDataService.class)).detachAndStopAllAppenders();
     }
 
+    /** 按"带异常"筛而不按文案筛：本类日志里带 throwable 的只有 join() 那条，改文案也不会失配 */
     private static String waiterFailureCause(ListAppender<ILoggingEvent> logs) {
         return logs.list.stream()
-                .filter(e -> e.getFormattedMessage().contains("等待在途采集失败"))
+                .filter(e -> e.getThrowableProxy() != null)
                 .map(e -> e.getThrowableProxy().getClassName())
                 .findFirst()
                 .orElseThrow(() -> new AssertionError("等待者根本没走到失败分支"));

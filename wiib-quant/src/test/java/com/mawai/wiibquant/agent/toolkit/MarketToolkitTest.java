@@ -58,6 +58,22 @@ class MarketToolkitTest {
         assertThat(json).isEqualTo("{\"available\":false,\"reason\":\"funding data unavailable\"}");
     }
 
+    /** 熔断期两边都只剩过期缓存时工具仍要能正常作答——这是本次改动要救的那条路，也是三个契约字段的锁 */
+    @Test
+    void 历史与资金费上下文都在时输出完整() {
+        when(dataService.fundingHistory("BTCUSDT")).thenReturn("[{\"fundingTime\":1,\"fundingRate\":\"0.0001\"}]");
+        when(dataService.premiumIndex("BTCUSDT"))
+                .thenReturn("{\"nextFundingTime\":2,\"lastFundingRate\":\"0.0002\",\"markPrice\":\"100\"}");
+
+        String json = toolkit.fundingHistory("BTCUSDT");
+
+        // 三个字段的名字和取值都钉住：数据源刚被换掉，换错了模型是看不出来的
+        assertThat(json).contains("\"available\":true")
+                .contains("\"nextFundingTime\":2")
+                .contains("\"lastFundingRate\":\"0.0002\"")
+                .contains("\"markPrice\":\"100\"");
+    }
+
     /** 资金费上下文取不到时也要给结构完整的不可用，而不是让 NPE 冒成一句 Java 异常喂给模型 */
     @Test
     void 资金费上下文取不到时返回不可用JSON() {

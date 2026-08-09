@@ -102,7 +102,7 @@ public class MarketToolkit {
                 compact.add(row);
             }
             out.put("history", compact);
-            // 先判空再解析：熔断期这里返回 null 的话，JSON.parseObject(null) 也给 null，
+            // 先判空再解析：取不到且没有过期缓存可兜时这里给 null，而 JSON.parseObject(null) 也是 null，
             // 后面三个 getter 直接 NPE，异常信息（fastjson2 内部类名）会顺着 catch 喂给模型
             String premiumRaw = dataService.premiumIndex(symbol);
             if (premiumRaw == null) {
