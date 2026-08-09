@@ -299,7 +299,13 @@ class MarketDataServiceTest {
         ((Logger) LoggerFactory.getLogger(MarketDataService.class)).detachAndStopAllAppenders();
     }
 
-    /** 按"带异常"筛而不按文案筛：本类日志里带 throwable 的只有 join() 那条，改文案也不会失配 */
+    /**
+     * 按"带异常"筛而不按文案筛，改文案也不会失配。
+     * <p>
+     * 限定语别丢：本测试只走 assemble()，这条路上带 throwable 的日志只有 join() 那条
+     * （MarketDataService.rawCached 的"取数失败"也带 throwable，但不在这条路上）。
+     * findFirst() 是顺序敏感的——哪天这个测试类里的用例开始走 rawCached，筛出来就是错的那条且静默通过。
+     */
     private static String waiterFailureCause(ListAppender<ILoggingEvent> logs) {
         return logs.list.stream()
                 .filter(e -> e.getThrowableProxy() != null)

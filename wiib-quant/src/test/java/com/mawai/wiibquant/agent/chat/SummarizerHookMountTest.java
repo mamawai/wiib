@@ -7,9 +7,11 @@ import com.mawai.wiibquant.agent.llm.ModelCallLimiter;
 import com.mawai.wiibquant.agent.toolkit.MarketToolkit;
 import com.mawai.wiibquant.agent.toolkit.NewsToolkit;
 import org.bsc.langgraph4j.CompiledGraph;
+import org.bsc.langgraph4j.NodeOutput;
 import org.bsc.langgraph4j.checkpoint.MemorySaver;
 import org.bsc.langgraph4j.prebuilt.MessagesState;
 import org.bsc.langgraph4j.spring.ai.serializer.jackson.SpringAIJacksonStateSerializer;
+import org.bsc.langgraph4j.streaming.StreamingOutput;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
@@ -22,6 +24,7 @@ import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.model.tool.ToolCallingChatOptions;
 import reactor.core.publisher.Flux;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -132,6 +135,39 @@ class SummarizerHookMountTest {
         // 而模型这一轮的答案不能被压缩顶掉：流式节点交回的是 token 生成器，
         // 按普通消息合并会把它整个丢掉——答案没了，工具节点还会当场报 no AssistantMessage provided
         assertThat(messages.getLast().getText()).isEqualTo("这是答案");
+    }
+
+    /**
+     * 压缩开着的时候 token 必须照样逐帧到达前端——这是本次改动真正危及、也是用户唯一看得见的东西。
+     * 上面那条只断言最终 state：把生成器抽干再交回、或者换个 key 塞回去，它照样绿而 SSE 直接哑掉。
+     */
+    @Test
+    void 压缩开着时token仍逐帧推送() throws Exception {
+        when(light.call(any(Prompt.class))).thenAnswer(inv -> {
+            Prompt prompt = inv.getArgument(0);
+            return prompt.getInstructions().getFirst().getText().contains(SUMMARY_PROMPT_MARK)
+                    ? responseOf(new AssistantMessage("早前聊了行情"))
+                    : responseOf(toolCall("r", "route", "{\"next\":[\"FINISH\"]}"));
+        });
+        when(deep.stream(any(Prompt.class))).thenReturn(Flux.just(
+                responseOf(new AssistantMessage("这是")),
+                responseOf(new AssistantMessage("答")),
+                responseOf(new AssistantMessage("案"))));
+        CompiledGraph<MessagesState<Message>> graph = factory(1, 1).chatGraph();
+
+        // 与 ChatWorkbenchController.run() 同款消费：普通迭代（不是 forEachAsync）+ 只认 StreamingOutput
+        List<String> chunks = new ArrayList<>();
+        for (NodeOutput<MessagesState<Message>> output : graph.stream(Map.of("messages", List.of(
+                new UserMessage("上一轮问题"), new AssistantMessage("上一轮回答"),
+                new UserMessage("这一轮问题"))))) {
+            if (output instanceof StreamingOutput<?> streaming
+                    && streaming.chunk() != null && !streaming.chunk().isEmpty()) {
+                chunks.add(streaming.chunk());
+            }
+        }
+
+        // 逐帧而非"拼起来等于答案"：一次性吐完整句同样能满足后者，那正是要防的退化
+        assertThat(chunks).containsExactly("这是", "答", "案");
     }
 
     /**

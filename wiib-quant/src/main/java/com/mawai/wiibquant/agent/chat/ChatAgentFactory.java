@@ -294,10 +294,13 @@ public class ChatAgentFactory {
     }
 
     /**
-     * 父图的全局 edge hook 会命中<b>所有</b>条件边（含 router），按 sourceId 收窄到目标那条。
+     * 父图的全局 edge hook 会命中<b>每一处带 mapping 的跳转</b>，按 sourceId 收窄到目标那处。
+     * 本图里实测命中两处：{@code router}（真条件边）和 {@code summarizer-action}
+     * （其实是 Command 节点，{@code addNode(String, AsyncCommandAction, Map)} 建的，不是边）。
      * <p>
-     * 漏了这层过滤的直接后果：ModelCallLimiter 在 router 边上短路回 {@code Command("end")}，
-     * 而 router 的 mapping 只有 {dispatch, summarize}，当场 "cannot find edge mapping"。
+     * 漏了这层过滤的直接后果：ModelCallLimiter 在 router 那处短路回 {@code Command("end")}，
+     * 而 router 的 mapping 只有 {dispatch, summarize}，当场 "cannot find edge mapping"；
+     * 而且 router 那一跳也会被计进模型调用数，上限提前一轮触发。
      */
     static EdgeHook.WrapCall<MessagesState<Message>> onlyOnEdge(
             String sourceId, EdgeHook.WrapCall<MessagesState<Message>> delegate) {
@@ -322,8 +325,16 @@ public class ChatAgentFactory {
      * summarizer 工具边上的 hook，<b>顺序即语义</b>：框架把 WrapCall 折叠成调用链
      * （后注册的包在外层），所以列表末尾 = 最外层 = 最先执行。
      * <p>
-     * 注意上限值本身有硬约束：ReAct 一轮吃 {@code 2L+3} 次图迭代（START 也算一次，保险丝跳 END 后
-     * 还要两次吐 END、给 done），而框架的 recursionLimit 默认 25，所以 L 最大只能取 11。
+     * 注意上限值本身有硬约束，而且比直觉紧得多。实测（router 直接 FINISH 的最省路径）：
+     * <pre>
+     * __START__, router, [agent, summarizer-agent, summarizer-action] ×L, __END__
+     * </pre>
+     * 一轮 ReAct 吃 <b>3</b> 次迭代不是 2——流式模型节点要烧一次交回 embed 生成器、
+     * 再烧一次合并它的 resultValue。加上 START/router/END 共 {@code 3L+3}，
+     * 而 {@code CompiledGraph.maxIterations} 默认 25，所以 <b>L 最大只能取 7</b>
+     * （L=7 实测通过、L=8 抛 "Maximum number of iterations (25) reached!"）。
+     * 这还是最省的那条路：一旦跑起专家轮（dispatch + 并行 + join + 回环 router）预算更少。
+     * 要用更大的 L 就得同时调 {@code compiled.setMaxIterations(n)}。
      */
     static List<EdgeHook.WrapCall<MessagesState<Message>>> summarizerToolHooks(int limit) {
         return List.of(new ModelCallLimiter(limit));
@@ -455,6 +466,16 @@ public class ChatAgentFactory {
      * 把压缩结果推迟到 token 流收尾那一刻再合并。图对生成器的处理是：先把 token 逐帧推给前端，
      * 跑完拿它的 resultValue（{@code {"messages": 本轮消息}}）并入 state——
      * 压缩要落进同一次写入，就只能改写这个 resultValue。
+     * <p>
+     * 两处已知的、当前无影响但别被重新发现的事：
+     * <ul>
+     *   <li>这一层没实现 {@code AsyncGenerator.Cancellable}，包上之后图生成器的 cancel 传不到
+     *       底层的 StreamingChatGenerator（{@code WithEmbed.cancel()} 只 cancel 栈里实现了该接口的项）。
+     *       本仓从不 cancel 图生成器——{@code ChatWorkbenchController.run()} 断连后是<b>故意</b>
+     *       继续消费到底好落历史的，所以现在没有影响；哪天真要支持中止，这里得补上</li>
+     *   <li>流出错、或收尾时 resultValue 不是 Map，就原样放行不合并：压缩这一次白做，
+     *       下次模型调用会重新压。是有意的降级——这条路上再加补救只会把一次失败放大成两次</li>
+     * </ul>
      */
     @SuppressWarnings("unchecked")
     private static AsyncGenerator<Object> mergeAtStreamEnd(AsyncGenerator<Object> stream,
