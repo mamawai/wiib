@@ -12,8 +12,9 @@ import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.stereotype.Component;
 
 /**
- * 市场状态工具：实时快照 / 期权IV 走 MarketDataService 共享组装（60s缓存），
- * 一轮对话内多工具调用不重复采集；资金费历史 / 盘口深度直连 Binance REST（轻量免费）。
+ * 市场状态工具：实时快照 / 期权IV 走 MarketDataService 共享组装缓存；
+ * 资金费历史 / 盘口深度走 MarketDataService 的裸 REST 缓存（老化粒度独立），
+ * ReAct 循环反复调用同一工具时不再每次真发请求。
  */
 @Component
 @RequiredArgsConstructor
@@ -82,10 +83,14 @@ public class MarketToolkit {
             persistently positive funding = longs paying shorts (crowded long), negative = the opposite.""")
     public String fundingHistory(@ToolParam(description = "Symbol, e.g. BTCUSDT") String symbol) {
         String sym = QuantConstants.normalizeSymbolLenient(symbol);
+        String raw = dataService.fundingHistory(symbol);
+        if (raw == null) {
+            return errorJson("funding data unavailable");
+        }
         try {
             JSONObject out = new JSONObject();
             out.put("available", true);
-            JSONArray history = JSON.parseArray(binanceRestClient.getFundingRateHistory(sym, 30));
+            JSONArray history = JSON.parseArray(raw);
             JSONArray compact = new JSONArray();
             for (int i = 0; i < history.size(); i++) {
                 JSONObject h = history.getJSONObject(i);
@@ -110,9 +115,12 @@ public class MarketToolkit {
             perpetual symbol. Useful for seeing where large resting orders (walls) sit relative to
             current price when choosing limit order placement or judging near support/resistance.""")
     public String orderbookDepth(@ToolParam(description = "Symbol, e.g. BTCUSDT") String symbol) {
-        String sym = QuantConstants.normalizeSymbolLenient(symbol);
+        String raw = dataService.orderbook(symbol);
+        if (raw == null) {
+            return errorJson("orderbook unavailable");
+        }
         try {
-            JSONObject book = JSON.parseObject(binanceRestClient.getFuturesOrderbook(sym, 10));
+            JSONObject book = JSON.parseObject(raw);
             JSONObject out = new JSONObject();
             out.put("available", true);
             out.put("bids", book.getJSONArray("bids"));

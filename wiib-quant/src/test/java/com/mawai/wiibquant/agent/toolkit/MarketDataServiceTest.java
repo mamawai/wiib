@@ -15,6 +15,9 @@ import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 class MarketDataServiceTest {
 
@@ -105,5 +108,34 @@ class MarketDataServiceTest {
         assertThat(results).hasSize(threads);
         MarketAssembly first = results.getFirst();
         assertThat(results).allMatch(a -> a == first);
+    }
+
+    /** 资金费历史和盘口在 ReAct 循环里会被反复调，必须跟快照一样吃 TTL 缓存，不能每次真发请求 */
+    @Test
+    void 资金费历史与盘口在TTL内复用不重复请求() {
+        when(binanceRestClient.getFundingRateHistory("BTCUSDT", 30)).thenReturn("[{\"fundingRate\":\"0.0001\"}]");
+        when(binanceRestClient.getFuturesOrderbook("BTCUSDT", 10)).thenReturn("{\"bids\":[],\"asks\":[]}");
+        MarketDataService service = service(60_000);
+
+        service.fundingHistory("BTCUSDT");
+        service.fundingHistory("btcusdt");
+        service.orderbook("BTCUSDT");
+        service.orderbook(" BTCUSDT ");
+
+        // 归一化后命中同一缓存键，四次调用只应打两个真请求
+        verify(binanceRestClient, times(1)).getFundingRateHistory("BTCUSDT", 30);
+        verify(binanceRestClient, times(1)).getFuturesOrderbook("BTCUSDT", 10);
+    }
+
+    /** TTL=0 时每次都过期，必须真发请求——否则缓存就成了永久缓存 */
+    @Test
+    void 资金费历史TTL过期后重新请求() {
+        when(binanceRestClient.getFundingRateHistory("BTCUSDT", 30)).thenReturn("[]");
+        MarketDataService service = service(0);
+
+        service.fundingHistory("BTCUSDT");
+        service.fundingHistory("BTCUSDT");
+
+        verify(binanceRestClient, times(2)).getFundingRateHistory("BTCUSDT", 30);
     }
 }

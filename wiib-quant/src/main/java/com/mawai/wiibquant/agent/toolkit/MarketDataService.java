@@ -19,6 +19,7 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Supplier;
 
 /**
  * 市场数据组装服务：采集 → 特征快照 一条链，带 TTL 缓存。
@@ -29,12 +30,18 @@ import java.util.concurrent.ConcurrentHashMap;
 @Service
 public class MarketDataService {
 
+    private final BinanceRestClient binanceRestClient;
     private final CollectDataNode collectNode;
     private final BuildFeaturesNode featuresNode;
     private final long ttlMillis;
     private final Map<String, MarketAssembly> cache = new ConcurrentHashMap<>();
     /** 在途采集：TTL 过期瞬间多个线程同时 miss，只放一个去真采集，其余等它的结果 */
     private final Map<String, CompletableFuture<MarketAssembly>> inFlight = new ConcurrentHashMap<>();
+
+    /** 裸 REST 结果的 TTL 缓存：资金费历史/盘口这类"工具直取"的数据，与整装快照分开老化 */
+    private record Cached(String value, long at) {}
+
+    private final Map<String, Cached> rawCache = new ConcurrentHashMap<>();
 
     public MarketDataService(BinanceRestClient binanceRestClient,
                              ForceOrderService forceOrderService,
@@ -43,6 +50,7 @@ public class MarketDataService {
                              OrderFlowAggregator orderFlowAggregator,
                              @Value("${trading.decision-interval:M5}") KlineInterval decisionInterval,
                              @Value("${quant.toolkit.assembly-ttl-ms:60000}") long ttlMillis) {
+        this.binanceRestClient = binanceRestClient;
         this.collectNode = new CollectDataNode(binanceRestClient, forceOrderService, depthStreamCache, deribitClient);
         this.featuresNode = new BuildFeaturesNode(orderFlowAggregator, decisionInterval);
         this.ttlMillis = ttlMillis;
@@ -74,6 +82,37 @@ public class MarketDataService {
             throw e;
         } finally {
             inFlight.remove(normalized, mine);
+        }
+    }
+
+    /** 资金费历史（近 30 条）。失败返回 null，调用方按"数据不可用"处理。 */
+    public String fundingHistory(String symbol) {
+        String normalized = QuantConstants.normalizeSymbolLenient(symbol);
+        return rawCached("funding:" + normalized,
+                () -> binanceRestClient.getFundingRateHistory(normalized, 30));
+    }
+
+    /** 合约盘口深度（10 档）。失败返回 null。 */
+    public String orderbook(String symbol) {
+        String normalized = QuantConstants.normalizeSymbolLenient(symbol);
+        return rawCached("depth:" + normalized,
+                () -> binanceRestClient.getFuturesOrderbook(normalized, 10));
+    }
+
+    private String rawCached(String key, Supplier<String> loader) {
+        Cached hit = rawCache.get(key);
+        if (hit != null && Instant.now().toEpochMilli() - hit.at() < ttlMillis) {
+            return hit.value();
+        }
+        try {
+            String value = loader.get();
+            if (value != null) {
+                rawCache.put(key, new Cached(value, Instant.now().toEpochMilli()));
+            }
+            return value;
+        } catch (Exception e) {
+            log.warn("[Toolkit] 取数失败 key={}", key, e);
+            return null;
         }
     }
 
