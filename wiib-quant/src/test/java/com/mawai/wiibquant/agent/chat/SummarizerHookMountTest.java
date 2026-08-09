@@ -50,15 +50,14 @@ class SummarizerHookMountTest {
     private static final String SUMMARY_PROMPT_MARK = "请把下面的对话历史压缩成一段要点记录";
 
     /**
-     * 测试用的调用上限。故意远小于生产默认的 12：框架把 START 也算一次迭代，
-     * summarizer 一轮 ReAct 吃 3 次（流式模型节点占 2 次——交回 embed 生成器一次、
-     * 合并 resultValue 一次——加工具节点 1 次），共 {@code 3L+3}，而硬顶 25 → <b>L 最大只能取 7</b>
-     * （实测 L=7 通过、L=8 抛 "Maximum number of iterations (25) reached!"）。
-     * 写 12 会在保险丝已经生效之后被硬顶掐掉，属假失败。3×3+3=12，余量足。
+     * 测试用的调用上限。取 3 只为跑得快——这几条验的是"hook 挂没挂"，不是上限值取多少：
+     * 上限值本身按生产口径（L=8 + 跑满专家轮）在 {@link ChatIterationBudgetTest} 里验。
      * <p>
-     * 别和 {@link ExpertCallLimitTest} 那边的 {@code 2L+3} / {@code L≤11} 对照着以为有一处是错的：
-     * 两张图的预算本来就不同，专家图没有 {@code .streaming(true)}，非流式模型节点只占 1 次迭代。
-     * 两个数都实测过。
+     * 父图的迭代账见 {@link ChatAgentFactory#PARENT_RECURSION_LIMIT}（{@code 3L+4R+4}，生产硬顶 40）。
+     * L=3、R=0 吃 13 格，怎么都够。
+     * <p>
+     * 别和 {@link ExpertCallLimitTest} 那边的 {@code 2L+3} 对照着以为有一处是错的：
+     * 两张图的预算本来就不同，专家图没有 {@code .streaming(true)}，非流式模型节点只占 1 格。
      */
     private static final int LIMIT = 3;
 
@@ -180,8 +179,7 @@ class SummarizerHookMountTest {
     }
 
     /**
-     * 模型永不收尾时保险丝必须按配置的上限收束；挂丢了就只能撞框架 25 次硬顶抛异常，
-     * 而这正是 summarizer 现在的处境。
+     * 模型永不收尾时保险丝必须按配置的上限收束；挂丢了就只能一路转到撞迭代硬顶抛异常。
      */
     @Test
     void 保险丝在真图上真的收束() throws Exception {

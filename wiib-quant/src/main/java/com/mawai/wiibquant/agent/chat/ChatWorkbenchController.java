@@ -4,6 +4,7 @@ import com.alibaba.fastjson2.JSONObject;
 import com.mawai.wiibcommon.annotation.CurrentUserId;
 import com.mawai.wiibcommon.annotation.RequireAdmin;
 import com.mawai.wiibcommon.util.Result;
+import com.mawai.wiibquant.agent.llm.ModelCallLimiter;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletResponse;
@@ -190,14 +191,17 @@ public class ChatWorkbenchController {
                                     event -> onExpertProgress(channel, expertLog, event))
                     .build();
 
-            // 派发轮次与已派名单每轮提问都清零：它们存在 state 里会随 checkpoint 续聊带过来，
-            // 不重置的话同一会话聊几轮后就永远达上限 / 永远"已取过数"，再也不派专家了。
+            // 派发轮次、已派名单、模型调用数每轮提问都清零：它们存在 state 里会随 checkpoint 续聊带过来，
+            // 不重置的话同一会话聊几轮后就永远达上限 / 永远"已取过数"，再也不派专家、也再也调不动工具了
+            // （model_call_count 漏了最狠：累计够上限那 8 次之后，summarizer 一到工具边就短路跳 END，
+            //  深研判确认后的续跑轮直接哑火，用户点了确认什么都不发生。钉子见 ChatWorkbenchResetTest）。
             // 必须用普通迭代消费而非 forEachAsync：后者 thenCompose 递归自链，
             // 每个流式 chunk 叠一层栈帧，长回答（数千帧）会 StackOverflowError（真跑实证过）
             for (var output : graph.stream(Map.of(
                     "messages", new UserMessage(enriched),
                     ChatAgentFactory.DISPATCH_ROUND_KEY, 0,
-                    ChatAgentFactory.DISPATCHED_KEY, List.of()), config)) {
+                    ChatAgentFactory.DISPATCHED_KEY, List.of(),
+                    ModelCallLimiter.CALL_COUNT_KEY, 0), config)) {
                 // 断连后不发帧但继续消费：图要跑完落历史，前端靠 status+历史补答案
                 if (channel.isClosed()) {
                     continue;

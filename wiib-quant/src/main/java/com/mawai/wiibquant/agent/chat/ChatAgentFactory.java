@@ -117,9 +117,47 @@ public class ChatAgentFactory {
     /**
      * 派发轮次上限。ModelCallLimiter 挂在 supervisor 的工具边上，管不到主图回环
      * （supervisor → dispatch → 专家 → join → supervisor 不过工具节点），这条路得自己数。
-     * 一轮派发拿数据 + 一轮补充足够，留 3 是余量；超了强制收尾，总比撞框架 25 次硬上限抛异常强。
+     * 一轮派发拿数据 + 一轮补充足够，留 3 是余量；超了强制收尾，总比撞迭代硬顶抛异常强。
+     * <p>
+     * 这个数也是 {@link #PARENT_RECURSION_LIMIT} 的一个乘数，改它要一起核对那边的账。
      */
     static final int MAX_DISPATCH_ROUNDS = 3;
+
+    /**
+     * 父图的迭代硬顶（框架默认 25，不够用）。图每走一步吃一格，超了直接抛
+     * {@code Maximum number of iterations (n) reached!}——它抛在<b>结果交出去之前</b>，
+     * 所以保险丝哪怕已经打完 {@code [CallLimit]} 日志也白搭，"截断但可用的回答"照样拿不到。
+     * <p>
+     * 实测账（打桩模型跑生产 {@link #chatGraph()}，逐格上探"最小能跑通的硬顶"）：
+     * <pre>
+     * 迭代格 = 3L + 4R + 4    L = summarizer 的 ReAct 轮数(= run-model-call-limit)，R = 专家派发轮数
+     *   3/轮  summarizer 一轮：流式模型节点 2 格（交回 token 生成器 + 合并它的 resultValue）+ 工具边 1 格
+     *   4/轮  一轮派发：dispatch + __PARALLEL__ + join + 回环 router
+     *   4     固定开销：__START__ + 进 summarizer 前那次 router + __END__ + 跑完再问一次生成器的那格
+     * 实测点：L=1..9 且 R=0 逐个扫过，最小值恒为 3L+4（L=7→25、L=8→28）；
+     *         L=8 时 R=1 派 1 个专家→32、R=1 派 2 个→32、R=2→36。每个点都验过"减 1 格就抛硬顶"。
+     * token 帧不吃格：summarizer 每轮吐 1 帧、20 帧、200 帧、800 帧，最小值都是 28。
+     * </pre>
+     * <b>4R 里没有"专家个数"这一项</b>（R=1 派 1 个和派 2 个同为 32，实测隔离过）：扇出是
+     * {@code ParallelNode} 单个节点在自己 {@code apply()} 里做完的，而且没被派发的专家节点每轮
+     * 照样跑（立即 {@code return Map.of()}），专家个数在框架的计数里根本没有出场机会。
+     * <p>
+     * 取 40 = L 吃满 8、R 吃满 {@link #MAX_DISPATCH_ROUNDS}=3 的账（24+12+4）。
+     * 今天只有两个专家、派完就被 {@link #route} 的去重挡住，R 实际最多到 2 → 最坏 36，
+     * 余下 4 格正好是一轮派发的量。
+     * <p>
+     * <b>注意 R=3 是刚好吃满 40、零余量</b>（判据是 {@code > maxIterations} 所以 40 能过）。
+     * 也就是说加第三个专家时这个数还够用，但届时再往回环里加任何一个节点都会当场撞顶——
+     * 那时候要改的是这里，不是去调 L。
+     * <p>
+     * 硬顶不是越大越好——它兜的就是死循环，抬太高等于没有。真正的两道闸门（L 和 R）都锁在
+     * 40 以内，正常情况下永远轮不到硬顶说话；轮到了就说明有环没收住，那才是它该抛的时候。
+     * <p>
+     * 这本账的钉子在 {@code ChatIterationBudgetTest}，改图结构（往回环里加节点、给 summarizer
+     * 再挂一层）就会红，别只改代码不改这段。
+     */
+    static final int PARENT_RECURSION_LIMIT = 40;
+
     /** 进度 sink 在 RunnableConfig metadata 里的键（值为 {@code Consumer<ExpertProgress>}） */
     public static final String PROGRESS_SINK_KEY = "workbench_progress_sink";
 
@@ -187,7 +225,7 @@ public class ChatAgentFactory {
                             ApprovalRegistry approvalRegistry,
                             BaseCheckpointSaver checkpointSaver,
                             StateSerializer<MessagesState<Message>> stateSerializer,
-                            @Value("${quant.workbench.run-model-call-limit:12}") int runModelCallLimit,
+                            @Value("${quant.workbench.run-model-call-limit:8}") int runModelCallLimit,
                             @Value("${quant.workbench.summarize-threshold-tokens:32000}") int summarizeThresholdTokens,
                             @Value("${quant.workbench.summarize-keep-messages:6}") int summarizeKeepMessages,
                             @Value("${quant.workbench.news-supplement-source:}") String supplementSource) {
@@ -290,7 +328,11 @@ public class ChatAgentFactory {
         graph.addWrapCallNodeHook(onlyOnNode(modelNode, wrapBefore(
                 new ConversationSummarizer(light, summarizeThresholdTokens, summarizeKeepMessages))));
 
-        return graph.compile(CompileConfig.builder().checkpointSaver(checkpointSaver).build());
+        // 这是父图唯一的编译点，硬顶只能在这儿抬（框架默认 25 连一轮专家都跑不完，见 PARENT_RECURSION_LIMIT）
+        return graph.compile(CompileConfig.builder()
+                .checkpointSaver(checkpointSaver)
+                .recursionLimit(PARENT_RECURSION_LIMIT)
+                .build());
     }
 
     /**
@@ -325,23 +367,23 @@ public class ChatAgentFactory {
      * summarizer 工具边上的 hook，<b>顺序即语义</b>：框架把 WrapCall 折叠成调用链
      * （后注册的包在外层），所以列表末尾 = 最外层 = 最先执行。
      * <p>
-     * 注意上限值本身有硬约束，而且比直觉紧得多。实测（router 直接 FINISH 的最省路径）：
-     * <pre>
-     * __START__, router, [agent, summarizer-agent, summarizer-action] ×L, __END__
-     * </pre>
-     * 一轮 ReAct 吃 <b>3</b> 次迭代不是 2——流式模型节点要烧一次交回 embed 生成器、
-     * 再烧一次合并它的 resultValue。加上 START/router/END 共 {@code 3L+3}，
-     * 而 {@code CompiledGraph.maxIterations} 默认 25，所以 <b>L 最大只能取 7</b>
-     * （L=7 实测通过、L=8 抛 "Maximum number of iterations (25) reached!"）。
-     * 这还是最省的那条路：一旦跑起专家轮（dispatch + 并行 + join + 回环 router）预算更少。
-     * 要用更大的 L 就得同时抬硬顶（编译期 {@code CompileConfig.builder().recursionLimit(n)}，
-     * 或事后 {@code compiled.setMaxIterations(n)}）。
+     * 上限值不是随便取的：它就是迭代账里的 <b>L</b>，直接决定父图的硬顶要开多大，
+     * 改它必须一起核对 {@link #PARENT_RECURSION_LIMIT}。生产取 8。
      * <p>
-     * <b>注意专家图的账不一样，两个数都实测过，别当成有一处写错了</b>：
-     * {@link #expertGraph} 没有 {@code .streaming(true)}，非流式模型节点只吃 1 次迭代，
-     * 一轮 {@code 2} 次、共 {@code 2L+3} → L≤11（实测 11 通过、12 抛硬顶）。
-     * 而 {@code run-model-call-limit} 这<b>一个</b>配置同时喂着两张图，所以取值要按更紧的
-     * summarizer 来（≤7 自动同时满足专家侧）。
+     * <b>同一个配置也喂着专家图，但两边的账不一样，别当成有一处写错了</b>：
+     * {@link #expertGraph} 没有 {@code .streaming(true)}，非流式模型节点只吃 1 格，
+     * 一轮 {@code 2} 格、共 {@code 2L+3} → L=8 实测吃 19 格；专家图结尾是无参 {@code .compile()}，
+     * 吃框架默认 25，够用（这也是它这次不用改的原因）。
+     * <p>
+     * 还要注意这<b>一个</b>配置项管的是"每个 agent 各自的上限"而不是"整轮总量"：
+     * summarizer 和每个带工具的专家各跑各的 state，{@link ModelCallLimiter#CALL_COUNT_KEY}
+     * 计数互不相通。所以一轮对话的模型调用是各家相加（summarizer ≤8、每个带工具的专家各 ≤8，
+     * 再加上 router 每轮一次），不是 8 次封顶。想收总量得另立机制，不是把这个数调小。
+     * <p>
+     * <b>"一轮"这个作用域是撑出来的，不是天生的</b>：计数存在 state 里，而父图带 checkpointSaver，
+     * 续聊按同一 threadId 从上次 checkpoint 起算。全靠 {@code ChatWorkbenchController.run()}
+     * 每轮把这个键清零；那行没了就退化成"一个会话累计 8 次"，第 8 轮起 summarizer 再也调不动工具。
+     * 专家侧不受影响——专家子图是无参 {@code .compile()}、没有 saver，每次 invoke 都从 schema 起算。
      */
     static List<EdgeHook.WrapCall<MessagesState<Message>>> summarizerToolHooks(int limit) {
         return List.of(new ModelCallLimiter(limit));

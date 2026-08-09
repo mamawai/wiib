@@ -47,11 +47,14 @@ class ExpertCallLimitTest {
     }
 
     /**
-     * 故意远小于生产默认的 12：框架把 START 也算一次迭代，ReAct 一轮 = 模型节点 + 工具节点，
+     * 故意远小于生产默认的 8：框架把 START 也算一次迭代，ReAct 一轮 = 模型节点 + 工具节点，
      * 保险丝在第 2L+1 次迭代触发，收尾还要 2 次（吐 END、给 done），共 2L+3 次。
      * 25 的硬顶意味着 L 最大只能取 11——写 12 今天就直接抛
      * "Maximum number of iterations (25) reached!"，而且是 hook 挂得好好的情况下红，属假失败。
      * 取 3 留足余量，顺带跑得快。
+     * <p>
+     * 生产的 8 落在这条线里（实测吃 19 格），所以专家图的 {@code .compile()} 保持无参、不抬硬顶。
+     * 父图那侧的账不一样（流式模型节点吃 2 格），见 {@link ChatAgentFactory#PARENT_RECURSION_LIMIT}。
      */
     private static final int LIMIT = 3;
 
