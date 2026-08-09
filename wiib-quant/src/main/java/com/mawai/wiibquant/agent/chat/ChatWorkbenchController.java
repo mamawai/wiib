@@ -178,8 +178,6 @@ public class ChatWorkbenchController {
             runRegistry.start(sessionId, text ->
                     channel.send("progress", new JSONObject().fluentPut("text", text)));
             channel.send("session", new JSONObject().fluentPut("sessionId", sessionId));
-            // 活跃会话槽：DeepAnalysisToolkit 的 HITL 闸门经此拿 sessionId（ToolContext 桥的兜底）
-            approvalRegistry.markActive(sessionId);
             chatHistoryService.append(sessionId, userId, "user", message);
 
             // 跨会话记忆前缀：让 agent 记得用户常看什么、上次聊到哪

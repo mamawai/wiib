@@ -8,11 +8,12 @@ import com.mawai.wiibquant.agent.quant.domain.news.NewsFlash;
 import com.mawai.wiibquant.agent.toolkit.MarketAssembly;
 import com.mawai.wiibquant.agent.toolkit.MarketDataService;
 import com.mawai.wiibquant.agent.toolkit.NewsCache;
-import com.mawai.wiibquant.agent.toolkit.QuantLlm;
 import com.mawai.wiibquant.mapper.QuantDeepAnalysisMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.jspecify.annotations.NonNull;
+import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.converter.BeanOutputConverter;
 import org.springframework.stereotype.Service;
 
@@ -32,7 +33,6 @@ public class DeepAnalysisService {
     private static final BeanOutputConverter<DeepAnalysisResponse> JUDGE_CONVERTER =
             new BeanOutputConverter<>(DeepAnalysisResponse.class);
 
-    private final QuantLlm quantLlm;
     private final MarketDataService marketDataService;
     private final NewsCache newsCache;
     private final QuantDeepAnalysisMapper mapper;
@@ -55,17 +55,25 @@ public class DeepAnalysisService {
         return sb.toString().trim();
     }
 
+    /**
+     * 模型由调用方传入而不是自己去拿：BYOK 后每个用户的模型不同，
+     * 服务自己去 runtimeManager 取就不知道"当前是谁在用"了。
+     */
+    private String call(ChatModel model, String prompt) {
+        return ChatClient.builder(model).build().prompt().user(prompt).call().content();
+    }
+
     /** Bull 辩手：严格做多立场；失败给占位论据不阻断。 */
-    public String bullArgue(String symbol, String newsContext) {
-        return argue(symbol, newsContext, true);
+    public String bullArgue(ChatModel model, String symbol, String newsContext) {
+        return argue(model, symbol, newsContext, true);
     }
 
     /** Bear 辩手：严格做空/观望立场；失败给占位论据不阻断。 */
-    public String bearArgue(String symbol, String newsContext) {
-        return argue(symbol, newsContext, false);
+    public String bearArgue(ChatModel model, String symbol, String newsContext) {
+        return argue(model, symbol, newsContext, false);
     }
 
-    private String argue(String symbol, String newsContext, boolean bull) {
+    private String argue(ChatModel model, String symbol, String newsContext, boolean bull) {
         String side = bull ? "Bull" : "Bear";
         try {
             String stance = bull
@@ -85,7 +93,7 @@ public class DeepAnalysisService {
                     %s
 
                     限300字，纯文字论述，不要返回JSON。""".formatted(stance, buildDataContext(symbol, newsContext));
-            String argument = quantLlm.call(prompt);
+            String argument = call(model, prompt);
             return argument != null && !argument.isBlank() ? argument : side + "辩手未能提供论据";
         } catch (Exception e) {
             log.warn("[Deep] {}辩手失败 symbol={} msg={}", side, symbol, e.getMessage());
@@ -94,7 +102,7 @@ public class DeepAnalysisService {
     }
 
     /** Judge 裁决：综合数据+双方论据产研判；失败返回 null（本次研判缺席）。 */
-    public QuantDeepAnalysis judge(String symbol, long closeTime, String triggerSource,
+    public QuantDeepAnalysis judge(ChatModel model, String symbol, long closeTime, String triggerSource,
                                    String newsContext, String bullArgument, String bearArgument) {
         try {
             String prompt = """
@@ -122,7 +130,7 @@ public class DeepAnalysisService {
                     %s
                     """.formatted(buildDataContext(symbol, newsContext), bullArgument, bearArgument,
                     JUDGE_CONVERTER.getFormat());
-            String response = quantLlm.call(prompt);
+            String response = call(model, prompt);
             if (response == null || response.isBlank()) {
                 log.warn("[Deep] Judge 空响应 symbol={}", symbol);
                 return null;

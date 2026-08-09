@@ -102,11 +102,10 @@ class ChatWorkbenchResetTest {
                         : new AssistantMessage("这是第 " + seq.get() + " 轮的答案"))
                 .map(ChatWorkbenchResetTest::responseOf));
 
-        // 真 toolkit：没登记授权时它直接回 PENDING_APPROVAL，一次深模型都不烧
-        DeepAnalysisToolkit toolkit = new DeepAnalysisToolkit(
-                mock(DeepAnalysisService.class), approvalRegistry, mock(WorkbenchRunRegistry.class));
+        // 工厂内部自己 new 出真 toolkit：没授权时闸门直接短路回 PENDING_APPROVAL，一次深模型都不烧
         return new ChatAgentFactory(runtimeManager, mock(MarketToolkit.class), mock(NewsToolkit.class),
-                toolkit, approvalRegistry, new MemorySaver(),
+                mock(DeepAnalysisService.class), mock(WorkbenchRunRegistry.class),
+                approvalRegistry, new MemorySaver(),
                 new SpringAIJacksonStateSerializer<>(MessagesState::new),
                 PRODUCTION_LIMIT, NO_COMPRESSION, 6, "X").chatGraph();
     }

@@ -79,13 +79,12 @@ class SummarizerHookMountTest {
         when(light.getOptions()).thenReturn(ToolCallingChatOptions.builder().build());
         // 位序是 (behavior, quant, quantLight, chat)：深模型进 quant，浅模型进 quantLight
         when(runtimeManager.current()).thenReturn(new AiAgentRuntime(light, deep, light, deep));
-        // 真 toolkit 而不是 mock：ReAct 循环要真走到工具边，run_deep_analysis 得是能执行的工具。
-        // 没登记授权时它直接回 PENDING_APPROVAL，一次深模型都不烧
-        DeepAnalysisToolkit toolkit = new DeepAnalysisToolkit(
-                mock(DeepAnalysisService.class), approvalRegistry, mock(WorkbenchRunRegistry.class));
+        // run_deep_analysis 必须是能执行的真工具（ReAct 循环要真走到工具边）——
+        // 工厂内部自己 new DeepAnalysisToolkit，天然就是真的，这里只喂它的两个依赖
         // 真 saver 而不是 mock：mock 的 put() 返回 null，而 CompiledGraph 会接着用这个返回值
         return new ChatAgentFactory(runtimeManager, mock(MarketToolkit.class), mock(NewsToolkit.class),
-                toolkit, approvalRegistry, new MemorySaver(),
+                mock(DeepAnalysisService.class), mock(WorkbenchRunRegistry.class),
+                approvalRegistry, new MemorySaver(),
                 new SpringAIJacksonStateSerializer<>(MessagesState::new),
                 LIMIT, summarizeThresholdTokens, summarizeKeepMessages, "X");
     }

@@ -1,5 +1,6 @@
 package com.mawai.wiibquant.agent.chat;
 
+import com.mawai.wiibquant.agent.analysis.DeepAnalysisService;
 import com.mawai.wiibquant.agent.config.AiAgentRuntime;
 import com.mawai.wiibquant.agent.config.AiAgentRuntimeManager;
 import com.mawai.wiibquant.agent.toolkit.MarketToolkit;
@@ -47,7 +48,8 @@ class ChatAgentFactoryTest {
         when(runtimeManager.current()).thenReturn(new AiAgentRuntime(model, model, model, model));
         return new ChatAgentFactory(runtimeManager,
                 mock(MarketToolkit.class), mock(NewsToolkit.class),
-                mock(DeepAnalysisToolkit.class), approvalRegistry, mock(BaseCheckpointSaver.class),
+                mock(DeepAnalysisService.class), mock(WorkbenchRunRegistry.class),
+                approvalRegistry, mock(BaseCheckpointSaver.class),
                 new SpringAIJacksonStateSerializer<>(MessagesState::new), 12, 32000, 6, "X");
     }
 

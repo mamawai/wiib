@@ -2,6 +2,7 @@ package com.mawai.wiibquant.agent.chat;
 
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONArray;
+import com.mawai.wiibquant.agent.analysis.DeepAnalysisService;
 import com.mawai.wiibquant.agent.config.AiAgentRuntime;
 import com.mawai.wiibquant.agent.config.AiAgentRuntimeManager;
 import com.mawai.wiibquant.agent.config.AiRuntimeRefreshedEvent;
@@ -197,7 +198,8 @@ public class ChatAgentFactory {
     private final AiAgentRuntimeManager runtimeManager;
     private final MarketToolkit marketToolkit;
     private final NewsToolkit newsToolkit;
-    private final DeepAnalysisToolkit deepAnalysisToolkit;
+    private final DeepAnalysisService deepAnalysisService;
+    private final WorkbenchRunRegistry runRegistry;
     private final ApprovalRegistry approvalRegistry;
     private final BaseCheckpointSaver checkpointSaver;
     /** 与 saver 同一个实例：序列化格式不一致会导致 checkpoint 写得进读不出 */
@@ -221,7 +223,8 @@ public class ChatAgentFactory {
     public ChatAgentFactory(AiAgentRuntimeManager runtimeManager,
                             MarketToolkit marketToolkit,
                             NewsToolkit newsToolkit,
-                            DeepAnalysisToolkit deepAnalysisToolkit,
+                            DeepAnalysisService deepAnalysisService,
+                            WorkbenchRunRegistry runRegistry,
                             ApprovalRegistry approvalRegistry,
                             BaseCheckpointSaver checkpointSaver,
                             StateSerializer<MessagesState<Message>> stateSerializer,
@@ -232,7 +235,8 @@ public class ChatAgentFactory {
         this.runtimeManager = runtimeManager;
         this.marketToolkit = marketToolkit;
         this.newsToolkit = newsToolkit;
-        this.deepAnalysisToolkit = deepAnalysisToolkit;
+        this.deepAnalysisService = deepAnalysisService;
+        this.runRegistry = runRegistry;
         this.approvalRegistry = approvalRegistry;
         this.checkpointSaver = checkpointSaver;
         this.stateSerializer = stateSerializer;
@@ -302,7 +306,10 @@ public class ChatAgentFactory {
         experts.forEach((name, expert) -> addExpertNode(graph, name, expert,
                 NEWS_AGENT.equals(name) ? newsToolkit::newsSearch : null));
         graph.addNode(NODE_JOIN, node_async(state -> Map.of()));
-        graph.addNode(NODE_SUMMARIZER, summarizerGraph(deep, fallback));
+        // 工具的模型建图期绑定：BYOK 后"当前是哪个用户"只有建图这一层知道，
+        // 工具方法体里再去 runtimeManager 现取就取错人了
+        graph.addNode(NODE_SUMMARIZER, summarizerGraph(deep, fallback,
+                new DeepAnalysisToolkit(deep, deepAnalysisService, runRegistry)));
 
         graph.addEdge(START, NODE_ROUTER);
         // 条件边只读 router 写好的结构化结果，绝不解析消息文本（对齐官方 how-to 的 state.next()）
@@ -425,13 +432,14 @@ public class ChatAgentFactory {
      * 派谁、还要不要再派，全归 {@link #route} 那个结构化路由节点管，这里一个字都不提——
      * 角色单一，模型不会再纠结"该作答还是该派发"（那正是之前无限循环的病根）。
      */
-    private StateGraph<MessagesState<Message>> summarizerGraph(ChatModel deep, ChatModel fallback)
+    private StateGraph<MessagesState<Message>> summarizerGraph(ChatModel deep, ChatModel fallback,
+                                                               DeepAnalysisToolkit toolkit)
             throws Exception {
         return ReactAgent.<MessagesState<Message>>builder()
                 .chatModel(deep)
                 .stateSerializer(stateSerializer)
                 .streaming(true) // 答案要逐字推给前端
-                .toolsFromObject(deepAnalysisToolkit)
+                .toolsFromObject(toolkit)
                 .defaultSystem("""
                         你是加密货币研判工作台的分析师。对话里已经有专家 agent 取回的真实数据，
                         你的职责是据此写出最终回答（新闻的联网补充也归你，见原则2）。
@@ -555,8 +563,9 @@ public class ChatAgentFactory {
     Map<String, Object> route(MessagesState<Message> state, ChatModel model, RunnableConfig config) {
         // 深研判确认后的续跑轮：存在未消费授权说明这一轮的使命就是让 summarizer 重调工具。
         // 专家数据上一轮刚取过、深研判也不消费它们，重派一遍纯烧钱——代码直通，不指望模型自觉 FINISH
-        String sessionId = config.threadId().orElseGet(approvalRegistry::activeSession);
-        if (approvalRegistry.hasApproval(sessionId)) {
+        // threadId 拿不到时不再兜底到全局活跃槽（该槽已删，多用户下它返回的是别人的会话号）
+        String sessionId = config.threadId().orElse(null);
+        if (sessionId != null && approvalRegistry.hasApproval(sessionId)) {
             log.info("[Workbench] 存在未消费的深研判授权，跳过派发直通汇总 session={}", sessionId);
             return Map.of(NEXT_KEY, FINISH);
         }

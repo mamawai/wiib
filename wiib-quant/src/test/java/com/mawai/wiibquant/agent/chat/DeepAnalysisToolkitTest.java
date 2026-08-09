@@ -2,7 +2,18 @@ package com.mawai.wiibquant.agent.chat;
 
 import com.mawai.wiibcommon.entity.QuantDeepAnalysis;
 import com.mawai.wiibquant.agent.analysis.DeepAnalysisService;
+import org.bsc.langgraph4j.RunnableConfig;
+import org.bsc.langgraph4j.action.Command;
+import org.bsc.langgraph4j.prebuilt.MessagesState;
 import org.junit.jupiter.api.Test;
+import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.messages.Message;
+import org.springframework.ai.chat.messages.UserMessage;
+import org.springframework.ai.chat.model.ChatModel;
+
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -14,67 +25,87 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+/**
+ * 工具本体只剩"执行"这一件事：HITL 判断已经上移到 {@link ApprovalGate}
+ * （工具方法体看不到 sessionId 和 tool_call 参数，判断做在这里就绑不住标的），
+ * 授权语义的用例全在 {@link ApprovalGateTest}。
+ */
 class DeepAnalysisToolkitTest {
 
+    private static final String SESSION = "wb-1-x";
+
+    private final ChatModel model = mock(ChatModel.class);
     private final DeepAnalysisService deepAnalysisService = mock(DeepAnalysisService.class);
-    private final ApprovalRegistry approvalRegistry = new ApprovalRegistry();
     private final WorkbenchRunRegistry runRegistry = new WorkbenchRunRegistry();
 
     private final DeepAnalysisToolkit toolkit =
-            new DeepAnalysisToolkit(deepAnalysisService, approvalRegistry, runRegistry);
-
-    /** 授权改成三元组后要先登记再按 requestId 批准，两步是原来 approve(sid) 的等价形式 */
-    private void grantApproval(String sessionId, String symbol) {
-        approvalRegistry.requestApproval(sessionId, "run_deep_analysis", symbol, "贵操作");
-        approvalRegistry.approve(sessionId,
-                approvalRegistry.peekPending(sessionId).orElseThrow().requestId());
-    }
+            new DeepAnalysisToolkit(model, deepAnalysisService, runRegistry);
 
     @Test
-    void gateBlocksWithoutApprovalAndRegistersPending() {
-        approvalRegistry.markActive("wb-1-x");
-
-        String result = toolkit.runDeepAnalysis("BTCUSDT", null);
-
-        assertThat(result).contains("PENDING_APPROVAL");
-        assertThat(approvalRegistry.peekPending("wb-1-x")).isPresent(); // 确认卡素材已登记
-        verify(deepAnalysisService, never()).buildNewsContext(); // 一分钱 LLM 没烧
-    }
-
-    @Test
-    void approvedSessionRunsFullChainAndPersists() {
-        approvalRegistry.markActive("wb-1-x");
-        grantApproval("wb-1-x", "BTCUSDT");
+    void 执行成功时输出研判结论并落库() {
         when(deepAnalysisService.buildNewsContext()).thenReturn("ctx");
-        when(deepAnalysisService.bullArgue("BTCUSDT", "ctx")).thenReturn("bull");
-        when(deepAnalysisService.bearArgue("BTCUSDT", "ctx")).thenReturn("bear");
+        when(deepAnalysisService.bullArgue(model, "BTCUSDT", "ctx")).thenReturn("bull");
+        when(deepAnalysisService.bearArgue(model, "BTCUSDT", "ctx")).thenReturn("bear");
         QuantDeepAnalysis analysis = new QuantDeepAnalysis();
         analysis.setNarrative("研判叙事");
         analysis.setScenariosJson("{\"bullPct\":40,\"rangePct\":35,\"bearPct\":25}");
         analysis.setNoDirection(false);
         analysis.setInvalidation("若X则作废");
-        when(deepAnalysisService.judge(eq("BTCUSDT"), anyLong(), eq("chat"),
+        when(deepAnalysisService.judge(eq(model), eq("BTCUSDT"), anyLong(), eq("chat"),
                 eq("ctx"), eq("bull"), eq("bear"))).thenReturn(analysis);
 
-        String result = toolkit.runDeepAnalysis("BTCUSDT", null);
+        String result = toolkit.runDeepAnalysis("BTCUSDT");
 
         assertThat(result).contains("\"status\":\"OK\"").contains("研判叙事").contains("作废");
         verify(deepAnalysisService).persist(analysis);
     }
 
     @Test
-    void judgeFailureReportsFailedWithoutPersist() {
-        approvalRegistry.markActive("wb-1-x");
-        grantApproval("wb-1-x", "BTCUSDT");
+    void 裁决失败时报FAILED且不落库() {
         when(deepAnalysisService.buildNewsContext()).thenReturn("ctx");
-        when(deepAnalysisService.bullArgue(anyString(), anyString())).thenReturn("b");
-        when(deepAnalysisService.bearArgue(anyString(), anyString())).thenReturn("b");
-        when(deepAnalysisService.judge(anyString(), anyLong(), anyString(),
+        when(deepAnalysisService.bullArgue(any(), anyString(), anyString())).thenReturn("b");
+        when(deepAnalysisService.bearArgue(any(), anyString(), anyString())).thenReturn("b");
+        when(deepAnalysisService.judge(any(), anyString(), anyLong(), anyString(),
                 anyString(), anyString(), anyString())).thenReturn(null);
 
-        String result = toolkit.runDeepAnalysis("BTCUSDT", null);
+        String result = toolkit.runDeepAnalysis("BTCUSDT");
 
         assertThat(result).contains("FAILED");
         verify(deepAnalysisService, never()).persist(any());
+    }
+
+    /**
+     * 工具执行用的标的必须和闸门算授权键/写确认卡用的<b>是同一个字符串</b>。
+     * <p>
+     * 模型填 {@code btc} 时闸门归成 {@code BTCUSDT}（要能对上后续的 {@code btcusdt} 写法），
+     * 工具这边要是只 trim+大写就成了 {@code BTC}——卡片写着 BTCUSDT、实际拿 BTC 去
+     * {@code MarketDataService.assemble}，一条数据都取不到，落库的 symbol 也是错的。
+     * <p>
+     * 断言比的是闸门的真实产物而不是硬编码字面量：两边哪天各自改归一化规则，这条都会红。
+     */
+    @Test
+    void 工具执行的标的与闸门授权键一致() {
+        ApprovalRegistry registry = new ApprovalRegistry();
+        new ApprovalGate(registry).applyWrap("tools", deepCallState("btc"),
+                RunnableConfig.builder().threadId(SESSION).build(),
+                (s, c) -> CompletableFuture.completedFuture(Command.emptyCommand())).join();
+        String gateSymbol = registry.peekPending(SESSION).orElseThrow().symbol();
+        when(deepAnalysisService.buildNewsContext()).thenReturn("ctx");
+
+        toolkit.runDeepAnalysis("btc");
+
+        verify(deepAnalysisService).bullArgue(model, gateSymbol, "ctx");
+        verify(deepAnalysisService).bearArgue(model, gateSymbol, "ctx");
+        verify(deepAnalysisService).judge(eq(model), eq(gateSymbol), anyLong(), eq("chat"),
+                anyString(), any(), any());
+    }
+
+    private static MessagesState<Message> deepCallState(String symbol) {
+        return new MessagesState<>(Map.of("messages", List.of(
+                new UserMessage("深度研判一下"),
+                AssistantMessage.builder().content("")
+                        .toolCalls(List.of(new AssistantMessage.ToolCall("c1", "function",
+                                "run_deep_analysis", "{\"symbol\":\"" + symbol + "\"}")))
+                        .build())));
     }
 }

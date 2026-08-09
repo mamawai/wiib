@@ -151,6 +151,10 @@ public class ApprovalGate implements EdgeHook.WrapCall<MessagesState<Message>> {
      * 授权键专用归一：trim+大写之后把 USDT/USDC 后缀收掉再统一补 USDT，
      * 于是 btc / BTCUSDT / btcusdt 落到同一个键。
      * <p>
+     * <b>{@link DeepAnalysisToolkit} 执行时共用这一个方法</b>，不是"顺手复用"：闸门用它算授权键、
+     * 也用它写进确认卡的 symbol，工具要是另算一套（比如只 trim+大写），模型填 {@code btc} 时
+     * 卡片写着 BTCUSDT、工具却拿 {@code BTC} 去打 Binance，一条数据都取不到。
+     * <p>
      * 没直接用 {@code QuantConstants} 的两个现成方法，各有原因：<br>
      * {@code normalizeSymbolLenient} 只 trim+大写，{@code btc} 归成 {@code BTC} 对不上
      * {@code BTCUSDT}，正是这里要防的那件事；<br>
@@ -161,7 +165,7 @@ public class ApprovalGate implements EdgeHook.WrapCall<MessagesState<Message>> {
      * 白名单外的标的（{@code SOL} 之类）保留自己的键、<b>不塌成 BTCUSDT</b>：
      * 塌了会让"批了 BTC"的授权把一个 SOL 请求放行进去，比不归一化更危险。
      */
-    private static String approvalSymbol(String raw) {
+    static String approvalSymbol(String raw) {
         String upper = QuantConstants.normalizeSymbolLenient(raw);
         if (upper.endsWith("USDT") || upper.endsWith("USDC")) {
             upper = upper.substring(0, upper.length() - 4);

@@ -53,20 +53,6 @@ public class ApprovalRegistry {
     /** 一次性拒绝标记：让模型知道"用户拒了"，否则它下一轮会再弹一次卡 */
     private final Map<String, PendingRequest> rejected = new ConcurrentHashMap<>();
 
-    /** 活跃会话槽：ToolContext 拿不到 sessionId 时的兜底。Task 8 连同工具里的 HITL 一起删 */
-    private final java.util.concurrent.atomic.AtomicReference<String> activeSession =
-            new java.util.concurrent.atomic.AtomicReference<>("unknown-session");
-
-    /** Task 8 删 */
-    public void markActive(String sessionId) {
-        activeSession.set(sessionId);
-    }
-
-    /** Task 8 删 */
-    public String activeSession() {
-        return activeSession.get();
-    }
-
     /** 闸门侧：登记待确认请求（同 session 重复登记覆盖，一个会话同时只有一条待确认）。 */
     public void requestApproval(String sessionId, String toolName, String symbol, String reason) {
         pending.put(sessionId, new PendingRequest(UUID.randomUUID().toString(),

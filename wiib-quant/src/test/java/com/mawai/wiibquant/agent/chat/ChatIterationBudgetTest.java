@@ -118,12 +118,11 @@ class ChatIterationBudgetTest {
                 "c" + summarizerCalls.incrementAndGet(), "run_deep_analysis", "{\"symbol\":\"BTCUSDT\"}"))));
 
         ApprovalRegistry approvalRegistry = new ApprovalRegistry();
-        // 真 toolkit：没登记授权时它直接回 PENDING_APPROVAL，一次深模型都不烧
-        DeepAnalysisToolkit toolkit = new DeepAnalysisToolkit(
-                mock(DeepAnalysisService.class), approvalRegistry, mock(WorkbenchRunRegistry.class));
+        // 工厂内部自己 new 出真 toolkit：没授权时闸门直接短路回 PENDING_APPROVAL，一次深模型都不烧
         // 真 saver 而不是 mock：mock 的 put() 返回 null，而 CompiledGraph 会接着用这个返回值
         ChatAgentFactory factory = new ChatAgentFactory(runtimeManager,
-                mock(MarketToolkit.class), mock(NewsToolkit.class), toolkit, approvalRegistry,
+                mock(MarketToolkit.class), mock(NewsToolkit.class),
+                mock(DeepAnalysisService.class), mock(WorkbenchRunRegistry.class), approvalRegistry,
                 new MemorySaver(), new SpringAIJacksonStateSerializer<>(MessagesState::new),
                 PRODUCTION_LIMIT, NO_COMPRESSION, 6, "X");
         return new Rig(factory.chatGraph(), summarizerCalls, routerCalls, expertCalls);
