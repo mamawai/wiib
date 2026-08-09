@@ -329,7 +329,8 @@ public class ChatAgentFactory {
         // summarizer-action 这个 id）。于是只剩"全局注册 + hook 内自己按 id 过滤"这一条路
         String toolsEdge = SubGraphNode.formatId(NODE_SUMMARIZER, Agent.ACTION_LABEL);   // summarizer-action
         String modelNode = SubGraphNode.formatId(NODE_SUMMARIZER, Agent.AGENT_LABEL);    // summarizer-agent
-        for (EdgeHook.WrapCall<MessagesState<Message>> hook : summarizerToolHooks(runModelCallLimit)) {
+        for (EdgeHook.WrapCall<MessagesState<Message>> hook :
+                summarizerToolHooks(approvalRegistry, runModelCallLimit)) {
             graph.addWrapCallEdgeHook(onlyOnEdge(toolsEdge, hook));
         }
         graph.addWrapCallNodeHook(onlyOnNode(modelNode, wrapBefore(
@@ -371,8 +372,13 @@ public class ChatAgentFactory {
     }
 
     /**
-     * summarizer 工具边上的 hook，<b>顺序即语义</b>：框架把 WrapCall 折叠成调用链
-     * （后注册的包在外层），所以列表末尾 = 最外层 = 最先执行。
+     * summarizer 工具边上的 hook，<b>顺序即语义</b>：WrapCall 是 reduce 左折叠
+     * （{@code reduce(action, (acc, w) -> new WrapCallChainLink(id, w, acc))}），
+     * 流里最后一个成为最外层，即后注册的先执行。<b>列表末尾 = 最外层。</b>
+     * <p>
+     * 保险丝必须在最外层：反过来会出现"ReAct 逼近调用上限时闸门先弹了卡，
+     * 但模型已经没配额把这件事告诉用户"——卡片弹出来了，用户收不到任何解释。
+     * 写反了代码照跑什么都不报错，钉子在 {@code ApprovalGateOrderTest}。
      * <p>
      * 上限值不是随便取的：它就是迭代账里的 <b>L</b>，直接决定父图的硬顶要开多大，
      * 改它必须一起核对 {@link #PARENT_RECURSION_LIMIT}。生产取 8。
@@ -392,8 +398,9 @@ public class ChatAgentFactory {
      * 每轮把这个键清零；那行没了就退化成"一个会话累计 8 次"，第 8 轮起 summarizer 再也调不动工具。
      * 专家侧不受影响——专家子图是无参 {@code .compile()}、没有 saver，每次 invoke 都从 schema 起算。
      */
-    static List<EdgeHook.WrapCall<MessagesState<Message>>> summarizerToolHooks(int limit) {
-        return List.of(new ModelCallLimiter(limit));
+    static List<EdgeHook.WrapCall<MessagesState<Message>>> summarizerToolHooks(
+            ApprovalRegistry registry, int limit) {
+        return List.of(new ApprovalGate(registry), new ModelCallLimiter(limit));  // 内层 → 外层
     }
 
     /**
