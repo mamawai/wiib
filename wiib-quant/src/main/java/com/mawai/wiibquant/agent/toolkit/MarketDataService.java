@@ -16,6 +16,8 @@ import org.springframework.stereotype.Service;
 
 import java.time.Instant;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -31,6 +33,8 @@ public class MarketDataService {
     private final BuildFeaturesNode featuresNode;
     private final long ttlMillis;
     private final Map<String, MarketAssembly> cache = new ConcurrentHashMap<>();
+    /** 在途采集：TTL 过期瞬间多个线程同时 miss，只放一个去真采集，其余等它的结果 */
+    private final Map<String, CompletableFuture<MarketAssembly>> inFlight = new ConcurrentHashMap<>();
 
     public MarketDataService(BinanceRestClient binanceRestClient,
                              ForceOrderService forceOrderService,
@@ -44,16 +48,49 @@ public class MarketDataService {
         this.ttlMillis = ttlMillis;
     }
 
-    /** 工具层统一入口：TTL 内直接复用，避免一轮对话多个工具各采一遍。 */
+    /** 工具层统一入口：TTL 内直接复用；过期时同 symbol 只允许一个线程真采集（防击穿）。 */
     public MarketAssembly assemble(String symbol) {
         String normalized = QuantConstants.normalizeSymbolLenient(symbol);
         MarketAssembly cached = cache.get(normalized);
-        if (cached != null && Instant.now().toEpochMilli() - cached.assembledAt().toEpochMilli() < ttlMillis) {
+        if (fresh(cached)) {
             return cached;
         }
-        MarketAssembly fresh = assembleFresh(normalized);
-        cache.put(normalized, fresh);
-        return fresh;
+        // computeIfAbsent 的 mapping 函数对同一 key 互斥，天然选出唯一的"采集者"。
+        // 采集本身放在函数外做（见下），函数内只登记 future——否则采集期间整个桶被锁住，
+        // 其他 symbol 的请求也会被卡（ConcurrentHashMap 是分段锁，同桶不同 key 也会互等）
+        CompletableFuture<MarketAssembly> mine = new CompletableFuture<>();
+        CompletableFuture<MarketAssembly> running = inFlight.putIfAbsent(normalized, mine);
+        if (running != null) {
+            return join(running, normalized);
+        }
+        try {
+            MarketAssembly fresh = assembleFresh(normalized);
+            cache.put(normalized, fresh);
+            mine.complete(fresh);
+            return fresh;
+        } catch (RuntimeException e) {
+            // 失败也要唤醒等待者，否则它们挂到超时；异常原样传播给每一个等待者
+            mine.completeExceptionally(e);
+            throw e;
+        } finally {
+            inFlight.remove(normalized, mine);
+        }
+    }
+
+    private boolean fresh(MarketAssembly cached) {
+        return cached != null
+                && Instant.now().toEpochMilli() - cached.assembledAt().toEpochMilli() < ttlMillis;
+    }
+
+    /** 等在途采集的结果。等待者不该因为别人的失败而卡死，也不该吞掉异常。 */
+    private MarketAssembly join(CompletableFuture<MarketAssembly> running, String symbol) {
+        try {
+            return running.join();
+        } catch (CompletionException e) {
+            Throwable cause = e.getCause() != null ? e.getCause() : e;
+            log.warn("[Toolkit] 等待在途采集失败 symbol={}", symbol, cause);
+            return MarketAssembly.unavailable(symbol, Map.of());
+        }
     }
 
     MarketAssembly assembleFresh(String symbol) {
