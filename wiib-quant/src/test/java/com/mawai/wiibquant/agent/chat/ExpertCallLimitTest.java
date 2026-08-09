@@ -47,8 +47,11 @@ class ExpertCallLimitTest {
     }
 
     /**
-     * 故意远小于生产默认的 12：12 次模型调用意味着保险丝在第 23 个节点才触发，离框架 25 次迭代硬顶
-     * 只剩 2 格——将来 ReAct 循环里多一个节点，hook 挂得好好的也会被硬顶打红，是假失败。取 3 留足余量，顺带跑得快。
+     * 故意远小于生产默认的 12：框架把 START 也算一次迭代，ReAct 一轮 = 模型节点 + 工具节点，
+     * 保险丝在第 2L+1 次迭代触发，收尾还要 2 次（吐 END、给 done），共 2L+3 次。
+     * 25 的硬顶意味着 L 最大只能取 11——写 12 今天就直接抛
+     * "Maximum number of iterations (25) reached!"，而且是 hook 挂得好好的情况下红，属假失败。
+     * 取 3 留足余量，顺带跑得快。
      */
     private static final int LIMIT = 3;
 
@@ -82,7 +85,6 @@ class ExpertCallLimitTest {
         // 恰好等于而非"不超过"：ModelCallLimiter 是 calls=已有+1、calls>=runLimit 跳 END，
         // 触发那一刻模型正好被调 runLimit 次。钉死这个数才验得到上限值是从构造参数来的——
         // 写成 new ModelCallLimiter(1) 这种取错值的写法，"不超过"照样绿。
-        // 而删掉 expertGraph 里那行 addExecuteToolsHook，模型永不收尾会直接撞框架硬顶抛异常
         assertThat(round.get()).isEqualTo(LIMIT);
     }
 }
