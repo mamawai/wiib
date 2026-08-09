@@ -11,15 +11,21 @@ import com.mawai.wiibquant.agent.llm.ResilientChatService;
 import com.mawai.wiibquant.agent.toolkit.MarketToolkit;
 import com.mawai.wiibquant.agent.toolkit.NewsToolkit;
 import lombok.extern.slf4j.Slf4j;
+import org.bsc.async.AsyncGenerator;
 import org.bsc.langgraph4j.CompileConfig;
 import org.bsc.langgraph4j.CompiledGraph;
 import org.bsc.langgraph4j.RunnableConfig;
 import org.bsc.langgraph4j.StateGraph;
+import org.bsc.langgraph4j.SubGraphNode;
 import org.bsc.langgraph4j.action.NodeActionWithConfig;
+import org.bsc.langgraph4j.agent.Agent;
 import org.bsc.langgraph4j.checkpoint.BaseCheckpointSaver;
+import org.bsc.langgraph4j.hook.EdgeHook;
+import org.bsc.langgraph4j.hook.NodeHook;
 import org.bsc.langgraph4j.prebuilt.MessagesState;
 import org.bsc.langgraph4j.serializer.StateSerializer;
 import org.bsc.langgraph4j.spring.ai.agent.ReactAgent;
+import org.bsc.langgraph4j.state.AgentState;
 import org.bsc.langgraph4j.state.AppenderChannel;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
@@ -38,6 +44,7 @@ import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 
 import java.util.*;
+import java.util.concurrent.Executor;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
@@ -257,7 +264,7 @@ public class ChatAgentFactory {
         experts.forEach((name, expert) -> addExpertNode(graph, name, expert,
                 NEWS_AGENT.equals(name) ? newsToolkit::newsSearch : null));
         graph.addNode(NODE_JOIN, node_async(state -> Map.of()));
-        graph.addNode(NODE_SUMMARIZER, summarizerGraph(deep, light, fallback));
+        graph.addNode(NODE_SUMMARIZER, summarizerGraph(deep, fallback));
 
         graph.addEdge(START, NODE_ROUTER);
         // 条件边只读 router 写好的结构化结果，绝不解析消息文本（对齐官方 how-to 的 state.next()）
@@ -271,7 +278,55 @@ public class ChatAgentFactory {
         graph.addEdge(NODE_JOIN, NODE_ROUTER);      // 回环：带着专家数据再判一次还要不要补数据
         graph.addEdge(NODE_SUMMARIZER, END);
 
+        // summarizer 的两个 hook 只能挂在这里。子 StateGraph 上注册的 hook 会在
+        // addNode(id, StateGraph) 内联时被框架整个丢掉（只搬 nodes/edges），挂在子图上一次都不执行；
+        // 而按内联后的 id 注册又会被 compile() 的图校验拒掉（校验跑在内联之前，那时还没有
+        // summarizer-action 这个 id）。于是只剩"全局注册 + hook 内自己按 id 过滤"这一条路
+        String toolsEdge = SubGraphNode.formatId(NODE_SUMMARIZER, Agent.ACTION_LABEL);   // summarizer-action
+        String modelNode = SubGraphNode.formatId(NODE_SUMMARIZER, Agent.AGENT_LABEL);    // summarizer-agent
+        for (EdgeHook.WrapCall<MessagesState<Message>> hook : summarizerToolHooks(runModelCallLimit)) {
+            graph.addWrapCallEdgeHook(onlyOnEdge(toolsEdge, hook));
+        }
+        graph.addWrapCallNodeHook(onlyOnNode(modelNode, wrapBefore(
+                new ConversationSummarizer(light, summarizeThresholdTokens, summarizeKeepMessages))));
+
         return graph.compile(CompileConfig.builder().checkpointSaver(checkpointSaver).build());
+    }
+
+    /**
+     * 父图的全局 edge hook 会命中<b>所有</b>条件边（含 router），按 sourceId 收窄到目标那条。
+     * <p>
+     * 漏了这层过滤的直接后果：ModelCallLimiter 在 router 边上短路回 {@code Command("end")}，
+     * 而 router 的 mapping 只有 {dispatch, summarize}，当场 "cannot find edge mapping"。
+     */
+    static EdgeHook.WrapCall<MessagesState<Message>> onlyOnEdge(
+            String sourceId, EdgeHook.WrapCall<MessagesState<Message>> delegate) {
+        return (id, state, config, action) -> sourceId.equals(id)
+                ? delegate.applyWrap(id, state, config, action)
+                : action.apply(state, config);
+    }
+
+    /**
+     * 同上，node 版。全局 node hook 会命中图里每一个节点（router / 专家 / summarizer-action 都在内），
+     * 不收窄的话 ConversationSummarizer 会在这些地方也压一遍：白烧浅模型的钱，
+     * 还会在错误的时机整体替换 messages。
+     */
+    static NodeHook.WrapCall<MessagesState<Message>> onlyOnNode(
+            String nodeId, NodeHook.WrapCall<MessagesState<Message>> delegate) {
+        return (id, state, config, action) -> nodeId.equals(id)
+                ? delegate.applyWrap(id, state, config, action)
+                : action.apply(state, config);
+    }
+
+    /**
+     * summarizer 工具边上的 hook，<b>顺序即语义</b>：框架把 WrapCall 折叠成调用链
+     * （后注册的包在外层），所以列表末尾 = 最外层 = 最先执行。
+     * <p>
+     * 注意上限值本身有硬约束：ReAct 一轮吃 {@code 2L+3} 次图迭代（START 也算一次，保险丝跳 END 后
+     * 还要两次吐 END、给 done），而框架的 recursionLimit 默认 25，所以 L 最大只能取 11。
+     */
+    static List<EdgeHook.WrapCall<MessagesState<Message>>> summarizerToolHooks(int limit) {
+        return List.of(new ModelCallLimiter(limit));
     }
 
     /**
@@ -310,7 +365,7 @@ public class ChatAgentFactory {
      * 派谁、还要不要再派，全归 {@link #route} 那个结构化路由节点管，这里一个字都不提——
      * 角色单一，模型不会再纠结"该作答还是该派发"（那正是之前无限循环的病根）。
      */
-    private StateGraph<MessagesState<Message>> summarizerGraph(ChatModel deep, ChatModel light, ChatModel fallback)
+    private StateGraph<MessagesState<Message>> summarizerGraph(ChatModel deep, ChatModel fallback)
             throws Exception {
         return ReactAgent.<MessagesState<Message>>builder()
                 .chatModel(deep)
@@ -338,8 +393,8 @@ public class ChatAgentFactory {
                            "怎么看走势"这类普通提问不要调它、也不要主动推销，直接按专家数据作答
 
                         输出精炼中文。""".formatted(supplementTag, mergedTag))
-                .addCallModelHook(wrapBefore(new ConversationSummarizer(light, summarizeThresholdTokens, summarizeKeepMessages)))
-                .addExecuteToolsHook(new ModelCallLimiter(runModelCallLimit))
+                // 调用上限与历史压缩两个 hook 不在这儿挂：这张子图会被 addNode(id, StateGraph) 内联进主图，
+                // 内联只搬 nodes/edges，挂在这里的 hook 一次都不会执行。见 build() 末尾
                 .build(ResilientChatService.builder()
                         .model(deep).fallbackModel(fallback)
                         .maxAttempts(3).initialDelay(500).maxDelay(4000)
@@ -350,15 +405,14 @@ public class ChatAgentFactory {
      * 把 BeforeCall 语义的钩子接到 ReactAgent 只暴露的 WrapCall 上：
      * 先跑钩子拿状态更新，合并进 state 后再执行真正的模型调用。
      */
-    private org.bsc.langgraph4j.hook.NodeHook.WrapCall<MessagesState<Message>> wrapBefore(
-            org.bsc.langgraph4j.hook.NodeHook.BeforeCall<MessagesState<Message>> before) {
+    private NodeHook.WrapCall<MessagesState<Message>> wrapBefore(
+            NodeHook.BeforeCall<MessagesState<Message>> before) {
         return (nodeId, state, config, action) -> before.applyBefore(nodeId, state, config)
                 .thenCompose(update -> {
                     if (update.isEmpty()) {
                         return action.apply(state, config);
                     }
-                    Map<String, Object> merged = org.bsc.langgraph4j.state.AgentState
-                            .updateState(state, update, MessagesState.SCHEMA);
+                    Map<String, Object> merged = AgentState.updateState(state, update, MessagesState.SCHEMA);
                     return action.apply(new MessagesState<>(merged), config)
                             // 压缩结果要一并写回 state，否则下次调用又得重压一遍
                             .thenApply(result -> mergeUpdates(update, result));
@@ -373,6 +427,15 @@ public class ChatAgentFactory {
      */
     @SuppressWarnings("unchecked")
     static Map<String, Object> mergeUpdates(Map<String, Object> compression, Map<String, Object> modelResult) {
+        // summarizer 是流式的，模型节点交回的 messages 是个 AsyncGenerator（token 流），
+        // 真消息要等流跑完才有。生成器必须原样交回图，否则前端一个 token 都收不到；
+        // 而且它既不是 Collection 也不是 Message，下面的分支会当作"看不懂的值"直接扔掉——
+        // 答案没了，紧接着工具节点读到的最后一条不是 AssistantMessage，当场报 no AssistantMessage provided
+        if (modelResult.get("messages") instanceof AsyncGenerator<?> stream) {
+            Map<String, Object> merged = new LinkedHashMap<>(modelResult);
+            merged.put("messages", mergeAtStreamEnd((AsyncGenerator<Object>) stream, compression));
+            return merged;
+        }
         Map<String, Object> merged = new LinkedHashMap<>(compression);
         merged.putAll(modelResult);
         if (!(compression.get("messages") instanceof AppenderChannel.ReplaceAllWith<?>(List<?> newValues))) {
@@ -386,6 +449,30 @@ public class ChatAgentFactory {
         }
         merged.put("messages", new AppenderChannel.ReplaceAllWith<>(all));
         return merged;
+    }
+
+    /**
+     * 把压缩结果推迟到 token 流收尾那一刻再合并。图对生成器的处理是：先把 token 逐帧推给前端，
+     * 跑完拿它的 resultValue（{@code {"messages": 本轮消息}}）并入 state——
+     * 压缩要落进同一次写入，就只能改写这个 resultValue。
+     */
+    @SuppressWarnings("unchecked")
+    private static AsyncGenerator<Object> mergeAtStreamEnd(AsyncGenerator<Object> stream,
+                                                           Map<String, Object> compression) {
+        return new AsyncGenerator<>() {
+            @Override
+            public Data<Object> next() {
+                Data<Object> data = stream.next();
+                return data.isDone() && data.resultValue() instanceof Map<?, ?> result
+                        ? Data.done(mergeUpdates(compression, (Map<String, Object>) result))
+                        : data;
+            }
+
+            @Override
+            public Executor executor() {
+                return stream.executor();
+            }
+        };
     }
 
     /**
