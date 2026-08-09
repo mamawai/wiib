@@ -13,12 +13,18 @@ import org.springframework.stereotype.Component;
 
 /**
  * 市场状态工具：实时快照 / 期权IV 走 MarketDataService 共享组装缓存；
- * 资金费历史 / 盘口深度走 MarketDataService 的裸 REST 缓存（老化粒度独立），
- * ReAct 循环反复调用同一工具时不再每次真发请求。
+ * 盘口深度优先取 WS 快照，断流才回退 REST 缓存（老化粒度独立于快照）。
+ *
+ * <p>资金费历史只有 30 条历史那半边走了缓存：本类 {@link #fundingHistory} 里的
+ * {@code getPremiumIndex} 仍是每次调用真发一个请求。也就是说 ReAct 循环里反复调
+ * funding_history，最坏请求量是每次 1 个而不是 0 个。</p>
  */
 @Component
 @RequiredArgsConstructor
 public class MarketToolkit {
+
+    /** orderbook_depth 的 tool description 承诺 top10，输出前按这个档数截齐 */
+    private static final int DEPTH_LEVELS = 10;
 
     private final MarketDataService dataService;
     private final BinanceRestClient binanceRestClient;
@@ -123,12 +129,20 @@ public class MarketToolkit {
             JSONObject book = JSON.parseObject(raw);
             JSONObject out = new JSONObject();
             out.put("available", true);
-            out.put("bids", book.getJSONArray("bids"));
-            out.put("asks", book.getJSONArray("asks"));
+            // 数据源档数不定（WS 快照是 top20，REST 兜底是 top10），这里统一截到工具描述承诺的 10 档
+            out.put("bids", topLevels(book.getJSONArray("bids")));
+            out.put("asks", topLevels(book.getJSONArray("asks")));
             return out.toJSONString();
         } catch (Exception e) {
             return errorJson("orderbook unavailable: " + e.getMessage());
         }
+    }
+
+    private static JSONArray topLevels(JSONArray levels) {
+        if (levels == null || levels.size() <= DEPTH_LEVELS) {
+            return levels;
+        }
+        return new JSONArray(levels.subList(0, DEPTH_LEVELS));
     }
 
     private static String errorJson(String reason) {

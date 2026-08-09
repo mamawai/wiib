@@ -14,12 +14,22 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 class MarketDataServiceTest {
+
+    /** 一根合法 K 线：只为让 data_available=true，不足 30 根所以指标计算会跳过 */
+    private static final String ONE_KLINE = "[[1,\"1\",\"2\",\"1\",\"1.5\",\"10\",2,\"15\",5,\"6\"]]";
+    private static final String WS_DEPTH = "{\"bids\":[[\"1\",\"1\"]],\"asks\":[[\"2\",\"1\"]]}";
 
     private final BinanceRestClient binanceRestClient = mock(BinanceRestClient.class);
     private final ForceOrderService forceOrderService = mock(ForceOrderService.class);
@@ -74,11 +84,15 @@ class MarketDataServiceTest {
     }
 
     /**
-     * TTL 过期瞬间的并发击穿：无锁的 check-then-act 会让 N 个线程各打一整套采集
-     * （一套 19 个 HTTP 请求）。single-flight 后只允许一个线程真采集，其余等它的结果。
+     * TTL 过期瞬间 N 个线程同时 miss，必须只有一个真打 HTTP——配额按 IP 算，N 倍击穿会连累策略轨。
      */
     @Test
     void 并发未命中时只真采集一次() throws Exception {
+        // 把采集卡住 300ms，逼所有线程都挤进在途表，而不是靠调度侥幸串行后命中缓存
+        when(binanceRestClient.getFutures24hTicker("BTCUSDT")).thenAnswer(inv -> {
+            Thread.sleep(300);
+            return null;
+        });
         MarketDataService service = service(60_000);
         int threads = 8;
         CountDownLatch start = new CountDownLatch(1);
@@ -104,7 +118,8 @@ class MarketDataServiceTest {
 
         assertThat(done.await(30, TimeUnit.SECONDS)).isTrue();
         assertThat(errors).isEmpty();
-        // 八个线程拿到的必须是同一个实例——说明只有一次真采集，其余复用
+        // 直接验请求次数，这才是"只采集一次"的证据；同一性断言只是顺带
+        verify(binanceRestClient, times(1)).getFutures24hTicker("BTCUSDT");
         assertThat(results).hasSize(threads);
         MarketAssembly first = results.getFirst();
         assertThat(results).allMatch(a -> a == first);
@@ -125,6 +140,8 @@ class MarketDataServiceTest {
         // 归一化后命中同一缓存键，四次调用只应打两个真请求
         verify(binanceRestClient, times(1)).getFundingRateHistory("BTCUSDT", 30);
         verify(binanceRestClient, times(1)).getFuturesOrderbook("BTCUSDT", 10);
+        // 归一化要是坏了会多出 "btcusdt"/" BTCUSDT " 那几组调用，上面两条 times(1) 照样绿，这条才拦得住
+        verifyNoMoreInteractions(binanceRestClient);
     }
 
     /** TTL=0 时每次都过期，必须真发请求——否则缓存就成了永久缓存 */
@@ -137,5 +154,120 @@ class MarketDataServiceTest {
         service.fundingHistory("BTCUSDT");
 
         verify(binanceRestClient, times(2)).getFundingRateHistory("BTCUSDT", 30);
+    }
+
+    /**
+     * 采集线程炸了不能把等待者一起拖走：赢家自己把异常抛出去，等待者拿降级快照继续走，
+     * 否则一个 symbol 的畸形数据会顺着 join() 打断所有等它的对话/交易线程。
+     */
+    @Test
+    void 采集失败时等待者拿到降级快照() throws Exception {
+        stubSlowCollectableSymbol();
+        when(orderFlowAggregator.hasData("BTCUSDT")).thenThrow(new IllegalStateException("aggTrade 数据结构坏了"));
+        MarketDataService service = service(60_000);
+
+        Outcome outcome = assembleFromTwoThreads(service);
+
+        assertThat(outcome.allFinished()).isTrue();
+        assertThat(outcome.errors()).hasSize(1);
+        assertThat(outcome.errors().getFirst()).hasMessageContaining("aggTrade 数据结构坏了"); // 赢家原样抛出
+        assertThat(outcome.results()).singleElement()
+                .matches(a -> !a.available()); // 等待者降级，没被别人的异常打断
+    }
+
+    /**
+     * 采集线程撞上 Error（爆栈/OOM/类初始化失败）时等待者也必须被唤醒：
+     * CompletableFuture.join() 既没超时也不可中断，漏一次 complete 就是一批 interrupt 都杀不掉的
+     * 僵尸线程，还会挡住 Spring 优雅关停。catch RuntimeException 挡不住 Error，所以兜底得在 finally。
+     */
+    @Test
+    void 采集线程遇Error时等待者不被挂死() throws Exception {
+        stubSlowCollectableSymbol();
+        when(orderFlowAggregator.hasData("BTCUSDT")).thenThrow(new StackOverflowError("递归爆栈"));
+        MarketDataService service = service(60_000);
+
+        Outcome outcome = assembleFromTwoThreads(service);
+
+        assertThat(outcome.allFinished()).isTrue(); // 等待者挂死的话这里 15 秒后是 false
+        assertThat(outcome.errors()).hasSize(1);
+        assertThat(outcome.errors().getFirst()).isInstanceOf(StackOverflowError.class);
+        assertThat(outcome.results()).singleElement().matches(a -> !a.available());
+    }
+
+    /** 盘口有 WS 快照就绝不打 REST——WS 是 100ms 级且不吃 Binance 配额，REST 只是断流兜底 */
+    @Test
+    void 盘口优先用WS快照() {
+        when(depthStreamCache.getFreshDepth("BTCUSDT", 2000)).thenReturn(WS_DEPTH);
+        MarketDataService service = service(60_000);
+
+        String depth = service.orderbook("btcusdt");
+
+        assertThat(depth).isEqualTo(WS_DEPTH);
+        verify(binanceRestClient, never()).getFuturesOrderbook(anyString(), anyInt());
+    }
+
+    /**
+     * 熔断冷却 120s 比 TTL 60s 长：取不到新数据时资金费必须兜过期那份，
+     * 否则内存里明明躺着够用的数据却要黑掉 60 秒（资金费 8h 才结算一次，过期无所谓）。
+     */
+    @Test
+    void 资金费取不到新数据时兜过期缓存() {
+        when(binanceRestClient.getFundingRateHistory("BTCUSDT", 30))
+                .thenReturn("[{\"fundingRate\":\"0.0001\"}]")
+                .thenReturn(null); // 第二次模拟熔断中
+        MarketDataService service = service(0); // ttl=0 → 第二次必然过期，直接触发重取
+
+        String first = service.fundingHistory("BTCUSDT");
+        String second = service.fundingHistory("BTCUSDT");
+
+        assertThat(second).isEqualTo(first);
+    }
+
+    /** 盘口反过来：agent 拿它挂限价单，宁可报不可用也不能喂两分钟前的挂单墙 */
+    @Test
+    void 盘口取不到新数据时不兜过期缓存() {
+        when(binanceRestClient.getFuturesOrderbook("BTCUSDT", 10))
+                .thenReturn("{\"bids\":[],\"asks\":[]}")
+                .thenReturn(null);
+        MarketDataService service = service(0);
+
+        service.orderbook("BTCUSDT");
+        String second = service.orderbook("BTCUSDT");
+
+        assertThat(second).isNull();
+    }
+
+    /** K线+ticker 齐活让 data_available=true 走进特征构建；ticker 拖 300ms 是为了撑开在途窗口 */
+    private void stubSlowCollectableSymbol() {
+        when(binanceRestClient.getFuturesKlines(eq("BTCUSDT"), anyString(), anyInt(), any()))
+                .thenReturn(ONE_KLINE);
+        when(binanceRestClient.getFutures24hTicker("BTCUSDT")).thenAnswer(inv -> {
+            Thread.sleep(300);
+            return "{\"lastPrice\":\"65000\"}";
+        });
+    }
+
+    private record Outcome(boolean allFinished, List<MarketAssembly> results, List<Throwable> errors) {}
+
+    /** 两个线程错开 50ms 进 assemble：第二个必然撞在第一个的在途窗口里，当上等待者 */
+    private Outcome assembleFromTwoThreads(MarketDataService service) throws Exception {
+        List<MarketAssembly> results = new CopyOnWriteArrayList<>();
+        List<Throwable> errors = new CopyOnWriteArrayList<>();
+        CountDownLatch done = new CountDownLatch(2);
+        for (int i = 0; i < 2; i++) {
+            Thread th = new Thread(() -> {
+                try {
+                    results.add(service.assemble("BTCUSDT"));
+                } catch (Throwable e) {
+                    errors.add(e);
+                } finally {
+                    done.countDown();
+                }
+            });
+            th.setDaemon(true);
+            th.start();
+            Thread.sleep(50);
+        }
+        return new Outcome(done.await(15, TimeUnit.SECONDS), results, errors);
     }
 }
