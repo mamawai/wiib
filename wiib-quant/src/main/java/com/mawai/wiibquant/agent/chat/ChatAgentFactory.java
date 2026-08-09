@@ -276,13 +276,15 @@ public class ChatAgentFactory {
 
     /**
      * 专家 agent：浅模型 + 自己那套工具的 ReAct 循环。
+     * <p>
+     * 包私有而非 private：ExpertCallLimitTest 要直接调它真跑一遍，才验得到"生产代码里保险丝挂没挂"。
      *
      * @param toolkit              可空。null=纯预取/纯模型能力的专家（如 news），不挂任何 function tool
      * @param forceFirstToolChoice "required"=首轮强制调工具（工具带参数、数据必须模型现取的专家）；
      *                             null=不强制
      */
-    private CompiledGraph<MessagesState<Message>> expertGraph(ChatModel model, Object toolkit,
-                                                              String forceFirstToolChoice, String instruction)
+    CompiledGraph<MessagesState<Message>> expertGraph(ChatModel model, Object toolkit,
+                                                      String forceFirstToolChoice, String instruction)
             throws Exception {
         ReactAgent.Builder<MessagesState<Message>> builder = ReactAgent.<MessagesState<Message>>builder()
                 .chatModel(model)
@@ -291,6 +293,12 @@ public class ChatAgentFactory {
         if (toolkit != null) {
             builder.toolsFromObject(toolkit);
         }
+        // 专家也是 ReAct 循环，没保险丝就一路顶到框架 25 次迭代硬顶抛异常；而 market 的工具每调一次
+        // 就打一次真实上游，是行情配额账里唯一没封顶的一项。
+        // 挂在公共出口而不是只给 market：news 现在没工具（toolkit=null）发不出 tool_call，挂上是空操作，
+        // 但将来给它加工具时不必再想起这件事。
+        // 这里 hook 真生效：结尾 .compile() 是独立编译，不走父图 addNode(id, StateGraph) 那条会丢掉子图 hook 的内联通道
+        builder.addExecuteToolsHook(new ModelCallLimiter(runModelCallLimit));
         // 专家的立身之本是"用工具拿真实数据"：不强制的话模型可能用自带的内置搜索直接答，
         // 工具一次都不调，数据源就失控了（本系统的行情/预测战绩全被绕过去）
         return builder.build(ResilientChatService.builder().model(model)
