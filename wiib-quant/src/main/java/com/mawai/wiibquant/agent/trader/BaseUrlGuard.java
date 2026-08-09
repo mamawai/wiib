@@ -60,7 +60,8 @@ public class BaseUrlGuard {
         }
         for (InetAddress a : addrs) {
             if (a.isLoopbackAddress() || a.isSiteLocalAddress() || a.isLinkLocalAddress()
-                    || a.isAnyLocalAddress() || a.isMulticastAddress() || isUniqueLocalV6(a)) {
+                    || a.isAnyLocalAddress() || a.isMulticastAddress()
+                    || isUniqueLocalV6(a) || isSharedAddressSpace(a)) {
                 return "baseUrl 不允许指向内网/本机地址";
             }
         }
@@ -70,5 +71,19 @@ public class BaseUrlGuard {
     /** IPv6 unique-local fc00::/7：isSiteLocalAddress 只认已废弃的 fec0::/10，这段要手判 */
     private static boolean isUniqueLocalV6(InetAddress a) {
         return a instanceof Inet6Address && (a.getAddress()[0] & 0xFE) == 0xFC;
+    }
+
+    /**
+     * RFC 6598 共享地址空间 100.64.0.0/10：运营商级 NAT 用它，多家云也拿它当内网服务段
+     * （阿里云元数据 100.100.100.200、内网 DNS 100.100.2.136 都在这段）。
+     * isSiteLocalAddress 只认 10/172.16/192.168，这一段是它的盲区
+     */
+    private static boolean isSharedAddressSpace(InetAddress a) {
+        if (a instanceof Inet6Address) {
+            return false;
+        }
+        byte[] b = a.getAddress();
+        // 100.64.0.0/10 = 第一字节 100（8 位全定）+ 第二字节高 2 位为 0b01（即 64..127）
+        return (b[0] & 0xFF) == 100 && (b[1] & 0xC0) == 0x40;
     }
 }

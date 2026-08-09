@@ -45,6 +45,25 @@ class BaseUrlGuardTest {
         assertThat(guard.check("https://")).isNotNull();
     }
 
+    /**
+     * 100.64.0.0/10 是 RFC 6598 共享地址空间，多家云拿它当内网服务段（阿里云元数据 100.100.100.200 就在这段），
+     * 而 isSiteLocalAddress 只认 10/172.16/192.168，不补这一判断这段就是直通内网的口子
+     */
+    @Test
+    void 拦截共享地址空间() {
+        // 段头、阿里云元数据实址、段尾各钉一点：掩码写窄了这三点必掉一个，只判第二字节等于某值也过不了
+        assertThat(guard.check("http://100.64.0.1")).contains("内网");
+        assertThat(guard.check("http://100.100.100.200")).contains("内网");
+        assertThat(guard.check("http://100.127.255.254")).contains("内网");
+    }
+
+    /** 掩码写宽就会把 100.x 里本属公网的部分一起误封，用户填的合法端点会被无故拒掉 */
+    @Test
+    void 共享地址空间边界外的公网地址不误伤() {
+        assertThat(guard.check("http://100.63.255.255")).isNull();
+        assertThat(guard.check("http://100.128.0.1")).isNull();
+    }
+
     /** 运维白名单主机先于 DNS 短路放行：docker 网络主机名在开发机上解析不了也要能过 */
     @Test
     void allowlistedHostBypassesResolution() {
