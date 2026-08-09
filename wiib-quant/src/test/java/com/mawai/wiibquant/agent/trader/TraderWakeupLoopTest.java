@@ -76,7 +76,7 @@ class TraderWakeupLoopTest {
     private final TraderWakeupRunner runner = new TraderWakeupRunner(
             modelFactory, new TraderPromptAssembler(), simTradeClient, binanceRestClient,
             new IndicatorToolkit(binanceRestClient),
-            new MarketToolkit(mock(MarketDataService.class), binanceRestClient),
+            new MarketToolkit(mock(MarketDataService.class)),
             new NewsToolkit(mock(NewsCache.class)),
             traderMapper, decisionMapper, new TraderPlanStore(planMapper), requestService,
             new SpringAIJacksonStateSerializer<>(MessagesState::new));

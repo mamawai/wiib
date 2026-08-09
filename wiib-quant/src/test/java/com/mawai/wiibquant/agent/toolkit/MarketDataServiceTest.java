@@ -1,12 +1,17 @@
 package com.mawai.wiibquant.agent.toolkit;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.mawai.wiibcommon.enums.KlineInterval;
 import com.mawai.wiibcommon.market.BinanceRestClient;
 import com.mawai.wiibcommon.market.DepthStreamCache;
 import com.mawai.wiibcommon.market.ForceOrderService;
 import com.mawai.wiibcommon.market.OrderFlowAggregator;
 import com.mawai.wiibquant.config.DeribitClient;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -176,12 +181,13 @@ class MarketDataServiceTest {
     }
 
     /**
-     * 采集线程撞上 Error（爆栈/OOM/类初始化失败）时等待者也必须被唤醒：
-     * CompletableFuture.join() 既没超时也不可中断，漏一次 complete 就是一批 interrupt 都杀不掉的
-     * 僵尸线程，还会挡住 Spring 优雅关停。catch RuntimeException 挡不住 Error，所以兜底得在 finally。
+     * 采集线程撞上 Error（爆栈/OOM/类初始化失败）时等待者也必须被唤醒，且拿到的是 Error 本尊：
+     * join() 既没超时也不可中断，漏一次 complete 就是一批 interrupt 都杀不掉的僵尸线程；
+     * 而若改用兜底壳异常给终局，等待者日志里就只剩那个壳子，真凶（爆栈）彻底看不见。
      */
     @Test
     void 采集线程遇Error时等待者不被挂死() throws Exception {
+        ListAppender<ILoggingEvent> logs = captureServiceLogs();
         stubSlowCollectableSymbol();
         when(orderFlowAggregator.hasData("BTCUSDT")).thenThrow(new StackOverflowError("递归爆栈"));
         MarketDataService service = service(60_000);
@@ -192,6 +198,8 @@ class MarketDataServiceTest {
         assertThat(outcome.errors()).hasSize(1);
         assertThat(outcome.errors().getFirst()).isInstanceOf(StackOverflowError.class);
         assertThat(outcome.results()).singleElement().matches(a -> !a.available());
+        // 等待者对外一律降级成 unavailable，根因只在它那条 warn 日志里露面，只能打在日志上
+        assertThat(waiterFailureCause(logs)).isEqualTo(StackOverflowError.class.getName());
     }
 
     /** 盘口有 WS 快照就绝不打 REST——WS 是 100ms 级且不吃 Binance 配额，REST 只是断流兜底 */
@@ -223,6 +231,47 @@ class MarketDataServiceTest {
         assertThat(second).isEqualTo(first);
     }
 
+    /** 资金费上下文是 funding_history 里最后一个裸奔的真请求，ReAct 循环反复取必须吃缓存 */
+    @Test
+    void 资金费上下文在TTL内复用不重复请求() {
+        when(binanceRestClient.getPremiumIndex("BTCUSDT")).thenReturn("{\"markPrice\":\"100\"}");
+        MarketDataService service = service(60_000);
+
+        service.premiumIndex("BTCUSDT");
+        service.premiumIndex("btcusdt");
+        service.premiumIndex(" BTCUSDT ");
+
+        verify(binanceRestClient, times(1)).getPremiumIndex("BTCUSDT");
+        // 归一化要是坏了会多出 "btcusdt"/" BTCUSDT " 那两组调用，上面 times(1) 照样绿，这条才拦得住
+        verifyNoMoreInteractions(binanceRestClient);
+    }
+
+    /**
+     * 熔断期（上游返回 null）必须回退到过期缓存：不兜的话资金费上下文一 null 就把整条
+     * funding_history 拖垮，历史那边的兜底跟着白做——两者共用同一个熔断器，同进同退。
+     */
+    @Test
+    void 资金费上下文取不到新数据时兜过期缓存() {
+        when(binanceRestClient.getPremiumIndex("BTCUSDT"))
+                .thenReturn("{\"markPrice\":\"100\"}")
+                .thenReturn(null); // 第二次模拟熔断中
+        MarketDataService service = service(0); // ttl=0 → 第二次必然过期，直接触发重取
+
+        String first = service.premiumIndex("BTCUSDT");
+        String stale = service.premiumIndex("BTCUSDT");
+
+        assertThat(first).contains("100");
+        assertThat(stale).isEqualTo(first);
+    }
+
+    /** 从没成功过就没有过期那份可兜，只能如实返回 null——不能凭空给模型造标记价 */
+    @Test
+    void 资金费上下文从未成功过时返回null() {
+        when(binanceRestClient.getPremiumIndex("BTCUSDT")).thenReturn(null);
+
+        assertThat(service(60_000).premiumIndex("BTCUSDT")).isNull();
+    }
+
     /** 盘口反过来：agent 拿它挂限价单，宁可报不可用也不能喂两分钟前的挂单墙 */
     @Test
     void 盘口取不到新数据时不兜过期缓存() {
@@ -235,6 +284,26 @@ class MarketDataServiceTest {
         String second = service.orderbook("BTCUSDT");
 
         assertThat(second).isNull();
+    }
+
+    private ListAppender<ILoggingEvent> captureServiceLogs() {
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        ((Logger) LoggerFactory.getLogger(MarketDataService.class)).addAppender(appender);
+        return appender;
+    }
+
+    @AfterEach
+    void 摘掉日志采集器() {
+        ((Logger) LoggerFactory.getLogger(MarketDataService.class)).detachAndStopAllAppenders();
+    }
+
+    private static String waiterFailureCause(ListAppender<ILoggingEvent> logs) {
+        return logs.list.stream()
+                .filter(e -> e.getFormattedMessage().contains("等待在途采集失败"))
+                .map(e -> e.getThrowableProxy().getClassName())
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("等待者根本没走到失败分支"));
     }
 
     /** K线+ticker 齐活让 data_available=true 走进特征构建；ticker 拖 300ms 是为了撑开在途窗口 */

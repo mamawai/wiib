@@ -83,15 +83,14 @@ public class MarketDataService {
             cache.put(normalized, assembled);
             mine.complete(assembled);
             return assembled;
-        } catch (RuntimeException e) {
-            // 先把真实异常交给等待者，它们的日志里才有根因（等待者最终看到的是降级的 unavailable，见 join）
-            mine.completeExceptionally(e);
-            throw e;
+        } catch (Throwable t) {
+            // join() 无超时且不可中断，漏一次 complete 就留下一批杀不掉的僵尸线程，所以 Error 也要给终局。
+            // 一处 catch 覆盖全部逃逸路径，等待者日志里拿到的就是原始根因（爆栈/OOM 本尊）；
+            // 换成 finally 里补一个壳异常，真凶会被盖住，而且每次采集都白建一个带栈对象——OOM 时它自己就分配不出来
+            mine.completeExceptionally(t);
+            throw t;
         } finally {
             inFlight.remove(normalized, mine);
-            // join() 无超时且不可中断：采集线程无论怎么退出（含 Error）都必须给等待者一个终局，
-            // 否则一次 StackOverflowError 就留下一批杀不掉的僵尸线程。已完成的 future 这里是 no-op
-            mine.completeExceptionally(new IllegalStateException("采集线程异常退出 symbol=" + normalized));
         }
     }
 
@@ -99,11 +98,31 @@ public class MarketDataService {
      * 资金费历史（近 30 条）。失败返回 null，调用方按"数据不可用"处理。
      * 取不到新数据时兜过期那份：资金费 8 小时才结算一次，两分钟前的历史与实时没有差别，
      * 而熔断冷却 120s 比 TTL 60s 长，不兜就会白白黑掉中间那 60 秒。
+     * <p>
+     * 这份兜底要真生效，得和 {@link #premiumIndex} 同进同退：两者共用同一个熔断器，
+     * funding_history 工具是"历史 + 资金费上下文"一起出的，任一边空了整条工具就报不可用。
      */
     public String fundingHistory(String symbol) {
         String normalized = QuantConstants.normalizeSymbolLenient(symbol);
         return rawCached("funding:" + normalized, true,
                 () -> binanceRestClient.getFundingRateHistory(normalized, 30));
+    }
+
+    /**
+     * 资金费上下文（下次结算时间 / 上次费率 / 标记价）。仅供 @Tool 层给 LLM 读，失败返回 null。
+     * <p>
+     * 允许兜过期那份：这三个字段在资金费语境下陈旧几分钟无害——费率按 8 小时结算，
+     * 两分钟前的值与实时没有差别。反过来若不兜，熔断期这里一 null 就把整条 funding_history
+     * 拖垮，历史那边的兜底也就白做了。
+     * <p>
+     * <b>算钱的路径不许走这里</b>：trader 下单量（TraderWakeupRunner）和结算价
+     * （FuturesSettlementServiceImpl）各自直调 BinanceRestClient 取实时 markPrice，
+     * BTC 一分钟就能走 0.1~0.3%，拿缓存价格算钱是真会出偏差的。
+     */
+    public String premiumIndex(String symbol) {
+        String normalized = QuantConstants.normalizeSymbolLenient(symbol);
+        return rawCached("premium:" + normalized, true,
+                () -> binanceRestClient.getPremiumIndex(normalized));
     }
 
     /**

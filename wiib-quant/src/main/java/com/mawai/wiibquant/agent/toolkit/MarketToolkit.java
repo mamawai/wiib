@@ -3,8 +3,6 @@ package com.mawai.wiibquant.agent.toolkit;
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
-import com.mawai.wiibcommon.constant.QuantConstants;
-import com.mawai.wiibcommon.market.BinanceRestClient;
 import com.mawai.wiibquant.agent.quant.domain.FeatureSnapshot;
 import lombok.RequiredArgsConstructor;
 import org.springframework.ai.tool.annotation.Tool;
@@ -15,9 +13,9 @@ import org.springframework.stereotype.Component;
  * 市场状态工具：实时快照 / 期权IV 走 MarketDataService 共享组装缓存；
  * 盘口深度优先取 WS 快照，断流才回退 REST 缓存（老化粒度独立于快照）。
  *
- * <p>资金费历史只有 30 条历史那半边走了缓存：本类 {@link #fundingHistory} 里的
- * {@code getPremiumIndex} 仍是每次调用真发一个请求。也就是说 ReAct 循环里反复调
- * funding_history，最坏请求量是每次 1 个而不是 0 个。</p>
+ * <p>本类所有取数一律经 MarketDataService，自己不直连 REST——ReAct 循环里工具会被反复调，
+ * 裸奔的真请求既吃配额又绕开熔断兜底。算钱的路径（下单量/结算价）另有直调
+ * BinanceRestClient 的实时通道，不受这层缓存影响。</p>
  */
 @Component
 @RequiredArgsConstructor
@@ -27,7 +25,6 @@ public class MarketToolkit {
     private static final int DEPTH_LEVELS = 10;
 
     private final MarketDataService dataService;
-    private final BinanceRestClient binanceRestClient;
 
     @Tool(name = "market_snapshot", description = """
             Get real-time market snapshot for a crypto perpetual symbol: price, price changes,
@@ -88,7 +85,6 @@ public class MarketToolkit {
             time and current mark price for a crypto perpetual symbol. Useful for carry judgment:
             persistently positive funding = longs paying shorts (crowded long), negative = the opposite.""")
     public String fundingHistory(@ToolParam(description = "Symbol, e.g. BTCUSDT") String symbol) {
-        String sym = QuantConstants.normalizeSymbolLenient(symbol);
         String raw = dataService.fundingHistory(symbol);
         if (raw == null) {
             return errorJson("funding data unavailable");
@@ -106,7 +102,13 @@ public class MarketToolkit {
                 compact.add(row);
             }
             out.put("history", compact);
-            JSONObject premium = JSON.parseObject(binanceRestClient.getPremiumIndex(sym));
+            // 先判空再解析：熔断期这里返回 null 的话，JSON.parseObject(null) 也给 null，
+            // 后面三个 getter 直接 NPE，异常信息（fastjson2 内部类名）会顺着 catch 喂给模型
+            String premiumRaw = dataService.premiumIndex(symbol);
+            if (premiumRaw == null) {
+                return errorJson("funding data unavailable");
+            }
+            JSONObject premium = JSON.parseObject(premiumRaw);
             out.put("nextFundingTime", premium.getLong("nextFundingTime"));
             out.put("lastFundingRate", premium.getString("lastFundingRate"));
             out.put("markPrice", premium.getString("markPrice"));

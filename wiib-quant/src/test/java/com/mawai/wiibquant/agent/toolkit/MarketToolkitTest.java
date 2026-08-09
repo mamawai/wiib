@@ -14,8 +14,7 @@ import static org.mockito.Mockito.when;
 class MarketToolkitTest {
 
     private final MarketDataService dataService = mock(MarketDataService.class);
-    private final MarketToolkit toolkit = new MarketToolkit(dataService,
-            mock(com.mawai.wiibcommon.market.BinanceRestClient.class));
+    private final MarketToolkit toolkit = new MarketToolkit(dataService);
 
     /** 共用造件见 TestAssemblies（record 无法可靠 mock，统一真实构造）。 */
     private MarketAssembly assemblyWithSnapshot() {
@@ -53,6 +52,17 @@ class MarketToolkitTest {
     @Test
     void 资金费取数失败返回不可用JSON() {
         when(dataService.fundingHistory("BTCUSDT")).thenReturn(null);
+
+        String json = toolkit.fundingHistory("BTCUSDT");
+
+        assertThat(json).isEqualTo("{\"available\":false,\"reason\":\"funding data unavailable\"}");
+    }
+
+    /** 资金费上下文取不到时也要给结构完整的不可用，而不是让 NPE 冒成一句 Java 异常喂给模型 */
+    @Test
+    void 资金费上下文取不到时返回不可用JSON() {
+        when(dataService.fundingHistory("BTCUSDT")).thenReturn("[]");
+        when(dataService.premiumIndex("BTCUSDT")).thenReturn(null);
 
         String json = toolkit.fundingHistory("BTCUSDT");
 
