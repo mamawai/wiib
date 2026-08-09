@@ -44,8 +44,9 @@ public class DeepAnalysisToolkit {
         String normalized = QuantConstants.normalizeSymbolLenient(symbol);
 
         // HITL 闸门：无有效授权 → 登记 pending，返回待确认标记（不烧深模型）
-        if (!approvalRegistry.consumeApproval(sessionId)) {
-            approvalRegistry.requestApproval(sessionId, normalized,
+        // 过渡：闸门仍在工具内，只是跟上新签名。Task 8 把判断搬到 ApprovalGate 后这段删掉
+        if (!approvalRegistry.consumeApproval(sessionId, "run_deep_analysis", normalized)) {
+            approvalRegistry.requestApproval(sessionId, "run_deep_analysis", normalized,
                     "深度研判需 3 次深模型调用（Bull/Bear 辩论 + Judge 裁决）");
             JSONObject out = new JSONObject();
             out.put("status", "PENDING_APPROVAL");

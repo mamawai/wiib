@@ -200,7 +200,10 @@ class ChatAgentFactoryTest {
     @Test
     void unconsumedApprovalSkipsDispatchStraightToSummarizer() {
         ChatModel model = mock(ChatModel.class);
-        approvalRegistry.approve("wb-1-t"); // 与 runConfig() 的 threadId 同一会话
+        // 与 runConfig() 的 threadId 同一会话
+        approvalRegistry.requestApproval("wb-1-t", "run_deep_analysis", "BTCUSDT", "贵操作");
+        approvalRegistry.approve("wb-1-t",
+                approvalRegistry.peekPending("wb-1-t").orElseThrow().requestId());
 
         Map<String, Object> update = factory().route(new MessagesState<>(
                 Map.of("messages", List.of(new UserMessage("已确认，请继续执行深度研判")))), model, runConfig());

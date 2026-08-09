@@ -23,6 +23,13 @@ class DeepAnalysisToolkitTest {
     private final DeepAnalysisToolkit toolkit =
             new DeepAnalysisToolkit(deepAnalysisService, approvalRegistry, runRegistry);
 
+    /** 授权改成三元组后要先登记再按 requestId 批准，两步是原来 approve(sid) 的等价形式 */
+    private void grantApproval(String sessionId, String symbol) {
+        approvalRegistry.requestApproval(sessionId, "run_deep_analysis", symbol, "贵操作");
+        approvalRegistry.approve(sessionId,
+                approvalRegistry.peekPending(sessionId).orElseThrow().requestId());
+    }
+
     @Test
     void gateBlocksWithoutApprovalAndRegistersPending() {
         approvalRegistry.markActive("wb-1-x");
@@ -30,14 +37,14 @@ class DeepAnalysisToolkitTest {
         String result = toolkit.runDeepAnalysis("BTCUSDT", null);
 
         assertThat(result).contains("PENDING_APPROVAL");
-        assertThat(approvalRegistry.drainPending("wb-1-x")).isPresent(); // 确认卡素材已登记
+        assertThat(approvalRegistry.peekPending("wb-1-x")).isPresent(); // 确认卡素材已登记
         verify(deepAnalysisService, never()).buildNewsContext(); // 一分钱 LLM 没烧
     }
 
     @Test
     void approvedSessionRunsFullChainAndPersists() {
         approvalRegistry.markActive("wb-1-x");
-        approvalRegistry.approve("wb-1-x");
+        grantApproval("wb-1-x", "BTCUSDT");
         when(deepAnalysisService.buildNewsContext()).thenReturn("ctx");
         when(deepAnalysisService.bullArgue("BTCUSDT", "ctx")).thenReturn("bull");
         when(deepAnalysisService.bearArgue("BTCUSDT", "ctx")).thenReturn("bear");
@@ -58,7 +65,7 @@ class DeepAnalysisToolkitTest {
     @Test
     void judgeFailureReportsFailedWithoutPersist() {
         approvalRegistry.markActive("wb-1-x");
-        approvalRegistry.approve("wb-1-x");
+        grantApproval("wb-1-x", "BTCUSDT");
         when(deepAnalysisService.buildNewsContext()).thenReturn("ctx");
         when(deepAnalysisService.bullArgue(anyString(), anyString())).thenReturn("b");
         when(deepAnalysisService.bearArgue(anyString(), anyString())).thenReturn("b");

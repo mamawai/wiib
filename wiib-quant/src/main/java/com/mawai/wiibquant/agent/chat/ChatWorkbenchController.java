@@ -153,10 +153,14 @@ public class ChatWorkbenchController {
         if (sessionId == null || !sessionId.startsWith("wb-" + userId + "-")) {
             return Result.fail("会话不存在或无权限");
         }
+        // 过渡：前端还没回传 requestId，先从服务端记录里取——等价于不比对，与改造前行为一致。
+        // Task 10 换成前端从 hitl_request 事件原样回传
+        String requestId = approvalRegistry.peekPending(sessionId)
+                .map(ApprovalRegistry.PendingRequest::requestId).orElse("");
         if (request.isApproved()) {
-            approvalRegistry.approve(sessionId);
+            approvalRegistry.approve(sessionId, requestId);
         } else {
-            approvalRegistry.reject(sessionId);
+            approvalRegistry.reject(sessionId, requestId);
         }
         return Result.ok(null);
     }
@@ -222,7 +226,7 @@ public class ChatWorkbenchController {
             }
 
             // HITL：本轮 agent 触发了贵操作待确认 → 弹确认卡（approve 后前端自动补发继续指令）
-            approvalRegistry.drainPending(sessionId).ifPresent(pendingRequest ->
+            approvalRegistry.peekPending(sessionId).ifPresent(pendingRequest ->
                     channel.send("hitl_request", new JSONObject()
                             .fluentPut("sessionId", sessionId)
                             .fluentPut("symbol", pendingRequest.symbol())
