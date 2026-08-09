@@ -292,13 +292,11 @@ public class ChatAgentFactory {
                 .defaultSystem(instruction);
         if (toolkit != null) {
             builder.toolsFromObject(toolkit);
+            // 有工具才有 ReAct 循环，没保险丝就一路顶到框架 25 次迭代硬顶抛异常；而 market 的工具
+            // 每调一次就打一次真实上游，是行情配额账里唯一没封顶的一项。
+            // 这里 hook 真生效：结尾 .compile() 是独立编译，不走父图 addNode(id, StateGraph) 那条会丢掉子图 hook 的内联通道
+            builder.addExecuteToolsHook(new ModelCallLimiter(runModelCallLimit));
         }
-        // 专家也是 ReAct 循环，没保险丝就一路顶到框架 25 次迭代硬顶抛异常；而 market 的工具每调一次
-        // 就打一次真实上游，是行情配额账里唯一没封顶的一项。
-        // 挂在公共出口而不是只给 market：news 现在没工具（toolkit=null）发不出 tool_call，挂上是空操作，
-        // 但将来给它加工具时不必再想起这件事。
-        // 这里 hook 真生效：结尾 .compile() 是独立编译，不走父图 addNode(id, StateGraph) 那条会丢掉子图 hook 的内联通道
-        builder.addExecuteToolsHook(new ModelCallLimiter(runModelCallLimit));
         // 专家的立身之本是"用工具拿真实数据"：不强制的话模型可能用自带的内置搜索直接答，
         // 工具一次都不调，数据源就失控了（本系统的行情/预测战绩全被绕过去）
         return builder.build(ResilientChatService.builder().model(model)

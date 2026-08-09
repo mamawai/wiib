@@ -47,8 +47,8 @@ class ExpertCallLimitTest {
     }
 
     /**
-     * 故意远小于生产默认的 12：框架 25 次迭代硬顶换算下来约 13 次模型调用，
-     * 拿 12 当断言线只差 1 次，漏挂保险丝也可能侥幸压线变绿。留足余量这条断言才是钉子。
+     * 故意远小于生产默认的 12：12 次模型调用意味着保险丝在第 23 个节点才触发，离框架 25 次迭代硬顶
+     * 只剩 2 格——将来 ReAct 循环里多一个节点，hook 挂得好好的也会被硬顶打红，是假失败。取 3 留足余量，顺带跑得快。
      */
     private static final int LIMIT = 3;
 
@@ -79,8 +79,10 @@ class ExpertCallLimitTest {
                 .expertGraph(model, new FakeMarketTools(), "required", "你是市场状态专家");
         expert.invoke(Map.of("messages", List.of(new UserMessage("看看行情")))).orElseThrow();
 
-        // 被配置的上限收束，没冲到框架硬顶。删掉 expertGraph 里那行 addExecuteToolsHook
-        // 就会一路顶上去（抛异常或调用数远超上限）——这条断言就是钉子本身
-        assertThat(round.get()).isLessThanOrEqualTo(LIMIT);
+        // 恰好等于而非"不超过"：ModelCallLimiter 是 calls=已有+1、calls>=runLimit 跳 END，
+        // 触发那一刻模型正好被调 runLimit 次。钉死这个数才验得到上限值是从构造参数来的——
+        // 写成 new ModelCallLimiter(1) 这种取错值的写法，"不超过"照样绿。
+        // 而删掉 expertGraph 里那行 addExecuteToolsHook，模型永不收尾会直接撞框架硬顶抛异常
+        assertThat(round.get()).isEqualTo(LIMIT);
     }
 }
