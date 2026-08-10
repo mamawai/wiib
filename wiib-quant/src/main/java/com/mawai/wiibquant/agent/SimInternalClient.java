@@ -35,7 +35,11 @@ public class SimInternalClient {
                 .build();
     }
 
-    /** GET internal 端点，返回原始 JSON（agent 工具直接当结果用）。失败返回错误 JSON 不抛，避免打断 agent 推理。 */
+    /**
+     * GET internal 端点，返回原始 JSON（调用方直接当结果用）。
+     * 失败返回错误 JSON 而不是抛异常：一个维度取不到不该让整份分析作废，
+     * 让调用方把这段错误原样交给模型，它自己知道这块缺数据。
+     */
     public String getJson(String path) {
         try {
             return restClient.get().uri(path).retrieve().body(String.class);
