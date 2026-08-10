@@ -110,7 +110,7 @@ public class ChatModelFactory {
         String raw = String.join("\0",
                 String.valueOf(c.getApiProtocol()), String.valueOf(c.getBaseUrl()),
                 String.valueOf(c.getModel()), String.valueOf(c.getLightModel()),
-                String.valueOf(c.getApiKeyEnc()));
+                String.valueOf(c.getReasoningEffort()), String.valueOf(c.getApiKeyEnc()));
         try {
             return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
                     .digest(raw.getBytes(StandardCharsets.UTF_8)));
@@ -121,19 +121,24 @@ public class ChatModelFactory {
 
     private Models build(UserLlmConfig config) {
         String apiKey = apiKeyCrypto.decrypt(config.getApiKeyEnc());
-        ChatModel deep = buildOne(config, apiKey, config.getModel());
+        // 思考档位只给深模型：轻模型跑 router/专家/历史压缩这些简单活，高档纯烧钱烧延迟。
+        // 用户不填轻模型时 light 就是 deep 这个实例，档位自然全局生效——正是单模型用户想要的
+        ChatModel deep = buildOne(config, apiKey, config.getModel(), config.getReasoningEffort());
         // 轻模型不填就复用深模型这个实例本身（不是照参数再建一个）：省一份客户端和连接池
         ChatModel light = config.getLightModel() == null || config.getLightModel().isBlank()
                 ? deep
-                : buildOne(config, apiKey, config.getLightModel());
-        log.info("[ChatModel] 建模完成 model={} light={}", config.getModel(), config.getLightModel());
+                : buildOne(config, apiKey, config.getLightModel(), null);
+        log.info("[ChatModel] 建模完成 model={} light={} effort={}",
+                config.getModel(), config.getLightModel(), config.getReasoningEffort());
         return new Models(deep, light);
     }
 
-    private ChatModel buildOne(UserLlmConfig config, String apiKey, String modelName) {
+    /** @param reasoningEffort 可空=不传，走模型默认。模型认不认这个参数查不到，所以是用户自己选的值 */
+    private ChatModel buildOne(UserLlmConfig config, String apiKey, String modelName,
+                               String reasoningEffort) {
         if (AiProtocols.isResponses(config.getApiProtocol())) {
             return new ResponsesChatModel(apiKey, config.getBaseUrl(), modelName,
-                    null, null, toolCallingManager);
+                    null, reasoningEffort, toolCallingManager);
         }
         // timeout 非空是硬约束（SDK 是 Kotlin，null 运行时 NPE）
         OpenAIClient client = OpenAiSetup.setupSyncClient(
@@ -146,10 +151,14 @@ public class ChatModelFactory {
                 config.getBaseUrl(), apiKey, null, null, null, null,
                 false, false, modelName, ResponsesChatModel.CALL_TIMEOUT, 3, null, null,
                 observationRegistry, null, List.of());
+        OpenAiChatOptions.Builder options = OpenAiChatOptions.builder().model(modelName);
+        if (reasoningEffort != null) {
+            options.reasoningEffort(reasoningEffort);
+        }
         return OpenAiChatModel.builder()
                 .openAiClient(client)
                 .openAiClientAsync(clientAsync)
-                .options(OpenAiChatOptions.builder().model(modelName).build())
+                .options(options.build())
                 .observationRegistry(observationRegistry)
                 .build();
     }

@@ -25,13 +25,15 @@ public class UserLlmConfigController {
 
     /** key 只回尾 4 位，明文任何情况下不出服务端 */
     public record ConfigView(String apiProtocol, String baseUrl, String model,
-                             String lightModel, String apiKeyTail) {
+                             String lightModel, String reasoningEffort, String apiKeyTail) {
     }
 
+    /** reasoningEffort 留空=不传给上游走模型默认（模型支不支持这个参数查不到，只能让用户自己选） */
     public record SaveRequest(String apiProtocol, String baseUrl, String model,
-                              String lightModel, String apiKey) {
+                              String lightModel, String reasoningEffort, String apiKey) {
         UserLlmConfigService.SaveReq toReq() {
-            return new UserLlmConfigService.SaveReq(apiProtocol, baseUrl, model, lightModel, apiKey);
+            return new UserLlmConfigService.SaveReq(
+                    apiProtocol, baseUrl, model, lightModel, reasoningEffort, apiKey);
         }
     }
 
@@ -43,7 +45,7 @@ public class UserLlmConfigController {
             return Result.ok(null);
         }
         return Result.ok(new ConfigView(c.getApiProtocol(), c.getBaseUrl(), c.getModel(),
-                c.getLightModel(), service.keyTail(c)));
+                c.getLightModel(), c.getReasoningEffort(), service.keyTail(c)));
     }
 
     @PostMapping

@@ -5,9 +5,12 @@ import com.mawai.wiibquant.agent.llm.ResponsesChatModel;
 import com.mawai.wiibquant.agent.trader.ApiKeyCrypto;
 import io.micrometer.observation.ObservationRegistry;
 import org.junit.jupiter.api.Test;
+import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.model.tool.ToolCallingManager;
+import org.springframework.ai.openai.OpenAiChatModel;
 import org.springframework.beans.factory.ObjectProvider;
 
+import java.lang.reflect.Field;
 import java.util.Base64;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -80,14 +83,53 @@ class ChatModelFactoryTest {
 
     /**
      * responses 协议要走自研的 {@link ResponsesChatModel}（/v1/responses），不能悄悄按
-     * openai 发 /v1/chat/completions。生产上 grok/xAI/CPA 用户走的正是这条分支。
+     * openai 发 /v1/chat/completions；档位也要一起进去。
+     * 生产上 grok/xAI/CPA 用户走的正是这条分支，而它和 openai 那条各有各的注入点，分开钉。
      */
     @Test
-    void responses协议建出自研模型() {
+    void responses协议建出自研模型并带上思考档位() {
         UserLlmConfig c = config("grok-4.5", null);
         c.setApiProtocol("responses");
+        c.setReasoningEffort("high");
 
-        assertThat(factory().modelsFor(c).deep()).isInstanceOf(ResponsesChatModel.class);
+        ChatModel deep = factory().modelsFor(c).deep();
+
+        assertThat(deep).isInstanceOf(ResponsesChatModel.class);
+        assertThat(effortOf(deep)).isEqualTo("high");
+    }
+
+    /**
+     * 档位只给深模型。轻模型跑 router/专家/历史压缩这些简单活，high 档纯烧钱烧延迟。
+     * 深浅两位都断：只断深的话"两个都注入"照样绿。
+     */
+    @Test
+    void 思考档位只注入深模型() {
+        UserLlmConfig c = config("gpt-5", "gpt-5-mini");
+        c.setReasoningEffort("high");
+
+        ChatModelFactory.Models models = factory().modelsFor(c);
+
+        assertThat(effortOf(models.deep())).isEqualTo("high");
+        assertThat(effortOf(models.light())).isNull();
+    }
+
+    /**
+     * 读出模型上真实生效的档位。openai 那侧走 options；responses 那侧只能反射——
+     * {@code ResponsesChatModel.getOptions()} 故意不带这个字段（它是请求体里的 reasoning.effort，
+     * 不是 ChatOptions 的东西），而 agent/llm 是只读地盘，不能为了测试给它加 getter。
+     * 字段改名的话这里当场 NoSuchFieldException，不会静默变绿。
+     */
+    private static String effortOf(ChatModel model) {
+        if (model instanceof OpenAiChatModel openAi) {
+            return openAi.getOptions().getReasoningEffort();
+        }
+        try {
+            Field field = ResponsesChatModel.class.getDeclaredField("reasoningEffort");
+            field.setAccessible(true);
+            return (String) field.get(model);
+        } catch (ReflectiveOperationException e) {
+            throw new IllegalStateException("读不到 ResponsesChatModel.reasoningEffort", e);
+        }
     }
 
     /** 轻模型不填时直接复用深模型实例，不该白建第二个 */
@@ -110,6 +152,10 @@ class ChatModelFactoryTest {
         assertThat(ChatModelFactory.fingerprint(config("gpt-5", "gpt-5-mini"))).isEqualTo(base);
         assertThat(ChatModelFactory.fingerprint(config("gpt-5.1", "gpt-5-mini"))).isNotEqualTo(base);
         assertThat(ChatModelFactory.fingerprint(config("gpt-5", "other"))).isNotEqualTo(base);
+        // 档位也是建模要素：漏算它的话用户从 low 调到 high，拿到的还是那个 low 的旧模型
+        UserLlmConfig highEffort = config("gpt-5", "gpt-5-mini");
+        highEffort.setReasoningEffort("high");
+        assertThat(ChatModelFactory.fingerprint(highEffort)).isNotEqualTo(base);
     }
 
     /**

@@ -12,6 +12,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.Set;
 
 /**
  * 用户 BYOK 配置读写。与 trader 侧的 BYOK 是<b>两份独立配置</b>：
@@ -26,8 +27,16 @@ import java.util.List;
 public class UserLlmConfigService {
 
     public record SaveReq(String apiProtocol, String baseUrl, String model,
-                          String lightModel, String apiKey) {
+                          String lightModel, String reasoningEffort, String apiKey) {
     }
+
+    /**
+     * 思考档位的合法值，与 {@code ai_runtime_config.reasoning_effort} 同一套。
+     * <p>
+     * 这里必须挡一道：档位是原样塞进上游请求体的，OpenAI 官方对不认识的值直接 400，
+     * 而那时用户看到的是一次失败的对话，不是一句"档位填错了"。本地校验零成本。
+     */
+    private static final Set<String> REASONING_EFFORTS = Set.of("none", "low", "medium", "high");
 
     public record ListModelsResult(String error, List<String> models) {
     }
@@ -87,6 +96,7 @@ public class UserLlmConfigService {
         row.setBaseUrl(stripTrailingSlash(req.baseUrl().trim()));
         row.setModel(req.model().trim());
         row.setLightModel(blankToNull(req.lightModel()));
+        row.setReasoningEffort(normalizeEffort(req.reasoningEffort()));
         row.setApiKeyEnc(keyChanged ? apiKeyCrypto.encrypt(req.apiKey().trim()) : existing.getApiKeyEnc());
         return row;
     }
@@ -162,6 +172,10 @@ public class UserLlmConfigService {
         if (!AiProtocols.isValid(normalizeProtocol(req.apiProtocol()))) {
             return "协议仅支持 openai / responses";
         }
+        String effort = normalizeEffort(req.reasoningEffort());
+        if (effort != null && !REASONING_EFFORTS.contains(effort)) {
+            return "思考档位仅支持 none / low / medium / high，留空=不传";
+        }
         if (requireKey && (req.apiKey() == null || req.apiKey().isBlank())) {
             return "apiKey不能为空";
         }
@@ -175,6 +189,12 @@ public class UserLlmConfigService {
      */
     private static String normalizeProtocol(String protocol) {
         return protocol == null ? null : protocol.trim().toLowerCase();
+    }
+
+    /** 同 normalizeProtocol 的道理：档位是原样进请求体的，脏值等到上游才报错就太晚了。留空一律 null=不传 */
+    private static String normalizeEffort(String effort) {
+        String trimmed = blankToNull(effort);
+        return trimmed == null ? null : trimmed.toLowerCase();
     }
 
     private static String blankToNull(String s) {

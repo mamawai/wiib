@@ -30,7 +30,7 @@ class UserLlmConfigServiceTest {
 
     /** 字面 IP 而非域名：BaseUrlGuard 对主机名会真查 DNS，用域名等于让单测依赖网络 */
     private static UserLlmConfigService.SaveReq req(String baseUrl, String apiKey) {
-        return new UserLlmConfigService.SaveReq("openai", baseUrl, "gpt-5", null, apiKey);
+        return new UserLlmConfigService.SaveReq("openai", baseUrl, "gpt-5", null, null, apiKey);
     }
 
     /** SSRF 防线必须接进每一个吃 baseUrl 的入口，配置保存是其中之一 */
@@ -128,7 +128,7 @@ class UserLlmConfigServiceTest {
         when(modelFactory.testConnection(any())).thenReturn(null);
 
         assertThat(service.testConnection(1L, new UserLlmConfigService.SaveReq(
-                "responses", "https://8.8.8.8/", " gpt-5-pro ", null, "sk-abcd1234"))).isNull();
+                "responses", "https://8.8.8.8/", " gpt-5-pro ", null, null, "sk-abcd1234"))).isNull();
 
         ArgumentCaptor<AiTrader> probe = ArgumentCaptor.forClass(AiTrader.class);
         verify(modelFactory).testConnection(probe.capture());
@@ -144,9 +144,57 @@ class UserLlmConfigServiceTest {
     @Test
     void 非法协议被拒绝() {
         String err = service.save(1L, new UserLlmConfigService.SaveReq(
-                "anthropic", "https://8.8.8.8", "gpt-5", null, "sk-x"));
+                "anthropic", "https://8.8.8.8", "gpt-5", null, null, "sk-x"));
 
         assertThat(err).isEqualTo("协议仅支持 openai / responses");
+    }
+
+    /**
+     * 思考档位落库并抹平大小写空格。这条钉的是整条链路的第一段：档位存不进去，
+     * 后面 ChatModelFactory 注入得再对也没用。
+     */
+    @Test
+    void 思考档位归一化后入库() {
+        when(mapper.selectById(1L)).thenReturn(null);
+        AtomicReference<UserLlmConfig> inserted = new AtomicReference<>();
+        when(mapper.insert(any(UserLlmConfig.class))).thenAnswer(inv -> {
+            inserted.set(inv.getArgument(0));
+            return 1;
+        });
+
+        assertThat(service.save(1L, new UserLlmConfigService.SaveReq(
+                "openai", "https://8.8.8.8", "gpt-5", null, "  HIGH ", "sk-x"))).isNull();
+
+        assertThat(inserted.get().getReasoningEffort()).isEqualTo("high");
+    }
+
+    /** 留空=不传，走模型默认。不能存成 "" ——那会被原样塞进上游请求体 */
+    @Test
+    void 思考档位留空存成null() {
+        when(mapper.selectById(1L)).thenReturn(null);
+        AtomicReference<UserLlmConfig> inserted = new AtomicReference<>();
+        when(mapper.insert(any(UserLlmConfig.class))).thenAnswer(inv -> {
+            inserted.set(inv.getArgument(0));
+            return 1;
+        });
+
+        assertThat(service.save(1L, new UserLlmConfigService.SaveReq(
+                "openai", "https://8.8.8.8", "gpt-5", null, "   ", "sk-x"))).isNull();
+
+        assertThat(inserted.get().getReasoningEffort()).isNull();
+    }
+
+    /**
+     * 认不出的档位当场拒。它是原样塞进上游请求体的，OpenAI 官方对不认识的值直接 400——
+     * 那时用户看到的是一次失败的对话，而不是一句"档位填错了"。
+     */
+    @Test
+    void 非法思考档位被拒绝() {
+        String err = service.save(1L, new UserLlmConfigService.SaveReq(
+                "openai", "https://8.8.8.8", "gpt-5", null, "ultra", "sk-x"));
+
+        assertThat(err).contains("思考档位");
+        verify(mapper, never()).insert(any(UserLlmConfig.class));
     }
 
     /**
@@ -163,7 +211,7 @@ class UserLlmConfigServiceTest {
         });
 
         assertThat(service.save(1L, new UserLlmConfigService.SaveReq(
-                "  RESPONSES  ", "https://8.8.8.8", "gpt-5", null, "sk-x"))).isNull();
+                "  RESPONSES  ", "https://8.8.8.8", "gpt-5", null, null, "sk-x"))).isNull();
 
         assertThat(inserted.get().getApiProtocol()).isEqualTo("responses");
     }

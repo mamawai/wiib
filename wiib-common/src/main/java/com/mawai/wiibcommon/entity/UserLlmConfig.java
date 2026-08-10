@@ -22,6 +22,14 @@ public class UserLlmConfig {
     @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private String lightModel;
 
+    /**
+     * 思考档位 none/low/medium/high，可空=不传走模型默认。只作用于 model，轻模型不带
+     *（跑 router/专家/历史压缩这些简单活，高档纯烧钱烧延迟）。
+     * ALWAYS 的理由同 lightModel：改回"不传"是合法操作。
+     */
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
+    private String reasoningEffort;
+
     private String apiKeyEnc;
 
     @TableField(fill = FieldFill.INSERT)
