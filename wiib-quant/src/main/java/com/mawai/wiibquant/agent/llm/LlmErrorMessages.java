@@ -5,9 +5,14 @@ import lombok.extern.slf4j.Slf4j;
 import java.util.Locale;
 
 /**
- * 上游 LLM 异常 → 用户看得懂、也能据此动手解决的一句话。
+ * 异常 → 用户看得懂、也能据此动手解决的一句话。
  * <p>
- * BYOK 之后最高频的故障就是 key 相关，而 SDK 原始异常常是几百字符、带 URL 和请求片段的东西。
+ * BYOK 之后最高频的故障就是 key 相关，而 SDK 原始异常常是几百字符、带 URL 和请求片段的东西，
+ * 所以认得出的那四类（401/429/模型不存在/连不上）各给一句能照着做的话。
+ * <p>
+ * <b>认不出来的就不替用户判病因。</b> 两个调用方的 catch 罩的范围都比 LLM 大得多——
+ * 落历史、写记忆、checkpoint 落库全在里面，数据库挂了也走这条路。
+ * 兜底要是说"请检查端点与模型配置"，用户会去乱改一把本来没问题的 key。
  * <p>
  * 硬约束：<b>任何分支都不许把 API key 带出去</b>。这段文本不只给用户看——
  * 专家失败时它会被拼进 AssistantMessage 喂回模型，并随 checkpoint 落库。
@@ -23,7 +28,7 @@ public final class LlmErrorMessages {
 
     public static String classify(Throwable t) {
         if (t == null) {
-            return "模型调用失败，请稍后重试";
+            return "处理失败，请稍后重试";
         }
         String lower = chain(t).toLowerCase(Locale.ROOT);
         if (lower.contains("401") || lower.contains("403")
@@ -44,11 +49,12 @@ public final class LlmErrorMessages {
             return "端点无响应，请检查 Base URL 是否正确";
         }
         // 归类不到的形态要能被发现，否则它永远只以兜底文案示人；但不重复打栈——
-        // 两个调用方（Controller 的 catch、专家节点的 catch）都已经把整条异常记下来了
-        log.warn("[LLM] 未归类的上游异常 {}", t.getClass().getName());
+        // 两个调用方（Controller 的 catch、专家节点的 catch）都已经把整条异常记下来了。
+        // 不写 [LLM]：这里也会收到 DB 之类的服务端故障，贴错标签会把真跑验收的观察点搅浑
+        log.warn("[ErrorClassify] 归类不到 {}", t.getClass().getName());
         // 兜底不回显上游原文：中转网关的异常里经常带完整请求 URL（?api_key=…）、自定义 header，
         // key 的形态正则永远追不全。上面四个分支返的是固定文案，天然不含 key
-        return "模型调用失败（" + t.getClass().getSimpleName() + "），请检查端点与模型配置";
+        return "处理失败（" + t.getClass().getSimpleName() + "），请稍后重试";
     }
 
     /**

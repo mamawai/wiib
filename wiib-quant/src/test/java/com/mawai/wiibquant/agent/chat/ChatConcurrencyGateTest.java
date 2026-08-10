@@ -18,11 +18,15 @@ class ChatConcurrencyGateTest {
 
     /**
      * 同一用户同时只能跑一轮：开十个标签页也占不满全局名额。
-     * 断言拒因而不只是"拒了"——它决定用户看到"你已有一轮在跑"还是"人满了"，是两回事
+     * 断言拒因而不只是"拒了"——它决定用户看到"你已有一轮在跑"还是"人满了"，是两回事。
+     * <p>
+     * <b>上限必须取 1，不能图省事写 10</b>：闸门若反过来先占全局位再占用户位，
+     * 同一用户的第二次请求会先拿走一个全局名额、再因用户位被占而退回，
+     * 拒因就成了 GLOBAL_FULL。上限给大了这个错根本露不出来
      */
     @Test
     void 同一用户只能占一个名额() {
-        ChatConcurrencyGate gate = new ChatConcurrencyGate(10);
+        ChatConcurrencyGate gate = new ChatConcurrencyGate(1);
 
         assertThat(gate.tryAcquire(1L)).isEqualTo(ChatConcurrencyGate.Acquire.OK);
         assertThat(gate.tryAcquire(1L)).isEqualTo(ChatConcurrencyGate.Acquire.USER_BUSY);

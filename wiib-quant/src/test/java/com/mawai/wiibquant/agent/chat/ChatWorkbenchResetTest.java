@@ -160,7 +160,9 @@ class ChatWorkbenchResetTest {
             request.setMessage("第 " + turn + " 轮：深度研判 BTC");
 
             controller.chat(1L, request, mock(HttpServletResponse.class));
-            assertThat(turnDone[0].await(60, TimeUnit.SECONDS)).as("第 %d 轮跑完", turn).isTrue();
+            // 20s 是给 CI 慢机留的余量：整整 6 轮实测也就 0.1 秒量级。
+            // 这个数直接决定"漏掉 release"要多久才暴露，别再往大写
+            assertThat(turnDone[0].await(20, TimeUnit.SECONDS)).as("第 %d 轮跑完", turn).isTrue();
 
             // 计数是本轮自己的，不是从上一轮续上来的——不清零的话这里会是 2、4、6、8…
             assertThat(callCount(graph, sessionId)).as("第 %d 轮跑完后的 %s", turn, ModelCallLimiter.CALL_COUNT_KEY)

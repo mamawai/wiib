@@ -49,15 +49,18 @@ class LlmErrorMessagesTest {
         assertThat(LlmErrorMessages.classify(wrapped)).contains("API key");
     }
 
-    /** 兜底分支要短且固定，避免几百字符的 SDK 异常灌进 SSE 和对话历史 */
+    /**
+     * 兜底分支要短且固定，避免几百字符的 SDK 异常灌进 SSE 和对话历史；
+     * 而且<b>不许替用户判病因</b>——调用方的 catch 也罩着落历史、写记忆、checkpoint 落库，
+     * 数据库挂了同样走这条路，兜底若说"请检查端点与模型配置"，用户会去乱改一把没问题的 key
+     */
     @Test
-    void 未知错误不回显上游原文() {
+    void 未知错误既不回显原文也不替用户判病因() {
         String longMsg = "x".repeat(500);
 
         String msg = LlmErrorMessages.classify(new IllegalStateException(longMsg));
 
-        assertThat(msg).doesNotContain("xxxx");
-        assertThat(msg.length()).isLessThanOrEqualTo(120);
+        assertThat(msg).doesNotContain("xxxx").doesNotContain("配置");
     }
 
     /**

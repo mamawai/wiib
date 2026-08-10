@@ -60,11 +60,20 @@ class ChatWorkbenchAdmissionTest {
                 .hasFieldOrPropertyWithValue("code", code);
     }
 
+    /**
+     * 被拒的请求一个名额都不许占。闸门排在配置检查<b>前面</b>的话，
+     * 没配置的用户每点一次发送就吃掉一个全局名额且永不归还（那条路上根本走不到 release），
+     * 满 10 次之后 /chat 对所有人回 2204、重启才能恢复。
+     * 限额取 1 就是为了让漏掉的那一个立刻现形
+     */
     @Test
     void 没配置端点时拒绝并给出配置缺失码() {
         when(llmConfigService.get(1L)).thenReturn(null);
+        ChatConcurrencyGate gate = new ChatConcurrencyGate(1);
 
-        assertRejectedWithCode(2201, () -> chat(controller(new ChatConcurrencyGate(10)), 1L));
+        assertRejectedWithCode(2201, () -> chat(controller(gate), 1L));
+
+        assertThat(gate.tryAcquire(9L)).as("被拒的请求不能占住名额").isEqualTo(ChatConcurrencyGate.Acquire.OK);
     }
 
     /** 配置能过保存校验但仍可能建不出模型（协议对不上等），这类错误必须在建流前暴露 */
@@ -72,8 +81,11 @@ class ChatWorkbenchAdmissionTest {
     void 建不出图时拒绝并给出配置无效码() {
         when(llmConfigService.get(1L)).thenReturn(new UserLlmConfig());
         when(factory.chatGraph(any())).thenThrow(new IllegalStateException("对话图构建失败"));
+        ChatConcurrencyGate gate = new ChatConcurrencyGate(1);
 
-        assertRejectedWithCode(2202, () -> chat(controller(new ChatConcurrencyGate(10)), 1L));
+        assertRejectedWithCode(2202, () -> chat(controller(gate), 1L));
+
+        assertThat(gate.tryAcquire(9L)).as("被拒的请求不能占住名额").isEqualTo(ChatConcurrencyGate.Acquire.OK);
     }
 
     /** 拒因要分得清：这条给的是"你已有一轮在跑"，不是下面那条"人满了" */
