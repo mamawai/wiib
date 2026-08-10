@@ -1,8 +1,7 @@
 package com.mawai.wiibquant.agent.chat;
 
+import com.mawai.wiibcommon.entity.UserLlmConfig;
 import com.mawai.wiibquant.agent.analysis.DeepAnalysisService;
-import com.mawai.wiibquant.agent.config.AiAgentRuntime;
-import com.mawai.wiibquant.agent.config.AiAgentRuntimeManager;
 import com.mawai.wiibquant.agent.toolkit.MarketToolkit;
 import com.mawai.wiibquant.agent.toolkit.NewsToolkit;
 import org.bsc.langgraph4j.CompiledGraph;
@@ -38,19 +37,31 @@ import static org.mockito.Mockito.when;
 
 class ChatAgentFactoryTest {
 
-    private final AiAgentRuntimeManager runtimeManager = mock(AiAgentRuntimeManager.class);
+    private final ChatModelFactory chatModelFactory = mock(ChatModelFactory.class);
     private final ApprovalRegistry approvalRegistry = new ApprovalRegistry();
 
     private ChatAgentFactory factory() {
         ChatModel model = mock(ChatModel.class);
         // 建图时 ChatService 会读 getOptions() 挂工具，null 会 NPE
         when(model.getOptions()).thenReturn(ToolCallingChatOptions.builder().build());
-        when(runtimeManager.current()).thenReturn(new AiAgentRuntime(model, model, model, model));
-        return new ChatAgentFactory(runtimeManager,
+        when(chatModelFactory.modelsFor(any())).thenReturn(new ChatModelFactory.Models(model, model));
+        return new ChatAgentFactory(chatModelFactory,
                 mock(MarketToolkit.class), mock(NewsToolkit.class),
                 mock(DeepAnalysisService.class), mock(WorkbenchRunRegistry.class),
                 approvalRegistry, mock(BaseCheckpointSaver.class),
                 new SpringAIJacksonStateSerializer<>(MessagesState::new), 12, 32000, 6, "X");
+    }
+
+    private static UserLlmConfig config(String model) {
+        UserLlmConfig c = new UserLlmConfig();
+        c.setUserId(1L);
+        c.setApiProtocol("openai");
+        c.setBaseUrl("https://api.example.com");
+        c.setModel(model);
+        // 固定密文而不是真加密：ApiKeyCrypto 是 AES-GCM 随机 IV，真加密的话同一份配置
+        // 两次调用会算出不同指纹，下面那条 isSameAs 必挂
+        c.setApiKeyEnc("enc-fixed");
+        return c;
     }
 
     private static RunnableConfig runConfig() {
@@ -65,8 +76,8 @@ class ChatAgentFactoryTest {
     }
 
     @Test
-    void buildsRouterDispatchExpertsAndSummarizer() throws Exception {
-        CompiledGraph<MessagesState<Message>> graph = factory().chatGraph();
+    void buildsRouterDispatchExpertsAndSummarizer() {
+        CompiledGraph<MessagesState<Message>> graph = factory().chatGraph(config("gpt-5"));
 
         assertThat(graph).isNotNull();
         String mermaid = graph.stateGraph
@@ -76,15 +87,24 @@ class ChatAgentFactoryTest {
         assertThat(mermaid).contains("router").contains("dispatch").contains("join").contains("summarizer");
     }
 
+    /**
+     * 同配置的用户共享同一张图（实际部署里大家多半用同一个中转 + 同一模型）；
+     * 配置一变指纹就变、自然拿到新图——不需要任何显式 evict，也就不会有"改了配置还用旧模型"。
+     */
     @Test
-    void cachesGraphAndRebuildsOnRuntimeRefresh() throws Exception {
+    void 同配置共享图改配置后重建() {
         ChatAgentFactory factory = factory();
 
-        CompiledGraph<MessagesState<Message>> first = factory.chatGraph();
-        assertThat(factory.chatGraph()).isSameAs(first); // 单例缓存
+        CompiledGraph<MessagesState<Message>> first = factory.chatGraph(config("gpt-5"));
 
-        factory.onRuntimeRefreshed(); // 模型热更事件 → 缓存失效
-        assertThat(factory.chatGraph()).isNotSameAs(first);
+        assertThat(factory.chatGraph(config("gpt-5"))).isSameAs(first);
+        assertThat(factory.chatGraph(config("gpt-5.1"))).isNotSameAs(first);
+        // 两条 verify 各管一件事，都是 isSameAs 抓不到的：
+        // 1) 每份配置只建一次。把"先查缓存"那步删掉，第二次照样重建一整张图、再被 putIfAbsent
+        //    换回旧图——断言全绿而每轮对话都在白建图（实测过）
+        // 2) 取模型时用的就是调用方给的这份配置，而不是别处随便来的一份
+        verify(chatModelFactory).modelsFor(config("gpt-5"));
+        verify(chatModelFactory).modelsFor(config("gpt-5.1"));
     }
 
     // ===== 结构化路由：只认 tool_call 参数，绝不解析消息文本 =====
@@ -244,7 +264,7 @@ class ChatAgentFactoryTest {
 
     @Test
     void mainGraphSerializerCanCloneStateWithSpringAiMessages() throws Exception {
-        CompiledGraph<MessagesState<Message>> graph = factory().chatGraph();
+        CompiledGraph<MessagesState<Message>> graph = factory().chatGraph(config("gpt-5"));
 
         MessagesState<Message> cloned = graph.stateGraph.getStateSerializer()
                 .cloneObject(Map.of("messages", List.of(

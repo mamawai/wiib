@@ -1,8 +1,7 @@
 package com.mawai.wiibquant.agent.chat;
 
+import com.mawai.wiibcommon.entity.UserLlmConfig;
 import com.mawai.wiibquant.agent.analysis.DeepAnalysisService;
-import com.mawai.wiibquant.agent.config.AiAgentRuntime;
-import com.mawai.wiibquant.agent.config.AiAgentRuntimeManager;
 import com.mawai.wiibquant.agent.llm.ModelCallLimiter;
 import com.mawai.wiibquant.agent.toolkit.MarketToolkit;
 import com.mawai.wiibquant.agent.toolkit.NewsToolkit;
@@ -22,6 +21,7 @@ import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.model.tool.ToolCallingChatOptions;
+import org.springframework.ai.retry.NonTransientAiException;
 import reactor.core.publisher.Flux;
 
 import java.util.ArrayList;
@@ -31,16 +31,19 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * summarizer 那两个 hook 到底有没有在<b>真图</b>上执行。
+ * summarizer 在<b>真图</b>上的装配：两个 hook 到底有没有执行，以及它有没有兜底模型。
  * <p>
  * 挂在子 StateGraph 上的 hook 会在 {@code addNode(id, StateGraph)} 内联时被框架整个丢掉
  * （只搬 nodes/edges），所以只能挂父图 + 按 id 过滤。这几条测试就是那套挂载的钉子：
- * 建的是生产的 {@link ChatAgentFactory#chatGraph()} 并真跑，把 build() 里的注册删掉前两条立刻变红。
+ * 建的是生产的 {@link ChatAgentFactory#chatGraph} 并真跑，把 build() 里的注册删掉前两条立刻变红。
  * 自己搭图自己挂 hook 只能证明 hook 类本身好使（ModelCallLimiterTest/ConversationSummarizerTest
  * 已经证过了），证明不了生产装配里挂上了。
  */
@@ -66,8 +69,11 @@ class SummarizerHookMountTest {
 
     private final ChatModel deep = mock(ChatModel.class);
     private final ChatModel light = mock(ChatModel.class);
-    private final AiAgentRuntimeManager runtimeManager = mock(AiAgentRuntimeManager.class);
+    private final ChatModelFactory chatModelFactory = mock(ChatModelFactory.class);
     private final ApprovalRegistry approvalRegistry = new ApprovalRegistry();
+
+    /** 配置内容与这几条无关（模型来自打桩的 ChatModelFactory），它只用来算图的缓存键 */
+    private static final UserLlmConfig CONFIG = new UserLlmConfig();
 
     /**
      * @param summarizeThresholdTokens 压缩阈值，调到 1 = 每次模型调用都触发
@@ -77,12 +83,11 @@ class SummarizerHookMountTest {
         // ChatService 建请求时无条件读 getOptions() 挂工具，null 会 NPE
         when(deep.getOptions()).thenReturn(ToolCallingChatOptions.builder().build());
         when(light.getOptions()).thenReturn(ToolCallingChatOptions.builder().build());
-        // 位序是 (behavior, quant, quantLight, chat)：深模型进 quant，浅模型进 quantLight
-        when(runtimeManager.current()).thenReturn(new AiAgentRuntime(light, deep, light, deep));
+        when(chatModelFactory.modelsFor(any())).thenReturn(new ChatModelFactory.Models(deep, light));
         // run_deep_analysis 必须是能执行的真工具（ReAct 循环要真走到工具边）——
         // 工厂内部自己 new DeepAnalysisToolkit，天然就是真的，这里只喂它的两个依赖
         // 真 saver 而不是 mock：mock 的 put() 返回 null，而 CompiledGraph 会接着用这个返回值
-        return new ChatAgentFactory(runtimeManager, mock(MarketToolkit.class), mock(NewsToolkit.class),
+        return new ChatAgentFactory(chatModelFactory, mock(MarketToolkit.class), mock(NewsToolkit.class),
                 mock(DeepAnalysisService.class), mock(WorkbenchRunRegistry.class),
                 approvalRegistry, new MemorySaver(),
                 new SpringAIJacksonStateSerializer<>(MessagesState::new),
@@ -125,7 +130,7 @@ class SummarizerHookMountTest {
         when(deep.stream(any(Prompt.class)))
                 .thenReturn(Flux.just(responseOf(new AssistantMessage("这是答案"))));
         // threshold=1 每次都超；keep=1 让切点落在最后一条之前，才有原文可压
-        CompiledGraph<MessagesState<Message>> graph = factory(1, 1).chatGraph();
+        CompiledGraph<MessagesState<Message>> graph = factory(1, 1).chatGraph(CONFIG);
 
         List<Message> messages = graph.invoke(Map.of("messages", List.of(
                 new UserMessage("上一轮问题"), new AssistantMessage("上一轮回答"),
@@ -160,7 +165,7 @@ class SummarizerHookMountTest {
                 responseOf(new AssistantMessage("这是")),
                 responseOf(new AssistantMessage("答")),
                 responseOf(new AssistantMessage("案"))));
-        CompiledGraph<MessagesState<Message>> graph = factory(1, 1).chatGraph();
+        CompiledGraph<MessagesState<Message>> graph = factory(1, 1).chatGraph(CONFIG);
 
         // 与 ChatWorkbenchController.run() 同款消费：普通迭代（不是 forEachAsync）+ 只认 StreamingOutput
         List<String> chunks = new ArrayList<>();
@@ -186,7 +191,7 @@ class SummarizerHookMountTest {
         AtomicInteger rounds = new AtomicInteger();
         when(deep.stream(any(Prompt.class))).thenAnswer(inv -> Flux.just(responseOf(
                 toolCall("c" + rounds.incrementAndGet(), "run_deep_analysis", "{\"symbol\":\"BTCUSDT\"}"))));
-        CompiledGraph<MessagesState<Message>> graph = factory(NO_COMPRESSION, 6).chatGraph();
+        CompiledGraph<MessagesState<Message>> graph = factory(NO_COMPRESSION, 6).chatGraph(CONFIG);
 
         assertThatCode(() -> graph.invoke(Map.of("messages", List.of(new UserMessage("深度研判 BTC")))))
                 .doesNotThrowAnyException();
@@ -206,11 +211,32 @@ class SummarizerHookMountTest {
         routerAlwaysFinishes();
         when(deep.stream(any(Prompt.class)))
                 .thenReturn(Flux.just(responseOf(new AssistantMessage("这是答案"))));
-        CompiledGraph<MessagesState<Message>> graph = factory(NO_COMPRESSION, 6).chatGraph();
+        CompiledGraph<MessagesState<Message>> graph = factory(NO_COMPRESSION, 6).chatGraph(CONFIG);
 
         assertThatCode(() -> graph.invoke(Map.of(
                 "messages", List.of(new UserMessage("随便问问")),
                 ModelCallLimiter.CALL_COUNT_KEY, LIMIT)))
                 .doesNotThrowAnyException();
+    }
+
+    /**
+     * summarizer 不许有兜底模型：BYOK 只有一个端点，切到同端点的另一个模型没有意义
+     *（端点挂了两个一起挂），还会把"你的 key 出问题了"这件事捂成一个更差的答案。
+     * <p>
+     * 把 {@code .fallbackModel(light)} 加回去这条就红：浅模型会顶上，答案照出、错误无声消失。
+     * 用 NonTransientAiException 是为了跳过退避重试，这条只验兜底、不想等那几秒。
+     */
+    @Test
+    void 深模型失败不会偷偷切到浅模型() throws Exception {
+        routerAlwaysFinishes();
+        when(deep.stream(any(Prompt.class)))
+                .thenReturn(Flux.error(new NonTransientAiException("端点挂了")));
+        when(light.stream(any(Prompt.class)))
+                .thenReturn(Flux.just(responseOf(new AssistantMessage("兜底答案"))));
+        CompiledGraph<MessagesState<Message>> graph = factory(NO_COMPRESSION, 6).chatGraph(CONFIG);
+
+        assertThatThrownBy(() -> graph.invoke(Map.of("messages", List.of(new UserMessage("随便问问")))));
+
+        verify(light, never()).stream(any(Prompt.class));
     }
 }

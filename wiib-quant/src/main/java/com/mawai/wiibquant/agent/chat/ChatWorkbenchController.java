@@ -3,6 +3,7 @@ package com.mawai.wiibquant.agent.chat;
 import com.alibaba.fastjson2.JSONObject;
 import com.mawai.wiibcommon.annotation.CurrentUserId;
 import com.mawai.wiibcommon.annotation.RequireAdmin;
+import com.mawai.wiibcommon.entity.UserLlmConfig;
 import com.mawai.wiibcommon.util.Result;
 import com.mawai.wiibquant.agent.llm.ModelCallLimiter;
 import io.swagger.v3.oas.annotations.Operation;
@@ -52,6 +53,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public class ChatWorkbenchController {
 
     private final ChatAgentFactory chatAgentFactory;
+    private final UserLlmConfigService userLlmConfigService;
     private final ApprovalRegistry approvalRegistry;
     private final ChatMemoryService chatMemoryService;
     private final ChatHistoryService chatHistoryService;
@@ -190,7 +192,12 @@ public class ChatWorkbenchController {
             String memory = chatMemoryService.recall(userId);
             String enriched = memory.isEmpty() ? message : memory + "\n用户问题：" + message;
 
-            var graph = chatAgentFactory.chatGraph();
+            // 图烧的是用户自己的 key，没配就没得跑
+            UserLlmConfig llmConfig = userLlmConfigService.get(userId);
+            if (llmConfig == null) {
+                throw new IllegalArgumentException("尚未配置 LLM 端点");
+            }
+            var graph = chatAgentFactory.chatGraph(llmConfig);
             RunnableConfig config = RunnableConfig.builder()
                     .threadId(sessionId)
                     // 专家的 token 流被并行分支 reduce 掉了拿不到，节点经此 sink 主动汇报进度与结论

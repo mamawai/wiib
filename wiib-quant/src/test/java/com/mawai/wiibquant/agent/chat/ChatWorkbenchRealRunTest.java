@@ -1,5 +1,6 @@
 package com.mawai.wiibquant.agent.chat;
 
+import com.mawai.wiibcommon.entity.UserLlmConfig;
 import org.bsc.langgraph4j.RunnableConfig;
 import org.bsc.langgraph4j.streaming.StreamingOutput;
 import org.junit.jupiter.api.Test;
@@ -42,12 +43,22 @@ class ChatWorkbenchRealRunTest {
 
     private static final Logger log = LoggerFactory.getLogger(ChatWorkbenchRealRunTest.class);
 
+    /** 工作台目前只对管理员开放（@RequireAdmin），BYOK 配置也就配在这个账号下 */
+    private static final long ADMIN_USER_ID = 1L;
+
     @Autowired
     private ChatAgentFactory chatAgentFactory;
 
+    /** 真跑就得烧真配置：这一跑的全部价值就在于走用户自己那份 BYOK，绝不在这里造一份假的 */
+    @Autowired
+    private UserLlmConfigService userLlmConfigService;
+
     @Test
-    void 一轮新闻加行情提问全链路真跑() throws Exception {
-        var graph = chatAgentFactory.chatGraph();
+    void 一轮新闻加行情提问全链路真跑() {
+        UserLlmConfig llmConfig = userLlmConfigService.get(ADMIN_USER_ID);
+        assertThat(llmConfig).as("先用管理员账号在 /api/ai/llm-config 配一份 BYOK 端点再跑").isNotNull();
+
+        var graph = chatAgentFactory.chatGraph(llmConfig);
         String sessionId = "wb-1-realrun-" + UUID.randomUUID();
         List<ChatAgentFactory.ExpertProgress> events = new CopyOnWriteArrayList<>();
         StringBuilder answer = new StringBuilder();

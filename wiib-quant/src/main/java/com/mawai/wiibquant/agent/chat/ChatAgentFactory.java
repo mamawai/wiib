@@ -2,10 +2,8 @@ package com.mawai.wiibquant.agent.chat;
 
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONArray;
+import com.mawai.wiibcommon.entity.UserLlmConfig;
 import com.mawai.wiibquant.agent.analysis.DeepAnalysisService;
-import com.mawai.wiibquant.agent.config.AiAgentRuntime;
-import com.mawai.wiibquant.agent.config.AiAgentRuntimeManager;
-import com.mawai.wiibquant.agent.config.AiRuntimeRefreshedEvent;
 import com.mawai.wiibquant.agent.llm.ConversationSummarizer;
 import com.mawai.wiibquant.agent.llm.ModelCallLimiter;
 import com.mawai.wiibquant.agent.llm.ResilientChatService;
@@ -41,7 +39,6 @@ import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.ai.tool.method.MethodToolCallbackProvider;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 
 import java.util.*;
@@ -75,7 +72,7 @@ import static org.bsc.langgraph4j.action.AsyncNodeActionWithConfig.node_async;
  *   <li><b>进度靠旁路</b>：专家的 token 流拿不到，节点自己经 RunnableConfig 里的 sink 推
  *       "开始/完成"事件，前端据此渲染真实进度</li>
  * </ul>
- * 模型是构建期绑定的，监听 {@link AiRuntimeRefreshedEvent} 重建缓存实现热更新。
+ * 模型是建图期绑定的，来自用户自己的 BYOK 配置；图按配置指纹缓存，见 {@link #chatGraph}。
  */
 @Slf4j
 @Component
@@ -129,7 +126,7 @@ public class ChatAgentFactory {
      * {@code Maximum number of iterations (n) reached!}——它抛在<b>结果交出去之前</b>，
      * 所以保险丝哪怕已经打完 {@code [CallLimit]} 日志也白搭，"截断但可用的回答"照样拿不到。
      * <p>
-     * 实测账（打桩模型跑生产 {@link #chatGraph()}，逐格上探"最小能跑通的硬顶"）：
+     * 实测账（打桩模型跑生产 {@link #chatGraph}，逐格上探"最小能跑通的硬顶"）：
      * <pre>
      * 迭代格 = 3L + 4R + 4    L = summarizer 的 ReAct 轮数(= run-model-call-limit)，R = 专家派发轮数
      *   3/轮  summarizer 一轮：流式模型节点 2 格（交回 token 生成器 + 合并它的 resultValue）+ 工具边 1 格
@@ -195,7 +192,7 @@ public class ChatAgentFactory {
     private static final List<ToolCallback> ROUTER_TOOLS = List.of(
             MethodToolCallbackProvider.builder().toolObjects(new RouterTool()).build().getToolCallbacks());
 
-    private final AiAgentRuntimeManager runtimeManager;
+    private final ChatModelFactory chatModelFactory;
     private final MarketToolkit marketToolkit;
     private final NewsToolkit newsToolkit;
     private final DeepAnalysisService deepAnalysisService;
@@ -212,7 +209,19 @@ public class ChatAgentFactory {
     /** 两边都有的事件合并后的标签，如 [BlockBeats+X] */
     private final String mergedTag;
 
-    private volatile CompiledGraph<MessagesState<Message>> cached;
+    /** 图缓存上限：32 份不同配置同时在用远超实际规模，够用又不会无界增长 */
+    private static final int MAX_GRAPHS = 32;
+
+    /** 按配置指纹缓存的图。LRU 与并发口径同 {@link ChatModelFactory#modelsFor}，建图不在锁里做 */
+    private final Map<String, CompiledGraph<MessagesState<Message>>> graphs =
+            Collections.synchronizedMap(
+                    new LinkedHashMap<>(16, 0.75f, true) {
+                        @Override
+                        protected boolean removeEldestEntry(
+                                Map.Entry<String, CompiledGraph<MessagesState<Message>>> eldest) {
+                            return size() > MAX_GRAPHS;
+                        }
+                    });
 
     /**
      * @param supplementSource 补充源名。BlockBeats 之外那一路是 summarizer 模型自带的联网搜索捞的，
@@ -220,7 +229,7 @@ public class ChatAgentFactory {
      *                         所以提示词里一律只说"联网搜索"不点名平台，只有输出标签用这个名字——
      *                         换源改配置一处，提示词不用动
      */
-    public ChatAgentFactory(AiAgentRuntimeManager runtimeManager,
+    public ChatAgentFactory(ChatModelFactory chatModelFactory,
                             MarketToolkit marketToolkit,
                             NewsToolkit newsToolkit,
                             DeepAnalysisService deepAnalysisService,
@@ -232,7 +241,7 @@ public class ChatAgentFactory {
                             @Value("${quant.workbench.summarize-threshold-tokens:32000}") int summarizeThresholdTokens,
                             @Value("${quant.workbench.summarize-keep-messages:6}") int summarizeKeepMessages,
                             @Value("${quant.workbench.news-supplement-source:}") String supplementSource) {
-        this.runtimeManager = runtimeManager;
+        this.chatModelFactory = chatModelFactory;
         this.marketToolkit = marketToolkit;
         this.newsToolkit = newsToolkit;
         this.deepAnalysisService = deepAnalysisService;
@@ -254,32 +263,42 @@ public class ChatAgentFactory {
         return mergedTag;
     }
 
-    /** 对话图单例（编译含 PostgresSaver），模型刷新事件后重建。 */
-    public CompiledGraph<MessagesState<Message>> chatGraph() throws Exception {
-        CompiledGraph<MessagesState<Message>> graph = cached;
-        if (graph != null) return graph;
-        synchronized (this) {
-            if (cached == null) {
-                cached = build();
-                log.info("对话工作台图已构建（supervisor + {} 专家并行 + PostgresSaver）", EXPERT_AGENTS.size());
-            }
-            return cached;
+    /**
+     * 对话图（编译含 PostgresSaver），按用户配置的指纹缓存：配置一变指纹就变、自然拿到新图，
+     * 不需要任何显式失效。
+     * <p>
+     * <b>先查后建，不用 computeIfAbsent</b>：它会在整个 mapping 函数执行期间攥着互斥锁，
+     * 而这里的 mapping 是建一整张 langgraph4j 图（两个 ReactAgent 反射扫工具 + 编译 + 序列化器装配），
+     * 几十到几百毫秒。这条路后面要放到请求线程上，写成 computeIfAbsent 的话任何一个用户
+     * 首次建图期间，<b>其余所有用户的 /chat 请求全堵在这把锁上</b>。
+     */
+    public CompiledGraph<MessagesState<Message>> chatGraph(UserLlmConfig llmConfig) {
+        String fp = ChatModelFactory.fingerprint(llmConfig);
+        CompiledGraph<MessagesState<Message>> hit = graphs.get(fp);
+        if (hit != null) {
+            return hit;
         }
+        CompiledGraph<MessagesState<Message>> built;
+        try {
+            built = build(llmConfig);               // 锁外建图，慢也只慢自己
+        } catch (Exception e) {
+            // build 抛检查异常；包成运行时，让上层当"这份配置建不出图"处理
+            throw new IllegalStateException("对话图构建失败", e);
+        }
+        // 并发下可能有人先放好了，用先到的那张：图无状态，多建一张只是一次 GC
+        CompiledGraph<MessagesState<Message>> prev = graphs.putIfAbsent(fp, built);
+        if (prev != null) {
+            return prev;
+        }
+        log.info("对话工作台图已构建 model={} 缓存数={}", llmConfig.getModel(), graphs.size());
+        return built;
     }
 
-    @EventListener(AiRuntimeRefreshedEvent.class)
-    public void onRuntimeRefreshed() {
-        synchronized (this) {
-            cached = null;
-        }
-        log.info("模型配置刷新，对话图缓存已失效待重建");
-    }
-
-    private CompiledGraph<MessagesState<Message>> build() throws Exception {
-        AiAgentRuntime runtime = runtimeManager.current();
-        ChatModel deep = runtime.quantChatModel();
-        ChatModel light = runtime.quantLightChatModel();
-        ChatModel fallback = runtime.chatChatModel();
+    // 形参叫 llmConfig 不叫 config：这个类里 config 一律是 RunnableConfig，重名会撞上 route 那个 lambda
+    private CompiledGraph<MessagesState<Message>> build(UserLlmConfig llmConfig) throws Exception {
+        ChatModelFactory.Models models = chatModelFactory.modelsFor(llmConfig);
+        ChatModel deep = models.deep();
+        ChatModel light = models.light();
 
         Map<String, CompiledGraph<MessagesState<Message>>> experts = new LinkedHashMap<>();
         experts.put(MARKET_AGENT, expertGraph(light, marketToolkit, "required", """
@@ -306,9 +325,9 @@ public class ChatAgentFactory {
         experts.forEach((name, expert) -> addExpertNode(graph, name, expert,
                 NEWS_AGENT.equals(name) ? newsToolkit::newsSearch : null));
         graph.addNode(NODE_JOIN, node_async(state -> Map.of()));
-        // 工具的模型建图期绑定：BYOK 后"当前是哪个用户"只有建图这一层知道，
-        // 工具方法体里再去 runtimeManager 现取就取错人了
-        graph.addNode(NODE_SUMMARIZER, summarizerGraph(deep, fallback,
+        // 工具的模型在建图这一层绑死："当前用的是谁的 key"只有这里知道，
+        // 工具方法体里拿不到用户身份（ChatService.execute 的签名里没有 RunnableConfig）
+        graph.addNode(NODE_SUMMARIZER, summarizerGraph(deep,
                 new DeepAnalysisToolkit(deep, deepAnalysisService, runRegistry)));
 
         graph.addEdge(START, NODE_ROUTER);
@@ -439,8 +458,7 @@ public class ChatAgentFactory {
      * 派谁、还要不要再派，全归 {@link #route} 那个结构化路由节点管，这里一个字都不提——
      * 角色单一，模型不会再纠结"该作答还是该派发"（那正是之前无限循环的病根）。
      */
-    private StateGraph<MessagesState<Message>> summarizerGraph(ChatModel deep, ChatModel fallback,
-                                                               DeepAnalysisToolkit toolkit)
+    private StateGraph<MessagesState<Message>> summarizerGraph(ChatModel deep, DeepAnalysisToolkit toolkit)
             throws Exception {
         return ReactAgent.<MessagesState<Message>>builder()
                 .chatModel(deep)
@@ -471,7 +489,9 @@ public class ChatAgentFactory {
                 // 调用上限与历史压缩两个 hook 不在这儿挂：这张子图会被 addNode(id, StateGraph) 内联进主图，
                 // 内联只搬 nodes/edges，挂在这里的 hook 一次都不会执行。见 build() 末尾
                 .build(ResilientChatService.builder()
-                        .model(deep).fallbackModel(fallback)
+                        // 不给兜底模型：BYOK 只有一个端点，切到同端点的另一个模型没意义
+                        //（端点挂了两个一起挂）。ResilientChatService 支持兜底为空，退避重试照旧
+                        .model(deep)
                         .maxAttempts(3).initialDelay(500).maxDelay(4000)
                         .asFactory());
     }

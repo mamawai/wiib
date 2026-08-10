@@ -1,7 +1,6 @@
 package com.mawai.wiibquant.agent.chat;
 
 import com.mawai.wiibquant.agent.analysis.DeepAnalysisService;
-import com.mawai.wiibquant.agent.config.AiAgentRuntimeManager;
 import com.mawai.wiibquant.agent.toolkit.MarketToolkit;
 import com.mawai.wiibquant.agent.toolkit.NewsToolkit;
 import org.bsc.langgraph4j.CompiledGraph;
@@ -59,9 +58,9 @@ class ExpertCallLimitTest {
      */
     private static final int LIMIT = 3;
 
-    /** 与工厂的生产装配同款；runtimeManager 只在 chatGraph() 用得到，这条路不碰它，不必打桩 */
+    /** 与工厂的生产装配同款；模型工厂只在 chatGraph 用得到，这条路不碰它，不必打桩 */
     private ChatAgentFactory factory() {
-        return new ChatAgentFactory(mock(AiAgentRuntimeManager.class),
+        return new ChatAgentFactory(mock(ChatModelFactory.class),
                 mock(MarketToolkit.class), mock(NewsToolkit.class),
                 mock(DeepAnalysisService.class), mock(WorkbenchRunRegistry.class),
                 new ApprovalRegistry(), mock(BaseCheckpointSaver.class),

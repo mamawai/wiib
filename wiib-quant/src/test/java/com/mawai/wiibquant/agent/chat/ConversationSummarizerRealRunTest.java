@@ -3,6 +3,7 @@ package com.mawai.wiibquant.agent.chat;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
+import com.mawai.wiibcommon.entity.UserLlmConfig;
 import com.mawai.wiibquant.agent.llm.ConversationSummarizer;
 import com.mawai.wiibquant.agent.llm.ResilientChatService;
 import org.bsc.langgraph4j.CompiledGraph;
@@ -72,10 +73,9 @@ import static org.assertj.core.api.Assertions.assertThat;
  * 有效边界要记牢：2026-08-09 实测，深模型位全程 {@code grok-4.5}（走 Responses 协议）；
  * OpenAI 自家 Responses 对孤儿 function_call_output 是会 400 的，换模型位这条结论未必成立。
  * <p>
- * 而且<b>就算真报了 400，图也不会抛</b>：{@code ChatAgentFactory.summarizerGraph} 给 summarizer
- * 装了 fallbackModel，而 {@code ResilientChatService.streamingExecute} 的 onErrorResume 只看
- * "有兜底 && 还没吐过帧"——400 恰恰发生在任何 SSE 帧之前，兜底必然接管，answer 照样非空、测试照样绿。
- * 所以"上游有没有出错"得自己盯日志，见 {@link #resilienceLogs}。
+ * BYOK 之后 summarizer 的 fallback 传 null（只有一个端点，切到同端点没意义），所以真报 400
+ * 这一跑会当场红，不再像从前那样被兜底无声接盘。但"重试之后勉强成功"仍然只在日志里留一行，
+ * 见 {@link #resilienceLogs}。
  * <p>
  * 主图历史里的工具配对只可能来自 summarizer 的 {@code run_deep_analysis}：专家是独立 threadId 的
  * 子图、只把 lastMessage 并回主图，它们自己的配对不进主图；而 summarizer 是内联子图、与父图共享 state。
@@ -157,17 +157,20 @@ class ConversationSummarizerRealRunTest {
             "刚才我们都聊了什么？简单回顾一下",
             "结合前面聊过的，BTC 现在最需要注意的风险是什么？");
 
+    /** 工作台目前只对管理员开放（@RequireAdmin），BYOK 配置也就配在这个账号下 */
+    private static final long ADMIN_USER_ID = 1L;
+
     @Autowired
     private ChatAgentFactory chatAgentFactory;
 
+    /** 真跑就得烧真配置：这一跑的全部价值就在于走用户自己那份 BYOK，绝不在这里造一份假的 */
+    @Autowired
+    private UserLlmConfigService userLlmConfigService;
+
     private final ListAppender<ILoggingEvent> summarizeLogs = new ListAppender<>();
     /**
-     * {@link ResilientChatService} 的日志。装它是因为上游出错在这张图上是<b>静默</b>的：
-     * summarizer 带兜底模型，400 发生在首帧之前 → onErrorResume 直接切兜底，答案照出、测试照绿。
-     * 这一层是"压缩后上游没出错"唯一的观测点。
-     * <p>
-     * BYOK 改造后 summarizer 的 fallback 会传 null（只有一个端点，切到同端点没意义），
-     * 届时同样的 400 会直接炸到用户脸上——这条断言守的是一条马上要变得更脆的路。
+     * {@link ResilientChatService} 的日志。硬失败现在会直接把这一跑弄红（这张图上已经没有兜底模型），
+     * 但<b>重试之后成功</b>那类只在日志里留一行、答案照出、测试照绿——这一层是那类问题唯一的观测点。
      */
     private final ListAppender<ILoggingEvent> resilienceLogs = new ListAppender<>();
     /** 全程扫到的"落单工具回执"，同形状只留一条 */
@@ -180,13 +183,16 @@ class ConversationSummarizerRealRunTest {
     }
 
     @Test
-    void 多轮真跑触发历史压缩且切点不切断工具配对() throws Exception {
+    void 多轮真跑触发历史压缩且切点不切断工具配对() {
         summarizeLogs.start();
         ((Logger) LoggerFactory.getLogger(ConversationSummarizer.class)).addAppender(summarizeLogs);
         resilienceLogs.start();
         ((Logger) LoggerFactory.getLogger(ResilientChatService.class)).addAppender(resilienceLogs);
 
-        CompiledGraph<MessagesState<Message>> graph = chatAgentFactory.chatGraph();
+        UserLlmConfig llmConfig = userLlmConfigService.get(ADMIN_USER_ID);
+        assertThat(llmConfig).as("先用管理员账号在 /api/ai/llm-config 配一份 BYOK 端点再跑").isNotNull();
+
+        CompiledGraph<MessagesState<Message>> graph = chatAgentFactory.chatGraph(llmConfig);
         // threadId 跨轮不变：历史靠 PostgresSaver 的 checkpoint 累积，这才是生产形态
         String sessionId = "wb-1-summarize-realrun-" + UUID.randomUUID();
 
@@ -311,15 +317,17 @@ class ConversationSummarizerRealRunTest {
      * 上游出错的痕迹。三串关键词覆盖 {@link ResilientChatService} 的<b>全部四个</b>出错日志点：
      * 流式退避重试、流式重试耗尽切兜底、阻塞路径切兜底（后两个共用"切换兜底"这句）、
      * 阻塞路径读响应中断。任何一条出现都说明这轮请求被上游拒过或断过。
+     *（"切换兜底"这两句今天在这张图上已经打不出来了——BYOK 后全图都不带兜底模型；
+     * 关键词留着不碍事，将来真加回兜底也不用改这里。）
      * <p>
      * <b>这个探针至今没通过电，用它的时候心里要有数</b>：那四个日志点全是 {@code log.warn}、
      * 只在出错时打，所以历次真跑它一条都没捕到过。后果是——appender 接错 logger、或者哪天日志
      * 文案被改，与"一切正常"在观测上完全不可区分，它会静默地永远为空。对比之下
      * {@link #summarizeLogs} 是被证明活着的（每跑都捕到 {@code 无新原文可压} 与压缩 INFO）。
      * <p>
-     * 即便如此仍然值得留：没有它，验收点 2 是<b>不可证伪</b>的（兜底无缝接盘 → 答案恒非空 → 恒绿）；
-     * 而通往违规的那条路真实存在——变异跑里落单回执穿过了 agent / summarizer-agent /
-     * summarizer-action 三个节点。
+     * 即便如此仍然值得留：硬失败现在会自己红，但"退避重试之后成功"这类照样答案非空、测试全绿，
+     * 没有它就完全看不见；而通往违规的那条路真实存在——变异跑里落单回执穿过了
+     * agent / summarizer-agent / summarizer-action 三个节点。
      * <p>
      * 已知代价：{@code 退避重试} 会被无关的瞬时网络抖动触发成假红（历次真跑 0 次出现）。留着——
      * 漏掉一次真的上游拒绝，比偶尔多红一次贵得多。

@@ -1,8 +1,7 @@
 package com.mawai.wiibquant.agent.chat;
 
+import com.mawai.wiibcommon.entity.UserLlmConfig;
 import com.mawai.wiibquant.agent.analysis.DeepAnalysisService;
-import com.mawai.wiibquant.agent.config.AiAgentRuntime;
-import com.mawai.wiibquant.agent.config.AiAgentRuntimeManager;
 import com.mawai.wiibquant.agent.llm.ModelCallLimiter;
 import com.mawai.wiibquant.agent.toolkit.MarketToolkit;
 import com.mawai.wiibquant.agent.toolkit.NewsToolkit;
@@ -76,17 +75,15 @@ class ChatWorkbenchResetTest {
                 .toolCalls(List.of(new AssistantMessage.ToolCall(id, "function", name, args))).build();
     }
 
-    /** 生产装配的对话图（真 {@link ChatAgentFactory#chatGraph()} + MemorySaver，续聊语义与线上一致） */
-    private CompiledGraph<MessagesState<Message>> productionGraph(ApprovalRegistry approvalRegistry)
-            throws Exception {
+    /** 生产装配的对话图（真 {@link ChatAgentFactory#chatGraph} + MemorySaver，续聊语义与线上一致） */
+    private CompiledGraph<MessagesState<Message>> productionGraph(ApprovalRegistry approvalRegistry) {
         ChatModel deep = mock(ChatModel.class);
         ChatModel light = mock(ChatModel.class);
         // ChatService 建请求时无条件读 getOptions() 挂工具，null 会 NPE
         when(deep.getOptions()).thenReturn(ToolCallingChatOptions.builder().build());
         when(light.getOptions()).thenReturn(ToolCallingChatOptions.builder().build());
-        AiAgentRuntimeManager runtimeManager = mock(AiAgentRuntimeManager.class);
-        // 位序是 (behavior, quant, quantLight, chat)：深模型进 quant，浅模型进 quantLight
-        when(runtimeManager.current()).thenReturn(new AiAgentRuntime(light, deep, light, deep));
+        ChatModelFactory chatModelFactory = mock(ChatModelFactory.class);
+        when(chatModelFactory.modelsFor(any())).thenReturn(new ChatModelFactory.Models(deep, light));
 
         // router 恒答 FINISH：专家轮与本条无关，别让它掺进计数
         when(light.call(any(Prompt.class))).thenAnswer(inv ->
@@ -103,11 +100,11 @@ class ChatWorkbenchResetTest {
                 .map(ChatWorkbenchResetTest::responseOf));
 
         // 工厂内部自己 new 出真 toolkit：没授权时闸门直接短路回 PENDING_APPROVAL，一次深模型都不烧
-        return new ChatAgentFactory(runtimeManager, mock(MarketToolkit.class), mock(NewsToolkit.class),
+        return new ChatAgentFactory(chatModelFactory, mock(MarketToolkit.class), mock(NewsToolkit.class),
                 mock(DeepAnalysisService.class), mock(WorkbenchRunRegistry.class),
                 approvalRegistry, new MemorySaver(),
                 new SpringAIJacksonStateSerializer<>(MessagesState::new),
-                PRODUCTION_LIMIT, NO_COMPRESSION, 6, "X").chatGraph();
+                PRODUCTION_LIMIT, NO_COMPRESSION, 6, "X").chatGraph(new UserLlmConfig());
     }
 
     @Test
@@ -116,9 +113,12 @@ class ChatWorkbenchResetTest {
         CompiledGraph<MessagesState<Message>> graph = productionGraph(approvalRegistry);
 
         ChatAgentFactory factory = mock(ChatAgentFactory.class);
-        when(factory.chatGraph()).thenReturn(graph);
+        when(factory.chatGraph(any())).thenReturn(graph);
         ChatMemoryService memory = mock(ChatMemoryService.class);
         when(memory.recall(anyLong())).thenReturn(""); // 空前缀：记忆拼接不是本条要验的
+        // 图是打桩的，配置内容用不上；但 run() 取不到配置就直接抛"尚未配置 LLM 端点"，整轮跑不起来
+        UserLlmConfigService llmConfigService = mock(UserLlmConfigService.class);
+        when(llmConfigService.get(anyLong())).thenReturn(new UserLlmConfig());
         WorkbenchRunRegistry runRegistry = mock(WorkbenchRunRegistry.class);
         // run() 是丢给虚拟线程跑的，靠 finally 里的 finish() 当完成信号
         CountDownLatch[] turnDone = new CountDownLatch[]{new CountDownLatch(1)};
@@ -127,8 +127,9 @@ class ChatWorkbenchResetTest {
             return null;
         }).when(runRegistry).finish(anyString());
 
-        ChatWorkbenchController controller = new ChatWorkbenchController(factory, approvalRegistry,
-                memory, mock(ChatHistoryService.class), mock(WorkbenchCheckpointStore.class), runRegistry);
+        ChatWorkbenchController controller = new ChatWorkbenchController(factory, llmConfigService,
+                approvalRegistry, memory, mock(ChatHistoryService.class),
+                mock(WorkbenchCheckpointStore.class), runRegistry);
 
         String sessionId = "wb-1-reset-probe";
         for (int turn = 1; turn <= TURNS; turn++) {

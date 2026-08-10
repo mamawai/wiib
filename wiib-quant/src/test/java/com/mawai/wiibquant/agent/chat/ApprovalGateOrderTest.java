@@ -1,8 +1,7 @@
 package com.mawai.wiibquant.agent.chat;
 
+import com.mawai.wiibcommon.entity.UserLlmConfig;
 import com.mawai.wiibquant.agent.analysis.DeepAnalysisService;
-import com.mawai.wiibquant.agent.config.AiAgentRuntime;
-import com.mawai.wiibquant.agent.config.AiAgentRuntimeManager;
 import com.mawai.wiibquant.agent.llm.ModelCallLimiter;
 import com.mawai.wiibquant.agent.llm.ResilientChatService;
 import com.mawai.wiibquant.agent.toolkit.MarketToolkit;
@@ -124,7 +123,8 @@ class ApprovalGateOrderTest {
                 .thenReturn(Flux.just(new ChatResponse(List.of(
                         new Generation(new AssistantMessage("已请你确认"))))));
 
-        CompiledGraph<MessagesState<Message>> graph = factory(deep, light, registry).chatGraph();
+        CompiledGraph<MessagesState<Message>> graph =
+                factory(deep, light, registry).chatGraph(new UserLlmConfig());
         graph.invoke(Map.of("messages", List.of(new UserMessage("深度研判 BTC"))),
                 RunnableConfig.builder().threadId(SESSION).build());
 
@@ -139,15 +139,11 @@ class ApprovalGateOrderTest {
         };
     }
 
-    /**
-     * 构造签名是 Task 8 之后的形态（toolkit 换成 service+runRegistry，工厂内部自己 new toolkit，
-     * 所以 run_deep_analysis 天然是真工具）。Task 14 换模型来源时这里还要再改一次
-     */
+    /** 工厂内部自己 new DeepAnalysisToolkit，所以 run_deep_analysis 天然是真工具 */
     private ChatAgentFactory factory(ChatModel deep, ChatModel light, ApprovalRegistry registry) {
-        AiAgentRuntimeManager runtimeManager = mock(AiAgentRuntimeManager.class);
-        // 位序是 (behavior, quant, quantLight, chat)：深模型进 quant，浅模型进 quantLight
-        when(runtimeManager.current()).thenReturn(new AiAgentRuntime(light, deep, light, deep));
-        return new ChatAgentFactory(runtimeManager,
+        ChatModelFactory chatModelFactory = mock(ChatModelFactory.class);
+        when(chatModelFactory.modelsFor(any())).thenReturn(new ChatModelFactory.Models(deep, light));
+        return new ChatAgentFactory(chatModelFactory,
                 mock(MarketToolkit.class), mock(NewsToolkit.class),
                 mock(DeepAnalysisService.class), mock(WorkbenchRunRegistry.class),
                 // 真 saver：mock 的 put() 返回 null，而 CompiledGraph 会接着用它的返回值

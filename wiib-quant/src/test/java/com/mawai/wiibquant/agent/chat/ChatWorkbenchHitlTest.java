@@ -2,10 +2,9 @@ package com.mawai.wiibquant.agent.chat;
 
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONObject;
+import com.mawai.wiibcommon.entity.UserLlmConfig;
 import com.mawai.wiibcommon.util.Result;
 import com.mawai.wiibquant.agent.analysis.DeepAnalysisService;
-import com.mawai.wiibquant.agent.config.AiAgentRuntime;
-import com.mawai.wiibquant.agent.config.AiAgentRuntimeManager;
 import com.mawai.wiibquant.agent.toolkit.MarketToolkit;
 import com.mawai.wiibquant.agent.toolkit.NewsToolkit;
 import org.bsc.langgraph4j.CompiledGraph;
@@ -96,14 +95,13 @@ class ChatWorkbenchHitlTest {
                 .toolCalls(List.of(new AssistantMessage.ToolCall(id, "function", name, args))).build();
     }
 
-    /** 生产装配的对话图（真 {@link ChatAgentFactory#chatGraph()} + MemorySaver，续聊语义与线上一致） */
-    private CompiledGraph<MessagesState<Message>> productionGraph() throws Exception {
+    /** 生产装配的对话图（真 {@link ChatAgentFactory#chatGraph} + MemorySaver，续聊语义与线上一致） */
+    private CompiledGraph<MessagesState<Message>> productionGraph() {
         // ChatService 建请求时无条件读 getOptions() 挂工具，null 会 NPE
         when(deep.getOptions()).thenReturn(ToolCallingChatOptions.builder().build());
         when(light.getOptions()).thenReturn(ToolCallingChatOptions.builder().build());
-        AiAgentRuntimeManager runtimeManager = mock(AiAgentRuntimeManager.class);
-        // 位序是 (behavior, quant, quantLight, chat)：深模型进 quant，浅模型进 quantLight
-        when(runtimeManager.current()).thenReturn(new AiAgentRuntime(light, deep, light, deep));
+        ChatModelFactory chatModelFactory = mock(ChatModelFactory.class);
+        when(chatModelFactory.modelsFor(any())).thenReturn(new ChatModelFactory.Models(deep, light));
         // router 恒答 FINISH：专家轮与本条无关
         when(light.call(any(Prompt.class))).thenAnswer(inv ->
                 responseOf(toolCall("r", "route", "{\"next\":[\"FINISH\"]}")));
@@ -116,19 +114,22 @@ class ChatWorkbenchHitlTest {
                         "{\"symbol\":\"BTCUSDT\"}")
                         : new AssistantMessage("这是第 " + seq.incrementAndGet() + " 段回答"))));
 
-        return new ChatAgentFactory(runtimeManager, mock(MarketToolkit.class), mock(NewsToolkit.class),
+        return new ChatAgentFactory(chatModelFactory, mock(MarketToolkit.class), mock(NewsToolkit.class),
                 deepAnalysisService, mock(WorkbenchRunRegistry.class),
                 registry, new MemorySaver(),
                 new SpringAIJacksonStateSerializer<>(MessagesState::new),
-                PRODUCTION_LIMIT, NO_COMPRESSION, 6, "X").chatGraph();
+                PRODUCTION_LIMIT, NO_COMPRESSION, 6, "X").chatGraph(new UserLlmConfig());
     }
 
-    private ChatWorkbenchController controller(CompiledGraph<MessagesState<Message>> graph) throws Exception {
+    private ChatWorkbenchController controller(CompiledGraph<MessagesState<Message>> graph) {
         ChatAgentFactory factory = mock(ChatAgentFactory.class);
-        when(factory.chatGraph()).thenReturn(graph);
+        when(factory.chatGraph(any())).thenReturn(graph);
         ChatMemoryService memory = mock(ChatMemoryService.class);
         when(memory.recall(anyLong())).thenReturn(""); // 空前缀：记忆拼接不是这里要验的
-        return new ChatWorkbenchController(factory, registry, memory,
+        // 图是打桩的，配置内容用不上；但 run() 取不到配置就直接抛"尚未配置 LLM 端点"，整轮跑不起来
+        UserLlmConfigService llmConfigService = mock(UserLlmConfigService.class);
+        when(llmConfigService.get(anyLong())).thenReturn(new UserLlmConfig());
+        return new ChatWorkbenchController(factory, llmConfigService, registry, memory,
                 mock(ChatHistoryService.class), mock(WorkbenchCheckpointStore.class),
                 mock(WorkbenchRunRegistry.class));
     }
@@ -156,7 +157,7 @@ class ChatWorkbenchHitlTest {
      * 会授权给新请求里的另一个标的。
      */
     @Test
-    void 确认标识对不上时拒绝授权() throws Exception {
+    void 确认标识对不上时拒绝授权() {
         ChatWorkbenchController controller = controller(productionGraph());
 
         JSONObject card = turn(controller, "深度研判 BTC").events("hitl_request").getFirst();
@@ -181,7 +182,7 @@ class ChatWorkbenchHitlTest {
      * 之后每一轮结束都会重发同一张卡（同一个 requestId），用户界面上越堆越多。
      */
     @Test
-    void 用户没点的确认卡不会在下一轮重复弹() throws Exception {
+    void 用户没点的确认卡不会在下一轮重复弹() {
         ChatWorkbenchController controller = controller(productionGraph());
 
         assertThat(turn(controller, "深度研判 BTC").events("hitl_request")).hasSize(1);
@@ -202,7 +203,7 @@ class ChatWorkbenchHitlTest {
      * 谁在每轮开跑时把它清掉（"只对本轮有效"），这条立刻变成"又弹了一张新卡"。
      */
     @Test
-    void 拒绝之后下一轮拿到拒绝回执而不是新卡() throws Exception {
+    void 拒绝之后下一轮拿到拒绝回执而不是新卡() {
         ChatWorkbenchController controller = controller(productionGraph());
 
         JSONObject card = turn(controller, "深度研判 BTC").events("hitl_request").getFirst();

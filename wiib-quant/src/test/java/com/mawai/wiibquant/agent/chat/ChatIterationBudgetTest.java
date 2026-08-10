@@ -1,8 +1,7 @@
 package com.mawai.wiibquant.agent.chat;
 
+import com.mawai.wiibcommon.entity.UserLlmConfig;
 import com.mawai.wiibquant.agent.analysis.DeepAnalysisService;
-import com.mawai.wiibquant.agent.config.AiAgentRuntime;
-import com.mawai.wiibquant.agent.config.AiAgentRuntimeManager;
 import com.mawai.wiibquant.agent.toolkit.MarketToolkit;
 import com.mawai.wiibquant.agent.toolkit.NewsToolkit;
 import org.bsc.langgraph4j.CompileConfig;
@@ -39,7 +38,7 @@ import static org.mockito.Mockito.when;
  * 硬顶开小了，保险丝哪怕正常触发、日志正常打，用户拿到的还是异常而不是那半个截断回答。
  * 所以这两个数必须一起看，光验保险丝（{@link SummarizerHookMountTest}）不够。
  * <p>
- * 这里跑的是<b>生产口径</b>：真 {@link ChatAgentFactory#chatGraph()}、生产的调用上限 8、
+ * 这里跑的是<b>生产口径</b>：真 {@link ChatAgentFactory#chatGraph}、生产的调用上限 8、
  * 走真实可达的最坏路径。{@link SummarizerHookMountTest} 那边 LIMIT=3 是为了跑得快，
  * 验不到"生产值配生产硬顶够不够"。
  */
@@ -88,9 +87,8 @@ class ChatIterationBudgetTest {
         // ChatService 建请求时无条件读 getOptions() 挂工具，null 会 NPE
         when(deep.getOptions()).thenReturn(ToolCallingChatOptions.builder().build());
         when(light.getOptions()).thenReturn(ToolCallingChatOptions.builder().build());
-        AiAgentRuntimeManager runtimeManager = mock(AiAgentRuntimeManager.class);
-        // 位序是 (behavior, quant, quantLight, chat)：深模型进 quant，浅模型进 quantLight
-        when(runtimeManager.current()).thenReturn(new AiAgentRuntime(light, deep, light, deep));
+        ChatModelFactory chatModelFactory = mock(ChatModelFactory.class);
+        when(chatModelFactory.modelsFor(any())).thenReturn(new ChatModelFactory.Models(deep, light));
 
         AtomicInteger routerCalls = new AtomicInteger();
         AtomicInteger expertCalls = new AtomicInteger();
@@ -120,12 +118,13 @@ class ChatIterationBudgetTest {
         ApprovalRegistry approvalRegistry = new ApprovalRegistry();
         // 工厂内部自己 new 出真 toolkit：没授权时闸门直接短路回 PENDING_APPROVAL，一次深模型都不烧
         // 真 saver 而不是 mock：mock 的 put() 返回 null，而 CompiledGraph 会接着用这个返回值
-        ChatAgentFactory factory = new ChatAgentFactory(runtimeManager,
+        ChatAgentFactory factory = new ChatAgentFactory(chatModelFactory,
                 mock(MarketToolkit.class), mock(NewsToolkit.class),
                 mock(DeepAnalysisService.class), mock(WorkbenchRunRegistry.class), approvalRegistry,
                 new MemorySaver(), new SpringAIJacksonStateSerializer<>(MessagesState::new),
                 PRODUCTION_LIMIT, NO_COMPRESSION, 6, "X");
-        return new Rig(factory.chatGraph(), summarizerCalls, routerCalls, expertCalls);
+        // 配置内容与迭代账无关（模型来自打桩的工厂），它只用来算图的缓存键
+        return new Rig(factory.chatGraph(new UserLlmConfig()), summarizerCalls, routerCalls, expertCalls);
     }
 
     private static void run(CompiledGraph<MessagesState<Message>> graph) {
