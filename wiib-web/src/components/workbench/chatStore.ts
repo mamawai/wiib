@@ -1,5 +1,13 @@
-import { workbenchApi } from '../../api';
+import { ApiError, workbenchApi } from '../../api';
 import type { WorkbenchChatMessage, WorkbenchEvent } from '../../types';
+
+/** 与后端 ErrorCode 对齐：2200 段是研判工作台（1600 段是 Crypto，别复用） */
+export const CHAT_ERROR = {
+  CONFIG_MISSING: 2201,
+  CONFIG_INVALID: 2202,
+  ALREADY_RUNNING: 2203,
+  CAPACITY_FULL: 2204,
+} as const;
 
 /**
  * 工作台对话 store（模块级单例）：状态与 SSE 消费脱离组件生命周期——
@@ -24,6 +32,8 @@ export interface ChatState {
   loading: boolean;
   /** true=刷新后发现会话还在后台跑（无 token 流，轮询等结果） */
   background: boolean;
+  /** true=后端说没配 LLM 或配置不可用，UI 该把配置弹窗顶出来而不是干显示一行红字 */
+  needsConfig: boolean;
   sessionId: string | null;
 }
 
@@ -34,6 +44,7 @@ let state: ChatState = {
   items: [],
   loading: false,
   background: false,
+  needsConfig: false,
   sessionId: sessionStorage.getItem(SESSION_KEY),
 };
 const listeners = new Set<() => void>();
@@ -178,6 +189,11 @@ async function send(message: string, opts?: { silent?: boolean }) {
   } catch (err) {
     if (!abort.signal.aborted) {
       updateItems(prev => [...prev, { kind: 'error', message: (err as Error).message || '连接中断，可直接重问续聊' }]);
+      // 配置类错误光显一行红字没用，用户得知道去哪儿改——置标记让配置弹窗自己顶出来
+      const code = err instanceof ApiError ? err.code : 0;
+      if (code === CHAT_ERROR.CONFIG_MISSING || code === CHAT_ERROR.CONFIG_INVALID) {
+        set({ needsConfig: true });
+      }
     }
   } finally {
     // 被 openSession/newSession 主动掐掉时它们各自接管状态，这里不抢
@@ -254,5 +270,13 @@ export const chatStore = {
   },
   pushError(message: string) {
     updateItems(prev => [...prev, { kind: 'error', message }]);
+  },
+  /** 引导卡的"去配置"按钮用它把弹窗顶出来 */
+  markNeedsConfig() {
+    set({ needsConfig: true });
+  },
+  /** 弹窗被顶出来之后必须清掉，否则用户关掉弹窗会被反复顶开 */
+  clearNeedsConfig() {
+    set({ needsConfig: false });
   },
 };

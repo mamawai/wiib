@@ -9,6 +9,19 @@ const api = axios.create({
   withCredentials: true,
 });
 
+/**
+ * 业务错误：带上后端的 code，让调用方能按类型分流（比如"没配 key"要引导去配置）。
+ * code 显式声明再赋值，不用构造器参数属性——本仓 tsconfig 开了 erasableSyntaxOnly，那个语法编译不过
+ */
+export class ApiError extends Error {
+  readonly code: number;
+
+  constructor(message: string, code: number) {
+    super(message);
+    this.code = code;
+  }
+}
+
 // 请求拦截器：添加Token到Header
 api.interceptors.request.use((config) => {
   const stored = localStorage.getItem('wiib-user');
@@ -30,17 +43,18 @@ api.interceptors.response.use(
     if (code === 401) {
       localStorage.removeItem('wiib-user');
       window.location.href = '/login';
-      return Promise.reject(new Error(msg || '未登录'));
+      return Promise.reject(new ApiError(msg || '未登录', code));
     }
     if (code !== 0) {
-      return Promise.reject(new Error(msg || '请求失败'));
+      return Promise.reject(new ApiError(msg || '请求失败', code));
     }
     return data;
   },
   (err) => {
     const msg = err.response?.data?.msg || err.response?.data?.message || err.message;
     console.error('API错误:', msg);
-    return Promise.reject(new Error(msg));
+    // 这条分支是 HTTP 层错误（网络断、5xx），响应体不一定是 Result，code 取不到就填 -1
+    return Promise.reject(new ApiError(msg, err.response?.data?.code ?? -1));
   }
 );
 
@@ -416,7 +430,7 @@ export const workbenchApi = {
     const contentType = response.headers.get('content-type') || '';
     if (contentType.includes('application/json')) {
       const payload = await response.json() as { code?: number; msg?: string };
-      throw new Error(payload.msg || '请求失败');
+      throw new ApiError(payload.msg || '请求失败', payload.code ?? -1);
     }
     if (!response.ok) throw new Error(`请求失败: ${response.status}`);
     await streamWorkbenchEvents(response, onEvent);
