@@ -2,6 +2,7 @@ import axios from 'axios';
 import type { TnOverview, TnTrade, TnDailyCell, TnEquityPoint, TnFillStats, TnManualOrderReq, TnOrderResult, TnAck } from '../types/testnet';
 import type { BacktestStrategyMeta, BacktestTaskStatus, BacktestEventsPage, BacktestKlinesPage, BacktestResultPayload } from '../types';
 import type { LedgerEntry, LedgerBizTypeOption, PublicTrade, UserProfile, PositionHistoryItem, RankingSort } from '../types';
+import type { LlmConfigView, LlmConfigSaveRequest } from '../types';
 import type { User, PageResult, RankingItem, CommentItem, NotificationItem, BuffStatus, UserBuff, BlackjackStatus, GameState, ConvertResult, MinesStatus, MinesGameState, VideoPokerStatus, VideoPokerGameState, CryptoPrice, CryptoOrderRequest, CryptoOrder, CryptoPosition, BStock, FuturesOpenRequest, FuturesCloseRequest, FuturesAddMarginRequest, FuturesReduceMarginRequest, FuturesStopLossRequest, FuturesTakeProfitRequest, FuturesAdjustLeverageRequest, FuturesCrossAccount, WalletTransferPreview, FuturesPosition, FuturesOrder, FuturesBracket, TradeFilterMap, PredictionRound, PredictionBet, PredictionBuyRequest, PredictionBetLive, PredictionPnl, AssetSnapshot, CategoryAverages, BehaviorAnalysisReport, ForceOrder, AiKeyConfig, AiModelAssignment, InviteCode, WorkbenchEvent, QuantDeepAnalysisView, StrategyAccountView, TraderPublicView, TraderOwnerView, TraderDetailView, AiTraderDecisionView, TraderEquityPoint, TraderUpsertRequest, TraderSpec, TraderRequestView, StrategySignalState, FeedStreamHealth, WorkbenchSessionSummary, WorkbenchChatMessage, NewsFlashItem } from '../types';
 
 const api = axios.create({
@@ -449,6 +450,16 @@ export const workbenchApi = {
   /** 删除历史会话（展示记录 + 后端 checkpoint 上下文） */
   deleteSession: (sessionId: string) =>
     api.delete<unknown, void>(`/ai/workbench/sessions/${sessionId}`),
+};
+
+// ========== 用户 BYOK 端点配置（工作台对话用） ==========
+export const llmConfigApi = {
+  mine: () => api.get<unknown, LlmConfigView | null>('/ai/llm-config/mine'),
+  save: (req: LlmConfigSaveRequest) => api.post<unknown, void>('/ai/llm-config', req),
+  listModels: (req: LlmConfigSaveRequest) =>
+    api.post<unknown, string[]>('/ai/llm-config/models', req),
+  /** 连通性探测：与保存分离，对应表单里的"测试连通性"按钮 */
+  test: (req: LlmConfigSaveRequest) => api.post<unknown, void>('/ai/llm-config/test', req),
 };
 
 export const quantApi = {

@@ -672,6 +672,27 @@ export interface WorkbenchChatMessage {
   createdAt: number;
 }
 
+/** 我的对话端点配置（BYOK）。key 只回尾 4 位，明文不出服务端 */
+export interface LlmConfigView {
+  apiProtocol: string;
+  baseUrl: string;
+  model: string;
+  lightModel: string | null;
+  /** none/low/medium/high，null=不传给上游走模型默认 */
+  reasoningEffort: string | null;
+  apiKeyTail: string;
+}
+
+/** 保存/检测/探测三个端点共用这个体；apiKey 传空=沿用已存的 */
+export interface LlmConfigSaveRequest {
+  apiProtocol: string;
+  baseUrl: string;
+  model: string;
+  lightModel?: string;
+  reasoningEffort?: string;
+  apiKey: string;
+}
+
 /** 策略×币种实时信号状态快照（/ai/strategies/signals）：一句话状态 + 有序指标表 */
 export interface StrategySignalState {
   strategyId: string;
