@@ -6,7 +6,6 @@ import com.mawai.wiibcommon.util.Result;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -16,7 +15,6 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.List;
 
 /** 用户 BYOK 端点配置。研判工作台对话用自己的 key，平台不承担 LLM 成本。 */
-@Slf4j
 @Tag(name = "用户 LLM 配置")
 @RestController
 @RequestMapping("/api/ai/llm-config")

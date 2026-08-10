@@ -1,5 +1,6 @@
 package com.mawai.wiibquant.agent.chat;
 
+import com.mawai.wiibcommon.constant.AiProtocols;
 import com.mawai.wiibcommon.entity.AiTrader;
 import com.mawai.wiibcommon.entity.UserLlmConfig;
 import com.mawai.wiibquant.agent.trader.ApiKeyCrypto;
@@ -13,7 +14,7 @@ import org.springframework.stereotype.Service;
 import java.util.List;
 
 /**
- * 用户 BYOK 配置读写。与 trader 侧的 BYOK 是**两份独立配置**：
+ * 用户 BYOK 配置读写。与 trader 侧的 BYOK 是<b>两份独立配置</b>：
  * trader 一天自动跑几十上百轮（要便宜稳），对话是按需的深度研判（要强模型），
  * 成本模型不同，绑一起会逼用户在两个诉求里二选一。
  * <p>
@@ -82,7 +83,7 @@ public class UserLlmConfigService {
     private UserLlmConfig toRow(long userId, SaveReq req, UserLlmConfig existing, boolean keyChanged) {
         UserLlmConfig row = new UserLlmConfig();
         row.setUserId(userId);
-        row.setApiProtocol(req.apiProtocol());
+        row.setApiProtocol(normalizeProtocol(req.apiProtocol()));
         row.setBaseUrl(stripTrailingSlash(req.baseUrl().trim()));
         row.setModel(req.model().trim());
         row.setLightModel(blankToNull(req.lightModel()));
@@ -90,7 +91,7 @@ public class UserLlmConfigService {
         return row;
     }
 
-    /** 拉端点模型清单。apiKey 传空=用已存的 key，与保存语义一致。 */
+    /** apiKey 传空=用已存的 key，与保存语义一致。 */
     public ListModelsResult listModels(long userId, SaveReq req) {
         String ssrf = baseUrlGuard.check(req.baseUrl() == null ? "" : req.baseUrl());
         if (ssrf != null) {
@@ -101,10 +102,11 @@ public class UserLlmConfigService {
         if (!keyChanged && existing == null) {
             return new ListModelsResult("apiKey不能为空", List.of());
         }
+        // 不设 model：拉清单只打 /models，TraderModelFactory.listModels 压根不读这个字段
+        //（它建 client 时自己写死了占位），这里凭空编个模型名只会误导读日志的人
         UserLlmConfig probe = new UserLlmConfig();
         probe.setApiProtocol(req.apiProtocol());
         probe.setBaseUrl(stripTrailingSlash(req.baseUrl().trim()));
-        probe.setModel("list-models");
         probe.setApiKeyEnc(keyChanged ? apiKeyCrypto.encrypt(req.apiKey().trim()) : existing.getApiKeyEnc());
         try {
             return new ListModelsResult(null, modelFactory.listModels(asProbe(probe)));
@@ -114,7 +116,7 @@ public class UserLlmConfigService {
         }
     }
 
-    /** 回显用的 key 尾 4 位。 */
+    /** 明文永远不出服务端，回显只给尾 4 位够用户认出是哪把 key。 */
     public String keyTail(UserLlmConfig c) {
         try {
             String plain = apiKeyCrypto.decrypt(c.getApiKeyEnc());
@@ -152,13 +154,27 @@ public class UserLlmConfigService {
         if (req.model() == null || req.model().isBlank()) {
             return "model不能为空";
         }
+        // 不学 trader 侧的"空→默认 openai"：那条兜底是给存量行留的，新表没这包袱；
+        // 前端是 select，传空说明请求本身不对，响亮拒绝比默默兜底好查
         if (req.apiProtocol() == null || req.apiProtocol().isBlank()) {
             return "apiProtocol不能为空";
+        }
+        if (!AiProtocols.isValid(normalizeProtocol(req.apiProtocol()))) {
+            return "协议仅支持 openai / responses";
         }
         if (requireKey && (req.apiKey() == null || req.apiKey().isBlank())) {
             return "apiKey不能为空";
         }
         return null;
+    }
+
+    /**
+     * 下游 {@link AiProtocols#isResponses} 是 equalsIgnoreCase 且不 trim，
+     * "responses " 这种脏值存进去会被当成 openai——用户选了 responses 却发 /chat/completions，
+     * 错误要到上游才冒出来。所以校验和落库都用抹平后的值，保证"验的就是存的"。
+     */
+    private static String normalizeProtocol(String protocol) {
+        return protocol == null ? null : protocol.trim().toLowerCase();
     }
 
     private static String blankToNull(String s) {

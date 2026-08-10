@@ -1,11 +1,13 @@
 package com.mawai.wiibquant.agent.chat;
 
+import com.mawai.wiibcommon.entity.AiTrader;
 import com.mawai.wiibcommon.entity.UserLlmConfig;
 import com.mawai.wiibquant.agent.trader.ApiKeyCrypto;
 import com.mawai.wiibquant.agent.trader.BaseUrlGuard;
 import com.mawai.wiibquant.agent.trader.TraderModelFactory;
 import com.mawai.wiibquant.mapper.UserLlmConfigMapper;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.util.Base64;
 import java.util.concurrent.atomic.AtomicReference;
@@ -102,6 +104,68 @@ class UserLlmConfigServiceTest {
         assertThat(service.save(1L, req("https://8.8.8.8", ""))).isNull();
 
         assertThat(updated.get().getApiKeyEnc()).isEqualTo("old-enc");   // 沿用旧密文
+    }
+
+    /**
+     * 拉模型清单是第二个吃 baseUrl 并真发出站请求的入口，走的是它自己那份 check——
+     * save 那条钉子管不到这里，拆了闸门也没人报警，所以单独钉
+     */
+    @Test
+    void 拉模型清单同样拦内网baseUrl() {
+        UserLlmConfigService.ListModelsResult r = service.listModels(1L, req("http://127.0.0.1:8080", "sk-x"));
+
+        verify(modelFactory, never()).listModels(any());   // 先钉住"请求根本没发出去"
+        assertThat(r.error()).contains("内网");
+    }
+
+    /**
+     * 探测递给上游的必须就是本次请求的这份配置，否则"测通了但存进去的不是它"。
+     * 只断言返回串不够：换成一份完全不相干的配置照样能返回 401
+     */
+    @Test
+    void 探测用的正是本次请求的配置() {
+        when(mapper.selectById(1L)).thenReturn(null);
+        when(modelFactory.testConnection(any())).thenReturn(null);
+
+        assertThat(service.testConnection(1L, new UserLlmConfigService.SaveReq(
+                "responses", "https://8.8.8.8/", " gpt-5-pro ", null, "sk-abcd1234"))).isNull();
+
+        ArgumentCaptor<AiTrader> probe = ArgumentCaptor.forClass(AiTrader.class);
+        verify(modelFactory).testConnection(probe.capture());
+        assertThat(probe.getValue().getApiProtocol()).isEqualTo("responses");
+        assertThat(probe.getValue().getBaseUrl()).isEqualTo("https://8.8.8.8");   // 尾斜杠已去
+        assertThat(probe.getValue().getModel()).isEqualTo("gpt-5-pro");
+        assertThat(new ApiKeyCrypto(SECRET).decrypt(probe.getValue().getApiKeyEnc())).isEqualTo("sk-abcd1234");
+        // 哨兵 id：TraderModelFactory 按 id 缓存，探针拿 userId 当 id 会和别人的 trader 撞车
+        assertThat(probe.getValue().getId()).isEqualTo(-1L);
+    }
+
+    /** 认不出的协议直接拒，不能存进去等 ChatModelFactory 悄悄按 openai 发请求 */
+    @Test
+    void 非法协议被拒绝() {
+        String err = service.save(1L, new UserLlmConfigService.SaveReq(
+                "anthropic", "https://8.8.8.8", "gpt-5", null, "sk-x"));
+
+        assertThat(err).isEqualTo("协议仅支持 openai / responses");
+    }
+
+    /**
+     * 协议脏值必须在入库前抹平：下游 AiProtocols.isResponses 不 trim，
+     * "responses " 存进去会被当成 openai，用户选了 responses 却发 /chat/completions
+     */
+    @Test
+    void 协议大小写与空格入库前归一化() {
+        when(mapper.selectById(1L)).thenReturn(null);
+        AtomicReference<UserLlmConfig> inserted = new AtomicReference<>();
+        when(mapper.insert(any(UserLlmConfig.class))).thenAnswer(inv -> {
+            inserted.set(inv.getArgument(0));
+            return 1;
+        });
+
+        assertThat(service.save(1L, new UserLlmConfigService.SaveReq(
+                "  RESPONSES  ", "https://8.8.8.8", "gpt-5", null, "sk-x"))).isNull();
+
+        assertThat(inserted.get().getApiProtocol()).isEqualTo("responses");
     }
 
     /** 没配过的用户拿到 null，准入层据此给"去配置"的引导（而不是当成系统错误） */
