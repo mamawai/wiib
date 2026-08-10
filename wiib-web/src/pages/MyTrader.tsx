@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Bot, Check, ChevronLeft, GraduationCap, KeyRound, Loader2, Pause, Play, RotateCcw, Save, ScanSearch, X } from 'lucide-react';
+import { Bot, Check, ChevronLeft, GraduationCap, Loader2, Pause, Play, RotateCcw, Save, X } from 'lucide-react';
 import { traderApi } from '../api';
 import { GuidedTour, type TourStep } from '../components/GuidedTour';
+import { LlmEndpointForm } from '../components/LlmEndpointForm';
 import { useCryptoStream } from '../hooks/useCryptoStream';
 import { useToast } from '../components/ui/use-toast';
 import { cn, fmtNum, fmtRelative } from '../lib/utils';
@@ -111,8 +112,6 @@ export function MyTrader() {
   const [loaded, setLoaded] = useState(false);
   const [form, setForm] = useState<TraderUpsertRequest>(EMPTY_FORM);
   const [busy, setBusy] = useState<string | null>(null);
-  const [models, setModels] = useState<string[]>([]);
-  const [detecting, setDetecting] = useState(false);
   const [template, setTemplate] = useState('');
   const [requests, setRequests] = useState<TraderRequestView[]>([]);
   const [tour, setTour] = useState(false);
@@ -194,21 +193,6 @@ export function MyTrader() {
     }
   };
 
-  // 不走 run()：检测不能触发 load()，否则会用库里旧配置冲掉表单里未保存的 baseUrl/key
-  const detectModels = async () => {
-    setDetecting(true);
-    try {
-      const list = await traderApi.listModels({
-        apiProtocol: form.apiProtocol, baseUrl: form.baseUrl, apiKey: form.apiKey,
-      });
-      setModels(list);
-      toast(list.length ? `检测到 ${list.length} 个模型` : '端点未返回模型，可直接手输', list.length ? 'success' : 'error');
-    } catch (e) {
-      toast((e as Error).message || '检测失败', 'error');
-    } finally {
-      setDetecting(false);
-    }
-  };
   const toggleSymbol = (s: string) => {
     const cur = new Set(form.symbols.split(',').filter(Boolean));
     if (cur.has(s)) {
@@ -445,73 +429,17 @@ export function MyTrader() {
                       hint="日线边界自动跑一次（烧你的 key，单次调用）；当天无交易自动跳过；关掉只停复盘，已有笔记照常注入" />
         </div>
 
-        <div className="space-y-3" data-tour="byok">
-        <div className="grid sm:grid-cols-3 gap-3">
-          <label className="space-y-1 text-xs">
-            <span className="text-muted-foreground font-bold">协议</span>
-            <div className="flex gap-1.5">
-              {['openai', 'responses'].map(p => (
-                <button key={p} type="button" onClick={() => set({ apiProtocol: p })}
-                        className={cn('flex-1 h-9 rounded-lg border text-xs font-bold',
-                          form.apiProtocol === p ? 'border-primary/60 bg-card-2 text-primary' : 'border-border text-muted-foreground hover:text-foreground')}>
-                  {p}
-                </button>
-              ))}
-            </div>
-          </label>
-          <label className="space-y-1 text-xs sm:col-span-2">
-            <span className="text-muted-foreground font-bold">Base URL（不含 /v1 后缀）</span>
-            <input value={form.baseUrl} onChange={e => set({ baseUrl: e.target.value })} placeholder="https://api.deepseek.com"
-                   className="w-full h-9 rounded-lg border border-border bg-card-2 px-3 text-xs num" />
-          </label>
+        <div data-tour="byok">
+          <LlmEndpointForm
+            value={form}
+            onChange={set}
+            exists={exists}
+            keyTail={mine?.apiKeyTail}
+            onDetect={() => traderApi.listModels({
+              apiProtocol: form.apiProtocol, baseUrl: form.baseUrl, apiKey: form.apiKey,
+            })}
+          />
         </div>
-
-        <div className="grid sm:grid-cols-2 gap-3">
-          <label className="space-y-1 text-xs">
-            <span className="text-muted-foreground font-bold">模型名</span>
-            <div className="flex gap-1.5">
-              <input value={form.model} onChange={e => set({ model: e.target.value })} placeholder="deepseek-chat"
-                     className="flex-1 min-w-0 h-9 rounded-lg border border-border bg-card-2 px-3 text-xs num" />
-              <button type="button" onClick={() => void detectModels()}
-                      disabled={detecting || !form.baseUrl.trim() || (!exists && !form.apiKey.trim())}
-                      title="拉取该端点可用的模型清单（需先填 Base URL 和 Key）"
-                      className="shrink-0 border border-border hover:bg-surface-hover rounded-lg px-2.5 h-9 text-xs font-bold text-primary flex items-center gap-1 disabled:opacity-50">
-                {detecting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ScanSearch className="w-3.5 h-3.5" />}
-                检测
-              </button>
-            </div>
-          </label>
-          <label className="space-y-1 text-xs">
-            <span className="text-muted-foreground font-bold flex items-center gap-1">
-              <KeyRound className="w-3 h-3" /> API Key
-              {exists && <span className="text-muted-foreground/70 font-normal">（当前尾号 {mine?.apiKeyTail}，留空=不换）</span>}
-            </span>
-            <input value={form.apiKey} onChange={e => set({ apiKey: e.target.value })} type="password"
-                   placeholder={exists ? '留空保持不变' : 'sk-…（加密存储，只在服务端出网）'}
-                   className="w-full h-9 rounded-lg border border-border bg-card-2 px-3 text-xs num" />
-          </label>
-        </div>
-        </div>
-
-        {/* 检测到的模型清单：模型名输入即过滤，点击填入；网关不支持 /models 时照常手输 */}
-        {models.length > 0 && (() => {
-          const kw = form.model.trim().toLowerCase();
-          const hits = models.filter(m => m.toLowerCase().includes(kw));
-          return (
-            <div className="max-h-28 overflow-y-auto flex flex-wrap gap-1.5 content-start rounded-lg border border-border bg-card-2/50 p-2">
-              {hits.map(m => (
-                <button key={m} type="button" onClick={() => set({ model: m })}
-                        className={cn('px-2 h-7 rounded-md border text-[11px] num',
-                          form.model === m ? 'border-primary/60 bg-card-2 text-primary font-bold' : 'border-border text-muted-foreground hover:text-foreground')}>
-                  {m}
-                </button>
-              ))}
-              {hits.length === 0 && (
-                <span className="text-[11px] text-muted-foreground px-1 py-1">清单里无匹配「{form.model.trim()}」，可直接手输</span>
-              )}
-            </div>
-          );
-        })()}
 
         {/* 平台系统提示词：默认勾选使用；取消后自定义成为唯一指令来源（TradeGuard 护栏仍硬校验） */}
         <div className="space-y-4" data-tour="prompt">
