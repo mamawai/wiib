@@ -6,14 +6,8 @@ package com.mawai.wiibcommon.constant;
  */
 public final class AiFunctions {
 
-    /** quant：用户行为分析 ReactAgent */
+    /** 平台唯一还在用的功能位——对话轨已全量 BYOK（见 user_llm_config），平台不再为对话建模型 */
     public static final String BEHAVIOR = "behavior";
-    /** quant：深研判/对话 Supervisor（深模型） */
-    public static final String QUANT = "quant";
-    /** quant：对话专家子 agent（浅模型） */
-    public static final String QUANT_LIGHT = "quant-light";
-    /** quant：对话 ModelFallback 兜底 */
-    public static final String CHAT = "chat";
 
     private AiFunctions() {
     }

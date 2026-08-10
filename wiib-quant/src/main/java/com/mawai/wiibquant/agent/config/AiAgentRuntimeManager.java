@@ -39,11 +39,10 @@ import java.util.stream.Collectors;
 @Component
 public class AiAgentRuntimeManager {
 
-    // P2a 删 reflection（方向反思链）；P4 增 quant-light（对话子 agent 浅模型，深浅分层省成本）；
-    // sim 随 wiib-sim 的 AiService 死代码删除（老股/期权行情生成遗留），DB 孤儿行无害且前端已过滤
-    // 管理口径（种子/Admin白名单/配置删除保护）：全部是本进程运行时功能位，refresh()按名建模型
-    private static final List<String> MANAGED_FUNCTIONS = List.of(
-            AiFunctions.BEHAVIOR, AiFunctions.QUANT, AiFunctions.QUANT_LIGHT, AiFunctions.CHAT);
+    // 管理口径（种子/Admin白名单/配置删除保护）：只列本进程要建模型的功能位，refresh()按名建
+    // 只剩 behavior：quant/quant-light/chat 随对话轨 BYOK 化删除，sim 是 wiib-sim 自读 DB 的位。
+    // 这些名字在 ai_model_assignment 里的残行是孤儿，无害——种子、白名单、删除保护都只认这个常量
+    private static final List<String> MANAGED_FUNCTIONS = List.of(AiFunctions.BEHAVIOR);
 
     private final BehaviorAnalysisWorkflow behaviorAnalysisWorkflow;
     private final ApplicationEventPublisher eventPublisher;
@@ -87,7 +86,8 @@ public class AiAgentRuntimeManager {
     }
 
     /**
-     * 从DB读取所有配置和分配关系，重建4个独立ChatModel；返回是否刷新成功（Admin据此报错）。
+     * 从DB读取所有配置和分配关系，重建 behavior 功能位的 ChatModel（其余功能位已随对话轨 BYOK 化删除）；
+     * 返回是否刷新成功（Admin据此报错）。
      * 空库→runtime置空（合法的"未配置"态）；构建失败→保留上一份可用runtime——坏切换/瞬时DB错误不打死在跑的AI。
      */
     public boolean refresh() {
@@ -104,11 +104,7 @@ public class AiAgentRuntimeManager {
                             .collect(Collectors.toMap(AiRuntimeConfig::getId, c -> c));
                     List<AiModelAssignment> assignments = assignmentMapper.selectAll();
                     runtimeRef.set(new AiAgentRuntime(
-                            buildFromAssignment(assignments, AiFunctions.BEHAVIOR, configMap),
-                            buildFromAssignment(assignments, AiFunctions.QUANT, configMap),
-                            buildFromAssignment(assignments, AiFunctions.QUANT_LIGHT, configMap),
-                            buildFromAssignment(assignments, AiFunctions.CHAT, configMap)
-                    ));
+                            buildFromAssignment(assignments, AiFunctions.BEHAVIOR, configMap)));
                     log.info("AI运行时已刷新，共{}个LLM配置，{}个功能位分配", configMap.size(), assignments.size());
                 }
                 ok = true;

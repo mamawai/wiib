@@ -4,13 +4,7 @@ import org.springframework.ai.chat.model.ChatModel;
 
 /**
  * 各功能位的 ChatModel 分配（DB 驱动，Admin 可热更）。
- * quant=深模型（Supervisor 调度/Judge/Bull/Bear），quantLight=浅模型（对话子 agent/新闻浓缩/摘要）——
- * 成本工程：贵的只花在裁决上。
+ * 只剩 behavior 一位——对话轨（原 quant / quant-light / chat 三位）已全量切用户自带 key。
  */
-public record AiAgentRuntime(
-        ChatModel behaviorChatModel,
-        ChatModel quantChatModel,
-        ChatModel quantLightChatModel,
-        ChatModel chatChatModel
-) {
+public record AiAgentRuntime(ChatModel behaviorChatModel) {
 }

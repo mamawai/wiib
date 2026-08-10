@@ -14,9 +14,6 @@ import { RefreshCw, Calendar, Plus, Trash2, Pencil, Save, Ban } from 'lucide-rea
 
 const FUNCTION_LABELS: Record<string, string> = {
   behavior: '行为分析',
-  quant: '量化研判(深)',
-  'quant-light': '对话专家(浅)',
-  chat: '对话兜底',
 };
 const MODEL_ASSIGNMENT_FUNCTIONS = new Set(Object.keys(FUNCTION_LABELS));
 
