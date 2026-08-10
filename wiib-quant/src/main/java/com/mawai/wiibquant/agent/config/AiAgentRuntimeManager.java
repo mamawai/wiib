@@ -6,7 +6,7 @@ import com.mawai.wiibcommon.entity.AiModelAssignment;
 import com.mawai.wiibcommon.entity.AiRuntimeConfig;
 import com.mawai.wiibcommon.mapper.AiModelAssignmentMapper;
 import com.mawai.wiibcommon.mapper.AiRuntimeConfigMapper;
-import com.mawai.wiibquant.agent.behavior.BehaviorAgentFactory;
+import com.mawai.wiibquant.agent.behavior.BehaviorAnalysisWorkflow;
 import com.mawai.wiibquant.agent.llm.ResponsesChatModel;
 import io.micrometer.observation.ObservationRegistry;
 import jakarta.annotation.PostConstruct;
@@ -15,10 +15,6 @@ import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.model.tool.ToolCallingManager;
 import com.openai.client.OpenAIClient;
 import com.openai.client.OpenAIClientAsync;
-import org.bsc.langgraph4j.GraphStateException;
-import org.bsc.langgraph4j.StateGraph;
-import org.bsc.langgraph4j.prebuilt.MessagesState;
-import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.openai.OpenAiChatModel;
 import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.ai.openai.setup.OpenAiSetup;
@@ -49,7 +45,7 @@ public class AiAgentRuntimeManager {
     private static final List<String> MANAGED_FUNCTIONS = List.of(
             AiFunctions.BEHAVIOR, AiFunctions.QUANT, AiFunctions.QUANT_LIGHT, AiFunctions.CHAT);
 
-    private final BehaviorAgentFactory behaviorAgentFactory;
+    private final BehaviorAnalysisWorkflow behaviorAnalysisWorkflow;
     private final ApplicationEventPublisher eventPublisher;
     private final AiRuntimeConfigMapper configMapper;
     private final AiModelAssignmentMapper assignmentMapper;
@@ -58,13 +54,13 @@ public class AiAgentRuntimeManager {
     private final AtomicReference<AiAgentRuntime> runtimeRef = new AtomicReference<>();
     private final Object graphLock = new Object();
 
-    public AiAgentRuntimeManager(BehaviorAgentFactory behaviorAgentFactory,
+    public AiAgentRuntimeManager(BehaviorAnalysisWorkflow behaviorAnalysisWorkflow,
                                  AiRuntimeConfigMapper configMapper,
                                  AiModelAssignmentMapper assignmentMapper,
                                  ToolCallingManager toolCallingManager,
                                  ObjectProvider<ObservationRegistry> observationRegistry,
                                  ApplicationEventPublisher eventPublisher) {
-        this.behaviorAgentFactory = behaviorAgentFactory;
+        this.behaviorAnalysisWorkflow = behaviorAnalysisWorkflow;
         this.eventPublisher = eventPublisher;
         this.configMapper = configMapper;
         this.assignmentMapper = assignmentMapper;
@@ -126,8 +122,9 @@ public class AiAgentRuntimeManager {
         }
     }
 
-    public StateGraph<MessagesState<Message>> createBehaviorAgent(Consumer<String> onProgress) throws GraphStateException {
-        return behaviorAgentFactory.create(current().behaviorChatModel(), onProgress);
+    /** 跑一次行为分析（阻塞出报告，不需要流式），返回模型原文；模型取当前 runtime 的 behavior 功能位。 */
+    public String runBehaviorAnalysis(long userId, Consumer<String> onProgress) {
+        return behaviorAnalysisWorkflow.run(current().behaviorChatModel(), userId, onProgress);
     }
 
     // 旧 quant graph 构建/fallback 整套已随旧管线删除（P2a）：

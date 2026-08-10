@@ -1,0 +1,164 @@
+package com.mawai.wiibquant.agent.behavior;
+
+import com.mawai.wiibquant.agent.SimInternalClient;
+import com.openai.errors.OpenAIInvalidDataException;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.messages.Message;
+import org.springframework.ai.chat.messages.SystemMessage;
+import org.springframework.ai.chat.messages.UserMessage;
+import org.springframework.ai.chat.model.ChatModel;
+import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.ai.chat.model.Generation;
+import org.springframework.ai.chat.prompt.Prompt;
+import org.springframework.ai.model.tool.ToolCallingChatOptions;
+
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.stream.Collectors;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+/**
+ * 行为分析改成一次性 workflow 后的契约。
+ * <p>最值钱的一条是"10 个端点一个都不能少"——ReAct 版本给不了这个保证：模型漏调一个工具没人知道，
+ * 报告照出，只是那一维凭空编。
+ */
+class BehaviorAnalysisWorkflowTest {
+
+    private static final long USER = 7L;
+
+    /** 与 BehaviorDataCollector.SOURCES 一一对应，顺序即 prompt 段序 */
+    private static final List<String> ENDPOINTS = List.of(
+            "user-profile", "portfolio-summary", "asset-snapshots", "crypto-stats", "bstock-stats",
+            "futures-stats", "prediction-stats", "blackjack-stats", "mines-stats", "videopoker-stats");
+
+    private static final List<String> SECTION_NAMES = List.of(
+            "用户基础信息", "实时资产概览", "近30日资产快照", "加密货币交易统计", "bStock(代币化美股)交易统计",
+            "合约交易统计", "Prediction统计", "Blackjack统计", "Mines统计", "Video Poker统计");
+
+    private final SimInternalClient simClient = mock(SimInternalClient.class);
+    private final ChatModel chatModel = mock(ChatModel.class);
+    private final BehaviorAnalysisWorkflow workflow =
+            new BehaviorAnalysisWorkflow(new BehaviorDataCollector(simClient));
+
+    private static final String MODEL_REPLY = "{\"overview\":{}}";
+
+    @BeforeEach
+    void setUp() {
+        // 每段 JSON 带上自己的来源路径，方便断言"这一段确实是这个端点的"
+        when(simClient.getJson(anyString())).thenAnswer(inv -> jsonFrom(inv.getArgument(0)));
+        when(chatModel.getOptions()).thenReturn(ToolCallingChatOptions.builder().build());
+        when(chatModel.call(any(Prompt.class))).thenReturn(responseOf(MODEL_REPLY));
+    }
+
+    private static String path(String endpoint) {
+        return "/internal/behavior/" + USER + "/" + endpoint;
+    }
+
+    private static String jsonFrom(String path) {
+        return "{\"from\":\"" + path + "\"}";
+    }
+
+    private static ChatResponse responseOf(String text) {
+        return new ChatResponse(List.of(new Generation(new AssistantMessage(text))));
+    }
+
+    private Prompt capturedPrompt() {
+        ArgumentCaptor<Prompt> captor = ArgumentCaptor.forClass(Prompt.class);
+        verify(chatModel, atLeastOnce()).call(captor.capture());
+        return captor.getValue();
+    }
+
+    private static String textOf(Prompt prompt, Class<? extends Message> type) {
+        return prompt.getInstructions().stream()
+                .filter(type::isInstance)
+                .map(Message::getText)
+                .collect(Collectors.joining("\n"));
+    }
+
+    @Test
+    void 十个端点一个都不能少_且各自的数据都进了prompt() {
+        workflow.run(chatModel, USER, null);
+
+        for (String endpoint : ENDPOINTS) {
+            verify(simClient).getJson(path(endpoint));
+        }
+        verify(simClient, times(ENDPOINTS.size())).getJson(anyString());
+
+        String prompt = textOf(capturedPrompt(), UserMessage.class);
+        for (int i = 0; i < ENDPOINTS.size(); i++) {
+            assertThat(prompt).contains(SECTION_NAMES.get(i));
+            assertThat(prompt).contains(jsonFrom(path(ENDPOINTS.get(i))));
+        }
+    }
+
+    @Test
+    void 只调一次LLM() {
+        workflow.run(chatModel, USER, null);
+
+        // 精确 1 次：多调一次、或退回循环，都会红
+        verify(chatModel, times(1)).call(any(Prompt.class));
+    }
+
+    @Test
+    void 单个端点失败_其余段照常进prompt且报告仍出得来() {
+        // SimInternalClient 失败返回错误 JSON 不抛，这里照搬它的返回形状
+        String errorJson = "{\"error\":\"sim internal api 调用失败: Connection refused\"}";
+        when(simClient.getJson(path("crypto-stats"))).thenReturn(errorJson);
+
+        String text = workflow.run(chatModel, USER, null);
+
+        String prompt = textOf(capturedPrompt(), UserMessage.class);
+        // 挂掉那段原样带进去：让模型知道这块没数据，而不是整份报告作废
+        assertThat(prompt).contains(errorJson);
+        assertThat(prompt).contains(SECTION_NAMES);
+        assertThat(text).isEqualTo(MODEL_REPLY);
+    }
+
+    /** 韧性挂在 ResilientChatService 上，退化成裸 chatModel.call 就没了——这里用它独有的补救行为钉住。 */
+    @Test
+    void 走韧性层而不是裸调模型() {
+        when(chatModel.call(any(Prompt.class)))
+                .thenThrow(new OpenAIInvalidDataException("Error reading response",
+                        new IOException("stream was reset: CANCEL")))
+                .thenReturn(responseOf(MODEL_REPLY));
+
+        assertThat(workflow.run(chatModel, USER, null)).isEqualTo(MODEL_REPLY);
+        verify(chatModel, times(2)).call(any(Prompt.class));
+    }
+
+    /** 采集是并发的，进度按"完成一段推一次"给；改造前每次工具调用推一次，这个能力不能悄悄丢 */
+    @Test
+    void 每采完一段推一次进度() {
+        List<String> steps = Collections.synchronizedList(new ArrayList<>());
+
+        workflow.run(chatModel, USER, steps::add);
+
+        assertThat(steps).hasSize(ENDPOINTS.size());
+        assertThat(steps).allMatch(s -> s.contains("/" + ENDPOINTS.size()));
+    }
+
+    /** 输出结构全靠系统提示里的 JSON Schema，掉了就只剩一段自由发挥的文本 */
+    @Test
+    void 系统指令带着输出schema一起下发() {
+        workflow.run(chatModel, USER, null);
+
+        String system = textOf(capturedPrompt(), SystemMessage.class);
+        assertThat(system).contains("用户行为分析师")
+                .contains("\"tradeBehavior\"")
+                .contains("\"riskProfile\"")
+                .contains("\"suggestions\"");
+    }
+}
