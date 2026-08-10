@@ -62,7 +62,7 @@ function pnl(v: number): { text: string; tone: 'gain' | 'loss' } {
 
 export function AiAgent() {
   const { toast } = useToast();
-  // 工作台数据区全员可看（Supervisor 对话在 Workbench 内部按管理员单独门禁）
+  // 工作台数据区全员可看；Supervisor 对话也已对全体开放，各人烧自己的 key（门禁改成"配没配端点"，见 Workbench）
   const [tab, setTab] = useState<Tab>('workbench');
   const [behaviorLoading, setBehaviorLoading] = useState(false);
   const [behaviorReport, setBehaviorReport] = useState<BehaviorAnalysisReport | null>(null);

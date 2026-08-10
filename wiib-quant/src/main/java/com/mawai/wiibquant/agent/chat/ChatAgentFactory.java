@@ -210,7 +210,11 @@ public class ChatAgentFactory {
     /** 两边都有的事件合并后的标签，如 [BlockBeats+X] */
     private final String mergedTag;
 
-    /** 图缓存上限：32 份不同配置同时在用远超实际规模，够用又不会无界增长 */
+    /**
+     * 图缓存上限：与 {@link ChatModelFactory#MAX_ENTRIES} 同口径（一个配置指纹一份），
+     * 实际就是"能同时缓存几个活跃用户的图"。超了 LRU 抖动，被淘汰的人下次发消息重新建图。
+     * 对话已对全体用户开放，32 是拍的数，调它看的是轮流来聊的人数——理由详见 MAX_ENTRIES。
+     */
     private static final int MAX_GRAPHS = 32;
 
     /** 按配置指纹缓存的图。LRU 与并发口径同 {@link ChatModelFactory#modelsFor}，建图不在锁里做 */

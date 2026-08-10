@@ -52,7 +52,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public class ResilientChatService implements ReactAgent.ChatService {
 
     private final ChatModel primaryModel;
-    /** 可空：null=纯重试（子 agent），非空=重试耗尽后切兜底（supervisor） */
+    /** 可空：null=纯重试，非空=重试耗尽后切兜底。生产侧现在一律 null——没有一处调 builder 的 fallbackModel，只有测试在覆盖切兜底这条路 */
     private final ChatModel fallbackModel;
     private final int maxAttempts;
     private final long initialDelayMs;

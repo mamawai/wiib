@@ -35,8 +35,9 @@ public class BinanceRestClient extends BaseRestTemplateConfig {
     java.util.function.LongSupplier nowMs = System::currentTimeMillis;
 
     /**
-     * 熔断截止时刻（0=未熔断）。多线程共享用 volatile；写入取 Math.max 只往后推，
-     * 防止一个慢请求（读超时 10s）拿着入口处的旧时间戳把后来者的冷却期缩短。
+     * 熔断截止时刻（0=未熔断）。多线程共享用 volatile；写入取 Math.max 只往后推——
+     * 多个线程可能同时撞 429，先算出来的小值别把后算出来的大值盖掉、把冷却期缩短。
+     * （读改写非原子，极端交错下仍可能丢一次更新；熔断是尽力而为，够用。）
      */
     private volatile long blockedUntil = 0L;
 

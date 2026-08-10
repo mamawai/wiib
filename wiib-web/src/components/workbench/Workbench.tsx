@@ -70,6 +70,7 @@ export function Workbench() {
   const displayed = selected ?? analyses[0] ?? null;
 
   return (
+    <>
     <div className="space-y-4">
       {/* 对话区（面板或引导卡）总是渲染，不再只给管理员。
           配置没回来前还不知道该渲染哪个，对话位空着，所以先单列 */}
@@ -151,14 +152,18 @@ export function Workbench() {
         </div>
       </div>
 
-      {configLoaded && (
-        <LlmConfigBall
-          configured={hasConfig}
-          keyTail={config?.apiKeyTail}
-          initial={formValue}
-          onSaved={loadConfig}
-        />
-      )}
     </div>
+
+    {/* 必须待在 space-y-4 外面：那条规则给"非最后一个子节点"加 margin-block-end，
+        弹窗一开，球就不再是最后一个，凭空吃到 16px 下边距——fixed 元素的 margin 照样生效，球会上跳 */}
+    {configLoaded && (
+      <LlmConfigBall
+        configured={hasConfig}
+        keyTail={config?.apiKeyTail}
+        initial={formValue}
+        onSaved={loadConfig}
+      />
+    )}
+    </>
   );
 }

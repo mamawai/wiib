@@ -19,7 +19,6 @@ import org.springframework.ai.openai.OpenAiChatModel;
 import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.ai.openai.setup.OpenAiSetup;
 import org.springframework.beans.factory.ObjectProvider;
-import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDateTime;
@@ -45,7 +44,6 @@ public class AiAgentRuntimeManager {
     private static final List<String> MANAGED_FUNCTIONS = List.of(AiFunctions.BEHAVIOR);
 
     private final BehaviorAnalysisWorkflow behaviorAnalysisWorkflow;
-    private final ApplicationEventPublisher eventPublisher;
     private final AiRuntimeConfigMapper configMapper;
     private final AiModelAssignmentMapper assignmentMapper;
     private final ToolCallingManager toolCallingManager;
@@ -57,10 +55,8 @@ public class AiAgentRuntimeManager {
                                  AiRuntimeConfigMapper configMapper,
                                  AiModelAssignmentMapper assignmentMapper,
                                  ToolCallingManager toolCallingManager,
-                                 ObjectProvider<ObservationRegistry> observationRegistry,
-                                 ApplicationEventPublisher eventPublisher) {
+                                 ObjectProvider<ObservationRegistry> observationRegistry) {
         this.behaviorAnalysisWorkflow = behaviorAnalysisWorkflow;
-        this.eventPublisher = eventPublisher;
         this.configMapper = configMapper;
         this.assignmentMapper = assignmentMapper;
         // 现在只有 ResponsesChatModel 用它：把 toolCallbacks 翻成发给 API 的工具声明
@@ -112,8 +108,6 @@ public class AiAgentRuntimeManager {
                 log.error("AI运行时构建失败，沿用变更前模型运行", e);
                 ok = false;
             }
-            // 成败都广播：让对话图等构建期绑定模型的缓存失效重建，与当前 runtime 保持一致
-            eventPublisher.publishEvent(new AiRuntimeRefreshedEvent(this));
             return ok;
         }
     }
