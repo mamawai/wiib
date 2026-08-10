@@ -1,6 +1,5 @@
 package com.mawai.wiibquant.agent.chat;
 
-import com.mawai.wiibcommon.entity.AiTrader;
 import com.mawai.wiibcommon.entity.UserLlmConfig;
 import com.mawai.wiibquant.agent.trader.ApiKeyCrypto;
 import com.mawai.wiibquant.agent.trader.BaseUrlGuard;
@@ -8,6 +7,8 @@ import com.mawai.wiibquant.agent.trader.TraderModelFactory;
 import com.mawai.wiibquant.mapper.UserLlmConfigMapper;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.ai.chat.model.ChatModel;
+import org.springframework.ai.chat.prompt.Prompt;
 
 import java.util.Base64;
 import java.util.concurrent.atomic.AtomicReference;
@@ -25,8 +26,22 @@ class UserLlmConfigServiceTest {
 
     private final UserLlmConfigMapper mapper = mock(UserLlmConfigMapper.class);
     private final TraderModelFactory modelFactory = mock(TraderModelFactory.class);
+    private final ChatModelFactory chatModelFactory = mock(ChatModelFactory.class);
+    /** 深浅两个不同实例：探测必须打深模型那个，探浅的等于测了个不相干的东西 */
+    private final ChatModel deepModel = mock(ChatModel.class);
+    private final ChatModel lightModel = mock(ChatModel.class);
     private final UserLlmConfigService service = new UserLlmConfigService(
-            mapper, new ApiKeyCrypto(SECRET), new BaseUrlGuard(""), modelFactory);
+            mapper, new ApiKeyCrypto(SECRET), new BaseUrlGuard(""), modelFactory, chatModelFactory);
+
+    /**
+     * 探测走的是生产建模那条路，所以这里打桩的是 ChatModelFactory 而不是另一个探针。
+     * "配置 → 模型上真带着协议/档位"那半边归 {@link ChatModelFactoryTest} 钉，
+     * 这边只管"服务把哪份配置递了过去、又打了哪个模型"——两边合起来才是完整链路。
+     */
+    private void stubModels() {
+        when(chatModelFactory.modelsFor(any()))
+                .thenReturn(new ChatModelFactory.Models(deepModel, lightModel));
+    }
 
     /** 字面 IP 而非域名：BaseUrlGuard 对主机名会真查 DNS，用域名等于让单测依赖网络 */
     private static UserLlmConfigService.SaveReq req(String baseUrl, String apiKey) {
@@ -72,17 +87,31 @@ class UserLlmConfigServiceTest {
 
         service.save(1L, req("https://8.8.8.8", "sk-abcd1234"));
 
-        verify(modelFactory, never()).testConnection(any());
+        // 探测这条路是从 modelsFor 开始的，一步都不该迈出去
+        verify(chatModelFactory, never()).modelsFor(any());
     }
 
     /** 探测走独立入口，上游说不行就如实把原因交出去 */
     @Test
     void 连通性探测失败时返回原因() {
         when(mapper.selectById(1L)).thenReturn(null);
-        when(modelFactory.testConnection(any())).thenReturn("401 Unauthorized");
+        stubModels();
+        when(deepModel.call(any(Prompt.class))).thenThrow(new RuntimeException("401 Unauthorized"));
 
         assertThat(service.testConnection(1L, req("https://8.8.8.8", "sk-x")))
                 .contains("401");
+    }
+
+    /** 上游错误可能带整个请求体，原样回给前端会刷屏——截断到 300 字 */
+    @Test
+    void 上游错误过长时截断() {
+        when(mapper.selectById(1L)).thenReturn(null);
+        stubModels();
+        when(deepModel.call(any(Prompt.class))).thenThrow(new RuntimeException("x".repeat(1000)));
+
+        String err = service.testConnection(1L, req("https://8.8.8.8", "sk-x"));
+
+        assertThat(err).hasSize("模型连通性测试失败：".length() + 300);
     }
 
     /** 改配置时 key 留空 = 不换，与 trader 侧语义保持一致 */
@@ -119,25 +148,31 @@ class UserLlmConfigServiceTest {
     }
 
     /**
-     * 探测递给上游的必须就是本次请求的这份配置，否则"测通了但存进去的不是它"。
-     * 只断言返回串不够：换成一份完全不相干的配置照样能返回 401
+     * 探测建模用的必须就是本次请求的这份配置，<b>包括思考档位</b>，否则"测通了但接下来跑的不是它"。
+     * <p>
+     * 档位这条是这次改动的由来：以前探测借道 TraderModelFactory，按 {@code ai_trader} 的形状建模，
+     * 那张表压根没有档位这一项——档位填错要等到第一轮真对话才炸。
+     * <p>
+     * 只断言返回 null 不够：换成一份完全不相干的配置照样能探通。
      */
     @Test
     void 探测用的正是本次请求的配置() {
         when(mapper.selectById(1L)).thenReturn(null);
-        when(modelFactory.testConnection(any())).thenReturn(null);
+        stubModels();
 
         assertThat(service.testConnection(1L, new UserLlmConfigService.SaveReq(
-                "responses", "https://8.8.8.8/", " gpt-5-pro ", null, null, "sk-abcd1234"))).isNull();
+                "responses", "https://8.8.8.8/", " gpt-5-pro ", null, "HIGH", "sk-abcd1234"))).isNull();
 
-        ArgumentCaptor<AiTrader> probe = ArgumentCaptor.forClass(AiTrader.class);
-        verify(modelFactory).testConnection(probe.capture());
+        ArgumentCaptor<UserLlmConfig> probe = ArgumentCaptor.forClass(UserLlmConfig.class);
+        verify(chatModelFactory).modelsFor(probe.capture());
         assertThat(probe.getValue().getApiProtocol()).isEqualTo("responses");
         assertThat(probe.getValue().getBaseUrl()).isEqualTo("https://8.8.8.8");   // 尾斜杠已去
         assertThat(probe.getValue().getModel()).isEqualTo("gpt-5-pro");
+        assertThat(probe.getValue().getReasoningEffort()).isEqualTo("high");      // 归一化后的值
         assertThat(new ApiKeyCrypto(SECRET).decrypt(probe.getValue().getApiKeyEnc())).isEqualTo("sk-abcd1234");
-        // 哨兵 id：TraderModelFactory 按 id 缓存，探针拿 userId 当 id 会和别人的 trader 撞车
-        assertThat(probe.getValue().getId()).isEqualTo(-1L);
+        // 探的是深模型：浅模型探通了不代表深模型能用，而深模型才是烧钱和吃档位的那个
+        verify(deepModel).call(any(Prompt.class));
+        verify(lightModel, never()).call(any(Prompt.class));
     }
 
     /** 认不出的协议直接拒，不能存进去等 ChatModelFactory 悄悄按 openai 发请求 */

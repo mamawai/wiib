@@ -9,6 +9,8 @@ import com.mawai.wiibquant.agent.trader.TraderModelFactory;
 import com.mawai.wiibquant.mapper.UserLlmConfigMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.ai.chat.messages.UserMessage;
+import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -44,7 +46,9 @@ public class UserLlmConfigService {
     private final UserLlmConfigMapper mapper;
     private final ApiKeyCrypto apiKeyCrypto;
     private final BaseUrlGuard baseUrlGuard;
+    /** 只剩 listModels 在用：拉清单只打 /models，与建模无关，两协议同一条路 */
     private final TraderModelFactory modelFactory;
+    private final ChatModelFactory chatModelFactory;
 
     /** 无配置返回 null——"没配"不是错误，是准入层要引导用户去处理的状态。 */
     public UserLlmConfig get(long userId) {
@@ -76,7 +80,16 @@ public class UserLlmConfigService {
         return null;
     }
 
-    /** 连通性探测（前端"测试连通性"按钮）。成功返 null，失败返上游原因。 */
+    /**
+     * 连通性探测（前端"测试连通性"按钮）。成功返 null，失败返上游原因。
+     * <p>
+     * <b>走的就是生产建模那条路</b>（{@link ChatModelFactory#modelsFor}），不是另搭一个形似的探针——
+     * 测什么就得是接下来真跑什么。之前借道 {@code TraderModelFactory} 的探针是"测 A 跑 B"：
+     * 那边按 {@code ai_trader} 的形状建模，没有思考档位这一项，于是档位填错要等到第一轮真对话才炸。
+     * <p>
+     * 顺带把缓存预热了：这次的指纹和用户接下来聊天用的是同一个，建的模不白建。
+     * 探测失败也不清缓存——上游拒绝说明 key/模型名不对，不代表建出来的对象坏了。
+     */
     public String testConnection(long userId, SaveReq req) {
         UserLlmConfig existing = get(userId);
         boolean keyChanged = req.apiKey() != null && !req.apiKey().isBlank();
@@ -84,8 +97,16 @@ public class UserLlmConfigService {
         if (err != null) {
             return err;
         }
-        String connErr = modelFactory.testConnection(asProbe(toRow(userId, req, existing, keyChanged)));
-        return connErr == null ? null : "模型连通性测试失败：" + connErr;
+        try {
+            // 探深模型：它才是烧钱和吃档位的那个，浅模型探通了不代表它能用
+            chatModelFactory.modelsFor(toRow(userId, req, existing, keyChanged))
+                    .deep().call(new Prompt(new UserMessage("ping")));
+            return null;
+        } catch (Exception e) {
+            String msg = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
+            // 上游错误可能带整个请求细节，截断防刷屏；key 本身不会出现在异常信息里
+            return "模型连通性测试失败：" + (msg.length() > 300 ? msg.substring(0, 300) : msg);
+        }
     }
 
     /** SaveReq → 行对象。save 与 testConnection 必须用同一份组装，否则"测通了但存进去的不是它" */
@@ -137,14 +158,14 @@ public class UserLlmConfigService {
     }
 
     /**
-     * 复用 TraderModelFactory 的建模/探针能力：两边的建模路径完全同款
-     * （openai→OpenAiChatModel / responses→ResponsesChatModel），
-     * 差别只是配置来自哪张表。为此把 UserLlmConfig 适配成它认的 AiTrader 形状
+     * 把 UserLlmConfig 适配成 TraderModelFactory 认的 AiTrader 形状，<b>只为拉模型清单</b>。
+     * 拉清单只打 /models，不建模、也就与协议分叉和思考档位都无关，借那边的实现没有代价；
+     * 连通性探测则不能这么借，它必须走自己那条真建模的路（见 {@link #testConnection}）。
      */
     private static AiTrader asProbe(UserLlmConfig c) {
         AiTrader t = new AiTrader();
-        // modelFor 按 id 缓存，探针不能用真实 id 污染缓存；这里只调 listModels/testConnection
-        //（都不走缓存），哨兵值是防将来误用
+        // modelFor 按 id 缓存，探针不能用真实 id 污染缓存；这条路只调 listModels（不走缓存），
+        // 哨兵值是防将来误用
         t.setId(-1L);
         t.setApiProtocol(c.getApiProtocol());
         t.setBaseUrl(c.getBaseUrl());
