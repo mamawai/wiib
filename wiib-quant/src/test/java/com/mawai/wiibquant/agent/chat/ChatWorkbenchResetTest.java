@@ -30,8 +30,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -65,6 +67,19 @@ class ChatWorkbenchResetTest {
     private static final int DEEP_CALLS_PER_TURN = 2;
 
     private final AtomicInteger deepCallsThisTurn = new AtomicInteger();
+
+    /** userId=1 名下那份 BYOK 配置。字段要有真值：全 null 的话它和随手 new 的一份就相等了，verify 认不出来 */
+    private static final UserLlmConfig MY_CONFIG = myConfig();
+
+    private static UserLlmConfig myConfig() {
+        UserLlmConfig c = new UserLlmConfig();
+        c.setUserId(1L);
+        c.setApiProtocol("openai");
+        c.setBaseUrl("https://api.example.com");
+        c.setModel("gpt-5");
+        c.setApiKeyEnc("enc-mine");
+        return c;
+    }
 
     private static ChatResponse responseOf(AssistantMessage message) {
         return new ChatResponse(List.of(new Generation(message)));
@@ -116,9 +131,9 @@ class ChatWorkbenchResetTest {
         when(factory.chatGraph(any())).thenReturn(graph);
         ChatMemoryService memory = mock(ChatMemoryService.class);
         when(memory.recall(anyLong())).thenReturn(""); // 空前缀：记忆拼接不是本条要验的
-        // 图是打桩的，配置内容用不上；但 run() 取不到配置就直接抛"尚未配置 LLM 端点"，整轮跑不起来
+        // 图是打桩的，但配置本身要有真内容：结尾那条 verify 靠它认出"传下去的就是取回来的这份"
         UserLlmConfigService llmConfigService = mock(UserLlmConfigService.class);
-        when(llmConfigService.get(anyLong())).thenReturn(new UserLlmConfig());
+        when(llmConfigService.get(1L)).thenReturn(MY_CONFIG);
         WorkbenchRunRegistry runRegistry = mock(WorkbenchRunRegistry.class);
         // run() 是丢给虚拟线程跑的，靠 finally 里的 finish() 当完成信号
         CountDownLatch[] turnDone = new CountDownLatch[]{new CountDownLatch(1)};
@@ -150,6 +165,11 @@ class ChatWorkbenchResetTest {
             assertThat(deepCallsThisTurn.get()).as("第 %d 轮 summarizer 的模型调用次数", turn)
                     .isEqualTo(DEEP_CALLS_PER_TURN);
         }
+
+        // 建图用的必须是"这个 userId 名下那份配置"，也就是烧的是他自己的 key。
+        // 少了这条，controller 把整段取配置的代码换成 chatGraph(new UserLlmConfig()) 上面全都照绿——
+        // 而线上表现是所有人共用一张图、烧同一把 key（评审实跑证过）
+        verify(factory, atLeastOnce()).chatGraph(MY_CONFIG);
     }
 
     /** 从 checkpoint 里读本轮跑完的调用计数——续聊起算的就是这份 state */

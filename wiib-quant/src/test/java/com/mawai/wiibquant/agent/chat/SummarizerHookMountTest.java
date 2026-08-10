@@ -235,7 +235,11 @@ class SummarizerHookMountTest {
                 .thenReturn(Flux.just(responseOf(new AssistantMessage("兜底答案"))));
         CompiledGraph<MessagesState<Message>> graph = factory(NO_COMPRESSION, 6).chatGraph(CONFIG);
 
-        assertThatThrownBy(() -> graph.invoke(Map.of("messages", List.of(new UserMessage("随便问问")))));
+        // 断到根因而不是"抛了就行"：要验的是上游那个错原样冒到用户面前，没被谁替换成别的失败
+        assertThatThrownBy(() -> graph.invoke(Map.of("messages", List.of(new UserMessage("随便问问")))))
+                .rootCause()
+                .isInstanceOf(NonTransientAiException.class)
+                .hasMessage("端点挂了");
 
         verify(light, never()).stream(any(Prompt.class));
     }

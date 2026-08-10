@@ -1,6 +1,7 @@
 package com.mawai.wiibquant.agent.chat;
 
 import com.mawai.wiibcommon.entity.UserLlmConfig;
+import com.mawai.wiibquant.agent.llm.ResponsesChatModel;
 import com.mawai.wiibquant.agent.trader.ApiKeyCrypto;
 import io.micrometer.observation.ObservationRegistry;
 import org.junit.jupiter.api.Test;
@@ -77,6 +78,18 @@ class ChatModelFactoryTest {
         assertThat(second.deep()).isNotSameAs(first.deep());
     }
 
+    /**
+     * responses 协议要走自研的 {@link ResponsesChatModel}（/v1/responses），不能悄悄按
+     * openai 发 /v1/chat/completions。生产上 grok/xAI/CPA 用户走的正是这条分支。
+     */
+    @Test
+    void responses协议建出自研模型() {
+        UserLlmConfig c = config("grok-4.5", null);
+        c.setApiProtocol("responses");
+
+        assertThat(factory().modelsFor(c).deep()).isInstanceOf(ResponsesChatModel.class);
+    }
+
     /** 轻模型不填时直接复用深模型实例，不该白建第二个 */
     @Test
     void 轻模型不填时复用主模型实例() {
@@ -99,13 +112,16 @@ class ChatModelFactoryTest {
         assertThat(ChatModelFactory.fingerprint(config("gpt-5", "other"))).isNotEqualTo(base);
     }
 
-    /** 分隔符不能省：没有它 ("ab","c") 和 ("a","bc") 拼出同一个串，两份配置共用一个 ChatModel */
+    /**
+     * 分隔符不能省，而且不能挑用户打得出来的字符：两份配置拼成同一个串就会共用一个 ChatModel。
+     * 第二组用带空格的模型名——model/lightModel 是前端自由输入的，拿空格当分隔符照样撞。
+     */
     @Test
     void 相邻字段拼接不会串味() {
-        UserLlmConfig a = config("ab", "c");
-        UserLlmConfig b = config("a", "bc");
-
-        assertThat(ChatModelFactory.fingerprint(a)).isNotEqualTo(ChatModelFactory.fingerprint(b));
+        assertThat(ChatModelFactory.fingerprint(config("ab", "c")))
+                .isNotEqualTo(ChatModelFactory.fingerprint(config("a", "bc")));
+        assertThat(ChatModelFactory.fingerprint(config("gpt-5 x", "y")))
+                .isNotEqualTo(ChatModelFactory.fingerprint(config("gpt-5", "x y")));
     }
 
     /**

@@ -29,17 +29,23 @@ import java.util.Map;
  * 对话轨的 BYOK 模型工厂：配置 → 深/浅两个 ChatModel。建模路径与
  * {@link com.mawai.wiibquant.agent.trader.TraderModelFactory} 同款，区别只是配置来自哪张表。
  * <p>
- * 缓存按<b>配置指纹</b>而不是按 userId：用同一个中转 + 同一模型的用户共享同一对实例
- *（实际部署里这是多数情况），用户改配置指纹就变、自然拿到新实例，不需要任何显式 evict。
+ * 缓存键是<b>配置指纹</b>而不是 userId，实际效果是<b>一个用户一份</b>：指纹把 api_key_enc 算了进去，
+ * 而它是 AES-GCM 随机 IV 的密文，两个用户的密文不可能相同——所以这里不存在跨用户共享实例。
+ * 用指纹的好处在另一头：用户改了配置指纹就变、自然拿到新实例，不需要任何显式 evict。
  * <p>
- * <b>已知行为</b>：api_key_enc 是 AES-GCM 随机 IV，同一把 key 每次加密出的密文都不同，
- * 所以用户点保存但一个字没改，指纹照样变、模型会白重建一次。旧实例被 LRU 淘汰，没有实际损失。
+ * <b>什么时候会白重建一次</b>：用户重新输入 key（哪怕就是同一把），密文随机 IV 变了指纹就变。
+ * 只改模型名之类、key 输入框留空的话密文沿用旧的（见 {@code UserLlmConfigService.toRow}），
+ * 不会重建。旧实例被 LRU 淘汰，没有实际损失。
  */
 @Slf4j
 @Component
 public class ChatModelFactory {
 
-    /** 缓存上限：32 份不同配置同时在用远超实际规模，够用又不会无界增长 */
+    /**
+     * 缓存上限。既然一个用户一份（见类头），这个数就是<b>能同时缓存几个活跃用户</b>——
+     * 活跃用户超过它就开始 LRU 抖动，每来一次请求重建一整套模型。
+     * 现在只对管理员开放，32 绰绰有余；哪天开门放开了，按<b>并发活跃用户数</b>调它，不是按别的。
+     */
     static final int MAX_ENTRIES = 32;
 
     public record Models(ChatModel deep, ChatModel light) {
@@ -96,9 +102,12 @@ public class ChatModelFactory {
      * 槽位内的"变了没有"校验位，撞了只影响该不该重建自己那一个模型。）
      * <p>
      * 分隔符不能省：没有它 {@code ("ab","c")} 和 {@code ("a","bc")} 拼出同一个串。
+     * 而且必须挑一个<b>字段值里不可能出现</b>的字符——model/lightModel 是用户在前端自由输入的，
+     * 用空格的话 {@code ("gpt-5 x","y")} 和 {@code ("gpt-5","x y")} 照样撞。取 NUL：
+     * Postgres 的 text 存不下这个字节，所以它绝不会出现在任何一个从库里读出来的字段值里。
      */
     public static String fingerprint(UserLlmConfig c) {
-        String raw = String.join(" ",
+        String raw = String.join("\0",
                 String.valueOf(c.getApiProtocol()), String.valueOf(c.getBaseUrl()),
                 String.valueOf(c.getModel()), String.valueOf(c.getLightModel()),
                 String.valueOf(c.getApiKeyEnc()));
