@@ -29,10 +29,9 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.atLeastOnce;
-import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -134,17 +133,22 @@ class ChatWorkbenchResetTest {
         // 图是打桩的，但配置本身要有真内容：结尾那条 verify 靠它认出"传下去的就是取回来的这份"
         UserLlmConfigService llmConfigService = mock(UserLlmConfigService.class);
         when(llmConfigService.get(1L)).thenReturn(MY_CONFIG);
-        WorkbenchRunRegistry runRegistry = mock(WorkbenchRunRegistry.class);
-        // run() 是丢给虚拟线程跑的，靠 finally 里的 finish() 当完成信号
+        // run() 是丢给虚拟线程跑的，靠"名额还回来了"当完成信号。
+        // 不拿 runRegistry.finish 当信号：它在 run() 自己的 finally 里，而名额是 run() 返回之后才还的，
+        // 中间那个窗口里主线程可能已经发起下一轮、撞上"每用户 1 轮"被拒
         CountDownLatch[] turnDone = new CountDownLatch[]{new CountDownLatch(1)};
-        doAnswer(inv -> {
-            turnDone[0].countDown();
-            return null;
-        }).when(runRegistry).finish(anyString());
+        ChatConcurrencyGate gate = new ChatConcurrencyGate(10) {
+            @Override
+            public void release(long userId) {
+                super.release(userId);
+                turnDone[0].countDown();
+            }
+        };
 
+        WorkbenchRunRegistry runRegistry = mock(WorkbenchRunRegistry.class);
         ChatWorkbenchController controller = new ChatWorkbenchController(factory, llmConfigService,
                 approvalRegistry, memory, mock(ChatHistoryService.class),
-                mock(WorkbenchCheckpointStore.class), runRegistry);
+                mock(WorkbenchCheckpointStore.class), runRegistry, gate);
 
         String sessionId = "wb-1-reset-probe";
         for (int turn = 1; turn <= TURNS; turn++) {
@@ -170,6 +174,9 @@ class ChatWorkbenchResetTest {
         // 少了这条，controller 把整段取配置的代码换成 chatGraph(new UserLlmConfig()) 上面全都照绿——
         // 而线上表现是所有人共用一张图、烧同一把 key（评审实跑证过）
         verify(factory, atLeastOnce()).chatGraph(MY_CONFIG);
+        // 每轮都要摘运行标记。这条原先是靠"拿 finish 当完成信号"顺带钉住的，信号换成 release 之后得明写：
+        // 漏调它的话 /status 永远回答"还在跑"，前端不去拉历史，用户就一直看不到答案
+        verify(runRegistry, times(TURNS)).finish(sessionId);
     }
 
     /** 从 checkpoint 里读本轮跑完的调用计数——续聊起算的就是这份 state */

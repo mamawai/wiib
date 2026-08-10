@@ -121,24 +121,21 @@ class ChatWorkbenchHitlTest {
                 PRODUCTION_LIMIT, NO_COMPRESSION, 6, "X").chatGraph(new UserLlmConfig());
     }
 
-    private ChatWorkbenchController controller(CompiledGraph<MessagesState<Message>> graph) {
-        ChatAgentFactory factory = mock(ChatAgentFactory.class);
-        when(factory.chatGraph(any())).thenReturn(graph);
+    /** 图改由 chat() 取好传进 run()，这条测试直接调 run()，所以工厂和配置服务都用不上了 */
+    private ChatWorkbenchController controller() {
         ChatMemoryService memory = mock(ChatMemoryService.class);
         when(memory.recall(anyLong())).thenReturn(""); // 空前缀：记忆拼接不是这里要验的
-        // 图是打桩的，配置内容用不上；但 run() 取不到配置就直接抛"尚未配置 LLM 端点"，整轮跑不起来
-        UserLlmConfigService llmConfigService = mock(UserLlmConfigService.class);
-        when(llmConfigService.get(anyLong())).thenReturn(new UserLlmConfig());
-        return new ChatWorkbenchController(factory, llmConfigService, registry, memory,
-                mock(ChatHistoryService.class), mock(WorkbenchCheckpointStore.class),
-                mock(WorkbenchRunRegistry.class));
+        return new ChatWorkbenchController(mock(ChatAgentFactory.class), mock(UserLlmConfigService.class),
+                registry, memory, mock(ChatHistoryService.class), mock(WorkbenchCheckpointStore.class),
+                mock(WorkbenchRunRegistry.class), new ChatConcurrencyGate(10));
     }
 
     /** 跑一轮，返回这一轮发出去的全部 SSE 事件 */
-    private RecordingEmitter turn(ChatWorkbenchController controller, String message) {
+    private RecordingEmitter turn(ChatWorkbenchController controller,
+                                  CompiledGraph<MessagesState<Message>> graph, String message) {
         deepCallsThisTurn.set(0);
         RecordingEmitter emitter = new RecordingEmitter();
-        controller.run(new ChatWorkbenchController.SseChannel(emitter), 1L, SESSION, message);
+        controller.run(new ChatWorkbenchController.SseChannel(emitter), 1L, SESSION, message, graph);
         return emitter;
     }
 
@@ -158,9 +155,10 @@ class ChatWorkbenchHitlTest {
      */
     @Test
     void 确认标识对不上时拒绝授权() {
-        ChatWorkbenchController controller = controller(productionGraph());
+        CompiledGraph<MessagesState<Message>> graph = productionGraph();
+        ChatWorkbenchController controller = controller();
 
-        JSONObject card = turn(controller, "深度研判 BTC").events("hitl_request").getFirst();
+        JSONObject card = turn(controller, graph, "深度研判 BTC").events("hitl_request").getFirst();
         assertThat(card.getString("requestId")).isNotBlank();
 
         Result<Void> stale = controller.approve(1L, decision("别的卡片的标识", true));
@@ -183,13 +181,14 @@ class ChatWorkbenchHitlTest {
      */
     @Test
     void 用户没点的确认卡不会在下一轮重复弹() {
-        ChatWorkbenchController controller = controller(productionGraph());
+        CompiledGraph<MessagesState<Message>> graph = productionGraph();
+        ChatWorkbenchController controller = controller();
 
-        assertThat(turn(controller, "深度研判 BTC").events("hitl_request")).hasSize(1);
+        assertThat(turn(controller, graph, "深度研判 BTC").events("hitl_request")).hasSize(1);
 
         // 第二轮模型不再调深研判（用户问的是别的），但上一张卡还挂在 registry 里
         wantsDeepAnalysis.set(false);
-        RecordingEmitter second = turn(controller, "顺便说说最近行情");
+        RecordingEmitter second = turn(controller, graph, "顺便说说最近行情");
 
         assertThat(second.events("hitl_request")).isEmpty();
         assertThat(registry.peekPending(SESSION)).isPresent(); // 卡还在，只是不再重发
@@ -204,12 +203,13 @@ class ChatWorkbenchHitlTest {
      */
     @Test
     void 拒绝之后下一轮拿到拒绝回执而不是新卡() {
-        ChatWorkbenchController controller = controller(productionGraph());
+        CompiledGraph<MessagesState<Message>> graph = productionGraph();
+        ChatWorkbenchController controller = controller();
 
-        JSONObject card = turn(controller, "深度研判 BTC").events("hitl_request").getFirst();
+        JSONObject card = turn(controller, graph, "深度研判 BTC").events("hitl_request").getFirst();
         assertThat(controller.approve(1L, decision(card.getString("requestId"), false)).getCode()).isZero();
 
-        RecordingEmitter second = turn(controller, "再研判一次 BTC");
+        RecordingEmitter second = turn(controller, graph, "再研判一次 BTC");
 
         assertThat(second.events("hitl_request")).isEmpty();
         assertThat(registry.peekPending(SESSION)).isEmpty();   // 没有登记新的待确认

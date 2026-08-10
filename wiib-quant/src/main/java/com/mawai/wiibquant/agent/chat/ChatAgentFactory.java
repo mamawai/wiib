@@ -5,6 +5,7 @@ import com.alibaba.fastjson2.JSONArray;
 import com.mawai.wiibcommon.entity.UserLlmConfig;
 import com.mawai.wiibquant.agent.analysis.DeepAnalysisService;
 import com.mawai.wiibquant.agent.llm.ConversationSummarizer;
+import com.mawai.wiibquant.agent.llm.LlmErrorMessages;
 import com.mawai.wiibquant.agent.llm.ModelCallLimiter;
 import com.mawai.wiibquant.agent.llm.ResilientChatService;
 import com.mawai.wiibquant.agent.toolkit.MarketToolkit;
@@ -698,10 +699,13 @@ public class ChatAgentFactory {
                 progress(config, new ExpertProgress(name, ExpertProgress.DONE, text));
                 return reply == null ? Map.of() : Map.of("messages", reply);
             } catch (Exception e) {
-                // 单个专家失败不该拖垮整轮：把失败作为一条消息交回，supervisor 自行判断要不要绕开
+                // 单个专家失败不该拖垮整轮：把失败作为一条消息交回，supervisor 自行判断要不要绕开。
+                // 两个出口都过归类：原始 SDK 异常可能几百字符，喂回模型既白烧 token，
+                // 又把上游细节（可能含 key）连同答案一起写进 checkpoint 持久化
                 log.warn("[Workbench] 专家 {} 执行失败", name, e);
-                progress(config, new ExpertProgress(name, ExpertProgress.ERROR, e.getMessage()));
-                return Map.of("messages", new AssistantMessage("[" + name + " 暂时不可用：" + e.getMessage() + "]"));
+                String reason = LlmErrorMessages.classify(e);
+                progress(config, new ExpertProgress(name, ExpertProgress.ERROR, reason));
+                return Map.of("messages", new AssistantMessage("[" + name + " 暂时不可用：" + reason + "]"));
             }
         };
         try {

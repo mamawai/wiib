@@ -2,9 +2,11 @@ package com.mawai.wiibquant.agent.chat;
 
 import com.alibaba.fastjson2.JSONObject;
 import com.mawai.wiibcommon.annotation.CurrentUserId;
-import com.mawai.wiibcommon.annotation.RequireAdmin;
 import com.mawai.wiibcommon.entity.UserLlmConfig;
+import com.mawai.wiibcommon.enums.ErrorCode;
+import com.mawai.wiibcommon.exception.BizException;
 import com.mawai.wiibcommon.util.Result;
+import com.mawai.wiibquant.agent.llm.LlmErrorMessages;
 import com.mawai.wiibquant.agent.llm.ModelCallLimiter;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -12,7 +14,9 @@ import jakarta.servlet.http.HttpServletResponse;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.bsc.langgraph4j.CompiledGraph;
 import org.bsc.langgraph4j.RunnableConfig;
+import org.bsc.langgraph4j.prebuilt.MessagesState;
 import org.bsc.langgraph4j.streaming.StreamingOutput;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
@@ -49,7 +53,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 @RestController
 @RequestMapping("/api/ai/workbench")
 @RequiredArgsConstructor
-@RequireAdmin // 暂只对管理员(userId=1)开放：LLM 对话按 token 计费，放开前先观察成本
 public class ChatWorkbenchController {
 
     private final ChatAgentFactory chatAgentFactory;
@@ -59,7 +62,9 @@ public class ChatWorkbenchController {
     private final ChatHistoryService chatHistoryService;
     private final WorkbenchCheckpointStore checkpointStore;
     private final WorkbenchRunRegistry runRegistry;
-    private final ExecutorService streamExecutor = Executors.newVirtualThreadPerTaskExecutor();
+    private final ChatConcurrencyGate concurrencyGate;
+    /** 包私有：名额泄漏那条钉子（{@code ChatWorkbenchAdmissionTest}）要关掉它来制造 submit 失败 */
+    final ExecutorService streamExecutor = Executors.newVirtualThreadPerTaskExecutor();
     /** 心跳专用：只发注释帧(微秒级)，单线程够所有会话用；虚拟线程不支持定时调度故用平台线程 */
     private final ScheduledExecutorService heartbeatScheduler =
             Executors.newSingleThreadScheduledExecutor(r -> {
@@ -93,6 +98,29 @@ public class ChatWorkbenchController {
         if (request.getMessage() == null || request.getMessage().isBlank()) {
             throw new IllegalArgumentException("消息不能为空");
         }
+        // 三道准入都在把 emitter 交出去之前：一旦 return 给 MVC，响应就成了 event-stream，
+        // 之后再出错只能推 error 事件，前端拿不到结构化错误码、没法自动引导用户去配置页
+        UserLlmConfig llmConfig = userLlmConfigService.get(userId);
+        if (llmConfig == null) {
+            throw new BizException(ErrorCode.LLM_CONFIG_MISSING);
+        }
+        CompiledGraph<MessagesState<Message>> graph;
+        try {
+            // 建图放准入期：配置能过保存校验但仍可能建不出模型（协议对不上等），这类错误必须在建流前暴露。
+            // 建图不发网络请求，慢端点不会拖垮这里
+            graph = chatAgentFactory.chatGraph(llmConfig);
+        } catch (Exception e) {
+            log.warn("[Workbench] 建图失败 userId={}", userId, e);
+            throw new BizException(ErrorCode.LLM_CONFIG_INVALID);
+        }
+        // 拒因由闸门自己给，不去 runRegistry 二次推断：那边 finish 先摘、名额后还，
+        // 中间那个窗口会把"你还有一轮在跑"误报成"人满了"
+        ChatConcurrencyGate.Acquire acquired = concurrencyGate.tryAcquire(userId);
+        if (acquired != ChatConcurrencyGate.Acquire.OK) {
+            throw new BizException(acquired == ChatConcurrencyGate.Acquire.USER_BUSY
+                    ? ErrorCode.CHAT_ALREADY_RUNNING : ErrorCode.CHAT_CAPACITY_FULL);
+        }
+
         // sessionId 绑定 userId 前缀，防跨用户续聊他人会话
         String sessionId = request.getSessionId() != null && request.getSessionId().startsWith("wb-" + userId + "-")
                 ? request.getSessionId()
@@ -108,7 +136,26 @@ public class ChatWorkbenchController {
         });
         emitter.onError(ex -> channel.markClosed());
 
-        streamExecutor.submit(() -> run(channel, userId, sessionId, request.getMessage()));
+        try {
+            streamExecutor.submit(() -> {
+                // 名额收在这一层还，而不是 run() 的 finally：run() 开头那句
+                // heartbeatScheduler.scheduleWithFixedDelay 在它自己的 try 之外，
+                // scheduler 关闭时它抛出去，run() 的 finally 根本不执行，名额就永久漏了
+                try {
+                    run(channel, userId, sessionId, request.getMessage(), graph);
+                } catch (Throwable e) {
+                    // submit 返回的 Future 没人 get()，不自己记一笔的话异常被完全吞掉
+                    log.error("[Workbench] 对话任务异常退出 sessionId={}", sessionId, e);
+                } finally {
+                    concurrencyGate.release(userId);
+                }
+            });
+        } catch (Throwable e) {
+            // 兜 Throwable 不是 RuntimeException：submit 失败的极端形态（线程建不出来）可能是 Error。
+            // 名额漏满就对所有人永久拒绝，是全套设计里唯一不可恢复的失败模式，宁可多兜一层
+            concurrencyGate.release(userId);
+            throw e;
+        }
         return emitter;
     }
 
@@ -171,7 +218,8 @@ public class ChatWorkbenchController {
      *（{@code ChatWorkbenchHitlTest}）要真跑这段并看它发出去的 SSE 事件，
      * 而 {@link #chat} 自己 new emitter、事件出不来。
      */
-    void run(SseChannel channel, long userId, String sessionId, String message) {
+    void run(SseChannel channel, long userId, String sessionId, String message,
+             CompiledGraph<MessagesState<Message>> graph) {
         // 本轮开跑的时刻：结尾只发"这一轮新登记"的确认卡，见下面 hitl_request 那段
         long turnStartedAt = System.currentTimeMillis();
         // 答案流/过程流分离：专家的结论是"工作过程"（前端折叠展示、不落历史），
@@ -192,12 +240,6 @@ public class ChatWorkbenchController {
             String memory = chatMemoryService.recall(userId);
             String enriched = memory.isEmpty() ? message : memory + "\n用户问题：" + message;
 
-            // 图烧的是用户自己的 key，没配就没得跑
-            UserLlmConfig llmConfig = userLlmConfigService.get(userId);
-            if (llmConfig == null) {
-                throw new IllegalArgumentException("尚未配置 LLM 端点");
-            }
-            var graph = chatAgentFactory.chatGraph(llmConfig);
             RunnableConfig config = RunnableConfig.builder()
                     .threadId(sessionId)
                     // 专家的 token 流被并行分支 reduce 掉了拿不到，节点经此 sink 主动汇报进度与结论
@@ -266,7 +308,7 @@ public class ChatWorkbenchController {
             log.error("[Workbench] 对话失败 sessionId={}", sessionId, e);
             if (!channel.isClosed()) {
                 channel.send("error", new JSONObject()
-                        .fluentPut("message", e.getMessage() != null ? e.getMessage() : "研判失败，请重试"));
+                        .fluentPut("message", LlmErrorMessages.classify(e)));
                 // 正常收尾而非 completeWithError：原因已随上面的 error 事件发出去了，
                 // 再把异常抛回 MVC 只会让 GlobalExceptionHandler 往 event-stream 里写 JSON，
                 // 撞 HttpMessageNotWritableException，反而把真实错误盖掉
