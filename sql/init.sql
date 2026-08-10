@@ -926,3 +926,20 @@ COMMENT ON COLUMN ai_trader_request.status IS 'PENDING待确认 / APPROVED已同
 COMMENT ON COLUMN ai_trader_request.executed_result IS '批准后的执行结果或失败原因（余额不足/仓位已不存在等），不吞';
 COMMENT ON COLUMN ai_trader_request.notified IS '处理结果是否已回注给模型：主人批/拒之后的下一次唤醒注入一次并置true——反馈闭环的最后一环，不注模型只能从仓位变化倒猜';
 COMMENT ON COLUMN ai_trader_request.wake_time IS '发起时所在唤醒边界(ms)，用于回注提示词时说明"这是第几轮提的"';
+
+-- ============ user_llm_config：研判工作台对话的用户自带 LLM 端点（BYOK，2026-08） ============
+-- 与 ai_trader 的 BYOK 分开存：trader 一天跑几十上百轮要便宜稳，对话是按需深研判要强模型，
+-- 绑一起会逼用户在两个诉求里二选一。
+CREATE TABLE IF NOT EXISTS user_llm_config (
+    user_id      BIGINT        PRIMARY KEY,
+    api_protocol VARCHAR(16)   NOT NULL DEFAULT 'openai',
+    base_url     VARCHAR(255)  NOT NULL,
+    model        VARCHAR(128)  NOT NULL,
+    light_model  VARCHAR(128),
+    api_key_enc  VARCHAR(1024) NOT NULL,
+    created_at   TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at   TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+COMMENT ON TABLE  user_llm_config IS '用户自带 LLM 端点配置（BYOK，研判工作台对话用）';
+COMMENT ON COLUMN user_llm_config.light_model IS '轻模型，可空；空则 router/专家/历史压缩复用 model';
+COMMENT ON COLUMN user_llm_config.api_key_enc IS 'AES-256-GCM 密文，密钥来自 WIIB_TRADER_KEY_SECRET';

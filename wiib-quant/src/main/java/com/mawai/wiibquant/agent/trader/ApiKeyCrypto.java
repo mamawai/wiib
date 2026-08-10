@@ -14,6 +14,9 @@ import java.util.Base64;
  * 用户 API key 加密器：AES-256-GCM，密文格式 base64(iv12B + cipher+tag)。
  * 密钥来自环境变量 WIIB_TRADER_KEY_SECRET（base64 的 32 字节）；未配置不挡进程启动，
  * 但加解密时响亮失败——绝不静默存明文。密钥/明文任何情况下不进日志。
+ * <p>
+ * 名字里的 TRADER 是历史包袱：它现在同时服务 ai_trader 和 user_llm_config（对话工作台 BYOK）。
+ * 不改名是因为环境变量名已经在生产配好了，改名的唯一效果是逼一次重新部署。
  */
 @Component
 public class ApiKeyCrypto {
