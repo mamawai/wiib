@@ -2,6 +2,7 @@ package com.mawai.wiibquant.agent.trader;
 
 import com.mawai.wiibcommon.constant.AiProtocols;
 import com.mawai.wiibcommon.entity.AiTrader;
+import com.mawai.wiibquant.agent.llm.OpenAiBaseUrl;
 import com.mawai.wiibquant.agent.llm.ResponsesChatModel;
 import com.openai.client.OpenAIClient;
 import com.openai.client.OpenAIClientAsync;
@@ -67,7 +68,7 @@ public class TraderModelFactory {
         String apiKey = apiKeyCrypto.decrypt(trader.getApiKeyEnc());
         // model 参数只在 Azure/GitHub 分支参与 URL 计算，探针还没选模型，占位即可
         OpenAIClient client = OpenAiSetup.setupSyncClient(
-                trader.getBaseUrl(), apiKey, null, null, null, null,
+                OpenAiBaseUrl.forSdk(trader.getBaseUrl()), apiKey, null, null, null, null,
                 false, false, "list-models", ResponsesChatModel.CALL_TIMEOUT, 3, null, null,
                 observationRegistry, null, List.of());
         return client.models().list().data().stream().map(Model::id).toList();
@@ -93,13 +94,13 @@ public class TraderModelFactory {
         }
         // timeout 非空是硬约束（SDK 是 Kotlin，null 运行时 NPE）；重试超时口径与平台模型一致
         OpenAIClient client = OpenAiSetup.setupSyncClient(
-                trader.getBaseUrl(), apiKey, null, null, null, null,
+                OpenAiBaseUrl.forSdk(trader.getBaseUrl()), apiKey, null, null, null, null,
                 false, false, trader.getModel(), ResponsesChatModel.CALL_TIMEOUT, 3, null, null,
                 observationRegistry, null, List.of());
         // async 也必须显式给：builder 见 openAiClientAsync 为空就拿 options 自建，而 options 里没 key，
         // SDK 当场抛 "At least one credential source must be specified"（哪怕我们根本不走流式）
         OpenAIClientAsync clientAsync = OpenAiSetup.setupAsyncClient(
-                trader.getBaseUrl(), apiKey, null, null, null, null,
+                OpenAiBaseUrl.forSdk(trader.getBaseUrl()), apiKey, null, null, null, null,
                 false, false, trader.getModel(), ResponsesChatModel.CALL_TIMEOUT, 3, null, null,
                 observationRegistry, null, List.of());
         return OpenAiChatModel.builder()

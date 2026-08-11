@@ -2,6 +2,7 @@ package com.mawai.wiibquant.agent.chat;
 
 import com.mawai.wiibcommon.constant.AiProtocols;
 import com.mawai.wiibcommon.entity.UserLlmConfig;
+import com.mawai.wiibquant.agent.llm.OpenAiBaseUrl;
 import com.mawai.wiibquant.agent.llm.ResponsesChatModel;
 import com.mawai.wiibquant.agent.trader.ApiKeyCrypto;
 import com.openai.client.OpenAIClient;
@@ -145,13 +146,13 @@ public class ChatModelFactory {
         }
         // timeout 非空是硬约束（SDK 是 Kotlin，null 运行时 NPE）
         OpenAIClient client = OpenAiSetup.setupSyncClient(
-                config.getBaseUrl(), apiKey, null, null, null, null,
+                OpenAiBaseUrl.forSdk(config.getBaseUrl()), apiKey, null, null, null, null,
                 false, false, modelName, ResponsesChatModel.CALL_TIMEOUT, 3, null, null,
                 observationRegistry, null, List.of());
         // async 也必须显式给：builder 见 openAiClientAsync 为空就拿 options 自建，而 options 里没 key，
         // SDK 当场抛 "At least one credential source must be specified"
         OpenAIClientAsync clientAsync = OpenAiSetup.setupAsyncClient(
-                config.getBaseUrl(), apiKey, null, null, null, null,
+                OpenAiBaseUrl.forSdk(config.getBaseUrl()), apiKey, null, null, null, null,
                 false, false, modelName, ResponsesChatModel.CALL_TIMEOUT, 3, null, null,
                 observationRegistry, null, List.of());
         OpenAiChatOptions.Builder options = OpenAiChatOptions.builder().model(modelName);

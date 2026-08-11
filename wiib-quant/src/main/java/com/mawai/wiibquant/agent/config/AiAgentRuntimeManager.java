@@ -7,6 +7,7 @@ import com.mawai.wiibcommon.entity.AiRuntimeConfig;
 import com.mawai.wiibcommon.mapper.AiModelAssignmentMapper;
 import com.mawai.wiibcommon.mapper.AiRuntimeConfigMapper;
 import com.mawai.wiibquant.agent.behavior.BehaviorAnalysisWorkflow;
+import com.mawai.wiibquant.agent.llm.OpenAiBaseUrl;
 import com.mawai.wiibquant.agent.llm.ResponsesChatModel;
 import io.micrometer.observation.ObservationRegistry;
 import jakarta.annotation.PostConstruct;
@@ -194,13 +195,13 @@ public class AiAgentRuntimeManager {
         // 超时/maxRetries=3 都取 ResponsesChatModel 同值：阻塞路径的重试超时统一归模型层，
         // ResilientChatService 只管兜底切换，避免两层叠乘放大尾延迟
         OpenAIClient openAiClient = OpenAiSetup.setupSyncClient(
-                config.getBaseUrl(), config.getApiKey(), null, null, null, null,
+                OpenAiBaseUrl.forSdk(config.getBaseUrl()), config.getApiKey(), null, null, null, null,
                 false, false, config.getModel(), ResponsesChatModel.CALL_TIMEOUT, 3, null, null,
                 observationRegistry, null, List.of());
         // async 也必须显式给：builder 见 openAiClientAsync 为空就拿 options 自建，而 options 里没 key，
         // SDK 当场抛 "At least one credential source must be specified"（哪怕我们根本不走流式）
         OpenAIClientAsync openAiClientAsync = OpenAiSetup.setupAsyncClient(
-                config.getBaseUrl(), config.getApiKey(), null, null, null, null,
+                OpenAiBaseUrl.forSdk(config.getBaseUrl()), config.getApiKey(), null, null, null, null,
                 false, false, config.getModel(), ResponsesChatModel.CALL_TIMEOUT, 3, null, null,
                 observationRegistry, null, List.of());
 
