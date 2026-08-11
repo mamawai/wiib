@@ -14,6 +14,7 @@ import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
 
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -433,6 +434,43 @@ class MarketDataServiceTest {
             Thread.sleep(300);
             return "{\"lastPrice\":\"65000\"}";
         });
+    }
+
+    /**
+     * symbol 入口不校验白名单，模型问什么就缓存什么。裸 Map 只增不减时，
+     * 连问上千个不存在的币就能把内存撑起来——这里连问 200 个，验 LRU 真在淘汰。
+     */
+    @Test
+    void assemblyCacheIsBounded() {
+        MarketDataService service = service(600_000);      // TTL 拉长，确保不是靠过期而是靠淘汰
+        for (int i = 0; i < 200; i++) {
+            service.assemble("FAKE" + i + "USDT");
+        }
+
+        assertThat(cacheSize(service, "cache")).isLessThanOrEqualTo(32);
+    }
+
+    @Test
+    void rawCacheIsBounded() {
+        when(binanceRestClient.getFundingRateHistory(anyString(), anyInt())).thenReturn("[]");
+        when(binanceRestClient.getPremiumIndex(anyString())).thenReturn("{}");
+        MarketDataService service = service(600_000);
+        for (int i = 0; i < 200; i++) {
+            service.fundingHistory("FAKE" + i + "USDT");
+            service.premiumIndex("FAKE" + i + "USDT");
+        }
+
+        assertThat(cacheSize(service, "rawCache")).isLessThanOrEqualTo(128);
+    }
+
+    private static int cacheSize(MarketDataService service, String field) {
+        try {
+            var f = MarketDataService.class.getDeclaredField(field);
+            f.setAccessible(true);
+            return ((Map<?, ?>) f.get(service)).size();
+        } catch (ReflectiveOperationException e) {
+            throw new AssertionError("取不到缓存字段 " + field, e);
+        }
     }
 
     private record Outcome(boolean allFinished, List<MarketAssembly> results, List<Throwable> errors) {}

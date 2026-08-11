@@ -16,6 +16,8 @@ import org.springframework.stereotype.Service;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
@@ -38,19 +40,46 @@ public class MarketDataService {
     /** 资金费上下文的兜底上限：里面装着标记价，是实时价；一刻钟前的还能当"大致现价"，再久就是误导 */
     private static final long PREMIUM_MAX_STALE_MS = Duration.ofMinutes(15).toMillis();
 
+    /**
+     * 两个缓存都得有上限：入口是宽松归一（{@link QuantConstants#normalizeSymbolLenient}），
+     * <b>不校验白名单</b>——模型问哪个币就存哪个，采集失败的 unavailable 也照样进缓存。
+     * 裸 Map 只增不减，等于把"存什么"的决定权交给了模型。
+     * <p>
+     * 整装快照给 32：一条里装着各周期 K 线原文加全套特征，是这里最占地方的东西，
+     * 而白名单统共几个币，32 够覆盖它们再加上临时问到的。
+     * rawCache 给 128：每个 symbol 最多三条（funding / premium / depth），值是几 KB 的 JSON，可以宽松些。
+     */
+    private static final int MAX_ASSEMBLY_ENTRIES = 32;
+    private static final int MAX_RAW_ENTRIES = 128;
+
     private final BinanceRestClient binanceRestClient;
     private final DepthStreamCache depthStreamCache;
     private final CollectDataNode collectNode;
     private final BuildFeaturesNode featuresNode;
     private final long ttlMillis;
-    private final Map<String, MarketAssembly> cache = new ConcurrentHashMap<>();
+
+    /** LRU：满了淘汰最久没被碰过的那条。accessOrder=true 让 get 也算一次访问 */
+    private final Map<String, MarketAssembly> cache = Collections.synchronizedMap(
+            new LinkedHashMap<>(16, 0.75f, true) {
+                @Override
+                protected boolean removeEldestEntry(Map.Entry<String, MarketAssembly> eldest) {
+                    return size() > MAX_ASSEMBLY_ENTRIES;
+                }
+            });
+
     /** 在途采集：TTL 过期瞬间多个线程同时 miss，只放一个去真采集，其余等它的结果 */
     private final Map<String, CompletableFuture<MarketAssembly>> inFlight = new ConcurrentHashMap<>();
 
     /** 裸 REST 结果的 TTL 缓存：资金费历史/盘口这类"工具直取"的数据，与整装快照分开老化 */
     private record Cached(String value, long at) {}
 
-    private final Map<String, Cached> rawCache = new ConcurrentHashMap<>();
+    private final Map<String, Cached> rawCache = Collections.synchronizedMap(
+            new LinkedHashMap<>(16, 0.75f, true) {
+                @Override
+                protected boolean removeEldestEntry(Map.Entry<String, Cached> eldest) {
+                    return size() > MAX_RAW_ENTRIES;
+                }
+            });
 
     /**
      * rawCache 的老化墙钟，可注入只为让"超龄不再兜"测得了——真等 8 小时不现实。

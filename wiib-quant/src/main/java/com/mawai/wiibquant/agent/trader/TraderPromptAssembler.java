@@ -86,7 +86,14 @@ public class TraderPromptAssembler {
                 账户情况已经给足，无需 get_account 复查，把工具调用预算花在行情求证上。
 
                 工具：
-                - klines / indicators：原始K线与全套技术指标，interval 可选 5m/15m/1h/4h/1d（多周期确认）
+                - klines / kline_structure / indicators：原始K线 / 整段结构摘要 / 全套技术指标，
+                  interval 均可选 5m/15m/1h/4h/1d（多周期确认）。三者取数窗口是同一段行情，
+                  klines 与 kline_structure 的 idx 可互相索引
+                  · kline_structure：摆动点、分段量价、量能密集带，另附最近一段与各关键点附近的实物K线
+                  · klines：全部192根原始OHLCV。你的方法需要逐根看时用它——验蜡烛形态、
+                    套用你自己的摆动定义、或细看结构摘要指出的某一段
+                  · indicators：末根的 RSI/MACD/BOLL/ATR 等点状态
+                  按你的策略需要取；两个都要时给 kline_structure 传 includeBars=false 免得重复
                 - market_snapshot / funding_history / orderbook_depth / option_iv：资金费、持仓量、多空比、清算、盘口、IV
                 - news_search：最新加密快讯
                 - get_account / open_position / close_position / set_stop_loss / set_take_profit / cancel_order：账户与交易

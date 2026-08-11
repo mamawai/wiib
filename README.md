@@ -75,7 +75,7 @@
 ### 资金账本
 
 - **全量记账**：所有资金变动经 `@Ledger` **AOP 切面**落 `user_ledger` 流水表，`balance_after` 取自同条 `UPDATE ... RETURNING`（不重查，天然与真实扣减同事务同一致），44 种业务类型带中文语义标注（另有 `UNKNOWN` 兜底，切面漏标也不丢账）。
-- **账单页**：游标翻页（`id` 倒序，服务端封顶 100/页）+ 按业务类型筛选，中文 label 只在 `LedgerBizType` 枚举里维护一处，前端不再抄一份映射。
+- **账单页**：游标翻页（`id` 倒序，服务端封顶 100/页）+ 按业务类型筛选，中文 label 只在 `LedgerBizType` 枚举里维护一处，前端不另抄映射。
 - **合约仓位历史**：一行一笔完整仓位，展开看分批平仓明细（已平仓量 / 平仓均价 / 已实现盈亏从订单表聚合，仓位表那两列只是残值）。
 
 ### 策略实盘
@@ -97,7 +97,7 @@
 - **AI Trader**（每用户一个）：BYOK 接自己的模型与 key，按选定 K 线级别自主唤醒交易；仓位规格（杠杆区间 / 保证金占比 / 单仓 / 双开 / 自主加减仓）由主人设定，护栏硬校验越界拒不截断；持仓极端波动时哨兵临时唤醒。
 - **每日复盘**：日线边界读自己一天的交易痕迹，写复盘笔记回注下一轮——战绩数字由代码算好，模型只许复述。
 - **竞技场**：全员按收益率排行，点进详情看决策时间线（推理全文 / 工具轨迹 / 论点与修订史 / 复盘卡片）与净值曲线。
-- **研判工作台**（管理员专属）：SSE 流式，结构化 router 调度 market / news 子 agent 并行取数，深模型 summarizer 汇总作答；断点续聊 + 跨会话记忆 + 贵操作 HITL 确认闸。
+- **研判工作台**（全员开放，BYOK）：SSE 流式，结构化 router 调度 market / news 子 agent 并行取数，深模型 summarizer 汇总作答；断点续聊 + 跨会话记忆 + 贵操作 HITL 确认闸。对话烧用户自己的 key（与 trader 的 key 分开存），平台不承担 LLM 成本——但行情配额是按 IP 算的、分摊不掉，所以并发夹死在全局 10 轮 + 每用户 1 轮。
 - **MCP Server**：同一工具层暴露只读市场工具（`market_snapshot` / `option_iv` / `funding_history` / `orderbook_depth`），SSE 端点。**仅监听本机**，公网未反代——要给 Claude Desktop / Cursor 这类客户端连，须自行反代，且反代前必须先加鉴权（MCP 路径不走 quant 的登录校验）。
 - **研究工具**：策略 K 线 / 组合回测引擎与 walk-forward 样本外评估 REST API。
 - 详见 [Agent Harness 架构](#agent-harness-架构)。
@@ -118,7 +118,7 @@
 - **用户主页**：榜单行 + 当前持仓 + 成交明细 / 仓位历史切换，由本人的**公开开关**门控（关了则除本人外一律 403）。
 - **全站成交页**：匿名流水，交易者只给稳定假名；接口刻意不开 `userId` 入口——开了就能枚举 userId 反查假名，匿名当场失效（反射守卫测试钉着）。
 - **留言板**：全站唯一，根评论 + 子评论两层，赞踩只存计数（去重靠 Redis Set 不落记录表），管理员可删除 / 禁言（`user.muted_until` 到期自动解禁）。赞与回复产生通知，顶栏信封角标 + WebSocket 点对点推送，前端按「类型 + 评论」合并展示。
-- **游戏**：每日 Buff 抽奖、21 点、Mines、Video Poker；用户行为分析 Agent（quant 经 internal API 读 sim 行为数据）。
+- **游戏**：每日 Buff 抽奖、21 点、Mines、Video Poker；用户行为分析（quant 经 internal API 读 sim 行为数据，并发取数后一次 LLM 调用出报告）。
 - **自助重置账户**：清空全部交易与游戏数据回到初始资金，每周一次、需逐字输入用户名确认。清理先注销 Redis 触发索引再事务删表，失败则把索引装回去。
 
 ### 前端体验
@@ -183,18 +183,25 @@ flowchart TD
 
 ## Agent Harness 架构
 
-平台跑着四套独立的 LLM 装置，各有各的形态与停止条件。**它们之间只经 PostgreSQL 解耦**——没有任何一个直接调用另一个，加一套新的不用改旧的。
+平台跑着五套独立的 LLM 装置，各有各的形态与停止条件。**它们之间只经 PostgreSQL 解耦**——没有任何一个直接调用另一个，加一套新的不用改旧的。
 
-图引擎 **langgraph4j 1.8.20**（spring-ai-alibaba 的上游）。选型只有一条准则：**固定步骤写死成代码，开放决策才交给模型循环**。所以四套里只有两套是真 agent。
+图引擎 **langgraph4j 1.8.20**（spring-ai-alibaba 的上游）。选型只有一条准则：**固定步骤写死成代码，开放决策才交给模型循环**。所以已落地的四套里只有两套是真 agent。
 
-| 装置 | 形态 | 工具 | 循环 | 触发 | 产出 |
-|---|---|:---:|:---:|---|---|
-| **trader agent** | ReactAgent | 14 | ✓ 上限 8 次调用 | 每根 K 线收盘 / 波动警报 | 真实开平仓 + 决策行 |
-| **reviewer workflow** | 单次调用 | 0 | ✗ | 日线边界 | 复盘笔记 |
-| **learning agent** | ReactAgent *(规划中)* | 只读同侪 | ✓ | 全体复盘之后 | 学习笔记 |
-| **chat agent** | StateGraph + 子 agent | 分层 | ✓ 带回环 | 用户提问 | 流式回答 |
+| 装置 | 形态 | 工具 | 循环 | 触发 | 模型来源 | 产出 |
+|---|---|:---:|:---:|---|---|---|
+| **trader agent** | ReactAgent | 15 | ✓ 上限 8 次调用 | 每根 K 线收盘 / 波动警报 | 主人的 key | 真实开平仓 + 决策行 |
+| **reviewer workflow** | 单次调用 | 0 | ✗ | 日线边界 | 同 trader | 复盘笔记 |
+| **learning agent** | ReactAgent *(规划中)* | 只读同侪 | ✓ | 全体复盘之后 | 同 trader | 学习笔记 |
+| **chat agent** | StateGraph + 子 agent | 分层 | ✓ 带回环 | 用户提问 | 用户的 key | 流式回答 |
+| **behavior workflow** | 单次调用 | 0 | ✗ | 用户点「分析我」 | 平台配置 | 行为画像报告 |
 
-### 全景：四套装置如何经 DB 咬合
+**模型来源两条轨**：交易与对话全部 **BYOK**（用户自带 key，AES-GCM 加密存库），而且是**两份独立配置**——trader 一天自动跑几十上百轮要便宜稳，对话是按需的深度研判要强模型，绑一起会逼用户在两个诉求里二选一。平台自己只为 `behavior` 一个功能位建模型（`ai_runtime_config` + `ai_model_assignment`）。
+
+> **behavior 为什么不是 agent**：它那 10 个数据源的参数全是 `userId`、端点写死，模型零决策自由度。配 ReactAgent 等于让它来回跑腿，所以拆成「并发拉 10 个端点 → 拼一个 prompt → 调一次 LLM」。
+
+### 全景：交易那四套如何经 DB 咬合
+
+（`behavior` 不在这张图里——它读的是 wiib-sim 的用户行为数据，与交易这条链没有任何交集。）
 
 ```mermaid
 flowchart TB
@@ -212,13 +219,13 @@ flowchart TB
     TA <-->|"开平仓 · 持仓查询"| SIM
     DB -->|"四块硬事实（代码算好）"| RW
     RW -->|"复盘笔记 → memory"| DB
-    DB -->|"同侪的复盘/学习笔记/开仓论点"| LA
-    LA -->|"学习笔记"| DB
-    DB ==>|"三份注入"| TA
+    DB -.->|"同侪的复盘/学习笔记/开仓论点"| LA
+    LA -.->|"学习笔记"| DB
+    DB ==>|"注入：系统提示词 + 复盘笔记<br/>（学习笔记那份等 learning 落地）"| TA
     CA -.->|"将来只读接入<br/>（读 memory + REVIEW 行，接口已就位）"| DB
 ```
 
-**trader 每次唤醒收到三份注入**：平台系统提示词（身份/规格/纪律）+ **复盘笔记**（自己的教训）+ **学习笔记**（从别人身上学到的）。后两份分别由 reviewer 和 learning 写，trader 侧只读——它不知道也不需要知道这两样东西是谁写的。
+**trader 每次唤醒收到的注入**：平台系统提示词（身份/规格/纪律）+ **复盘笔记**（自己的教训）。设计上还有第三份 **学习笔记**（从别人身上学到的），由 learning agent 写——**learning 尚未开工，所以目前只有两份**。这个结构的意义在于 trader 侧只读：它不知道也不需要知道这些东西是谁写的，加第三份不用改 trader。
 
 ### trader agent：唯一会动真账本的
 
@@ -226,10 +233,10 @@ flowchart TB
 flowchart LR
     CLK["5m K线收盘事件"] --> SCH{"TraderScheduler<br/>对齐 interval 边界<br/>抢占 + 互斥 + 并发闸"}
     SEN["VolatilitySentinel<br/>5min 振幅超阈值<br/>且持有该币"] -->|"警报（冷静期/预算预检）"| SCH
-    SCH --> PA["TraderPromptAssembler<br/>系统提示词 + 账户状态<br/>+ 复盘笔记 + 学习笔记"]
+    SCH --> PA["TraderPromptAssembler<br/>系统提示词 + 账户状态<br/>+ 复盘笔记（学习笔记待 learning 落地）"]
     PA --> RA(("ReactAgent<br/>循环"))
     RA <--> T1["交易工具 ×7<br/>开平仓/止损止盈/计划"]
-    RA <--> T2["数据工具 ×7<br/>K线/指标/快照/IV/资金费/盘口/快讯"]
+    RA <--> T2["数据工具 ×8<br/>K线/结构/指标/快照/IV/资金费/盘口/快讯"]
     RA --> OUT["决策全文 + 动作轨迹<br/>→ ai_trader_decision"]
     GUARD["TradeGuard<br/>开仓硬校验"] -.->|"越界一票否决<br/>拒因中文可修正后重试"| T1
     T1 -->|"下单"| SIMX["wiib-sim 子账户"]
@@ -310,15 +317,46 @@ flowchart LR
 
 三个子 agent 各自是独立编译的 `ReactAgent` 子图（独立 threadId，中间消息不污染主会话 checkpoint）：**market_agent** 与 **news_agent** 并行取数，**summarizer** 汇总作答。
 
-- **路由**：模型调 `route` 工具给出去向，结果只写 state、不进 messages；条件边只读这个结构化值，绝不解析消息文本。角色单一是关键——summarizer 一个字都不提"要不要再派发"，那正是早期无限循环的病根。
+- **路由**：模型调 `route` 工具给出去向，结果只写 state、不进 messages；条件边只读这个结构化值，绝不解析消息文本。角色单一是关键——summarizer 一个字都不提"要不要再派发"，让它同时纠结"该作答还是该派发"就会在两者之间反复横跳。
 - **并行**：`dispatch` → 各专家 → `join` 是同源多边（框架内部建 `ParallelNode`）；未被派发的节点直接返回空，不触发模型调用。同一专家一轮内只派一次，另设 3 轮派发上限。
-- **韧性**：自研 `ResilientChatService` 装配进 `ReactAgent.ChatService`，对图与节点透明。阻塞路径只切兜底模型（重试归模型层，两层叠乘只会放大尾延迟）；流式路径带退避重试，仅在尚未吐帧时重订阅。
+- **韧性**：自研 `ResilientChatService` 装配进 `ReactAgent.ChatService`，对图与节点透明。流式路径带退避重试，仅在尚未吐帧时重订阅。**不挂兜底模型**——BYOK 只有一个端点，切到同端点的另一个模型没有意义（端点挂了两个一起挂）。
 - **横切**：PostgresSaver 断点续聊、跨会话长期记忆（规则化写入，不烧 LLM）、`run_deep_analysis` 贵操作 HITL 确认闸、调用限额 + 历史摘要压缩控预算。
 - **新闻双源分工**：`news_agent` 出 BlockBeats 清单，summarizer 用联网搜索补充合并，独有条目带源标签——因为服务端搜索关不掉，与其硬压不如分工。
 
+#### 模型来自用户，所以图也跟着用户走
+
+```text
+POST /api/ai/workbench/chat
+  ├─ 取 user_llm_config          没配 → 2201，前端顶出配置弹窗
+  ├─ 按配置指纹取/建图（LRU 32）  建不出 → 2202，同上
+  ├─ 并发闸门 tryAcquire          该用户已有一轮 → 2203 ／ 全局 10 满 → 2204
+  └─ 这之后才 new SseEmitter
+```
+
+**四道准入全在建流之前**：一旦返回 `SseEmitter`，响应就是 `text/event-stream`，再报错只能推 error 事件，前端拿不到结构化错误码、没法自动引导去配置。
+
+- **图按配置指纹缓存，不按 userId**：指纹 = `SHA-256(协议, baseUrl, 主模型, 轻模型, 思考档位, 密文)`。用户改配置 → 指纹变 → 自然拿到新图，**不需要任何显式失效**。指纹把 AES-GCM 密文算了进去，而它每次加密都不同，所以实际效果是一人一份——那个数就是"能同时缓存几个活跃用户"。
+- **主模型 + 轻模型**：轻模型（选填）跑 router / 专家 / 历史压缩，主模型只用来写最终回答。不填就复用主模型**实例本身**，省一份客户端和连接池。
+- **思考档位**（选填 `none/low/medium/high`）只注入主模型——轻模型跑的都是简单活，高档纯烧钱烧延迟。**模型支不支持这个参数查不到**（OpenAI 标准 `/v1/models` 只回 id/object/created/owned_by，没有能力描述），所以默认留空=不传，让用户自己选，配套一个「测试连通性」按钮真发一次请求验。
+- **错误归类**：401/403、429、404+model、超时/连不上各给一句能照着做的话；**认不出来的不替用户判病因**——那个 catch 罩着落历史、写记忆、checkpoint 落库，数据库挂了也走这条路，兜底要是说"请检查端点与模型配置"，用户会去乱改一把本来没问题的 key。任何分支都不回显上游原文：中转网关的异常里经常带完整请求 URL（`?api_key=…`），正则永远追不全 key 的形态。
+
+#### HITL：判断要发生在信息完整的那一层
+
+`run_deep_analysis` 一次烧三次深模型调用，必须用户点头。闸门**不在工具内部**，而是 `EdgeHook.WrapCall` 挂在 summarizer 的工具边上：
+
+```text
+授权键 = (sessionId, 工具名, 归一化后的标的)
+```
+
+工具方法体**从来看不到自己被调用时的 sessionId**（`ChatService.execute(List<Message>)` 的签名里没有 `RunnableConfig`），而 hook 拿得到 `threadId` + 待执行 tool_call 的名字和参数。所以卡片上写 BTCUSDT、模型改口要 ETHUSDT 时键不匹配，会**重新弹卡**——这不是加校验，是把判断挪到了信息完整的那一层。
+
+> **这里有个坑**：挂在子图上的 hook 会被 `addNode(id, StateGraph)` 内联时整个丢掉（框架只搬 nodes/edges），而按内联后的 id 注册又会被 `compile()` 的图校验拒掉（校验跑在内联之前）。**只剩"父图全局注册 + hook 内按 id 过滤"这一条路。**挂错了不报错也不告警——hook 静默不执行，单测照样全绿。
+
 ### 日线边界的时序
 
-一天一次的交接：**先交易，再全体复盘，最后全体学习**。复盘与学习期间 trader 停工——它们要读的是"已经定格的一天"，边写边读会读到半截数据。
+目标形态是一天一次的交接：**先交易，再全体复盘，最后全体学习**。复盘与学习期间 trader 停工——它们要读的是"已经定格的一天"，边写边读会读到半截数据。
+
+> **下面这张图画的是目标态，不是现状。** 当前每个 trader 在自己的日线边界上顺序跑「交易 → 自己复盘」，**没有停工窗口，也没有全局屏障**；learning 整段尚未开工。屏障是 learning 的前置——只要还没有"向别人学"这一步，就没有必须等全体定格的理由。
 
 ```mermaid
 sequenceDiagram
@@ -340,7 +378,7 @@ sequenceDiagram
 
 > 时序中 learning 阶段与"等全体复盘完成"的协调尚未实现；当前形态是每个 trader 在自己的日线边界上顺序跑「交易 → 复盘」，无全局屏障。
 
-同一工具层的第三个消费方：**MCP Server**（SSE 端点）——只读市场工具，新闻抓取与深研判等贵操作刻意不对外。注意它**只监听本机、公网未反代**：quant 的鉴权靠 controller 手写 `StpUtil.checkLogin()` 与 `@RequireAdmin` 切面，而 MCP 走 RouterFunction 两者都不经过，所以一旦反代出去就是无鉴权端点——那几个工具每次直连 Binance REST 无缓存，会被当免费代理刷上游配额，进而连累共用同一 REST 客户端的策略执行轨。
+同一工具层的第三个消费方：**MCP Server**（SSE 端点）——只读市场工具，新闻抓取与深研判等贵操作刻意不对外。注意它**只监听本机、公网未反代**：quant 的鉴权靠 controller 手写 `StpUtil.checkLogin()` 与 `@RequireAdmin` 切面，而 MCP 走 RouterFunction 两者都不经过，所以一旦反代出去就是无鉴权端点——那几个工具虽有 60s 缓存，但缓存按 symbol 分片、入口又不校验白名单，换个币种就是一次全新的上游采集，会被当免费代理刷配额，进而连累共用同一 REST 客户端的策略执行轨。
 
 > **规划中的联动**：chat agent 将来可只读感知 trader（把 `TraderToolkit` 挂进 chat 图，读 memory 与 REVIEW 行即可）。接口已经就位——learning 只写笔记列与决策行，chat 只读同样两样东西，**不需要再改 trader**。
 
@@ -391,7 +429,7 @@ whatifibought/                        # Maven 多 module 聚合 reactor
 ├── start-local.ps1 / .bat            # 本地一键启动三服务（bat 为双击入口，转调 ps1）
 ├── docker-compose.yml                # 三进程编排（无私有值，配置全在 .env）
 ├── redis-compose.yml                 # Redis 主从 + 哨兵栈（可选）
-├── sql/                              # init.sql（29 表）+ bstock.sql（bStock 静态表 + 种子）
+├── sql/                              # init.sql（32 表）+ bstock.sql（bStock 静态表 + 种子）
 │
 ├── wiib-common/                      # 共享层：被 feed/quant/sim 共同依赖，三者互不直接依赖
 │   └── market/ broadcast/ cache/ aspect/ mapper/ entity/ dto/ enums/ util/ ...
@@ -410,12 +448,15 @@ whatifibought/                        # Maven 多 module 聚合 reactor
 │   │   ├── analysis/                 # 深研判（工作台触发）+ 叙事对账
 │   │   ├── research/                 # 回测 / 样本外评估 REST
 │   │   ├── toolkit/                  # 统一工具层（trader / chat / MCP 三处共用）
+│   │   │                             # + K线取数层（一份缓存喂三个 K 线工具，并发只放一个去拉）
 │   │   ├── chat/                     # chat agent：router + 子 agent 并行 + summarizer + checkpoint
+│   │   │                             # + BYOK 配置读写/建模 + HITL 授权闸门 + 并发闸门
 │   │   ├── strategy/                 # FIBO/LIQFADE/SQZMOM/TURTLE + 回测引擎
 │   │   │                             # + 执行层(testnet|sim) + 账户监控
 │   │   ├── llm/                      # ResilientChatService / Responses API / 摘要 / 调用限额
+│   │   │                             # + 上游异常归类（给用户看的一句话）
 │   │   └── mcp/ behavior/ binance/ external/ ...
-│   │                                 # MCP server / 行为 agent / Testnet 客户端
+│   │                                 # MCP server / 行为分析 workflow / Testnet 客户端
 │   │                                 # / ETF 流爬取 / SimInternalClient
 │   └── controller/ task/ mapper/ config/   # ResearchEval/Strategy/Testnet/Backtest... / 调度 / Deribit
 │
@@ -443,6 +484,9 @@ whatifibought/                        # Maven 多 module 聚合 reactor
 | Redis ZSet | 限价单、强平价、止损、止盈触发索引 |
 | Redis Pub/Sub | 多实例 WebSocket 广播 |
 | Caffeine + Redis | 本地热缓存 + L2 分布式缓存 |
+| single-flight | 行情快照组装：N 个会话同时问一个币只真采集一次，其余等同一份结果 |
+| 信号量 + 用户集合 | 对话并发闸门（全局 10 轮 + 每用户 1 轮），超限直接拒绝不排队 |
+| 熔断 + serve-stale | Binance 收到 429/418 记冷却期，期内不发请求改吐带年龄上限的旧数据（资金费 8h / 标记价 15min / 盘口不兜） |
 
 ---
 
@@ -486,7 +530,9 @@ cp .env.example .env.local    # 填 PG_USER / PG_PASSWORD（必填），其余�
 要点：
 
 - **共享库 / 总线**：三进程指向同一 PostgreSQL `wiib` + 同一 Redis，读同一份 `.env.local`；`INTERNAL_API_TOKEN` 天然一致（进程间 `/internal/**` 鉴权），不填走统一默认值。
-- **LLM 配置不在 yml**：唯一来源是 DB（`ai_runtime_config` + `ai_model_assignment`）。启动后用管理员账号进 Admin 页填 LLM（API Key + Base URL + 模型名，Base URL 不含 `/v1`）并给各功能位分配，即时生效、无需重启。
+- **LLM 配置不在 yml**，而且分两处，看是谁在烧钱：
+  - **平台位**（现只剩 `behavior` 一个）：DB 的 `ai_runtime_config` + `ai_model_assignment`，管理员进 Admin 页填 API Key + Base URL + 模型名（不含 `/v1`）并分配功能位，即时生效、无需重启。
+  - **用户 BYOK**：`ai_trader`（交易）与 `user_llm_config`（对话）两张表各存一份，用户在自己的页面上填。key 一律 AES-GCM 加密入库，密钥来自 `WIIB_TRADER_KEY_SECRET`（base64 的 32 字节）——**没配这个变量用户一保存就响亮失败**，绝不静默存明文。baseUrl 过 SSRF 校验（含 `100.64.0.0/10` 这类云厂商内网段）。
 - **quant 必须关掉 Spring AI 的 OpenAI 自动装配**（6 类全关，否则缺 api-key 拒绝启动）：
 
   ```yaml

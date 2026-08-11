@@ -4,7 +4,6 @@ import org.bsc.langgraph4j.state.AgentState;
 import org.bsc.langgraph4j.action.NodeAction;
 import com.alibaba.fastjson2.JSON;
 import com.mawai.wiibcommon.entity.ForceOrder;
-import com.mawai.wiibcommon.enums.KlineInterval;
 import com.mawai.wiibcommon.market.BinanceRestClient;
 import com.mawai.wiibquant.config.DeribitClient;
 import com.mawai.wiibcommon.market.DepthStreamCache;
@@ -71,18 +70,15 @@ public class CollectDataNode implements NodeAction<AgentState> {
         String fearGreedData = skipFearGreed ? preFetchedFearGreed : "{}";
         String dvolData = null;
         String bookSummaryData = null;
-        String[] intervals = {"1m", "3m", "5m", "15m", "1h", "4h", "1d"};
-        int[] limits = {
-                historyLimit("1m"),
-                historyLimit("3m"),
-                historyLimit("5m"),
-                historyLimit("15m"),
-                historyLimit("1h"),
-                180,
-                90
-        };
+        // 根数 = 下游真正读多少 + 递归指标收敛要多少。
+        // 收敛实测(2000根作基准)：ADX14 到 60 根收敛到 0.3%，ATR14 要 100 根，120 对三个短周期都够且有余量；
+        // 1h 只喂 price_change(最远回看 24 根)，4h/1d 的指标没有下游读取。
+        // 谁都不能低于 30——BuildFeaturesBuilder 那里 <30 根整条周期直接跳过，还会连带打质量标记。
+        String[] intervals = {"1m", "5m", "15m", "1h", "4h", "1d"};
+        int[] limits = {120, 120, 120, 48, 40, 40};
+        // 现货只出基差与领先滞后两个特征，各自回看不超过 5 根
         String[] spotIntervals = {"1m", "5m"};
-        int[] spotLimits = {120, 288};
+        int[] spotLimits = {40, 40};
 
         long deadlineNanos = System.nanoTime() + TimeUnit.SECONDS.toNanos(COLLECT_TIMEOUT_SECONDS);
         // 不能用 try-with-resources：ExecutorService.close() 会等待任务结束，可能抵消整轮 deadline。
@@ -99,8 +95,8 @@ public class CollectDataNode implements NodeAction<AgentState> {
                         () -> binanceRestClient.getFuturesKlines(symbol, intervals[idx], limits[idx], null));
             }
             @SuppressWarnings("unchecked")
-            Future<String>[] spotKlineFutures = new Future[2];
-            for (int i = 0; i < 2; i++) {
+            Future<String>[] spotKlineFutures = new Future[spotIntervals.length];
+            for (int i = 0; i < spotIntervals.length; i++) {
                 int idx = i;
                 spotKlineFutures[i] = executor.submit(
                         () -> binanceRestClient.getKlines(symbol, spotIntervals[idx], spotLimits[idx], null));
@@ -142,7 +138,7 @@ public class CollectDataNode implements NodeAction<AgentState> {
             klineMap.put(symbol, klines);
 
             Map<String, String> spotKlines = new HashMap<>();
-            for (int i = 0; i < 2; i++) {
+            for (int i = 0; i < spotIntervals.length; i++) {
                 String data = safeGet(spotKlineFutures[i], "现货K线" + spotIntervals[i], deadlineNanos);
                 if (data != null) spotKlines.put(spotIntervals[i], data);
             }
@@ -246,10 +242,6 @@ public class CollectDataNode implements NodeAction<AgentState> {
 
     private void putIfNotNull(Map<String, String> map, String key, String value) {
         if (value != null) map.put(key, value);
-    }
-
-    private static int historyLimit(String intervalCode) {
-        return KlineInterval.fromCode(intervalCode).getHistoryLimit();
     }
 
     private String buildForceOrdersJson(String symbol) {

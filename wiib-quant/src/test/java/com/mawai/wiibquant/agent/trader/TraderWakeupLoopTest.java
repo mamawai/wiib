@@ -12,6 +12,7 @@ import com.mawai.wiibcommon.entity.AiTraderDecision;
 import com.mawai.wiibcommon.market.BinanceRestClient;
 import com.mawai.wiibquant.agent.strategy.execution.SimTradeClient;
 import com.mawai.wiibquant.agent.toolkit.IndicatorToolkit;
+import com.mawai.wiibquant.agent.toolkit.KlineFetcher;
 import com.mawai.wiibquant.agent.toolkit.MarketDataService;
 import com.mawai.wiibquant.agent.toolkit.MarketToolkit;
 import com.mawai.wiibquant.agent.toolkit.NewsCache;
@@ -75,7 +76,7 @@ class TraderWakeupLoopTest {
 
     private final TraderWakeupRunner runner = new TraderWakeupRunner(
             modelFactory, new TraderPromptAssembler(), simTradeClient, binanceRestClient,
-            new IndicatorToolkit(binanceRestClient),
+            new IndicatorToolkit(new KlineFetcher(binanceRestClient, 60_000)),
             new MarketToolkit(mock(MarketDataService.class)),
             new NewsToolkit(mock(NewsCache.class)),
             traderMapper, decisionMapper, new TraderPlanStore(planMapper), requestService,

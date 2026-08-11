@@ -535,7 +535,8 @@ final class BuildFeaturesBuilder {
     private void addMissingTimeframeFlags(List<String> qualityFlags,
                                           Map<String, String> rawKlines,
                                           Map<String, Map<String, Object>> indicatorsByTf) {
-        for (String timeframe : List.of("1m", "3m", "5m", "15m", "1h", "4h", "1d")) {
+        // 周期表必须与 CollectDataNode 的采集列表一致：没去采的周期缺席不是故障，不该打质量标记
+        for (String timeframe : List.of("1m", "5m", "15m", "1h", "4h", "1d")) {
             if (!rawKlines.containsKey(timeframe)) {
                 qualityFlags.add("MISSING_TF_" + timeframe.toUpperCase());
                 continue;
