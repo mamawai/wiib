@@ -612,6 +612,19 @@ class TraderWakeupLoopTest {
         verify(traderMapper, never()).update(any(), any()); // 不计连败
     }
 
+    /** 手动唤醒落 MANUAL 行：回路同例行，但时间线要看得出扳机在人手里（借预算不足路径免 mock 模型）。 */
+    @Test
+    void manualWakeStampsManualKind() {
+        AiTrader t = trader();
+        runner.nowMs = () -> 1785171600000L + 3_580_000L; // 预算 15s < 30s → SKIPPED 落库
+
+        runner.wakeManual(t, 1785171600000L);
+
+        ArgumentCaptor<AiTraderDecision> dec = ArgumentCaptor.forClass(AiTraderDecision.class);
+        verify(decisionMapper).insert(dec.capture());
+        assertThat(dec.getValue().getKind()).isEqualTo(AiTraderDecision.KIND_MANUAL);
+    }
+
     /** 数据工具（klines等）没有自己的记录点，必须经轨迹hook进 actionsJson——"调用了哪些工具"要完整。 */
     @Test
     void dataToolCallsTracedIntoActions() {
@@ -665,7 +678,10 @@ class TraderWakeupLoopTest {
                 .contains("尚未收盘").contains("不因为被叫醒而必须动作");
     }
 
-    /** recent 回注窗口排除 REVIEW 行：复盘产出已进 memory 不许挤占 5 条窗口；ALERT 是真实交易决策必须保留 */
+    /**
+     * recent 回注窗口只认交易行白名单（TRADE/ALERT/MANUAL）：REVIEW/LEARN 的产出已经走
+     * memory/learning_notes 注入，混进 5 条窗口就是重复占字数；ALERT/MANUAL 是真实交易决策必须保留。
+     */
     @Test
     void recentDecisionsQueryExcludesReviewRows() {
         stubHealthyAccount();
@@ -678,9 +694,11 @@ class TraderWakeupLoopTest {
         ArgumentCaptor<com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<AiTraderDecision>> q =
                 ArgumentCaptor.forClass((Class) com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper.class);
         verify(decisionMapper).selectList(q.capture());
-        // 条件里必须带 kind <> REVIEW；不能反过来 kind = TRADE（会把 ALERT 行也挤出窗口）
-        assertThat(q.getValue().getSqlSegment()).contains("kind <>");
-        assertThat(q.getValue().getParamNameValuePairs()).containsValue(AiTraderDecision.KIND_REVIEW);
+        assertThat(q.getValue().getSqlSegment()).contains("kind IN");
+        var values = q.getValue().getParamNameValuePairs().values();
+        assertThat(values).contains(AiTraderDecision.KIND_TRADE,
+                AiTraderDecision.KIND_ALERT, AiTraderDecision.KIND_MANUAL);
+        assertThat(values).doesNotContain(AiTraderDecision.KIND_REVIEW, AiTraderDecision.KIND_LEARN);
     }
 
     @Test

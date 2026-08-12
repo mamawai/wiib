@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import {
   ArrowDownRight, ArrowUpRight, Bot, ChevronDown, ChevronLeft, ChevronUp, ClipboardList, GraduationCap, Loader2,
-  NotebookPen, RefreshCcw, Zap,
+  MousePointerClick, NotebookPen, RefreshCcw, Zap,
 } from 'lucide-react';
 import { traderApi } from '../api';
 import { STATUS_META } from './Arena';
@@ -108,6 +108,12 @@ function DecisionCard({ d }: { d: AiTraderDecisionView }) {
         {d.kind === 'ALERT' && (
           <span className="inline-flex items-center gap-0.5 text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-600">
             <Zap className="w-3 h-3" />波动警报
+          </span>
+        )}
+        {/* 手动唤醒凸显：扳机在主人手里（对话轨 wake_trader），不是例行K线节奏 */}
+        {d.kind === 'MANUAL' && (
+          <span className="inline-flex items-center gap-0.5 text-[10px] font-bold px-1.5 py-0.5 rounded bg-teal-500/15 text-teal-600">
+            <MousePointerClick className="w-3 h-3" />手动唤醒
           </span>
         )}
         <span className="text-[11px] num text-muted-foreground">{fmtDateTime(d.wakeTime)}</span>

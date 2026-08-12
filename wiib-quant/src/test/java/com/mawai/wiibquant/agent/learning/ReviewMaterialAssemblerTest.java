@@ -388,6 +388,27 @@ class ReviewMaterialAssemblerTest {
         assertThat(assembler.hasNewMaterial(7L, 1, FROM, TO)).isFalse();
     }
 
+    /**
+     * 素材判定必须是交易行白名单（TRADE/ALERT/MANUAL），不是 ne(REVIEW) 黑名单：
+     * LEARN 行每天必有一条，黑名单会让它天天充当"新素材"，无交易的日子复盘再也跳不过去。
+     */
+    @Test
+    void hasNewMaterial按交易行白名单过滤() {
+        when(decisionMapper.selectCount(any())).thenAnswer(inv -> {
+            com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<AiTraderDecision> w =
+                    inv.getArgument(0);
+            // MP 条件值懒求值：先拼一次 SQL，参数才落进 paramNameValuePairs
+            w.getTargetSql();
+            var values = w.getParamNameValuePairs().values();
+            assertThat(values).contains(AiTraderDecision.KIND_TRADE,
+                    AiTraderDecision.KIND_ALERT, AiTraderDecision.KIND_MANUAL);
+            assertThat(values).doesNotContain(AiTraderDecision.KIND_REVIEW, AiTraderDecision.KIND_LEARN);
+            return 1L;
+        });
+
+        assertThat(assembler.hasNewMaterial(7L, 1, FROM, TO)).isTrue();
+    }
+
     @Test
     void lastReviewReturnsNullWhenNone() {
         when(decisionMapper.selectOne(any())).thenReturn(null);

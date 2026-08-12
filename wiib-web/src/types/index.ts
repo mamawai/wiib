@@ -815,10 +815,10 @@ export interface AiTraderDecisionView {
   wakeTime: number;
   intervalCode: string;
   /**
-   * TRADE=例行K线唤醒 ALERT=波动哨兵警报唤醒 REVIEW=每日复盘（reasoning=复盘全文，无equity）
-   * LEARN=向同侪学习（reasoning=学习全文，无equity）
+   * TRADE=例行K线唤醒 ALERT=波动哨兵警报唤醒 MANUAL=主人手动唤醒（对话轨 wake_trader）
+   * REVIEW=每日复盘（reasoning=复盘全文，无equity） LEARN=向同侪学习（reasoning=学习全文，无equity）
    */
-  kind: 'TRADE' | 'ALERT' | 'REVIEW' | 'LEARN';
+  kind: 'TRADE' | 'ALERT' | 'MANUAL' | 'REVIEW' | 'LEARN';
   status: 'OK' | 'ERROR' | 'SKIPPED';
   equity: number | null;
   reasoning: string | null;

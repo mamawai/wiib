@@ -78,12 +78,17 @@ public class ReviewMaterialAssembler {
                 .last("LIMIT 1"));
     }
 
-    /** 窗口内有无新交易素材（TRADE/ALERT 的 OK 行）——无素材跳过复盘，不白烧钱。 */
+    /**
+     * 窗口内有无新交易素材（TRADE/ALERT/MANUAL 的 OK 行）——无素材跳过复盘，不白烧钱。
+     * 白名单不是黑名单：LEARN 行每天必有一条，用 ne(REVIEW) 排除的话它会天天充当"新素材"，
+     * 无交易的日子复盘再也跳不过去
+     */
     public boolean hasNewMaterial(long traderId, int roundNo, long fromMs, long toMs) {
         Long n = decisionMapper.selectCount(new LambdaQueryWrapper<AiTraderDecision>()
                 .eq(AiTraderDecision::getTraderId, traderId)
                 .eq(AiTraderDecision::getRoundNo, roundNo)
-                .ne(AiTraderDecision::getKind, AiTraderDecision.KIND_REVIEW)
+                .in(AiTraderDecision::getKind, AiTraderDecision.KIND_TRADE,
+                        AiTraderDecision.KIND_ALERT, AiTraderDecision.KIND_MANUAL)
                 .eq(AiTraderDecision::getStatus, AiTraderDecision.STATUS_OK)
                 .gt(AiTraderDecision::getWakeTime, fromMs)
                 .le(AiTraderDecision::getWakeTime, toMs));
@@ -263,10 +268,13 @@ public class ReviewMaterialAssembler {
     }
 
     private String timelineBlock(AiTrader t, long fromMs, long toMs) {
+        // 白名单同 hasNewMaterial：时间线是交易行为的摘编，LEARN/REVIEW 进来会虚增"唤醒轮数"，
+        // 保守度自检的对照物就失真了
         List<AiTraderDecision> rows = decisionMapper.selectList(new LambdaQueryWrapper<AiTraderDecision>()
                 .eq(AiTraderDecision::getTraderId, t.getId())
                 .eq(AiTraderDecision::getRoundNo, t.getRoundNo())
-                .ne(AiTraderDecision::getKind, AiTraderDecision.KIND_REVIEW)
+                .in(AiTraderDecision::getKind, AiTraderDecision.KIND_TRADE,
+                        AiTraderDecision.KIND_ALERT, AiTraderDecision.KIND_MANUAL)
                 .gt(AiTraderDecision::getWakeTime, fromMs)
                 .le(AiTraderDecision::getWakeTime, toMs)
                 .orderByAsc(AiTraderDecision::getWakeTime));

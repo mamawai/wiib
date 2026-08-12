@@ -329,7 +329,7 @@ public class TraderScheduler {
             try {
                 slots.acquire();
                 try {
-                    runner.wake(trader, boundary);
+                    runner.wakeManual(trader, boundary);
                 } finally {
                     slots.release();
                 }

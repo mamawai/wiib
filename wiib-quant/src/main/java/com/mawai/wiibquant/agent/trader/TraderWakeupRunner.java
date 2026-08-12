@@ -106,9 +106,19 @@ public class TraderWakeupRunner {
     }
 
     public void wake(AiTrader trader, long boundaryTime) {
+        wake(trader, boundaryTime, AiTraderDecision.KIND_TRADE);
+    }
+
+    /** 手动唤醒（对话轨 wake_trader，已过 HITL）：回路与例行完全相同，只是决策行标 MANUAL——时间线要看得出扳机在人手里。 */
+    public void wakeManual(AiTrader trader, long boundaryTime) {
+        wake(trader, boundaryTime, AiTraderDecision.KIND_MANUAL);
+    }
+
+    private void wake(AiTrader trader, long boundaryTime, String kind) {
         long intervalMs = TraderScheduler.INTERVAL_MS.getOrDefault(trader.getIntervalCode(), 300_000L);
         long budgetSeconds = wakeBudgetSeconds(boundaryTime, intervalMs, nowMs.getAsLong());
         AiTraderDecision decision = baseDecision(trader, boundaryTime);
+        decision.setKind(kind);
         if (budgetSeconds < MIN_WAKE_SECONDS) {
             // 事件迟到太多：与其用残余时间仓促决策，不如放弃等下一根新鲜K线（不算失败不计连败）
             decision.setStatus(AiTraderDecision.STATUS_SKIPPED);
@@ -210,12 +220,14 @@ public class TraderWakeupRunner {
                 planStore, requestService,
                 new TradeTools.WakeCtx(trader.getId(), trader.getRoundNo(), boundaryTime, risk));
 
-        // REVIEW 行排除在回注窗口外（复盘产出已进 memory）；ALERT 是真实交易决策必须保留——
-        // 警报轮可能刚动过仓位，开场白的"上次唤醒"也取自本列表第一条
+        // 回注窗口只认交易决策行（白名单：例行/警报/手动）——REVIEW/LEARN 的产出已经走
+        // memory/learning_notes 注入，再进最近决策就是重复占字数；ALERT/MANUAL 是真实交易
+        // 决策必须保留——警报轮可能刚动过仓位，开场白的"上次唤醒"也取自本列表第一条
         List<AiTraderDecision> recent = decisionMapper.selectList(new LambdaQueryWrapper<AiTraderDecision>()
                 .eq(AiTraderDecision::getTraderId, trader.getId())
                 .eq(AiTraderDecision::getRoundNo, trader.getRoundNo())
-                .ne(AiTraderDecision::getKind, AiTraderDecision.KIND_REVIEW)
+                .in(AiTraderDecision::getKind, AiTraderDecision.KIND_TRADE,
+                        AiTraderDecision.KIND_ALERT, AiTraderDecision.KIND_MANUAL)
                 .lt(AiTraderDecision::getWakeTime, boundaryTime)
                 .orderByDesc(AiTraderDecision::getWakeTime)
                 .last("LIMIT " + RECENT_DECISIONS));

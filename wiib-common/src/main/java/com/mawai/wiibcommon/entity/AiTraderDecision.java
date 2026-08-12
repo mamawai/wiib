@@ -20,6 +20,7 @@ public class AiTraderDecision {
 
     public static final String KIND_TRADE = "TRADE";
     public static final String KIND_ALERT = "ALERT";
+    public static final String KIND_MANUAL = "MANUAL";
     public static final String KIND_REVIEW = "REVIEW";
     public static final String KIND_LEARN = "LEARN";
 
@@ -36,8 +37,8 @@ public class AiTraderDecision {
     private String intervalCode;
 
     /**
-     * TRADE=例行K线唤醒 ALERT=波动哨兵警报唤醒 REVIEW=reviewer复盘（reasoning=复盘全文，无equity）
-     * LEARN=learning agent 向同侪学习（reasoning=学习全文，无equity）
+     * TRADE=例行K线唤醒 ALERT=波动哨兵警报唤醒 MANUAL=主人手动唤醒（对话轨 wake_trader，回路与例行相同）
+     * REVIEW=reviewer复盘（reasoning=复盘全文，无equity） LEARN=learning agent 向同侪学习（reasoning=学习全文，无equity）
      */
     private String kind;
 

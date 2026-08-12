@@ -150,7 +150,7 @@ public class TraderChatService {
                 .fluentPut("hasTrader", true)
                 .fluentPut("roundNo", t.getRoundNo())
                 .fluentPut("decisions", arr)
-                .fluentPut("kindNote", "TRADE=K线收盘唤醒 ALERT=波动警报唤醒 REVIEW=每日复盘（reasoning是复盘全文） LEARN=向同侪学习（reasoning是学习全文）")
+                .fluentPut("kindNote", "TRADE=K线收盘唤醒 ALERT=波动警报唤醒 MANUAL=主人手动唤醒 REVIEW=每日复盘（reasoning是复盘全文） LEARN=向同侪学习（reasoning是学习全文）")
                 .toJSONString();
     }
 
