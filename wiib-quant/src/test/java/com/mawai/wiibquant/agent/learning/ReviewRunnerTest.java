@@ -122,6 +122,8 @@ class ReviewRunnerTest {
         // REVIEW 行存【本期复盘】段（不含记忆段），不记 equity（净值曲线 isNotNull 过滤天然不受影响）
         assertThat(d.getReasoning()).contains("逐笔教训").contains("观望对账").doesNotContain("旧毛病仍在");
         assertThat(d.getEquity()).isNull();
+        // 学习快照随行存档：memory 是滚动覆盖的，历史版本只活在这一列
+        assertThat(d.getMemoryAfter()).isEqualTo("旧毛病仍在：追高。下期只做回踩确认。");
         // 用量照记：复盘也烧用户的钱
         assertThat(d.getModelCalls()).isEqualTo(1);
         assertThat(d.getPromptTokens()).isEqualTo(1000L);
@@ -169,6 +171,13 @@ class ReviewRunnerTest {
         assertThat(all).contains("这篇复盘是滚动的").contains("只会看到这一篇")
                 .contains("仍然成立的教训与纪律要继承");
         assertThat(all).contains("独立看懂");
+        // 学习宗旨四件套：教训二分类（复盘过程不复盘运气，防"亏一次就不敢开仓"）、
+        // 错过与亏损同罪+保守度自检（对称记账）、纪律可证伪淘汰（防只进不出）、
+        // 记忆两栏带样本数（防单次样本被当铁律盲信）
+        assertThat(all).contains("【决策错】").contains("【运气差】").contains("同样条件下次照做");
+        assertThat(all).contains("该行动没行动也是错误").contains("保守度自检");
+        assertThat(all).contains("削弱").contains("不许只进不出");
+        assertThat(all).contains("【已验证纪律】").contains("【待验证假设】").contains("样本数");
     }
 
     @Test
@@ -183,6 +192,7 @@ class ReviewRunnerTest {
         verify(decisionMapper).insert(dec.capture());
         assertThat(dec.getValue().getStatus()).isEqualTo(AiTraderDecision.STATUS_OK);
         assertThat(dec.getValue().getReasoning()).contains("格式失守");
+        assertThat(dec.getValue().getMemoryAfter()).isNull();   // 没产出记忆段，快照列同样空着
         // 降级安全：一次格式失守不许污染记忆
         verify(traderMapper, never()).update(any(), any());
     }

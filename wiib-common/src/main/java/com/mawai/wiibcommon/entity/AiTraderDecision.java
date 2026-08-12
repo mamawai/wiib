@@ -63,6 +63,12 @@ public class AiTraderDecision {
 
     private String error;
 
+    /**
+     * 仅 REVIEW 行：本期学习完的记忆快照存档（学习演进史，append-only）。
+     * ai_trader.memory 是滚动覆盖的"生效版本"，历史版本只活在这一列。
+     */
+    private String memoryAfter;
+
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdAt;
 }

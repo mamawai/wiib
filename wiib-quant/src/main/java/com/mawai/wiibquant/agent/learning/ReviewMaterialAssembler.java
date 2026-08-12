@@ -270,6 +270,7 @@ public class ReviewMaterialAssembler {
         List<TimelineEntry> entries = new ArrayList<>();
         int errors = 0;
         int skipped = 0;
+        int opens = 0;
         for (AiTraderDecision d : rows) {
             if (AiTraderDecision.STATUS_ERROR.equals(d.getStatus())) {
                 errors++;
@@ -281,6 +282,8 @@ public class ReviewMaterialAssembler {
             }
             String acts = actionSummary(d.getActionsJson());
             boolean hasAction = !acts.isEmpty();
+            // 数开仓动作按摘要文本认工具名：actionSummary 已过滤成 tool(args) 形态，误中不了正文
+            opens += countOccurrences(acts, "open_position(");
             String tag = AiTraderDecision.KIND_ALERT.equals(d.getKind()) ? "[警报] " : "";
             String line = "- " + TIME_FMT.format(Instant.ofEpochMilli(d.getWakeTime())) + " " + tag
                     + (hasAction ? acts + " ｜ " : "") + conclusion(d.getReasoning(), hasAction);
@@ -288,6 +291,10 @@ public class ReviewMaterialAssembler {
         }
 
         StringBuilder sb = new StringBuilder("【决策时间线摘编】（时间升序；动作行含工具摘要）\n");
+        // 活动统计给保守度自检当对照物：唤醒多动作少是"没信号"还是"吓缩了"，得先有数才能问
+        sb.append("本期活动：唤醒 ").append(rows.size()).append(" 轮，动作轮 ")
+                .append(entries.stream().filter(TimelineEntry::hasAction).count())
+                .append("，开仓动作 ").append(opens).append(" 次\n");
         if (entries.size() > MAX_TIMELINE_ENTRIES) {
             // 动作行全保、无动作 HOLD 从最新往回补足额度：复盘的主菜是动作，观望看最近的就够
             int budget = MAX_TIMELINE_ENTRIES - (int) entries.stream().filter(TimelineEntry::hasAction).count();
@@ -513,6 +520,14 @@ public class ReviewMaterialAssembler {
 
     private static String nullSafe(String s) {
         return s == null ? "—" : s;
+    }
+
+    private static int countOccurrences(String haystack, String needle) {
+        int count = 0;
+        for (int i = haystack.indexOf(needle); i >= 0; i = haystack.indexOf(needle, i + needle.length())) {
+            count++;
+        }
+        return count;
     }
 
     private static String humanize(long ms) {

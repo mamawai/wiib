@@ -265,6 +265,8 @@ class ReviewMaterialAssemblerTest {
         assertThat(m.timelineBlock()).contains("1h收盘跌破100500减仓");
         assertThat(m.timelineBlock()).contains("警报");
         assertThat(m.timelineBlock()).contains("1 轮 ERROR");
+        // 活动统计头：保守度自检的对照物（唤醒计全部轮含 ERROR，动作轮/开仓只数 OK 行）
+        assertThat(m.timelineBlock()).contains("本期活动：唤醒 4 轮，动作轮 1，开仓动作 1 次");
     }
 
     /** 转成待确认请求的动作没有成交，摘编里必须标出来——否则复盘会把"提了个请求"当成"平了仓" */
