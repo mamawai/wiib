@@ -628,7 +628,7 @@ COMMENT ON TABLE quant_narrative_verification IS '叙事对账:Judge三情景概
 COMMENT ON COLUMN quant_narrative_verification.range_cut_bps IS '实际情景判定界=研判时点前90天|H12收益|下三分位(基率≈1/3均分);对账时从K线现算,只用closeTime前数据保PIT';
 COMMENT ON COLUMN quant_narrative_verification.status IS 'VERIFIED=已对账/SKIPPED=不可对账(缺档界或情景损坏或K线缺口超宽限)';
 
--- ============ workbench_chat_message：工作台对话历史（展示用；续聊上下文走 langgraph4j 的 lg4j* 表） ============
+-- ============ workbench_chat_message：工作台对话历史（展示用；续聊上下文走 workbench_chat_context） ============
 CREATE TABLE IF NOT EXISTS workbench_chat_message (
     id          BIGSERIAL PRIMARY KEY,
     session_id  VARCHAR(80) NOT NULL,
@@ -639,7 +639,19 @@ CREATE TABLE IF NOT EXISTS workbench_chat_message (
 );
 CREATE INDEX IF NOT EXISTS idx_wb_chat_session ON workbench_chat_message (session_id, id);
 CREATE INDEX IF NOT EXISTS idx_wb_chat_user ON workbench_chat_message (user_id, id DESC);
-COMMENT ON TABLE workbench_chat_message IS '工作台对话历史(展示用):user/assistant按会话落库,session_id与lg4jthread.thread_name同值';
+COMMENT ON TABLE workbench_chat_message IS '工作台对话历史(展示用):user/assistant按会话落库,session_id与workbench_chat_context同值';
+
+-- ============ workbench_chat_context：工作台会话模型侧上下文（续聊主链；一会话一行整体替换） ============
+-- 替代 langgraph4j PostgresSaver 的 lg4j* 表：那套图每走一步存一行完整快照（一轮 8 行、同一份历史重复存），
+-- 而续聊只消费最新一份。这里只存那一份：每轮对话结束用 summarizer 的最终 state 整体覆盖
+CREATE TABLE IF NOT EXISTS workbench_chat_context (
+    session_id  VARCHAR(80) PRIMARY KEY,
+    user_id     BIGINT NOT NULL,
+    state       BYTEA NOT NULL,
+    updated_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+COMMENT ON TABLE workbench_chat_context IS '工作台会话模型侧上下文:完整消息历史(含专家结论/压缩摘要/工具配对),每轮结束整体替换;删会话随展示表一并清';
+COMMENT ON COLUMN workbench_chat_context.state IS 'StateSerializer(Jackson)序列化的{"messages":[...]}:与叶子agent同一序列化器,保Spring AI Message多态与tool_call配对往返无损';
 
 -- ============ workbench_memory：工作台跨会话长期记忆（规则化写入，不烧 LLM） ============
 -- 每用户最多 WATCH_SYMBOLS 条，召回只按 user_id 走主键前缀，量小不另建索引
