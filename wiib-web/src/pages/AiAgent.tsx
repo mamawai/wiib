@@ -1,18 +1,21 @@
 import { useState, useCallback } from 'react';
 import type { ReactNode } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { aiAgentApi } from '../api';
 import { useToast } from '../components/ui/use-toast';
 import { Button } from '../components/ui/button';
-import { Workbench } from '../components/workbench/Workbench';
+import { MarketPanel } from '../components/workbench/MarketPanel';
+import { ModelConfig } from '../components/ModelConfig';
 import { cn } from '../lib/utils';
 import {
   BarChart3, Bomb, Brain, BrainCircuit, CheckCircle2, Coins, Dices, Gem,
-  Rocket, ShieldAlert, Target, User, Zap,
+  KeyRound, Rocket, ShieldAlert, Target, User, Zap,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { BehaviorAnalysisReport } from '../types';
 
-type Tab = 'behavior' | 'workbench';
+const TABS = ['market', 'behavior', 'config'] as const;
+type Tab = typeof TABS[number];
 
 const RISK_TONE: Record<string, string> = {
   HIGH: 'bg-loss/15 text-loss',
@@ -62,8 +65,13 @@ function pnl(v: number): { text: string; tone: 'gain' | 'loss' } {
 
 export function AiAgent() {
   const { toast } = useToast();
-  // 工作台数据区全员可看；Supervisor 对话也已对全体开放，各人烧自己的 key（门禁改成"配没配端点"，见 Workbench）
-  const [tab, setTab] = useState<Tab>('workbench');
+  // Tab 落 URL（?tab=config 供对话气泡的"去配置"直达）；非法值当默认 market
+  const [searchParams, setSearchParams] = useSearchParams();
+  const rawTab = searchParams.get('tab') as Tab | null;
+  const tab: Tab = rawTab && TABS.includes(rawTab) ? rawTab : 'market';
+  const setTab = useCallback((t: Tab) => {
+    setSearchParams(t === 'market' ? {} : { tab: t }, { replace: true });
+  }, [setSearchParams]);
   const [behaviorLoading, setBehaviorLoading] = useState(false);
   const [behaviorReport, setBehaviorReport] = useState<BehaviorAnalysisReport | null>(null);
 
@@ -81,42 +89,44 @@ export function AiAgent() {
   }, [toast]);
 
   return (
-    <div className="page-shell p-4 md:p-6 space-y-4">
+    // 内容全是单列窄块（对话拆走后没有宽布局了），整页居中一个 3xl 列，不然全贴左边
+    <div className="page-shell p-4 md:p-6">
+      <div className="max-w-3xl mx-auto space-y-4">
       <div className="rounded-lg border border-border bg-card px-4 py-2.5 flex items-center gap-2.5 text-primary text-xs font-bold">
         <Zap className="w-4 h-4 shrink-0" />
         投资有风险，当前分析结果仅供参考不构成任何建议
       </div>
 
-      {/* Tab：内凹滑槽 + 浮起选中块（拟物分段控件） */}
-      <div className="border border-border bg-card-2 rounded-lg p-1 flex max-w-md">
-        <button
-          onClick={() => setTab('workbench')}
-          className={cn(
-            'flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-bold transition-all',
-            tab === 'workbench' ? 'bg-card border border-border bg-background text-primary' : 'text-muted-foreground hover:text-foreground',
-          )}
-        >
-          <BrainCircuit className="w-4 h-4" />
-          研判工作台
-        </button>
-        <button
-          onClick={() => setTab('behavior')}
-          className={cn(
-            'flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-bold transition-all',
-            tab === 'behavior' ? 'bg-card border border-border bg-background text-primary' : 'text-muted-foreground hover:text-foreground',
-          )}
-        >
-          <User className="w-4 h-4" />
-          行为分析
-        </button>
+      {/* Tab：内凹滑槽 + 浮起选中块（拟物分段控件）。对话已拆去全站悬浮气泡（ChatDock） */}
+      <div className="border border-border bg-card-2 rounded-lg p-1 flex">
+        {([
+          { key: 'market', icon: BrainCircuit, label: '市场研判' },
+          { key: 'behavior', icon: User, label: '行为分析' },
+          { key: 'config', icon: KeyRound, label: '模型配置' },
+        ] as { key: Tab; icon: LucideIcon; label: string }[]).map(({ key, icon: Icon, label }) => (
+          <button
+            key={key}
+            onClick={() => setTab(key)}
+            className={cn(
+              'flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-bold transition-all',
+              tab === key ? 'bg-card border border-border bg-background text-primary' : 'text-muted-foreground hover:text-foreground',
+            )}
+          >
+            <Icon className="w-4 h-4" />
+            {label}
+          </button>
+        ))}
       </div>
 
-      {/* 研判工作台（P7）：管理员左对话右时间线；普通用户纯数据视图 */}
-      {tab === 'workbench' && <Workbench />}
+      {/* 市场研判：最新深研判数据视图（对话在气泡里，历史时间线已删） */}
+      {tab === 'market' && <MarketPanel />}
 
-      {/* 行为分析（behavior agent）：窄容器保读感 */}
+      {/* 模型配置（BYOK）：对话 agent + 交易员 agent 两份端点 */}
+      {tab === 'config' && <ModelConfig />}
+
+      {/* 行为分析（behavior agent） */}
       {tab === 'behavior' && (
-        <div className="space-y-4 max-w-5xl">
+        <div className="space-y-4">
           {!behaviorReport || !behaviorReport.overview ? (
             <div className="rounded-lg pt-card p-8 sm:p-12 text-center">
               <div className={cn(
@@ -274,6 +284,7 @@ export function AiAgent() {
           )}
         </div>
       )}
+      </div>
     </div>
   );
 }

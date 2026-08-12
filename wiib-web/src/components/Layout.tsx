@@ -8,6 +8,7 @@ import { Button } from './ui/button';
 import { NotificationBell } from './NotificationBell';
 import { TickerStrip } from './TickerStrip';
 import { OfflineBanner } from './OfflineBanner';
+import { ChatDock } from './workbench/ChatDock';
 import { cn } from '../lib/utils';
 import {
   Home, Briefcase, LogOut, LogIn, TrendingUp, Sun, Moon,
@@ -169,6 +170,9 @@ export function Layout({ children }: Props) {
         <BottomNavItem to="/me" icon={<User className="w-5 h-5" />} label="我的" />
         <BottomNavItem to="/ai" icon={<Brain className="w-5 h-5" />} label="AI" />
       </nav>
+
+      {/* 全站悬浮研判对话（BYOK）：对话要登录，游客不给气泡 */}
+      {user && <ChatDock />}
     </div>
   );
 }

@@ -16,10 +16,11 @@ export const CHAT_ERROR = {
  */
 
 export type ChatItem =
-  | { kind: 'user'; content: string }
+  // queued=北辰忙时先上屏排队，本轮结束自动真发（同会话同 checkpoint，后端每用户并发=1，做不了真并发）
+  | { kind: 'user'; content: string; queued?: boolean }
   | { kind: 'assistant'; content: string; streaming: boolean }
-  // 专家过程流：弱化+可折叠展示，supervisor 答案开始后自动收起（不落历史）
-  | { kind: 'expert'; agent: string; content: string; streaming: boolean; collapsed: boolean }
+  // 专家过程流（不落历史）：视图层收进"工作过程"轨，折叠状态归视图管
+  | { kind: 'expert'; agent: string; content: string; streaming: boolean }
   | { kind: 'agent'; node: string; agent: string }
   // 长工具阶段进度（深研判等）：最新一条亮着转圈，后续事件到达即熄灭
   | { kind: 'progress'; text: string; active: boolean }
@@ -32,7 +33,7 @@ export interface ChatState {
   loading: boolean;
   /** true=刷新后发现会话还在后台跑（无 token 流，轮询等结果） */
   background: boolean;
-  /** true=后端说没配 LLM 或配置不可用，UI 该把配置弹窗顶出来而不是干显示一行红字 */
+  /** true=后端说没配 LLM 或配置不可用，面板显示"去配置"引导条而不是干显示一行红字 */
   needsConfig: boolean;
   sessionId: string | null;
 }
@@ -51,6 +52,8 @@ const listeners = new Set<() => void>();
 let abortCtrl: AbortController | null = null;
 let pollTimer: number | null = null;
 let initialized = false;
+/** 北辰忙时排队的待发消息（气泡已上屏，只差真发） */
+let sendQueue: string[] = [];
 
 function set(patch: Partial<ChatState>) {
   state = { ...state, ...patch };
@@ -105,12 +108,12 @@ function handleEvent(e: WorkbenchEvent) {
               return next;
             }
           }
-          next.push({ kind: 'expert', agent: e.agent, content: e.text, streaming: true, collapsed: false });
+          next.push({ kind: 'expert', agent: e.agent, content: e.text, streaming: true });
           return next;
         }
-        // 答案流开始：专家过程全部收起（可手动点开回看）
+        // 答案流开始：专家过程停止流式（视图层据此把工作过程轨默认收起）
         const next = base.map(it =>
-          it.kind === 'expert' && it.streaming ? { ...it, streaming: false, collapsed: true } : it,
+          it.kind === 'expert' && it.streaming ? { ...it, streaming: false } : it,
         );
         const last = next[next.length - 1];
         if (last?.kind === 'assistant' && last.streaming) {
@@ -131,7 +134,7 @@ function handleEvent(e: WorkbenchEvent) {
       updateItems(prev => {
         const next = deactivateProgress(prev).map(it => {
           if (it.kind === 'assistant' && it.streaming) return { ...it, content: it.content || e.answer, streaming: false };
-          if (it.kind === 'expert' && it.streaming) return { ...it, streaming: false, collapsed: true };
+          if (it.kind === 'expert' && it.streaming) return { ...it, streaming: false };
           return it;
         });
         // 答案流没出现过（如调用上限截停）：done 里的兜底答案补成气泡，不然这轮白问
@@ -170,7 +173,10 @@ function startPolling(sid: string) {
           stopPolling();
           const msgs = await workbenchApi.sessionMessages(sid);
           if (abortCtrl) return;
-          set({ items: toItems(msgs), loading: false, background: false });
+          // 历史回放会整体重建 items：排队气泡还没进后端历史，得补回尾部再续发
+          const queued = sendQueue.map(m => ({ kind: 'user' as const, content: m, queued: true }));
+          set({ items: [...toItems(msgs), ...queued], loading: false, background: false });
+          drainQueue();
         }
       } catch { /* 网络抖动下轮再试 */ }
     })();
@@ -178,18 +184,26 @@ function startPolling(sid: string) {
 }
 
 async function send(message: string, opts?: { silent?: boolean }) {
-  if (!message.trim() || state.loading) return;
+  const msg = message.trim();
+  if (!msg) return;
+  // 北辰忙着：消息上屏排队，本轮结束自动续发。真并发做不了——
+  // 后端并发闸门每用户 1，且同会话两条图并跑会互相踩 checkpoint
+  if (state.loading) {
+    sendQueue.push(msg);
+    updateItems(prev => [...prev, { kind: 'user', content: msg, queued: true }]);
+    return;
+  }
   stopPolling();
-  if (!opts?.silent) updateItems(prev => [...prev, { kind: 'user', content: message }]);
+  if (!opts?.silent) updateItems(prev => [...prev, { kind: 'user', content: msg }]);
   set({ loading: true, background: false });
   const abort = new AbortController();
   abortCtrl = abort;
   try {
-    await workbenchApi.chat(state.sessionId, message, handleEvent, abort.signal);
+    await workbenchApi.chat(state.sessionId, msg, handleEvent, abort.signal);
   } catch (err) {
     if (!abort.signal.aborted) {
       updateItems(prev => [...prev, { kind: 'error', message: (err as Error).message || '连接中断，可直接重问续聊' }]);
-      // 配置类错误光显一行红字没用，用户得知道去哪儿改——置标记让配置弹窗自己顶出来
+      // 配置类错误光显一行红字没用，用户得知道去哪儿改——置标记让面板亮"去配置"引导条
       const code = err instanceof ApiError ? err.code : 0;
       if (code === CHAT_ERROR.CONFIG_MISSING || code === CHAT_ERROR.CONFIG_INVALID) {
         set({ needsConfig: true });
@@ -200,15 +214,28 @@ async function send(message: string, opts?: { silent?: boolean }) {
     if (abortCtrl === abort) {
       abortCtrl = null;
       set({ loading: false });
+      drainQueue();
     }
   }
 }
 
-/** 载入会话：消息回放 + 运行状态感知（还在跑→置灰输入并轮询等结果） */
+/** 续发排队消息：气泡已上屏，去掉排队标记后以 silent 真发（失败各自报错，不阻塞后面的） */
+function drainQueue() {
+  const next = sendQueue.shift();
+  if (next == null) return;
+  updateItems(prev => {
+    const i = prev.findIndex(it => it.kind === 'user' && it.queued);
+    return i < 0 ? prev : prev.map((it, j) => (j === i && it.kind === 'user' ? { ...it, queued: false } : it));
+  });
+  void send(next, { silent: true });
+}
+
+/** 载入会话：消息回放 + 运行状态感知（还在跑→轮询等结果，新消息照常可排队） */
 async function openSession(sid: string) {
   abortCtrl?.abort();
   abortCtrl = null;
   stopPolling();
+  sendQueue = [];   // 排队的消息属于上一个会话语境，跟着带过去只会答非所问
   const [msgs, running] = await Promise.all([
     workbenchApi.sessionMessages(sid),
     workbenchApi.sessionStatus(sid).catch(() => false),
@@ -235,6 +262,7 @@ function newSession() {
   abortCtrl?.abort();
   abortCtrl = null;
   stopPolling();
+  sendQueue = [];
   setSession(null);
   set({ items: [], loading: false, background: false });
 }
@@ -263,19 +291,10 @@ export const chatStore = {
   clearIfCurrent(sid: string) {
     if (state.sessionId === sid) newSession();
   },
-  toggleExpert(index: number) {
-    updateItems(prev => prev.map((it, i) =>
-      i === index && it.kind === 'expert' ? { ...it, collapsed: !it.collapsed } : it,
-    ));
-  },
   pushError(message: string) {
     updateItems(prev => [...prev, { kind: 'error', message }]);
   },
-  /** 引导卡的"去配置"按钮用它把弹窗顶出来 */
-  markNeedsConfig() {
-    set({ needsConfig: true });
-  },
-  /** 弹窗被顶出来之后必须清掉，否则用户关掉弹窗会被反复顶开 */
+  /** 引导条点掉/点了去配置后清标记，否则一直挂着 */
   clearNeedsConfig() {
     set({ needsConfig: false });
   },
