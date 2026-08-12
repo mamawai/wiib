@@ -185,14 +185,14 @@ flowchart TD
 
 平台跑着五套独立的 LLM 装置，各有各的形态与停止条件。**它们之间只经 PostgreSQL 解耦**——没有任何一个直接调用另一个，加一套新的不用改旧的。
 
-图引擎 **langgraph4j 1.8.20**（spring-ai-alibaba 的上游）。选型只有一条准则：**固定步骤写死成代码，开放决策才交给模型循环**。所以已落地的四套里只有两套是真 agent。
+图引擎 **langgraph4j 1.8.20**（spring-ai-alibaba 的上游），只用在叶子 ReactAgent 上。选型只有一条准则：**固定步骤写死成代码，开放决策才交给模型循环**。五套里三套是真 agent（trader / learning / chat），另两套是一次性 workflow。
 
 | 装置 | 形态 | 工具 | 循环 | 触发 | 模型来源 | 产出 |
 |---|---|:---:|:---:|---|---|---|
 | **trader agent** | ReactAgent | 15 | ✓ 上限 8 次调用 | 每根 K 线收盘 / 波动警报 | 主人的 key | 真实开平仓 + 决策行 |
 | **reviewer workflow** | 单次调用 | 0 | ✗ | 日线边界 | 同 trader | 复盘笔记 |
-| **learning agent** | ReactAgent *(规划中)* | 只读同侪 | ✓ | 全体复盘之后 | 同 trader | 学习笔记 |
-| **chat agent** | StateGraph + 子 agent | 分层 | ✓ 带回环 | 用户提问 | 用户的 key | 流式回答 |
+| **learning agent** | ReactAgent | 1（只读同侪） | ✓ 上限 8 次调用 | 全体复盘之后（屏障） | 同 trader | 学习笔记 |
+| **chat agent** | 平铺编排 + ReactAgent 叶子 | 分层 | ✓ 带回环 | 用户提问 | 用户的 key | 流式回答 |
 | **behavior workflow** | 单次调用 | 0 | ✗ | 用户点「分析我」 | 平台配置 | 行为画像报告 |
 
 **模型来源两条轨**：交易与对话全部 **BYOK**（用户自带 key，AES-GCM 加密存库），而且是**两份独立配置**——trader 一天自动跑几十上百轮要便宜稳，对话是按需的深度研判要强模型，绑一起会逼用户在两个诉求里二选一。平台自己只为 `behavior` 一个功能位建模型（`ai_runtime_config` + `ai_model_assignment`）。
@@ -209,8 +209,8 @@ flowchart TB
         direction TB
         TA["<b>trader agent</b><br/>ReactAgent · 交易+数据工具<br/>每根 K 线一次决策"]
         RW["<b>reviewer workflow</b><br/>单次调用 · 无工具<br/>自己看自己"]
-        LA["<b>learning agent</b>（规划中）<br/>ReactAgent · 只读同侪<br/>向别人学"]
-        CA["<b>chat agent</b><br/>结构化路由 + 子 agent 并行<br/>研判工作台"]
+        LA["<b>learning agent</b><br/>ReactAgent · 只读同侪<br/>向别人学"]
+        CA["<b>chat agent</b><br/>平铺编排 + 专家叶子并行<br/>研判工作台"]
     end
     DB[("PostgreSQL<br/>ai_trader · ai_trader_decision<br/>ai_trader_plan")]
     SIM["wiib-sim<br/>模拟盘账本<br/>唯一事实源"]
@@ -219,13 +219,13 @@ flowchart TB
     TA <-->|"开平仓 · 持仓查询"| SIM
     DB -->|"四块硬事实（代码算好）"| RW
     RW -->|"复盘笔记 → memory"| DB
-    DB -.->|"同侪的复盘/学习笔记/开仓论点"| LA
-    LA -.->|"学习笔记"| DB
-    DB ==>|"注入：系统提示词 + 复盘笔记<br/>（学习笔记那份等 learning 落地）"| TA
-    CA -.->|"将来只读接入<br/>（读 memory + REVIEW 行，接口已就位）"| DB
+    DB -->|"同侪的复盘/学习笔记/开仓论点<br/>（peer_insights 只读工具）"| LA
+    LA -->|"学习笔记 → learning_notes<br/>+ LEARN 决策行（公开）"| DB
+    DB ==>|"注入三份：系统提示词<br/>+ 复盘笔记 + 学习笔记"| TA
+    CA -->|"只读感知 trader<br/>（trader_agent 专家）+ 三个动作过 HITL"| DB
 ```
 
-**trader 每次唤醒收到的注入**：平台系统提示词（身份/规格/纪律）+ **复盘笔记**（自己的教训）。设计上还有第三份 **学习笔记**（从别人身上学到的），由 learning agent 写——**learning 尚未开工，所以目前只有两份**。这个结构的意义在于 trader 侧只读：它不知道也不需要知道这些东西是谁写的，加第三份不用改 trader。
+**trader 每次唤醒收到的注入**：平台系统提示词（身份/规格/纪律）+ **复盘笔记**（自己的教训）+ **学习笔记**（从别人身上学到的）。三份并列、不合并——来源分开，模型才分得清"这是我自己的教训"和"这是从别人那儿学的"。trader 侧只读：它不知道也不需要知道这些东西是谁写的，再加一份新笔记也不用改 trader。
 
 ### trader agent：唯一会动真账本的
 
@@ -233,7 +233,7 @@ flowchart TB
 flowchart LR
     CLK["5m K线收盘事件"] --> SCH{"TraderScheduler<br/>对齐 interval 边界<br/>抢占 + 互斥 + 并发闸"}
     SEN["VolatilitySentinel<br/>5min 振幅超阈值<br/>且持有该币"] -->|"警报（冷静期/预算预检）"| SCH
-    SCH --> PA["TraderPromptAssembler<br/>系统提示词 + 账户状态<br/>+ 复盘笔记（学习笔记待 learning 落地）"]
+    SCH --> PA["TraderPromptAssembler<br/>系统提示词 + 账户状态<br/>+ 复盘笔记 + 学习笔记"]
     PA --> RA(("ReactAgent<br/>循环"))
     RA <--> T1["交易工具 ×7<br/>开平仓/止损止盈/计划"]
     RA <--> T2["数据工具 ×8<br/>K线/结构/指标/快照/IV/资金费/盘口/快讯"]
@@ -268,7 +268,7 @@ flowchart LR
 - **滚动继承**：只回注**上一期**复盘（不是全部历史），但要求这一期必须把仍然成立的教训继承进来——因为下一期同样只看得到这一篇。输入不膨胀的前提，是输出完成了继承。
 - **降级安全**：缺分隔符 → REVIEW 行照存、memory 不动，一次格式失守不许污染记忆；复盘失败不计连败（没有资金风险）。
 
-### learning agent：向别人学（规划中）
+### learning agent：向别人学
 
 reviewer 解决"我哪儿错了"，learning 解决"**别人做对了什么，其中哪些对我真的有用**"。
 
@@ -280,47 +280,42 @@ flowchart LR
     GOOD["排名靠前者<br/>复盘笔记 · 学习笔记<br/>开仓论点与失效条件"] --> LA
     BAD["排名靠后者<br/>亏在哪 · 踩了什么坑"] --> LA
     SELF["自己的复盘笔记<br/>（学的东西要对得上自己的问题）"] --> LA
-    LA(("learning agent<br/>分析 · 取舍 · 归因")) --> NOTE["学习笔记<br/>→ ai_trader 新列"]
+    LA(("learning agent<br/>分析 · 取舍 · 归因")) --> NOTE["学习笔记<br/>→ ai_trader.learning_notes<br/>+ LEARN 决策行（公开上时间线）"]
     NOTE --> INJ["下一根 K 线注入 trader"]
 ```
 
-设计约束（已定）：
-
-- **不是照抄**：要求分辨"他赚钱是因为方法对，还是因为运气/行情恰好配合"，抄不可复现的东西比不学更糟。
-- **好坏都看**：差 trader 的教训往往比好 trader 的经验更具体（爆仓路径是清晰的因果链）。
-- **产出独立成列**：与复盘笔记分开存，trader 侧拿到的是三份并列的注入，来源清晰。
+- **形态**：ReactAgent + 唯一只读工具 `peer_insights`（单工具双模式：无参回排行榜、传 traderId 深看某人的复盘全文/学习笔记/在场计划论点/论点→结局配对）。排行榜、自己的复盘笔记、上一份学习笔记随开场白代码注入——看谁、看几个、看多深是开放决策，写不成固定步骤，所以这个才配叫 agent。
+- **反照抄三件套**：【不学什么】是必填段（只会说"值得学"的复盘等于没复盘，缺了直接判格式失守）；每条学习必须带证据与差距数字；引用同侪战绩必须带笔数——样本少的时候，运气和方法长得一模一样。
+- **降级安全**：格式失守 → ERROR 行留痕、learning_notes 一个字不动；学习失败不计连败（没有资金风险）。同侪不足 3 人时整体静默跳过——一个人的竞技场没有同侪可学。
+- **滚动继承**：与复盘笔记同款——产出整份覆盖 learning_notes，下期只看得到这一份。
 
 待定（**尚未决策**）：agent 之间开"会议"互相提问讨论——想法记在这里，但差模型拖累好模型是真实风险，且多轮对话成本是乘法增长。暂不做。
 
 ### chat agent：研判工作台
 
+编排是 `ChatTurnRunner` 里的**普通 Java 循环**，不是 StateGraph——这段编排没有一处需要图：分支就是 if、并行就是虚拟线程、回环就是 while。图只留给叶子：三个专家与 summarizer 各自是独立编译的 `ReactAgent` 子图，那里的 ReAct 循环确实是框架在管。
+
 ```mermaid
 flowchart LR
     S((start))
-    R{"router · 浅模型<br/>调 route 工具给出结构化去向"}
-    D["dispatch"]
+    R{"路由 · 浅模型<br/>结构化 tool_call 给出去向"}
     M["market_agent<br/>行情/持仓/清算/资金费"]
     N["news_agent<br/>BlockBeats 快讯（无参预取）"]
-    J["join"]
-    SUM["summarizer 子图<br/>深模型 · 深研判工具 · 流式作答"]
+    T["trader_agent<br/>只读感知自己的 AI Trader"]
+    SUM["summarizer 叶子<br/>深模型 · 深研判工具 · 流式作答"]
     E((end))
     S --> R
-    R -->|dispatch| D
-    R -->|FINISH| SUM
-    D --> M
-    D --> N
-    M --> J
-    N --> J
-    J -.->|"回环：带着数据再判要不要补"| R
+    R -->|"派新专家（虚拟线程并行）"| M & N & T
+    M & N & T -.->|"结论接进历史，回到循环开头"| R
+    R -->|"FINISH / 已派过 / 轮次上限"| SUM
     SUM --> E
 ```
 
-三个子 agent 各自是独立编译的 `ReactAgent` 子图（独立 threadId，中间消息不污染主会话 checkpoint）：**market_agent** 与 **news_agent** 并行取数，**summarizer** 汇总作答。
-
-- **路由**：模型调 `route` 工具给出去向，结果只写 state、不进 messages；条件边只读这个结构化值，绝不解析消息文本。角色单一是关键——summarizer 一个字都不提"要不要再派发"，让它同时纠结"该作答还是该派发"就会在两者之间反复横跳。
-- **并行**：`dispatch` → 各专家 → `join` 是同源多边（框架内部建 `ParallelNode`）；未被派发的节点直接返回空，不触发模型调用。同一专家一轮内只派一次，另设 3 轮派发上限。
-- **韧性**：自研 `ResilientChatService` 装配进 `ReactAgent.ChatService`，对图与节点透明。流式路径带退避重试，仅在尚未吐帧时重订阅。**不挂兜底模型**——BYOK 只有一个端点，切到同端点的另一个模型没有意义（端点挂了两个一起挂）。
-- **横切**：PostgresSaver 断点续聊、跨会话长期记忆（规则化写入，不烧 LLM）、`run_deep_analysis` 贵操作 HITL 确认闸、调用限额 + 历史摘要压缩控预算。
+- **路由**：浅模型调 route 工具给出结构化去向，循环只认这个值，绝不解析消息文本。角色单一是关键——summarizer 一个字都不提"要不要再派发"，让它同时纠结"该作答还是该派发"就会在两者之间反复横跳。
+- **并行与停止**：专家在虚拟线程上并行跑；同一专家整轮只派一次（去重名单），另设 3 轮派发上限兜"去重失灵"。
+- **trader 联动**：`trader_agent` 专家只读感知用户自己的 AI Trader（概况/持仓/决策/计划）；`wake_trader` / `review_trader_now` / `run_deep_analysis` 三个烧钱动作过 HITL 确认闸，`leave_note_to_trader` 留言只写一行字不拦。
+- **韧性**：自研 `ResilientChatService` 装配进 `ReactAgent.ChatService`，对叶子透明。流式路径带退避重试，仅在尚未吐帧时重订阅。**不挂兜底模型**——BYOK 只有一个端点，切到同端点的另一个模型没有意义（端点挂了两个一起挂）。
+- **横切**：会话历史落 `workbench_chat_context` 自建表（终态整体覆盖写入）、跨会话长期记忆（规则化写入，不烧 LLM）、调用限额 + 历史摘要压缩控预算。
 - **新闻双源分工**：`news_agent` 出 BlockBeats 清单，summarizer 用联网搜索补充合并，独有条目带源标签——因为服务端搜索关不掉，与其硬压不如分工。
 
 #### 模型来自用户，所以图也跟着用户走
@@ -328,14 +323,14 @@ flowchart LR
 ```text
 POST /api/ai/workbench/chat
   ├─ 取 user_llm_config          没配 → 2201，前端顶出配置弹窗
-  ├─ 按配置指纹取/建图（LRU 32）  建不出 → 2202，同上
+  ├─ 按指纹取/建专家叶子（LRU 32） 建不出 → 2202，同上
   ├─ 并发闸门 tryAcquire          该用户已有一轮 → 2203 ／ 全局 10 满 → 2204
   └─ 这之后才 new SseEmitter
 ```
 
 **四道准入全在建流之前**：一旦返回 `SseEmitter`，响应就是 `text/event-stream`，再报错只能推 error 事件，前端拿不到结构化错误码、没法自动引导去配置。
 
-- **图按配置指纹缓存，不按 userId**：指纹 = `SHA-256(协议, baseUrl, 主模型, 轻模型, 思考档位, 密文)`。用户改配置 → 指纹变 → 自然拿到新图，**不需要任何显式失效**。指纹把 AES-GCM 密文算了进去，而它每次加密都不同，所以实际效果是一人一份——那个数就是"能同时缓存几个活跃用户"。
+- **叶子按指纹缓存，userId 必须进指纹**：指纹 = `SHA-256(userId, 协议, baseUrl, 主模型, 轻模型, 思考档位, 密文)`。用户改配置 → 指纹变 → 自然拿到新叶子，**不需要任何显式失效**。userId 进指纹不是为了缓存粒度，是数据隔离——叶子里有按用户烤死的工具（trader_agent 读的是"这个人的 trader"），两人共用一份叶子就是把别人的持仓端到对方眼前；隔离要靠键本身，不能指望密文的随机性。
 - **主模型 + 轻模型**：轻模型（选填）跑 router / 专家 / 历史压缩，主模型只用来写最终回答。不填就复用主模型**实例本身**，省一份客户端和连接池。
 - **思考档位**（选填 `none/low/medium/high`）只注入主模型——轻模型跑的都是简单活，高档纯烧钱烧延迟。**模型支不支持这个参数查不到**（OpenAI 标准 `/v1/models` 只回 id/object/created/owned_by，没有能力描述），所以默认留空=不传，让用户自己选，配套一个「测试连通性」按钮真发一次请求验。
 - **错误归类**：401/403、429、404+model、超时/连不上各给一句能照着做的话；**认不出来的不替用户判病因**——那个 catch 罩着落历史、写记忆、checkpoint 落库，数据库挂了也走这条路，兜底要是说"请检查端点与模型配置"，用户会去乱改一把本来没问题的 key。任何分支都不回显上游原文：中转网关的异常里经常带完整请求 URL（`?api_key=…`），正则永远追不全 key 的形态。
@@ -348,15 +343,11 @@ POST /api/ai/workbench/chat
 授权键 = (sessionId, 工具名, 归一化后的标的)
 ```
 
-工具方法体**从来看不到自己被调用时的 sessionId**（`ChatService.execute(List<Message>)` 的签名里没有 `RunnableConfig`），而 hook 拿得到 `threadId` + 待执行 tool_call 的名字和参数。所以卡片上写 BTCUSDT、模型改口要 ETHUSDT 时键不匹配，会**重新弹卡**——这不是加校验，是把判断挪到了信息完整的那一层。
-
-> **这里有个坑**：挂在子图上的 hook 会被 `addNode(id, StateGraph)` 内联时整个丢掉（框架只搬 nodes/edges），而按内联后的 id 注册又会被 `compile()` 的图校验拒掉（校验跑在内联之前）。**只剩"父图全局注册 + hook 内按 id 过滤"这一条路。**挂错了不报错也不告警——hook 静默不执行，单测照样全绿。
+工具方法体**从来看不到自己被调用时的 sessionId**（`ChatService.execute(List<Message>)` 的签名里没有 `RunnableConfig`），而 hook 拿得到 `threadId` + 待执行 tool_call 的名字和参数。所以卡片上写 BTCUSDT、模型改口要 ETHUSDT 时键不匹配，会**重新弹卡**——这不是加校验，是把判断挪到了信息完整的那一层。hook 直接挂在 summarizer 叶子图上。
 
 ### 日线边界的时序
 
-目标形态是一天一次的交接：**先交易，再全体复盘，最后全体学习**。复盘与学习期间 trader 停工——它们要读的是"已经定格的一天"，边写边读会读到半截数据。
-
-> **下面这张图画的是目标态，不是现状。** 当前每个 trader 在自己的日线边界上顺序跑「交易 → 自己复盘」，**没有停工窗口，也没有全局屏障**；learning 整段尚未开工。屏障是 learning 的前置——只要还没有"向别人学"这一步，就没有必须等全体定格的理由。
+一天一次的交接（`TraderScheduler.startDailyHandover`）：**先交易，再全体复盘，最后全体学习**。复盘与学习期间 trader 停工——它们要读的是"已经定格的一天"，边写边读会读到半截数据。停工窗口挡住全部四个唤醒入口（例行 K 线 / 波动警报 / 手动唤醒 / 点播复盘），窗口内的 K 线事件直接丢弃不补跑；复盘与学习之间是全局屏障——learning 读的是同侪**刚写好**的复盘，没有屏障，同一轮学习里各人看到的世界就不一样。
 
 ```mermaid
 sequenceDiagram
@@ -376,11 +367,11 @@ sequenceDiagram
     L-->>T: 下一根 K 线带着两份新笔记醒来
 ```
 
-> 时序中 learning 阶段与"等全体复盘完成"的协调尚未实现；当前形态是每个 trader 在自己的日线边界上顺序跑「交易 → 复盘」，无全局屏障。
+窗口时长 ≈ 复盘超时 180s + 学习超时 300s（两阶段各自内部并行，共用并发闸）——5m 档 trader 丢 1~2 根 K 线，日线交接每天只有一次，可接受。
 
 同一工具层的第三个消费方：**MCP Server**（SSE 端点）——只读市场工具，新闻抓取与深研判等贵操作刻意不对外。注意它**只监听本机、公网未反代**：quant 的鉴权靠 controller 手写 `StpUtil.checkLogin()` 与 `@RequireAdmin` 切面，而 MCP 走 RouterFunction 两者都不经过，所以一旦反代出去就是无鉴权端点——那几个工具虽有 60s 缓存，但缓存按 symbol 分片、入口又不校验白名单，换个币种就是一次全新的上游采集，会被当免费代理刷配额，进而连累共用同一 REST 客户端的策略执行轨。
 
-> **规划中的联动**：chat agent 将来可只读感知 trader（把 `TraderToolkit` 挂进 chat 图，读 memory 与 REVIEW 行即可）。接口已经就位——learning 只写笔记列与决策行，chat 只读同样两样东西，**不需要再改 trader**。
+> **chat 与 trader 的联动**：`trader_agent` 专家只读感知用户自己的 trader（读 memory / learning_notes / 决策行 / 计划），三个烧钱动作过 HITL 闸。learning 只写笔记列与决策行，chat 只读同样几样东西——两边都不触碰 trader 本体。
 
 ---
 

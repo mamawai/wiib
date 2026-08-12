@@ -44,8 +44,6 @@ management:
     tags:
       application: wiib-sim
 
-# AI 配置已迁 DB：ai_runtime_config + ai_model_assignment('sim' 位)，Admin 页热切换
-
 # 不配则关闭 LinuxDo 登录；本地/线上两对凭证分别放 .env.local / 线上 .env
 linuxdo:
   client-id: ${LINUXDO_CLIENT_ID:}
