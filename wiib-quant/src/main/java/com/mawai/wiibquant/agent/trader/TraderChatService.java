@@ -212,6 +212,10 @@ public class TraderChatService {
         if (t == null) {
             return noTrader();
         }
+        // 停工窗口挡点播：三阶段交接期间旁路写复盘，会让 learner 读到"半天"的复盘（脏读进记忆）
+        if (scheduler.isHandoverActive()) {
+            return outcome(false, "全体复盘与学习进行中（日线交接），几分钟后窗口关闭再试");
+        }
         long at = System.currentTimeMillis();
         reviewRunner.review(t, at);
         AiTraderDecision d = latestReview(t);

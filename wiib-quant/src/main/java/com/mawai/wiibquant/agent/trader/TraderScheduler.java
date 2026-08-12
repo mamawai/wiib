@@ -2,6 +2,7 @@ package com.mawai.wiibquant.agent.trader;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.mawai.wiibcommon.entity.AiTrader;
+import com.mawai.wiibquant.agent.learning.LearningRunner;
 import com.mawai.wiibquant.agent.learning.ReviewRunner;
 import com.mawai.wiibquant.agent.quant.domain.KlineClosedEvent;
 import com.mawai.wiibquant.mapper.AiTraderMapper;
@@ -10,11 +11,13 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Semaphore;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * trader 调度器：5m K线收盘事件当唯一时钟，对齐到各 trader 的 interval 边界触发唤醒。
@@ -22,6 +25,11 @@ import java.util.concurrent.Semaphore;
  * 事件是 per-symbol 的，同一边界多币多次触发靠 firedBoundary 去重。
  * 不做兜底补漏：WS/事件断流丢的K线就丢了——陈旧信号唤醒没有意义（迟到事件由唤醒预算兜底：
  * 距下一边界不足 30s 直接放弃，见 TraderWakeupRunner）。
+ * <p>
+ * 日线边界走三阶段交接（见 {@link #startDailyHandover}）：先交易、再全体复盘、最后全体学习，
+ * 复盘与学习之间是全局屏障——learning 读的是同侪<b>刚写好</b>的复盘，没有屏障，同一轮学习里
+ * 各人看到的世界就不一样。交接期间停工窗口拒绝一切唤醒（例行/警报/手动/点播复盘），
+ * 复盘与学习读的必须是"已定格的一天"，边写边读的脏读会进记忆污染后续每一轮。
  */
 @Slf4j
 @Component
@@ -29,15 +37,18 @@ import java.util.concurrent.Semaphore;
 public class TraderScheduler {
 
     static final int MAX_CONCURRENT_WAKEUPS = 10;
-    /** interval → 毫秒；TraderWakeupRunner 计算唤醒预算共用同一份。1d 只留数学（learning 日线边界用），不再是唤醒档位 */
+    /** interval → 毫秒；TraderWakeupRunner 计算唤醒预算共用同一份。1d 只留数学（日线交接边界用），不再是唤醒档位 */
     static final Map<String, Long> INTERVAL_MS = Map.of(
             "5m", 300_000L, "15m", 900_000L, "1h", 3_600_000L, "4h", 14_400_000L, "1d", 86_400_000L);
     /** 例行唤醒只遍历四档（1d 档位已下线，存量 1d trader 自然停摆） */
     static final Set<String> WAKE_INTERVALS = Set.of("5m", "15m", "1h", "4h");
+    /** 学习的同侪门槛：全库不足 3 行（自己+至少2个同侪）学习整体跳过——一个人的竞技场没有同侪可学 */
+    static final int MIN_TRADERS_FOR_LEARNING = 3;
 
     private final AiTraderMapper traderMapper;
     private final TraderWakeupRunner runner;
     private final ReviewRunner reviewRunner;
+    private final LearningRunner learningRunner;
 
     /** 警报冷静期：距该 trader 上一次任何唤醒（例行/警报）不足 5 分钟不再警报 */
     static final long ALERT_COOLDOWN_MS = 5 * 60_000L;
@@ -48,14 +59,34 @@ public class TraderScheduler {
     private final Map<Long, Long> firedBoundary = new ConcurrentHashMap<>();
     /** 每 trader 最近一次唤醒起始时刻（例行+警报都记）：警报冷静期的基准；重启清零无所谓 */
     private final Map<Long, Long> lastWakeAt = new ConcurrentHashMap<>();
+    /** 日线交接的边界去重位：多 symbol 在日线边界各发一次事件，交接只许启动一次 */
+    private final AtomicLong lastHandoverBoundary = new AtomicLong(-1);
+    /** 停工窗口位：交接编排线程独写，事件/警报/手动入口只读 */
+    private volatile boolean handoverActive = false;
 
     /** 墙钟注入点：警报准入的冷静期/预算预检要可测 */
     java.util.function.LongSupplier nowMs = System::currentTimeMillis;
+
+    /** 停工窗口是否开着：点播复盘（chat 轨）入场前也要看它，三阶段期间不许旁路写复盘 */
+    public boolean isHandoverActive() {
+        return handoverActive;
+    }
 
     /** 主触发：任意 watch 币的 5m 收盘都是一次时钟滴答。 */
     @EventListener
     public void onKlineClosed(KlineClosedEvent event) {
         if (!"5m".equalsIgnoreCase(event.interval())) {
+            return;
+        }
+        if (handoverActive) {
+            // 窗口内的K线事件直接丢弃不补跑：与"不做兜底补漏"同一条哲学——陈旧信号没有意义。
+            // 代价是 5m 档跳过 1~2 根K线，日线交接每天只有一次，可接受
+            log.info("[TraderSched] 日线交接中，丢弃K线事件 {} closeTime={}", event.symbol(), event.closeTime());
+            return;
+        }
+        long dayBoundary = boundaryOf(event.closeTime(), "1d");
+        if (dayBoundary > 0) {
+            startDailyHandover(dayBoundary);
             return;
         }
         for (String ic : WAKE_INTERVALS) {
@@ -66,16 +97,120 @@ public class TraderScheduler {
         }
     }
 
-    private void fireInterval(String intervalCode, long boundary) {
-        List<AiTrader> traders = traderMapper.selectList(new LambdaQueryWrapper<AiTrader>()
-                .eq(AiTrader::getStatus, AiTrader.STATUS_RUNNING)
-                .eq(AiTrader::getIntervalCode, intervalCode));
-        for (AiTrader trader : traders) {
-            fireTrader(trader, boundary);
+    /**
+     * 日线交接编排（本功能唯一的全局同步点）：
+     * 阶段0 全体例行唤醒照常跑完 → 【停工窗口开】→ 阶段1 全体复盘并行 →
+     * 屏障（等全部复盘落库）→ 阶段2 全体学习并行 → 【停工窗口关】。
+     * 屏障保证每个 learner 读到的是同侪同一天的复盘；窗口保证复盘/学习读的是定格数据。
+     * 各阶段单人超时都有硬顶（唤醒600s/复盘180s/学习300s），join 不会永久卡住。
+     */
+    private void startDailyHandover(long boundary) {
+        // 原子抢占：日线边界的多 symbol 事件里只有一个赢家启动交接
+        long prev = lastHandoverBoundary.get();
+        if (prev >= boundary || !lastHandoverBoundary.compareAndSet(prev, boundary)) {
+            return;
+        }
+        Thread.startVirtualThread(() -> {
+            // 阶段0：日线边界同时是四档的边界，全体例行唤醒照常；收集线程等交易全部跑完
+            List<Thread> wakes = new ArrayList<>();
+            for (String ic : WAKE_INTERVALS) {
+                wakes.addAll(fireInterval(ic, boundary));
+            }
+            joinAll(wakes);
+            handoverActive = true;
+            log.info("[TraderSched] 日线交接开始 boundary={}，停工窗口开", boundary);
+            try {
+                // 阶段1：全体复盘并行。fresh 查库——阶段0可能刚改过状态（爆仓/暂停）。
+                // 无素材跳过/失败语义都在 ReviewRunner 内部，这里只管准入与时序
+                joinAll(phase(running().stream()
+                        .filter(t -> !Boolean.FALSE.equals(t.getReviewEnabled())).toList(),
+                        t -> reviewRunner.review(t, boundary), "复盘"));
+                // ===== 屏障已过：全部复盘落库，learning 读到的同侪世界是同一天的 =====
+                Long total = traderMapper.selectCount(null);
+                if (total == null || total < MIN_TRADERS_FOR_LEARNING) {
+                    // 设计定案的降级：同侪不足整体静默跳过，不写空话也不留 ERROR 行
+                    log.info("[TraderSched] 同侪不足{}人（现{}人），本日学习整体跳过", MIN_TRADERS_FOR_LEARNING, total);
+                    return;
+                }
+                // 阶段2：全体学习并行。再 fresh 一次——阶段1刚写完 memory，learner 注入要拿最新的
+                joinAll(phase(running().stream()
+                        .filter(t -> !Boolean.FALSE.equals(t.getLearningEnabled())).toList(),
+                        t -> learningRunner.learn(t, boundary), "学习"));
+            } finally {
+                // 异常也不许卡死窗口：窗口关不上，全体 trader 就永久停摆了
+                handoverActive = false;
+                log.info("[TraderSched] 日线交接结束 boundary={}，停工窗口关", boundary);
+            }
+        });
+    }
+
+    /**
+     * 交接的一个阶段：每 trader 一个虚拟线程（复用 slots 并发闸与 inFlight 互斥），
+     * 返回线程列表由调用方 join 成屏障。
+     * inFlight 抢不到＝上一边界的交易还没跑完（预算最长600s），该 trader 本阶段跳过——
+     * 硬等会拖住全体，而复盘/学习明天还有机会；这也是屏障不脏读的第二道闸：
+     * 停工窗口挡住新唤醒，inFlight 挡住残留的旧唤醒。
+     */
+    private List<Thread> phase(List<AiTrader> traders, java.util.function.Consumer<AiTrader> action, String label) {
+        List<Thread> threads = new ArrayList<>();
+        for (AiTrader t : traders) {
+            if (!inFlight.add(t.getId())) {
+                log.info("[TraderSched] {}跳过（上轮交易未完）traderId={}", label, t.getId());
+                continue;
+            }
+            threads.add(Thread.startVirtualThread(() -> {
+                try {
+                    slots.acquire();
+                    try {
+                        action.accept(t);
+                    } finally {
+                        slots.release();
+                    }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                } catch (Exception e) {
+                    // 单人异常不许拖垮屏障：runner 内部已有 ERROR 行留痕，这里兜住意外逃逸的
+                    log.warn("[TraderSched] {}异常逃逸 traderId={} msg={}", label, t.getId(), e.getMessage());
+                } finally {
+                    inFlight.remove(t.getId());
+                }
+            }));
+        }
+        return threads;
+    }
+
+    private List<AiTrader> running() {
+        return traderMapper.selectList(new LambdaQueryWrapper<AiTrader>()
+                .eq(AiTrader::getStatus, AiTrader.STATUS_RUNNING));
+    }
+
+    private static void joinAll(List<Thread> threads) {
+        for (Thread t : threads) {
+            try {
+                t.join();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+            }
         }
     }
 
-    private void fireTrader(AiTrader trader, long boundary) {
+    private List<Thread> fireInterval(String intervalCode, long boundary) {
+        List<AiTrader> traders = traderMapper.selectList(new LambdaQueryWrapper<AiTrader>()
+                .eq(AiTrader::getStatus, AiTrader.STATUS_RUNNING)
+                .eq(AiTrader::getIntervalCode, intervalCode));
+        List<Thread> started = new ArrayList<>();
+        for (AiTrader trader : traders) {
+            Thread t = fireTrader(trader, boundary);
+            if (t != null) {
+                started.add(t);
+            }
+        }
+        return started;
+    }
+
+    /** 返回启动的唤醒线程（日线交接的阶段0要 join 等交易跑完）；去重输/互斥拒时返回 null。 */
+    private Thread fireTrader(AiTrader trader, long boundary) {
         // 原子抢占本边界：多 symbol 事件并发到达时只有一个赢家，输家静默返回（不是SKIPPED）
         boolean[] won = new boolean[1];
         firedBoundary.compute(trader.getId(), (id, prev) -> {
@@ -86,26 +221,20 @@ public class TraderScheduler {
             return prev;
         });
         if (!won[0]) {
-            return;
+            return null;
         }
         if (!inFlight.add(trader.getId())) {
             // 上一边界的唤醒还在跑：本边界作废并留痕，等下一根K线的新鲜信号
             runner.recordSkipped(trader, boundary);
             log.info("[TraderSched] 上轮未完跳过 traderId={} boundary={}", trader.getId(), boundary);
-            return;
+            return null;
         }
         lastWakeAt.put(trader.getId(), nowMs.getAsLong());
-        Thread.startVirtualThread(() -> {
+        return Thread.startVirtualThread(() -> {
             try {
                 slots.acquire();
                 try {
                     runner.wake(trader, boundary);
-                    // 日线边界的例行唤醒完成后同线程接复盘：先交易后复盘、共用互斥绝不并行；
-                    // 上轮未完抢不到锁时本日复盘随例行一起跳过，明天再来（无害）。
-                    // 无素材/失败语义都在 ReviewRunner 内部，这里只管准入与时序
-                    if (boundary % INTERVAL_MS.get("1d") == 0 && !Boolean.FALSE.equals(trader.getReviewEnabled())) {
-                        reviewRunner.review(trader, boundary);
-                    }
                 } finally {
                     slots.release();
                 }
@@ -122,6 +251,11 @@ public class TraderScheduler {
      * 任一环节不过都静默放弃只留日志——警报是补充不是义务，SKIPPED 决策行只属于例行调度。
      */
     public void tryAlertWake(AiTrader trader, AlertTrigger trigger) {
+        if (handoverActive) {
+            // 停工窗口挡警报：复盘/学习读的是定格数据，警报唤醒一开仓就是脏读
+            log.info("[TraderSched] 日线交接中，警报放弃 traderId={} {}", trader.getId(), trigger.symbol());
+            return;
+        }
         long now = nowMs.getAsLong();
         Long last = lastWakeAt.get(trader.getId());
         if (last != null && now - last < ALERT_COOLDOWN_MS) {
@@ -172,6 +306,9 @@ public class TraderScheduler {
      * @return null=已触发；非空=没触发的原因（原样给模型转述给用户）
      */
     public String tryManualWake(AiTrader trader) {
+        if (handoverActive) {
+            return "全体复盘与学习进行中（日线交接的停工窗口），几分钟后窗口关闭再试";
+        }
         Long intervalMs = INTERVAL_MS.get(trader.getIntervalCode());
         if (intervalMs == null) {
             return "该 trader 的唤醒档位已下线，无法唤醒";
