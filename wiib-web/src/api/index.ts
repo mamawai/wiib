@@ -447,7 +447,7 @@ export const workbenchApi = {
   /** 单会话消息记录；续聊仍走 chat 带同一 sessionId */
   sessionMessages: (sessionId: string) =>
     api.get<unknown, WorkbenchChatMessage[]>(`/ai/workbench/sessions/${sessionId}/messages`),
-  /** 删除历史会话（展示记录 + 后端 checkpoint 上下文） */
+  /** 删除历史会话（展示记录 + 后端续聊上下文） */
   deleteSession: (sessionId: string) =>
     api.delete<unknown, void>(`/ai/workbench/sessions/${sessionId}`),
 };

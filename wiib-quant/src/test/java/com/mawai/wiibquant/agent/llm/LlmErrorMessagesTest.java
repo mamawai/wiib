@@ -51,7 +51,7 @@ class LlmErrorMessagesTest {
 
     /**
      * 兜底分支要短且固定，避免几百字符的 SDK 异常灌进 SSE 和对话历史；
-     * 而且<b>不许替用户判病因</b>——调用方的 catch 也罩着落历史、写记忆、checkpoint 落库，
+     * 而且<b>不许替用户判病因</b>——调用方的 catch 也罩着落历史、写记忆、上下文落库，
      * 数据库挂了同样走这条路，兜底若说"请检查端点与模型配置"，用户会去乱改一把没问题的 key
      */
     @Test
@@ -66,7 +66,7 @@ class LlmErrorMessagesTest {
     /**
      * 任何分支都不许把 key 透出去。正则永远追不全 key 的形态（URL 里的 ?api_key=、
      * 自定义 header、非 sk- 前缀的自建 key……），所以兜底根本不回显原文——
-     * 这段文本不只给用户看，专家失败时还会拼进 AssistantMessage 喂回模型并进 checkpoint 持久化
+     * 这段文本不只给用户看，专家失败时还会拼进 AssistantMessage 喂回模型并随会话上下文持久化
      */
     @Test
     void 任何情况下不回显key() {

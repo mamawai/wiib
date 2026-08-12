@@ -185,7 +185,7 @@ export function ChatPanel({ onClose, onGoConfig }: ChatPanelProps) {
       .finally(() => setHistoryLoading(false));
   }, []);
 
-  /** 载入历史会话：消息回放 + sessionId 复用（checkpoint 在后端，继续聊自动带全上下文） */
+  /** 载入历史会话：消息回放 + sessionId 复用（续聊上下文在后端，继续聊自动带全上下文） */
   const openSession = useCallback(async (s: WorkbenchSessionSummary) => {
     // 点的就是当前在跑的会话：直接关列表回对话，别把在途流掐了重载
     if (s.sessionId === sessionId && loading) {

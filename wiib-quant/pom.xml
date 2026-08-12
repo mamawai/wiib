@@ -32,13 +32,13 @@
             <artifactId>langgraph4j-core</artifactId>
             <version>${langgraph4j.version}</version>
         </dependency>
-        <!-- Spring AI 桥接：Message 的 checkpoint 序列化 + Flux<ChatResponse> 接图 -->
+        <!-- Spring AI 桥接：Message 的 Jackson 序列化（会话上下文表复用） + Flux<ChatResponse> 接图 -->
         <dependency>
             <groupId>org.bsc.langgraph4j</groupId>
             <artifactId>langgraph4j-spring-ai</artifactId>
             <version>${langgraph4j.version}</version>
         </dependency>
-        <!-- ReactAgent：专家 agent 的 ReAct 循环，build() 出 StateGraph 可直接当子图嵌入 -->
+        <!-- ReactAgent：叶子 agent（专家/summarizer/trader）的 ReAct 循环 -->
         <dependency>
             <groupId>org.bsc.langgraph4j</groupId>
             <artifactId>langgraph4j-springai-agentexecutor</artifactId>
@@ -50,12 +50,6 @@
                     <artifactId>spring-boot-devtools</artifactId>
                 </exclusion>
             </exclusions>
-        </dependency>
-        <!-- 会话 checkpoint 落 PG（断连续聊地基），零 Spring AI 依赖 -->
-        <dependency>
-            <groupId>org.bsc.langgraph4j</groupId>
-            <artifactId>langgraph4j-postgres-saver</artifactId>
-            <version>${langgraph4j.version}</version>
         </dependency>
 
         <!-- Spring AI OpenAI Starter（接入 OpenAI Compatible API） -->

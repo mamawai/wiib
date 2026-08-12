@@ -22,7 +22,8 @@ import java.util.concurrent.CompletableFuture;
  * 的死转里一路烧 token。超过上限就直接结束本轮，把已有结果交出去。
  * <p>
  * 挂在工具边（ExecuteToolsHook）而不是模型节点：只有边的返回值 {@link Command} 能决定路由，
- * 节点 hook 改不了"下一步走哪"。计数存 state，因此跨 checkpoint 恢复仍然连续。
+ * 节点 hook 改不了"下一步走哪"。计数存 state；消费方（chat 叶子/trader 唤醒）都无 saver，
+ * 每次 invoke/stream 从 schema 起算，"单次运行"这个作用域天然成立。
  */
 @Slf4j
 public class ModelCallLimiter implements EdgeHook.WrapCall<MessagesState<Message>> {

@@ -197,7 +197,7 @@ class ApprovalGateTest {
 
     /**
      * 短路时同批每个 tool_call 都得配一条回执。少回一条就留下孤儿 tool_call，
-     * 这段历史落进 checkpoint 之后续聊重建，上游直接 400，会话只能删掉重开
+     * 这段历史落进会话上下文表之后续聊重放，上游直接 400，会话只能删掉重开
      */
     @Test
     void 短路时同批每个toolcall都配回执() {

@@ -16,7 +16,7 @@ export const CHAT_ERROR = {
  */
 
 export type ChatItem =
-  // queued=北辰忙时先上屏排队，本轮结束自动真发（同会话同 checkpoint，后端每用户并发=1，做不了真并发）
+  // queued=北辰忙时先上屏排队，本轮结束自动真发（后端并发闸门每用户 1，做不了真并发）
   | { kind: 'user'; content: string; queued?: boolean }
   | { kind: 'assistant'; content: string; streaming: boolean }
   // 专家过程流（不落历史）：视图层收进"工作过程"轨，折叠状态归视图管
@@ -187,7 +187,7 @@ async function send(message: string, opts?: { silent?: boolean }) {
   const msg = message.trim();
   if (!msg) return;
   // 北辰忙着：消息上屏排队，本轮结束自动续发。真并发做不了——
-  // 后端并发闸门每用户 1，且同会话两条图并跑会互相踩 checkpoint
+  // 后端并发闸门每用户 1，且会话历史是每轮整体覆盖的，两轮并跑会互相盖掉对方
   if (state.loading) {
     sendQueue.push(msg);
     updateItems(prev => [...prev, { kind: 'user', content: msg, queued: true }]);
