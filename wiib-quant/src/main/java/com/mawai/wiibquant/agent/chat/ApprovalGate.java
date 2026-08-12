@@ -28,17 +28,16 @@ import java.util.concurrent.CompletableFuture;
  * 而 ToolContext 是建图时算死的静态值），所以判断只能做在这里——
  * hook 同时拿得到 config.threadId() 和 tool_call 的 name/arguments。
  * <p>
- * <b>挂在哪</b>：不能挂在 summarizer 子图上（子图 hook 在内联进主图时会被框架丢掉，
- * 见 Task 5.6），而是挂在**父图**上并用 {@code ChatAgentFactory.onlyOnEdge} 收窄到
- * {@code "summarizer-action"} 这一条边。
+ * <b>挂在哪</b>：summarizer 叶子的工具边，走 {@code ReactAgent.Builder.addExecuteToolsHook}
+ * 直接注册（叶子是独立 {@code compile()} 的，官方挂载点真生效）。
  * <p>
  * <b>挂载顺序</b>：必须先于 {@link com.mawai.wiibquant.agent.llm.ModelCallLimiter} 注册。
  * langgraph4j 的 WrapCall 是 reduce 左折叠，<b>后注册的在外层先执行</b>，
  * 保险丝必须在外层——否则会出现"卡片弹了但模型没配额告诉用户"的窗口。
  * <p>
- * <b>拒绝标记的作用域是"本轮"</b>：它只该挡"用户拒绝后模型还想再调一次"那一瞬。
- * 用户重新发问 = 改主意，Controller 在每轮开跑时清掉它（见 Task 10），
- * 否则用户说"还是研判一下 BTC 吧"会被自己上一次的拒绝挡掉，得再说一遍才行。
+ * <b>拒绝标记跨轮活着，而且必须如此</b>：卡片是一轮结束时才发出去的，用户点拒绝必然发生在
+ * 两轮之间，下一轮模型重提同一件事时才轮到这里回执。它是一次性的——被读走就没了，
+ * 所以用户改主意重新问不会被上一次的拒绝挡住。
  */
 @Slf4j
 public class ApprovalGate implements EdgeHook.WrapCall<MessagesState<Message>> {
@@ -80,7 +79,7 @@ public class ApprovalGate implements EdgeHook.WrapCall<MessagesState<Message>> {
             return passThrough(sessionId, state, config, action);
         }
 
-        // 又要弹卡 = 上一条授权已经用不上了（模型改口换了 symbol）。留着它，route() 会在
+        // 又要弹卡 = 上一条授权已经用不上了（模型改口换了 symbol）。留着它，ChatTurnRunner 会在
         // TTL 内一直跳过专家派发，用户之后每问一句都拿不到真数据，且没有任何日志说明原因
         registry.discardApprovals(sessionId);
         registry.requestApproval(sessionId, call.name(), symbol, REASON);
@@ -179,7 +178,7 @@ public class ApprovalGate implements EdgeHook.WrapCall<MessagesState<Message>> {
 
     /**
      * 短路时必须给**这一批**每个 tool_call 都配对回执。只回一条 = 留下孤儿 tool_call，
-     * 这段历史被 checkpoint 持久化后，续聊重建时上游直接 400，会话只能删掉重开。
+     * 这段历史被 {@link ChatContextStore} 持久化后，续聊重放时上游直接 400，会话只能删掉重开。
      */
     private static ToolResponseMessage reply(MessagesState<Message> state, String body) {
         List<ToolResponseMessage.ToolResponse> responses = new ArrayList<>();

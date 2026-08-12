@@ -17,7 +17,7 @@ import java.util.function.LongSupplier;
  * {@link ApprovalGate}（executeTools hook）里，因为只有那一层同时看得到
  * sessionId（来自 RunnableConfig）和工具名/参数（来自 tool_call）。
  * <p>
- * 授权状态短 TTL、进程内存级即可，不持久化；断连恢复由 checkpoint 保证。
+ * 授权状态短 TTL、进程内存级即可，不持久化；对话上下文的恢复是 {@link ChatContextStore} 的事。
  */
 @Component
 public class ApprovalRegistry {
@@ -140,7 +140,7 @@ public class ApprovalRegistry {
      * <p>
      * 三元组化<b>新引入</b>的洞：旧的 {@code consumeApproval(sessionId)} 不带参数，必然消费掉；
      * 现在只要有一次对不上（模型改口换 symbol、或续跑轮压根没调工具），那条授权就一直躺到 TTL 结束，
-     * 而 {@link #hasApproval} 为真时 route() 会跳过全部专家派发——这 10 分钟内该会话每一条新提问
+     * 而 {@link #hasApproval} 为真时 {@link ChatTurnRunner} 会跳过全部专家派发——这 10 分钟内该会话每一条新提问
      * 都不取数据、直接让 summarizer 凭空作答，且没有任何日志说明原因。
      * 所以"又要弹卡"就意味着上一条授权已经用不上了，弹卡前先丢掉它。
      */

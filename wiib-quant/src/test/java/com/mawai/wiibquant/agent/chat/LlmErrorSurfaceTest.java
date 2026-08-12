@@ -4,15 +4,12 @@ import com.mawai.wiibcommon.entity.UserLlmConfig;
 import com.mawai.wiibquant.agent.analysis.DeepAnalysisService;
 import com.mawai.wiibquant.agent.toolkit.MarketToolkit;
 import com.mawai.wiibquant.agent.toolkit.NewsToolkit;
-import org.bsc.langgraph4j.CompiledGraph;
-import org.bsc.langgraph4j.RunnableConfig;
-import org.bsc.langgraph4j.checkpoint.MemorySaver;
 import org.bsc.langgraph4j.prebuilt.MessagesState;
 import org.bsc.langgraph4j.spring.ai.serializer.jackson.SpringAIJacksonStateSerializer;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
-import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
@@ -23,13 +20,15 @@ import reactor.core.publisher.Flux;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
-import java.util.function.Consumer;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -37,7 +36,7 @@ import static org.mockito.Mockito.when;
  * 原文可能几百字符，还带着 key 和完整请求 URL：
  * <ol>
  *   <li>专家失败时推给用户的 progress 事件</li>
- *   <li>专家失败时拼成 AssistantMessage 喂回模型、随 checkpoint 落库的那条</li>
+ *   <li>专家失败时拼成 AssistantMessage 喂回模型、随会话上下文落库的那条</li>
  *   <li>整轮失败时推给前端的 error 事件</li>
  * </ol>
  * 前两个在同一个 catch 里，是两行代码，漏改一行都不行。
@@ -62,8 +61,8 @@ class LlmErrorSurfaceTest {
         ChatModelFactory chatModelFactory = mock(ChatModelFactory.class);
         when(chatModelFactory.modelsFor(any())).thenReturn(new ChatModelFactory.Models(deep, light));
 
-        // 浅模型同时服务 router 和专家，只能靠系统提示词首句分辨是哪一种请求。
-        // router 每次都点名 market_agent：第二次会被 route 的去重转 FINISH，回环自然收口
+        // 浅模型同时服务路由和专家，只能靠系统提示词首句分辨是哪一种请求。
+        // 路由每次都点名 market_agent：第二次会被去重转 FINISH，循环自然收口
         when(light.call(any(Prompt.class))).thenAnswer(inv -> {
             Prompt prompt = inv.getArgument(0);
             if (!prompt.getInstructions().getFirst().getText().contains("你是研判工作台的调度器")) {
@@ -76,30 +75,27 @@ class LlmErrorSurfaceTest {
         when(deep.stream(any(Prompt.class)))
                 .thenReturn(Flux.just(responseOf(new AssistantMessage("汇总一下"))));
 
-        CompiledGraph<MessagesState<Message>> graph = new ChatAgentFactory(chatModelFactory,
+        ChatAgentFactory.Leaves leaves = new ChatAgentFactory(chatModelFactory,
                 mock(MarketToolkit.class), mock(NewsToolkit.class),
                 mock(DeepAnalysisService.class), mock(WorkbenchRunRegistry.class),
-                new ApprovalRegistry(), new MemorySaver(),
+                new ApprovalRegistry(),
                 new SpringAIJacksonStateSerializer<>(MessagesState::new), 8, 999_999, 6, "X")
-                .chatGraph(new UserLlmConfig());
+                .leavesFor(new UserLlmConfig());
 
-        List<ChatAgentFactory.ExpertProgress> progress = new ArrayList<>();
-        RunnableConfig config = RunnableConfig.builder().threadId("wb-1-expert-fail")
-                .addMetadata(ChatAgentFactory.PROGRESS_SINK_KEY,
-                        (Consumer<ChatAgentFactory.ExpertProgress>) progress::add)
-                .build();
-
-        MessagesState<Message> end = graph.invoke(Map.of(
-                "messages", List.of(new UserMessage("看看行情")),
-                ChatAgentFactory.DISPATCH_ROUND_KEY, 0,
-                ChatAgentFactory.DISPATCHED_KEY, List.of()), config).orElseThrow();
+        ChatContextStore contextStore = mock(ChatContextStore.class);
+        List<ChatTurnRunner.ExpertProgress> progress = new CopyOnWriteArrayList<>();
+        new ChatTurnRunner(contextStore, new ApprovalRegistry())
+                .run(leaves, 1L, "wb-1-expert-fail", "看看行情", chunk -> { }, progress::add);
 
         String pushedToUser = progress.stream()
-                .filter(e -> ChatAgentFactory.ExpertProgress.ERROR.equals(e.phase()))
-                .map(ChatAgentFactory.ExpertProgress::text)
+                .filter(e -> ChatTurnRunner.ExpertProgress.ERROR.equals(e.phase()))
+                .map(ChatTurnRunner.ExpertProgress::text)
                 .findFirst().orElseThrow();
-        String fedBackToModel = end.messages().stream().map(Message::getText)
-                .filter(text -> text.contains("market_agent 暂时不可用"))
+        // 喂回模型的那条会随会话上下文落库，从落库口截下来看
+        ArgumentCaptor<List<Message>> saved = ArgumentCaptor.captor();
+        verify(contextStore).save(eq("wb-1-expert-fail"), anyLong(), saved.capture());
+        String fedBackToModel = saved.getValue().stream().map(Message::getText)
+                .filter(text -> text != null && text.contains("market_agent 暂时不可用"))
                 .findFirst().orElseThrow();
 
         // 归类过了（认出是 401）+ 原文一个字都没漏出去
@@ -121,15 +117,15 @@ class LlmErrorSurfaceTest {
         };
         ChatMemoryService memory = mock(ChatMemoryService.class);
         when(memory.recall(anyLong())).thenReturn("");
+        ChatTurnRunner turnRunner = mock(ChatTurnRunner.class);
+        doThrow(new RuntimeException(RAW)).when(turnRunner)
+                .run(any(), anyLong(), any(), any(), any(), any());
         ChatWorkbenchController controller = new ChatWorkbenchController(mock(ChatAgentFactory.class),
                 mock(UserLlmConfigService.class), new ApprovalRegistry(), memory,
-                mock(ChatHistoryService.class), mock(WorkbenchCheckpointStore.class),
+                mock(ChatHistoryService.class), mock(ChatContextStore.class), turnRunner,
                 mock(WorkbenchRunRegistry.class), new ChatConcurrencyGate(10));
-        @SuppressWarnings("unchecked")
-        CompiledGraph<MessagesState<Message>> graph = mock(CompiledGraph.class);
-        when(graph.stream(any(Map.class), any(RunnableConfig.class))).thenThrow(new RuntimeException(RAW));
 
-        controller.run(new ChatWorkbenchController.SseChannel(emitter), 1L, "wb-1-boom", "看看行情", graph);
+        controller.run(new ChatWorkbenchController.SseChannel(emitter), 1L, "wb-1-boom", "看看行情", null);
 
         String errorEvent = sent.stream().filter(text -> text.startsWith("{") && text.contains("message"))
                 .reduce((first, second) -> second).orElseThrow();

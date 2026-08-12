@@ -13,7 +13,7 @@ import java.util.List;
 
 /**
  * 工作台对话历史（展示用）：user/assistant 消息按会话落库，支撑历史会话列表与回看。
- * 续聊上下文不靠它——那是 PostgresSaver checkpoint 的事（threadId=sessionId 原样复用）；
+ * 续聊上下文不靠它——那是 {@link ChatContextStore} 的事（存的是模型侧完整 messages）；
  * 本表只为前端展示，所以 agent 调度/HITL 过程事件不存。
  */
 @Slf4j

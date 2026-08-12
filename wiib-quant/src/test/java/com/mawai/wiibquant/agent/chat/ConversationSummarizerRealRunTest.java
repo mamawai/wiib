@@ -6,10 +6,6 @@ import ch.qos.logback.core.read.ListAppender;
 import com.mawai.wiibcommon.entity.UserLlmConfig;
 import com.mawai.wiibquant.agent.llm.ConversationSummarizer;
 import com.mawai.wiibquant.agent.llm.ResilientChatService;
-import org.bsc.langgraph4j.CompiledGraph;
-import org.bsc.langgraph4j.RunnableConfig;
-import org.bsc.langgraph4j.prebuilt.MessagesState;
-import org.bsc.langgraph4j.streaming.StreamingOutput;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
@@ -25,10 +21,8 @@ import org.springframework.boot.test.context.SpringBootTest;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
-import java.util.function.Consumer;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -41,26 +35,26 @@ import static org.assertj.core.api.Assertions.assertThat;
  * <b>本类独有、单测替代不了的三件事</b>（切点配对那条纯逻辑已由
  * {@code ConversationSummarizerTest} 的真实形状参数化用例必现覆盖，别再把它当本类的卖点）：
  * <ol>
- *   <li><b>hook 在生产装配下真的通电</b>。ConversationSummarizer 从上线起就是死代码——它原先挂在
- *       summarizer 子图上，而子图被 {@code addNode(id, StateGraph)} 内联进父图时框架只搬
- *       nodes/edges、不搬 hook。Task 5.6 改成父图全局注册 + 按 id 过滤后它才第一次通电，
- *       而全绿的单测（mock 掉 ChatModel 与 checkpointSaver）整个上线周期都没发现这件事</li>
- *   <li><b>压缩结果经 PostgresSaver 序列化往返后仍被上游接受</b>。压缩走的是
- *       {@code ReplaceAllWith}，要先并进 state、落 checkpoint、下一轮再读出来重放给模型，
+ *   <li><b>hook 在生产装配下真的通电</b>。ConversationSummarizer 从上线起就长期是死代码——
+ *       它原先挂在 summarizer 子图上，而子图被 {@code addNode(id, StateGraph)} 内联进父图时
+ *       框架只搬 nodes/edges、不搬 hook。父图退役后叶子是独立编译的，走 ReactAgent 自己的
+ *       {@code addCallModelHook}；而全绿的单测（mock 掉 ChatModel）当年整个上线周期都没发现这件事</li>
+ *   <li><b>压缩结果经 {@link ChatContextStore} 序列化往返后仍被上游接受</b>。压缩走的是
+ *       {@code ReplaceAllWith}，要先并进 state、落库、下一轮再读出来重放给模型，
  *       这条链上任何一环出错单测都看不见</li>
- *   <li><b>多轮同 threadId 累积</b>下压缩的实际节奏：什么时候触发、摘要怎么分段、
+ *   <li><b>多轮同会话累积</b>下压缩的实际节奏：什么时候触发、摘要怎么分段、
  *       后续轮次会不会被压没上下文</li>
  * </ol>
  * 配对断言（{@link #recordPairingViolation}）留着当现场取证——它记录的是真实形状下切点落在哪，
- * 不是回归网：触发条件看形状（回执后恰好还剩 {@code keep-1} 条才切得断，而那几条里有几条专家
- * 消息是 router 现场决定的），2026-08-09 实测 4 次完整剧本里至少有 1 次整跑没踩中。
+ * 不是回归网：触发条件看形状（回执后恰好还剩 {@code keep-1} 条才切得断），
+ * 2026-08-09 实测 4 次完整剧本里至少有 1 次整跑没踩中。
  * <p>
  * <b>"这一跑到底踩没踩中"怎么判，两种情形不一样，别混</b>：
  * <ul>
  *   <li><b>正确版的跑：看压缩日志的条数，这是完备且精确的判据</b>。压缩后条数
  *       {@code M = 2 + (size - cutoff)}，理想切点给 {@code keep+2}，所以
  *       <b>回退步数 = M - keep - 2</b>。M 恒等于 {@code keep+2} = 整跑没踩中（理想切点本来就安全）；
- *       出现 {@code M > keep+2} = 守卫被逼出来过。上面那句"至少 1 次整跑没踩中"就是这么判的</li>
+ *       出现 {@code M > keep+2} = 守卫被逼出来过</li>
  *   <li><b>变异版的跑：条数判不了，只能看 {@code pairingViolations}</b>。变异的定义就是永不回退，
  *       M 恒为 {@code keep+2}，条数与形状脱钩</li>
  * </ul>
@@ -77,10 +71,10 @@ import static org.assertj.core.api.Assertions.assertThat;
  * 这一跑会当场红，不再像从前那样被兜底无声接盘。但"重试之后勉强成功"仍然只在日志里留一行，
  * 见 {@link #resilienceLogs}。
  * <p>
- * 主图历史里的工具配对只可能来自 summarizer 的 {@code run_deep_analysis}：专家是独立 threadId 的
- * 子图、只把 lastMessage 并回主图，它们自己的配对不进主图；而 summarizer 是内联子图、与父图共享 state。
- * 所以剧本靠"深度研判"制造配对，且<b>不授权</b>——{@code DeepAnalysisToolkit} 未授权时直接返回
- * PENDING_APPROVAL，配对照样完整，却不烧那 3 次深模型。
+ * 会话历史里的工具配对只可能来自 summarizer 的 {@code run_deep_analysis}：专家叶子独立跑，
+ * 只把 lastMessage 交回主流程，它们自己的配对不进会话历史。所以剧本靠"深度研判"制造配对，
+ * 且<b>不授权</b>——{@link ApprovalGate} 未授权时直接短路回 PENDING_APPROVAL，配对照样完整，
+ * 却不烧那 3 次深模型。
  * <p>
  * 会真烧 LLM token（5 轮，约十分钟），默认跳过，显式开启才跑。跑法（项目根）：
  * <pre>
@@ -117,8 +111,7 @@ class ConversationSummarizerRealRunTest {
      *   <li><b>验收点 1 要求 M&lt;N，而压缩后条数恒为 {@code 首条用户消息 + 摘要 + keep = keep+2}</b>，
      *       所以只有 {@code N > keep+2} 才压得短。五次真跑触发压缩时的历史长度实录为
      *       {@code 7、8、9、10、13}：keep=6 时压缩后恒为 8 条，7、8 两档压不短，
-     *       {@code anySatisfy(M<N)} 有整跑落空的实际风险（最后那次真跑只触发两次压缩、N 为 7 和 13，
-     *       keep=6 下 7 那次直接跳过，就只剩一个数据点）；keep=4 时 7 条起就压得短。
+     *       {@code anySatisfy(M<N)} 有整跑落空的实际风险；keep=4 时 7 条起就压得短。
      *       换 keep 会连带改变压缩节奏、历史长度分布也会跟着变，所以这是量级判断不是精确外推。
      *       （{@code N == keep+2} 那一档具体走哪条路要看 index 1 是不是摘要：首次压缩时不是，
      *       会压出"N 条 → N 条"的空转；之后老摘要被挑出来不再压，{@code toSummarize} 为空，
@@ -145,9 +138,9 @@ class ConversationSummarizerRealRunTest {
     private static final String SECOND_SEGMENT = "── 第2段 ──";
 
     /**
-     * 剧本。前三轮负责把上下文撑起来并往主图历史里塞两组工具配对，后两轮是"压缩之后还能不能说话"的正主。
+     * 剧本。前三轮负责把上下文撑起来并往会话历史里塞两组工具配对，后两轮是"压缩之后还能不能说话"的正主。
      * 第 2、3 轮必须出现"深度研判"字样——summarizer 的 instruction 明令只有这类字眼才准调
-     * run_deep_analysis；带上"先看行情"是为了让 router 顺手派一个 market 专家，
+     * run_deep_analysis；带上"先看行情"是为了让路由顺手派一个 market 专家，
      * 专家消息会把工具配对顶到理想切点附近，切点安全性才验得到。
      */
     private static final List<String> SCRIPT = List.of(
@@ -163,13 +156,20 @@ class ConversationSummarizerRealRunTest {
     @Autowired
     private ChatAgentFactory chatAgentFactory;
 
+    @Autowired
+    private ChatTurnRunner chatTurnRunner;
+
+    /** 续聊上下文的真存储：每轮跑完从这里读，读到的就是下一轮原样重放给上游的那份 */
+    @Autowired
+    private ChatContextStore chatContextStore;
+
     /** 真跑就得烧真配置：这一跑的全部价值就在于走用户自己那份 BYOK，绝不在这里造一份假的 */
     @Autowired
     private UserLlmConfigService userLlmConfigService;
 
     private final ListAppender<ILoggingEvent> summarizeLogs = new ListAppender<>();
     /**
-     * {@link ResilientChatService} 的日志。硬失败现在会直接把这一跑弄红（这张图上已经没有兜底模型），
+     * {@link ResilientChatService} 的日志。硬失败现在会直接把这一跑弄红（这条链上已经没有兜底模型），
      * 但<b>重试之后成功</b>那类只在日志里留一行、答案照出、测试照绿——这一层是那类问题唯一的观测点。
      */
     private final ListAppender<ILoggingEvent> resilienceLogs = new ListAppender<>();
@@ -192,27 +192,34 @@ class ConversationSummarizerRealRunTest {
         UserLlmConfig llmConfig = userLlmConfigService.get(ADMIN_USER_ID);
         assertThat(llmConfig).as("先用管理员账号在 /api/ai/llm-config 配一份 BYOK 端点再跑").isNotNull();
 
-        CompiledGraph<MessagesState<Message>> graph = chatAgentFactory.chatGraph(llmConfig);
-        // threadId 跨轮不变：历史靠 PostgresSaver 的 checkpoint 累积，这才是生产形态
+        ChatAgentFactory.Leaves leaves = chatAgentFactory.leavesFor(llmConfig);
+        // sessionId 跨轮不变：历史靠 ChatContextStore 累积，这才是生产形态
         String sessionId = "wb-1-summarize-realrun-" + UUID.randomUUID();
 
         List<String> answers = new ArrayList<>();
         List<Integer> compressionsBeforeRound = new ArrayList<>();
-        for (String question : SCRIPT) {
-            compressionsBeforeRound.add(compressions().size());
-            String answer = ask(graph, sessionId, question);
-            answers.add(answer);
-            List<Message> history = messagesOf(graph, sessionId);
-            log.info("[SummarizeRealRun] 第 {} 轮问：{}", answers.size(), question);
-            log.info("[SummarizeRealRun] 第 {} 轮答（{} 字）：{}", answers.size(), answer.length(), answer);
-            log.info("[SummarizeRealRun] 第 {} 轮后历史 {} 条：{}",
-                    answers.size(), history.size(), shapeOf(history));
+        List<Message> finalMessages = List.of();
+        try {
+            for (String question : SCRIPT) {
+                compressionsBeforeRound.add(compressions().size());
+                String answer = ask(leaves, sessionId, question);
+                answers.add(answer);
+                // 一轮跑完落库的这份，就是下一轮原样重放给上游的输入——落单回执在这儿最抓得住现行
+                List<Message> history = chatContextStore.load(sessionId);
+                recordPairingViolation(answers.size(), history);
+                log.info("[SummarizeRealRun] 第 {} 轮问：{}", answers.size(), question);
+                log.info("[SummarizeRealRun] 第 {} 轮答（{} 字）：{}", answers.size(), answer.length(), answer);
+                log.info("[SummarizeRealRun] 第 {} 轮后历史 {} 条：{}",
+                        answers.size(), history.size(), shapeOf(history));
+                finalMessages = history;
+            }
+        } finally {
+            chatContextStore.purge(sessionId);   // 真跑不留脏行
         }
 
         List<String> compressions = compressions();
         compressions.forEach(line -> log.info("[SummarizeRealRun] {}", line));
         pairingViolations.forEach(line -> log.error("[SummarizeRealRun] 配对被切断：{}", line));
-        List<Message> finalMessages = messagesOf(graph, sessionId);
 
         // 验收点 1：压缩真的发生过，且确实压短了（不是"N 条 → N 条"的空转）
         assertThat(compressions).isNotEmpty();
@@ -223,7 +230,7 @@ class ConversationSummarizerRealRunTest {
         });
 
         // 验收点 2：压缩之后上游还能正常说话。
-        // 非平凡的是这条——必须真有轮次是「带着已压缩的历史从 checkpoint 起跑」的，
+        // 非平凡的是这条——必须真有轮次是「带着已压缩的历史从存储起跑」的，
         // 否则"压缩结果落没落盘、落盘的那份能不能被上游接受"根本没被验到
         assertThat(firstRoundStartingCompressed(compressionsBeforeRound))
                 .as("没有任何一轮是带着已压缩历史起跑的，验收点 2 无从谈起")
@@ -240,14 +247,12 @@ class ConversationSummarizerRealRunTest {
                 .isEmpty();
 
         // 同一件事的结构断言，也是本类真正的守门员（理由见类头"上游宽容"那段）：
-        // 全程每个节点交出的历史里，工具回执都必须能找到配对的调用。
-        // 只看最终 state 是不够的——落单的回执活不了多久，下一次压缩把它一并卷进摘要就"自愈"了，
-        // 而它已经被原样送进过上游请求
+        // 每轮落库的历史里，工具回执都必须能找到配对的调用——落单的那条会被原样送进下一轮请求
         assertThat(pairingViolations)
                 .as("压缩切点把工具调用与回执切成了两半，落单的回执会被原样送进上游请求")
                 .isEmpty();
 
-        // 验收点 3：摘要以固定前缀存在于最终 state；压缩发生两次以上则老摘要原样留着接新段
+        // 验收点 3：摘要以固定前缀存在于最终历史；压缩发生两次以上则老摘要原样留着接新段
         List<String> summaries = finalMessages.stream()
                 .filter(SystemMessage.class::isInstance)
                 .map(Message::getText)
@@ -260,64 +265,41 @@ class ConversationSummarizerRealRunTest {
         }
     }
 
-    /** 一轮对话。输入形态与 {@code ChatWorkbenchController.run} 一致：派发键每轮清零，否则去重会让后续轮次不再派专家 */
-    private String ask(CompiledGraph<MessagesState<Message>> graph, String sessionId, String question) {
-        RunnableConfig config = RunnableConfig.builder()
-                .threadId(sessionId)
-                .addMetadata(ChatAgentFactory.PROGRESS_SINK_KEY,
-                        (Consumer<ChatAgentFactory.ExpertProgress>) event ->
-                                log.info("[SummarizeRealRun] 专家 {} {}", event.agent(), event.phase()))
-                .build();
+    /** 一轮对话，走的就是 Controller 那条路（{@link ChatTurnRunner#run}） */
+    private String ask(ChatAgentFactory.Leaves leaves, String sessionId, String question) {
         StringBuilder answer = new StringBuilder();
-        // 普通 for 迭代消费，不用 forEachAsync——后者 thenCompose 递归自链，长回答会栈溢出（真跑实证过）
-        for (var output : graph.stream(Map.of(
-                "messages", new UserMessage(question),
-                ChatAgentFactory.DISPATCH_ROUND_KEY, 0,
-                ChatAgentFactory.DISPATCHED_KEY, List.of()), config)) {
-            recordPairingViolation(output);
-            if (output instanceof StreamingOutput<?> streaming) {
-                String chunk = streaming.chunk();
-                if (chunk != null) {
-                    answer.append(chunk);
-                }
-            }
-        }
+        chatTurnRunner.run(leaves, ADMIN_USER_ID, sessionId, question, answer::append,
+                event -> log.info("[SummarizeRealRun] 专家 {} {}", event.agent(), event.phase()));
         return answer.toString();
     }
 
     /**
-     * 逐个节点产出扫"落单的工具回执"。这是唯一能抓现行的地方：图交出的这份 messages 就是下一次
+     * 扫每轮落库历史里的"落单工具回执"。这是唯一抓得住现行的地方：这份历史就是下一轮
      * 上游请求的 input（{@code ResponsesChatModel.buildInput} 把 ToolResponseMessage 无条件转成
-     * function_call_output），而它在 state 里只活到下一次压缩——下次压缩把它卷进摘要就"自愈"了，
-     * 只看最终 state 什么都看不到。
+     * function_call_output），而它在库里只活到下一次压缩——下次压缩把它卷进摘要就"自愈"了。
      * <p>
      * <b>只查"回执找不到调用"这一个方向，不是图省事，是反方向不可达</b>：{@code compress} 做的是
      * 严格的前缀切（{@code messages.subList(cutoff, size)} 原样保留尾部），被提到头部的只有首条
      * UserMessage 和摘要 SystemMessage，这两种都带不了 toolCalls；而 ToolResponseMessage 恒在它的
      * AssistantMessage 之后。所以"调用存活、回执被压走"这种孤儿构造不出来。
-     * 反过来查还会误报：模型刚吐出 tool_call、工具节点还没跑的那一拍，本来就是"调用还没有回执"。
+     * 反过来查还会误报：模型刚吐出 tool_call、工具还没跑的那一拍，本来就是"调用还没有回执"。
      * <p>
      * <b>这条推理依赖 compress 保持前缀切语义</b>——哪天改成挖中间窗口（比如只压中段、保留头尾），
      * 反向孤儿立刻变得可达，而这条断言会静默瞎掉，届时必须补上反方向。
      */
-    private void recordPairingViolation(org.bsc.langgraph4j.NodeOutput<MessagesState<Message>> output) {
-        List<Message> messages = output.state().messages();
+    private void recordPairingViolation(int round, List<Message> messages) {
         Set<String> orphans = new LinkedHashSet<>(toolResponseIds(messages));
         orphans.removeAll(toolCallIds(messages));
         if (!orphans.isEmpty()) {
-            pairingViolations.add("节点 " + output.node() + " 落单回执 " + orphans + " 形状：" + shapeOf(messages));
+            pairingViolations.add("第 " + round + " 轮落单回执 " + orphans + " 形状：" + shapeOf(messages));
         }
-    }
-
-    private List<Message> messagesOf(CompiledGraph<MessagesState<Message>> graph, String sessionId) {
-        return graph.getState(RunnableConfig.builder().threadId(sessionId).build()).state().messages();
     }
 
     /**
      * 上游出错的痕迹。三串关键词覆盖 {@link ResilientChatService} 的<b>全部四个</b>出错日志点：
      * 流式退避重试、流式重试耗尽切兜底、阻塞路径切兜底（后两个共用"切换兜底"这句）、
      * 阻塞路径读响应中断。任何一条出现都说明这轮请求被上游拒过或断过。
-     *（"切换兜底"这两句今天在这张图上已经打不出来了——BYOK 后全图都不带兜底模型；
+     *（"切换兜底"这两句今天已经打不出来了——BYOK 后全链路都不带兜底模型；
      * 关键词留着不碍事，将来真加回兜底也不用改这里。）
      * <p>
      * <b>这个探针至今没通过电，用它的时候心里要有数</b>：那四个日志点全是 {@code log.warn}、
@@ -326,8 +308,7 @@ class ConversationSummarizerRealRunTest {
      * {@link #summarizeLogs} 是被证明活着的（每跑都捕到 {@code 无新原文可压} 与压缩 INFO）。
      * <p>
      * 即便如此仍然值得留：硬失败现在会自己红，但"退避重试之后成功"这类照样答案非空、测试全绿，
-     * 没有它就完全看不见；而通往违规的那条路真实存在——变异跑里落单回执穿过了
-     * agent / summarizer-agent / summarizer-action 三个节点。
+     * 没有它就完全看不见。
      * <p>
      * 已知代价：{@code 退避重试} 会被无关的瞬时网络抖动触发成假红（历次真跑 0 次出现）。留着——
      * 漏掉一次真的上游拒绝，比偶尔多红一次贵得多。
@@ -352,8 +333,7 @@ class ConversationSummarizerRealRunTest {
      *   <li>{@code messages > keep}：回退循环从理想切点一路退到了 0。<b>这句日志的措辞与实情有出入</b>——
      *       cutoff=0 处 {@code isSafeCutoff} 恒为真（配对两端都落在切点同侧，
      *       {@code (assistantIndex<0) != (i<0)} 永远是 false），所以它并不是"没找到安全点"，
-     *       而是只剩 0 这个没有压缩价值的切点可用（{@code ConversationSummarizer:215} 那句
-     *       {@code return 0} 因此是不可达代码）。真出事的正是这一支：理想切点到 1 之间<b>全部</b>
+     *       而是只剩 0 这个没有压缩价值的切点可用。真出事的正是这一支：理想切点到 1 之间<b>全部</b>
      *       不安全，说明配对已密集到无法安全切分</li>
      * </ul>
      * {@code 压缩失败，沿用原始对话} 无条件算违规，但要知道它<b>同样是环境敏感的</b>：那是

@@ -249,8 +249,10 @@ public class ConversationSummarizer implements NodeHook.BeforeCall<MessagesState
     /**
      * token 估算：CJK 字符按 1 字≈1 token，其余按 4 字符≈1 token。
      * 框架自带的计数器一律 charCount/4，中文会低估约 4 倍——阈值设 6000 实际到 20000+ 才触发。
+     * <p>
+     * public 是给 {@code ChatTurnRunner} 打轮次指标用的（跨包）。只是估算，不是计费口径。
      */
-    static int estimateTokens(List<Message> messages) {
+    public static int estimateTokens(List<Message> messages) {
         int total = 0;
         for (Message message : messages) {
             total += estimateTokens(message.getText());

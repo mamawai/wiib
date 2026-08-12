@@ -7,13 +7,11 @@ import com.mawai.wiibcommon.util.Result;
 import com.mawai.wiibquant.agent.analysis.DeepAnalysisService;
 import com.mawai.wiibquant.agent.toolkit.MarketToolkit;
 import com.mawai.wiibquant.agent.toolkit.NewsToolkit;
-import org.bsc.langgraph4j.CompiledGraph;
-import org.bsc.langgraph4j.checkpoint.MemorySaver;
+import com.mawai.wiibquant.mapper.WorkbenchChatContextMapper;
 import org.bsc.langgraph4j.prebuilt.MessagesState;
 import org.bsc.langgraph4j.spring.ai.serializer.jackson.SpringAIJacksonStateSerializer;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.messages.AssistantMessage;
-import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
@@ -23,24 +21,32 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import reactor.core.publisher.Flux;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * HITL 整条链路在 Controller 这一头的三件事：确认卡怎么发、点回来怎么比对、拒绝之后怎么办。
+ * HITL 整条链路在 Controller 这一头的四件事：确认卡怎么发、点回来怎么比对、拒绝之后怎么办，
+ * 以及确认后的续跑轮还看不看得见上一轮的上下文。
  * <p>
- * <b>必须真跑 {@link ChatWorkbenchController#run}</b>：确认卡是 run() 在流跑完之后发的，
+ * <b>必须真跑 {@link ChatWorkbenchController#run}</b>：确认卡是 run() 在这一轮跑完之后发的，
  * 发不发、发几张全是它自己的判断。测试自己调 registry 拼一遍只能证明 registry 好使，
  * controller 里写错照样绿。SSE 事件靠一个记账用的 emitter 收下来。
+ * <p>
+ * 装的是<b>真</b> {@link ChatTurnRunner} + <b>真</b> {@link ChatContextStore}（mapper 换成
+ * HashMap 假实现，字节真存真取）：跨轮上下文现在走这条路，mock 掉就等于把要验的东西验没了。
  */
 class ChatWorkbenchHitlTest {
 
@@ -59,8 +65,15 @@ class ChatWorkbenchHitlTest {
     private final AtomicInteger deepCallsThisTurn = new AtomicInteger();
     /** 本轮 summarizer 要不要调深研判工具（false=直接给答案） */
     private final AtomicBoolean wantsDeepAnalysis = new AtomicBoolean(true);
-    /** 消息去重用的全局序号，见下面 productionGraph 的说明 */
+    /** 本轮路由要不要派一次 market 专家（用来给"上一轮的专家数据"造实体） */
+    private final AtomicBoolean wantsMarketExpert = new AtomicBoolean(false);
+    /** 消息去重用的全局序号，见下面 productionLeaves 的说明 */
     private final AtomicInteger seq = new AtomicInteger();
+    /** summarizer 每次收到的 Prompt：跨轮上下文只能从这里看 */
+    private final List<Prompt> summarizerPrompts = new CopyOnWriteArrayList<>();
+
+    /** 会话上下文表的假实现：字节真存真取，跨轮上下文这条链才算真的被跑到 */
+    private final Map<String, byte[]> contextRows = new HashMap<>();
 
     /** 记账用的 emitter：SseChannel 的每一次 send 都从这里过，事件原文攒起来供断言 */
     private static final class RecordingEmitter extends SseEmitter {
@@ -95,47 +108,66 @@ class ChatWorkbenchHitlTest {
                 .toolCalls(List.of(new AssistantMessage.ToolCall(id, "function", name, args))).build();
     }
 
-    /** 生产装配的对话图（真 {@link ChatAgentFactory#chatGraph} + MemorySaver，续聊语义与线上一致） */
-    private CompiledGraph<MessagesState<Message>> productionGraph() {
+    /** 生产装配的叶子（真 {@link ChatAgentFactory#leavesFor}） */
+    private ChatAgentFactory.Leaves productionLeaves() {
         // ChatService 建请求时无条件读 getOptions() 挂工具，null 会 NPE
         when(deep.getOptions()).thenReturn(ToolCallingChatOptions.builder().build());
         when(light.getOptions()).thenReturn(ToolCallingChatOptions.builder().build());
         ChatModelFactory chatModelFactory = mock(ChatModelFactory.class);
         when(chatModelFactory.modelsFor(any())).thenReturn(new ChatModelFactory.Models(deep, light));
-        // router 恒答 FINISH：专家轮与本条无关
-        when(light.call(any(Prompt.class))).thenAnswer(inv ->
-                responseOf(toolCall("r", "route", "{\"next\":[\"FINISH\"]}")));
+        // 浅模型同时服务路由与专家，靠系统提示词首句分辨
+        when(light.call(any(Prompt.class))).thenAnswer(inv -> {
+            String head = ((Prompt) inv.getArgument(0)).getInstructions().getFirst().getText();
+            if (!head.contains("你是研判工作台的调度器")) {
+                return responseOf(new AssistantMessage("BTC 现价 97000（第 " + seq.incrementAndGet() + " 条）"));
+            }
+            // 派过一次之后 fresh 为空，循环自然收口，不必自己数轮次
+            return responseOf(toolCall("r", "route",
+                    wantsMarketExpert.get() ? "{\"next\":[\"market_agent\"]}" : "{\"next\":[\"FINISH\"]}"));
+        });
         // 每轮：先要一次深研判（闸门在这儿拦），拿到回执后再说一句话收尾。
         // 每条消息都带序号是必须的：MessagesState.SCHEMA 的 reducer 按 Objects.hash 去重，
         // 连着几轮回同一句话，后面那条会被静默丢掉，工具节点当场 no AssistantMessage provided
-        when(deep.stream(any(Prompt.class))).thenAnswer(inv -> Flux.just(responseOf(
-                wantsDeepAnalysis.get() && deepCallsThisTurn.incrementAndGet() == 1
-                        ? toolCall("c" + seq.incrementAndGet(), "run_deep_analysis",
-                        "{\"symbol\":\"BTCUSDT\"}")
-                        : new AssistantMessage("这是第 " + seq.incrementAndGet() + " 段回答"))));
+        when(deep.stream(any(Prompt.class))).thenAnswer(inv -> {
+            summarizerPrompts.add(inv.getArgument(0));
+            return Flux.just(responseOf(
+                    wantsDeepAnalysis.get() && deepCallsThisTurn.incrementAndGet() == 1
+                            ? toolCall("c" + seq.incrementAndGet(), "run_deep_analysis",
+                            "{\"symbol\":\"BTCUSDT\"}")
+                            : new AssistantMessage("这是第 " + seq.incrementAndGet() + " 段回答")));
+        });
 
         return new ChatAgentFactory(chatModelFactory, mock(MarketToolkit.class), mock(NewsToolkit.class),
                 deepAnalysisService, mock(WorkbenchRunRegistry.class),
-                registry, new MemorySaver(),
-                new SpringAIJacksonStateSerializer<>(MessagesState::new),
-                PRODUCTION_LIMIT, NO_COMPRESSION, 6, "X").chatGraph(new UserLlmConfig());
+                registry, new SpringAIJacksonStateSerializer<>(MessagesState::new),
+                PRODUCTION_LIMIT, NO_COMPRESSION, 6, "X")
+                .leavesFor(new UserLlmConfig());
     }
 
-    /** 图改由 chat() 取好传进 run()，这条测试直接调 run()，所以工厂和配置服务都用不上了 */
+    /** 叶子改由 chat() 取好传进 run()，这条测试直接调 run()，所以工厂和配置服务都用不上了 */
     private ChatWorkbenchController controller() {
         ChatMemoryService memory = mock(ChatMemoryService.class);
         when(memory.recall(anyLong())).thenReturn(""); // 空前缀：记忆拼接不是这里要验的
+        WorkbenchChatContextMapper contextMapper = mock(WorkbenchChatContextMapper.class);
+        when(contextMapper.selectState(anyString())).thenAnswer(inv -> contextRows.get(inv.getArgument(0)));
+        when(contextMapper.upsert(anyString(), anyLong(), any())).thenAnswer(inv -> {
+            contextRows.put(inv.getArgument(0), inv.getArgument(2));
+            return 1;
+        });
+        ChatContextStore contextStore = new ChatContextStore(
+                contextMapper, new SpringAIJacksonStateSerializer<>(MessagesState::new));
         return new ChatWorkbenchController(mock(ChatAgentFactory.class), mock(UserLlmConfigService.class),
-                registry, memory, mock(ChatHistoryService.class), mock(WorkbenchCheckpointStore.class),
+                registry, memory, mock(ChatHistoryService.class), contextStore,
+                new ChatTurnRunner(contextStore, registry),
                 mock(WorkbenchRunRegistry.class), new ChatConcurrencyGate(10));
     }
 
     /** 跑一轮，返回这一轮发出去的全部 SSE 事件 */
     private RecordingEmitter turn(ChatWorkbenchController controller,
-                                  CompiledGraph<MessagesState<Message>> graph, String message) {
+                                  ChatAgentFactory.Leaves leaves, String message) {
         deepCallsThisTurn.set(0);
         RecordingEmitter emitter = new RecordingEmitter();
-        controller.run(new ChatWorkbenchController.SseChannel(emitter), 1L, SESSION, message, graph);
+        controller.run(new ChatWorkbenchController.SseChannel(emitter), 1L, SESSION, message, leaves);
         return emitter;
     }
 
@@ -155,10 +187,10 @@ class ChatWorkbenchHitlTest {
      */
     @Test
     void 确认标识对不上时拒绝授权() {
-        CompiledGraph<MessagesState<Message>> graph = productionGraph();
+        ChatAgentFactory.Leaves leaves = productionLeaves();
         ChatWorkbenchController controller = controller();
 
-        JSONObject card = turn(controller, graph, "深度研判 BTC").events("hitl_request").getFirst();
+        JSONObject card = turn(controller, leaves, "深度研判 BTC").events("hitl_request").getFirst();
         assertThat(card.getString("requestId")).isNotBlank();
 
         Result<Void> stale = controller.approve(1L, decision("别的卡片的标识", true));
@@ -181,14 +213,14 @@ class ChatWorkbenchHitlTest {
      */
     @Test
     void 用户没点的确认卡不会在下一轮重复弹() {
-        CompiledGraph<MessagesState<Message>> graph = productionGraph();
+        ChatAgentFactory.Leaves leaves = productionLeaves();
         ChatWorkbenchController controller = controller();
 
-        assertThat(turn(controller, graph, "深度研判 BTC").events("hitl_request")).hasSize(1);
+        assertThat(turn(controller, leaves, "深度研判 BTC").events("hitl_request")).hasSize(1);
 
         // 第二轮模型不再调深研判（用户问的是别的），但上一张卡还挂在 registry 里
         wantsDeepAnalysis.set(false);
-        RecordingEmitter second = turn(controller, graph, "顺便说说最近行情");
+        RecordingEmitter second = turn(controller, leaves, "顺便说说最近行情");
 
         assertThat(second.events("hitl_request")).isEmpty();
         assertThat(registry.peekPending(SESSION)).isPresent(); // 卡还在，只是不再重发
@@ -203,18 +235,52 @@ class ChatWorkbenchHitlTest {
      */
     @Test
     void 拒绝之后下一轮拿到拒绝回执而不是新卡() {
-        CompiledGraph<MessagesState<Message>> graph = productionGraph();
+        ChatAgentFactory.Leaves leaves = productionLeaves();
         ChatWorkbenchController controller = controller();
 
-        JSONObject card = turn(controller, graph, "深度研判 BTC").events("hitl_request").getFirst();
+        JSONObject card = turn(controller, leaves, "深度研判 BTC").events("hitl_request").getFirst();
         assertThat(controller.approve(1L, decision(card.getString("requestId"), false)).getCode()).isZero();
 
-        RecordingEmitter second = turn(controller, graph, "再研判一次 BTC");
+        RecordingEmitter second = turn(controller, leaves, "再研判一次 BTC");
 
         assertThat(second.events("hitl_request")).isEmpty();
         assertThat(registry.peekPending(SESSION)).isEmpty();   // 没有登记新的待确认
         // 三条一起才钉得住"走的是拒绝分支"：没卡 + 没登记 + 工具也没跑
         //（只断前两条的话，"闸门放行、工具真跑了 3 次深模型"也满足）
         verify(deepAnalysisService, never()).buildNewsContext();
+    }
+
+    /**
+     * <b>验收硬条件</b>：续聊上下文来自会话上下文表而不是 checkpoint。
+     * <p>
+     * 第一轮派一次 market 专家，让"上一轮的数据"有实体；approve 之后跑第二轮，
+     * 断言 summarizer 这一轮收到的 Prompt 里既有上一轮的专家结论、也有上一轮的答案。
+     * 落库或读取任一头断了这条就红——而用户遭的罪是"AI 完全不记得刚才说过什么"。
+     */
+    @Test
+    void 确认后的续跑轮仍看得见上一轮的上下文() {
+        wantsMarketExpert.set(true);
+        ChatAgentFactory.Leaves leaves = productionLeaves();
+        ChatWorkbenchController controller = controller();
+
+        RecordingEmitter first = turn(controller, leaves, "先看行情，再深度研判 BTC");
+        JSONObject card = first.events("hitl_request").getFirst();
+        String expertConclusion = first.events("token").stream()
+                .filter(e -> "process".equals(e.getString("role")))
+                .map(e -> e.getString("text")).findFirst().orElseThrow();
+        String firstAnswer = first.events("done").getFirst().getString("answer");
+        assertThat(controller.approve(1L, decision(card.getString("requestId"), true)).getCode()).isZero();
+
+        // 授权还在 → 第二轮直通汇总，专家不再派；上下文只能从存储来
+        wantsMarketExpert.set(false);
+        summarizerPrompts.clear();
+        turn(controller, leaves, "已确认，请继续执行深度研判");
+
+        String secondTurnInput = summarizerPrompts.getFirst().getInstructions().stream()
+                .map(m -> m.getText() == null ? "" : m.getText())
+                .reduce("", (a, b) -> a + "\n" + b);
+        assertThat(secondTurnInput).contains(expertConclusion);
+        assertThat(secondTurnInput).contains(firstAnswer);
+        assertThat(secondTurnInput).contains("先看行情，再深度研判 BTC");
     }
 }

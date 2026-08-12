@@ -8,7 +8,6 @@ import com.mawai.wiibquant.agent.toolkit.MarketToolkit;
 import com.mawai.wiibquant.agent.toolkit.NewsToolkit;
 import org.bsc.langgraph4j.CompiledGraph;
 import org.bsc.langgraph4j.RunnableConfig;
-import org.bsc.langgraph4j.checkpoint.MemorySaver;
 import org.bsc.langgraph4j.hook.EdgeHook;
 import org.bsc.langgraph4j.prebuilt.MessagesState;
 import org.bsc.langgraph4j.spring.ai.agent.ReactAgent;
@@ -99,22 +98,19 @@ class ApprovalGateOrderTest {
     }
 
     /**
-     * 闸门真的挂上了：真图跑一轮，模型要调深研判，未授权时必须被短路并留下待确认。
+     * 闸门真的挂上了：生产的 summarizer 叶子跑一轮，模型要调深研判，未授权时必须被短路并留下待确认。
      * 这是唯一能抓住"忘了往 summarizerToolHooks 里放 ApprovalGate"的断言——
-     * 前两条测试对它一无所知
+     * 前两条测试对它一无所知。
+     * <p>
+     * 叶子是流式的，必须<b>把流消费完</b>才算跑完一轮；只拿到生成器就断言，工具边根本还没走到。
      */
     @Test
-    void 闸门在真图上拦下未授权的深研判() throws Exception {
+    void 闸门在生产叶子上拦下未授权的深研判() {
         ApprovalRegistry registry = new ApprovalRegistry();
         ChatModel deep = mock(ChatModel.class);
         ChatModel light = mock(ChatModel.class);
         when(deep.getOptions()).thenReturn(ToolCallingChatOptions.builder().build());
         when(light.getOptions()).thenReturn(ToolCallingChatOptions.builder().build());
-        // router 恒答 FINISH，直达 summarizer
-        when(light.call(any(Prompt.class))).thenReturn(new ChatResponse(
-                List.of(new Generation(AssistantMessage.builder().content("").toolCalls(List.of(
-                        new AssistantMessage.ToolCall("r", "function", "route", "{\"next\":[\"FINISH\"]}")))
-                        .build()))));
         when(deep.stream(any(Prompt.class)))
                 .thenReturn(Flux.just(new ChatResponse(List.of(new Generation(
                         AssistantMessage.builder().content("").toolCalls(List.of(
@@ -123,10 +119,13 @@ class ApprovalGateOrderTest {
                 .thenReturn(Flux.just(new ChatResponse(List.of(
                         new Generation(new AssistantMessage("已请你确认"))))));
 
-        CompiledGraph<MessagesState<Message>> graph =
-                factory(deep, light, registry).chatGraph(new UserLlmConfig());
-        graph.invoke(Map.of("messages", List.of(new UserMessage("深度研判 BTC"))),
-                RunnableConfig.builder().threadId(SESSION).build());
+        CompiledGraph<MessagesState<Message>> summarizer =
+                factory(deep, light, registry).leavesFor(new UserLlmConfig()).summarizer();
+        // 闸门只从 config.threadId() 取会话号，没有它整条 HITL 直接哑掉
+        for (var ignored : summarizer.stream(Map.of("messages", List.of(new UserMessage("深度研判 BTC"))),
+                RunnableConfig.builder().threadId(SESSION).build())) {
+            // 消费到底，别的什么都不做
+        }
 
         assertThat(registry.peekPending(SESSION)).isPresent()
                 .get().satisfies(p -> assertThat(p.symbol()).isEqualTo("BTCUSDT"));
@@ -145,9 +144,7 @@ class ApprovalGateOrderTest {
         when(chatModelFactory.modelsFor(any())).thenReturn(new ChatModelFactory.Models(deep, light));
         return new ChatAgentFactory(chatModelFactory,
                 mock(MarketToolkit.class), mock(NewsToolkit.class),
-                mock(DeepAnalysisService.class), mock(WorkbenchRunRegistry.class),
-                // 真 saver：mock 的 put() 返回 null，而 CompiledGraph 会接着用它的返回值
-                registry, new MemorySaver(),
+                mock(DeepAnalysisService.class), mock(WorkbenchRunRegistry.class), registry,
                 // summarizeThresholdTokens 给足，别让历史压缩掺进来干扰
                 new SpringAIJacksonStateSerializer<>(MessagesState::new), 12, 999_999, 6, "X");
     }

@@ -11,11 +11,11 @@ import java.util.Locale;
  * 所以认得出的那四类（401/429/模型不存在/连不上）各给一句能照着做的话。
  * <p>
  * <b>认不出来的就不替用户判病因。</b> 两个调用方的 catch 罩的范围都比 LLM 大得多——
- * 落历史、写记忆、checkpoint 落库全在里面，数据库挂了也走这条路。
+ * 落历史、写记忆、上下文落库全在里面，数据库挂了也走这条路。
  * 兜底要是说"请检查端点与模型配置"，用户会去乱改一把本来没问题的 key。
  * <p>
  * 硬约束：<b>任何分支都不许把 API key 带出去</b>。这段文本不只给用户看——
- * 专家失败时它会被拼进 AssistantMessage 喂回模型，并随 checkpoint 落库。
+ * 专家失败时它会被拼进 AssistantMessage 喂回模型，并随会话上下文落库。
  */
 @Slf4j
 public final class LlmErrorMessages {

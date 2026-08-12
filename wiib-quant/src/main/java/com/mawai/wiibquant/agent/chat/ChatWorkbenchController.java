@@ -7,20 +7,12 @@ import com.mawai.wiibcommon.enums.ErrorCode;
 import com.mawai.wiibcommon.exception.BizException;
 import com.mawai.wiibcommon.util.Result;
 import com.mawai.wiibquant.agent.llm.LlmErrorMessages;
-import com.mawai.wiibquant.agent.llm.ModelCallLimiter;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.bsc.langgraph4j.CompiledGraph;
-import org.bsc.langgraph4j.RunnableConfig;
-import org.bsc.langgraph4j.prebuilt.MessagesState;
-import org.bsc.langgraph4j.streaming.StreamingOutput;
-import org.springframework.ai.chat.messages.AssistantMessage;
-import org.springframework.ai.chat.messages.Message;
-import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -32,7 +24,6 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -42,11 +33,11 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * 研判工作台对话入口（P4）：SSE 流式暴露 Supervisor 多 agent 调度全过程。
+ * 研判工作台对话入口（P4）：SSE 流式暴露多 agent 调度全过程。
  * 事件协议：session(会话号) / agent_start(调度切换) / token(LLM流，带 agent+role 区分专家过程/答案)
  * / progress(长工具阶段进度) / done(完整回答) / error。
- * threadId=sessionId 走 PostgresSaver——断连后带同一 sessionId 重连即续聊；
- * 断连不中止图：跑完照样落历史，前端靠 status 接口+历史回放补答案。
+ * 续聊上下文按 sessionId 存在自建的 {@link ChatContextStore} 表里，带同一 sessionId 再发即续聊；
+ * 断连不中止本轮：{@link ChatTurnRunner} 跑完照样落历史，前端靠 status 接口+历史回放补答案。
  */
 @Slf4j
 @Tag(name = "研判工作台")
@@ -60,7 +51,8 @@ public class ChatWorkbenchController {
     private final ApprovalRegistry approvalRegistry;
     private final ChatMemoryService chatMemoryService;
     private final ChatHistoryService chatHistoryService;
-    private final WorkbenchCheckpointStore checkpointStore;
+    private final ChatContextStore contextStore;
+    private final ChatTurnRunner turnRunner;
     private final WorkbenchRunRegistry runRegistry;
     private final ChatConcurrencyGate concurrencyGate;
     /** 包私有：名额泄漏那条钉子（{@code ChatWorkbenchAdmissionTest}）要关掉它来制造 submit 失败 */
@@ -104,13 +96,13 @@ public class ChatWorkbenchController {
         if (llmConfig == null) {
             throw new BizException(ErrorCode.LLM_CONFIG_MISSING);
         }
-        CompiledGraph<MessagesState<Message>> graph;
+        ChatAgentFactory.Leaves leaves;
         try {
-            // 建图放准入期：配置能过保存校验但仍可能建不出模型（协议对不上等），这类错误必须在建流前暴露。
-            // 建图不发网络请求，慢端点不会拖垮这里
-            graph = chatAgentFactory.chatGraph(llmConfig);
+            // 建叶子放准入期：配置能过保存校验但仍可能建不出模型（协议对不上等），这类错误必须在建流前暴露。
+            // 建叶子不发网络请求，慢端点不会拖垮这里
+            leaves = chatAgentFactory.leavesFor(llmConfig);
         } catch (Exception e) {
-            log.warn("[Workbench] 建图失败 userId={}", userId, e);
+            log.warn("[Workbench] 建模失败 userId={}", userId, e);
             throw new BizException(ErrorCode.LLM_CONFIG_INVALID);
         }
         // 拒因由闸门自己给，不去 runRegistry 二次推断：那边 finish 先摘、名额后还，
@@ -142,7 +134,7 @@ public class ChatWorkbenchController {
                 // heartbeatScheduler.scheduleWithFixedDelay 在它自己的 try 之外，
                 // scheduler 关闭时它抛出去，run() 的 finally 根本不执行，名额就永久漏了
                 try {
-                    run(channel, userId, sessionId, request.getMessage(), graph);
+                    run(channel, userId, sessionId, request.getMessage(), leaves);
                 } catch (Throwable e) {
                     // submit 返回的 Future 没人 get()，不自己记一笔的话异常被完全吞掉
                     log.error("[Workbench] 对话任务异常退出 sessionId={}", sessionId, e);
@@ -185,14 +177,14 @@ public class ChatWorkbenchController {
     }
 
     @DeleteMapping("/sessions/{sessionId}")
-    @Operation(summary = "删除历史会话（展示记录 + 后端 checkpoint 上下文）")
+    @Operation(summary = "删除历史会话（展示记录 + 后端续聊上下文）")
     public Result<Void> deleteSession(@CurrentUserId long userId, @PathVariable String sessionId) {
         if (sessionId == null || !sessionId.startsWith("wb-" + userId + "-")) {
             return Result.fail("会话不存在或无权限");
         }
         chatHistoryService.deleteSession(sessionId);
         // 展示记录与续聊上下文是两套存储，删会话得都清
-        checkpointStore.purge(sessionId);
+        contextStore.purge(sessionId);
         return Result.ok(null);
     }
 
@@ -214,19 +206,19 @@ public class ChatWorkbenchController {
     }
 
     /**
-     * 一轮对话的全过程。包私有而非 private：HITL 的两条链路钉子
+     * 一轮对话的全过程。包私有而非 private：HITL 的链路钉子
      *（{@code ChatWorkbenchHitlTest}）要真跑这段并看它发出去的 SSE 事件，
      * 而 {@link #chat} 自己 new emitter、事件出不来。
      */
     void run(SseChannel channel, long userId, String sessionId, String message,
-             CompiledGraph<MessagesState<Message>> graph) {
+             ChatAgentFactory.Leaves leaves) {
         // 本轮开跑的时刻：结尾只发"这一轮新登记"的确认卡，见下面 hitl_request 那段
         long turnStartedAt = System.currentTimeMillis();
         // 答案流/过程流分离：专家的结论是"工作过程"（前端折叠展示、不落历史），
         // 只有 summarizer 的汇总才是答案——否则单专家问题会"专家一遍+汇总一遍"重复输出
         StringBuilder answer = new StringBuilder();
         StringBuilder expertLog = new StringBuilder();
-        // 深研判这类工具在图内同步阻塞跑，期间通道零字节。心跳全程喂着，中间层才不会当连接死了掐断
+        // 深研判这类工具在 agent 里同步阻塞跑，期间通道零字节。心跳全程喂着，中间层才不会当连接死了掐断
         ScheduledFuture<?> heartbeat = heartbeatScheduler.scheduleWithFixedDelay(
                 channel::heartbeat, HEARTBEAT_SECONDS, HEARTBEAT_SECONDS, TimeUnit.SECONDS);
         try {
@@ -240,43 +232,19 @@ public class ChatWorkbenchController {
             String memory = chatMemoryService.recall(userId);
             String enriched = memory.isEmpty() ? message : memory + "\n用户问题：" + message;
 
-            RunnableConfig config = RunnableConfig.builder()
-                    .threadId(sessionId)
-                    // 专家的 token 流被并行分支 reduce 掉了拿不到，节点经此 sink 主动汇报进度与结论
-                    .addMetadata(ChatAgentFactory.PROGRESS_SINK_KEY,
-                            (java.util.function.Consumer<ChatAgentFactory.ExpertProgress>)
-                                    event -> onExpertProgress(channel, expertLog, event))
-                    .build();
-
-            // 派发轮次、已派名单、模型调用数每轮提问都清零：它们存在 state 里会随 checkpoint 续聊带过来，
-            // 不重置的话同一会话聊几轮后就永远达上限 / 永远"已取过数"，再也不派专家、也再也调不动工具了
-            // （model_call_count 漏了最狠：累计够上限那 8 次之后，summarizer 一到工具边就短路跳 END，
-            //  深研判确认后的续跑轮直接哑火，用户点了确认什么都不发生。钉子见 ChatWorkbenchResetTest）。
-            // 必须用普通迭代消费而非 forEachAsync：后者 thenCompose 递归自链，
-            // 每个流式 chunk 叠一层栈帧，长回答（数千帧）会 StackOverflowError（真跑实证过）
-            for (var output : graph.stream(Map.of(
-                    "messages", new UserMessage(enriched),
-                    ChatAgentFactory.DISPATCH_ROUND_KEY, 0,
-                    ChatAgentFactory.DISPATCHED_KEY, List.of(),
-                    ModelCallLimiter.CALL_COUNT_KEY, 0), config)) {
-                // 断连后不发帧但继续消费：图要跑完落历史，前端靠 status+历史补答案
-                if (channel.isClosed()) {
-                    continue;
-                }
-                // 只有 summarizer 是流式的（专家走阻塞 invoke、router 走阻塞 call），
-                // 所以流出来的增量必然是最终答案，直接外发即可——
-                // 路由已改走 tool_call，不再有"派发指令混在文本里要过滤"这回事
-                if (output instanceof StreamingOutput<?> streaming) {
-                    String chunk = streaming.chunk();
-                    if (chunk != null && !chunk.isEmpty()) {
+            turnRunner.run(leaves, userId, sessionId, enriched,
+                    chunk -> {
+                        // 攒答案在断连判断之外：断连后这轮照跑完，答案仍要进历史，
+                        // 只是不再往已经断掉的通道里写帧
                         answer.append(chunk);
-                        channel.send("token", new JSONObject()
-                                .fluentPut("text", chunk)
-                                .fluentPut("agent", "supervisor") // 前端事件契约不变
-                                .fluentPut("role", "answer"));
-                    }
-                }
-            }
+                        if (!channel.isClosed()) {
+                            channel.send("token", new JSONObject()
+                                    .fluentPut("text", chunk)
+                                    .fluentPut("agent", "supervisor") // 前端事件契约不变
+                                    .fluentPut("role", "answer"));
+                        }
+                    },
+                    event -> onExpertProgress(channel, expertLog, event));
 
             // HITL：本轮 agent 触发了贵操作待确认 → 弹确认卡（approve 后前端自动补发继续指令）。
             // 只发本轮新登记的那张：pending 是 approve/reject 才摘的，用户不点、接着问下一个问题的话
@@ -292,9 +260,9 @@ public class ChatWorkbenchController {
                             .fluentPut("requestId", pendingRequest.requestId())
                             .fluentPut("resumeMessage", "已确认，请继续执行深度研判")));
 
-            // 极端场景（调用上限截停等）supervisor 没产出汇总，退专家结论，答案不至于丢
+            // 极端场景（调用上限截停等）summarizer 没产出汇总，退专家结论，答案不至于丢
             String finalAnswer = !answer.isEmpty() ? answer.toString() : expertLog.toString();
-            // 历史/记忆不看连接死活：切页断连后图照跑，答案必须落库（前端回来靠 status+历史补）。
+            // 历史/记忆不看连接死活：切页断连后这一轮照跑完，答案必须落库（前端回来靠 status+历史补）。
             // 且必须在 finally 摘运行标记之前写完——轮询端不能出现"已结束但查不到答案"的空窗
             chatHistoryService.append(sessionId, userId, "assistant", finalAnswer);
             chatMemoryService.remember(userId, message, finalAnswer);
@@ -326,12 +294,12 @@ public class ChatWorkbenchController {
      * 内容真实，只是并行下拿不到逐字流，一次性给。
      */
     private void onExpertProgress(SseChannel channel, StringBuilder expertLog,
-                                  ChatAgentFactory.ExpertProgress event) {
+                                  ChatTurnRunner.ExpertProgress event) {
         switch (event.phase()) {
-            case ChatAgentFactory.ExpertProgress.START -> channel.send("agent_start", new JSONObject()
+            case ChatTurnRunner.ExpertProgress.START -> channel.send("agent_start", new JSONObject()
                     .fluentPut("node", event.agent())
                     .fluentPut("agent", event.agent()));
-            case ChatAgentFactory.ExpertProgress.DONE -> {
+            case ChatTurnRunner.ExpertProgress.DONE -> {
                 if (event.text() != null && !event.text().isBlank()) {
                     expertLog.append(event.text());
                     channel.send("token", new JSONObject()
@@ -340,7 +308,7 @@ public class ChatWorkbenchController {
                             .fluentPut("role", "process"));
                 }
             }
-            case ChatAgentFactory.ExpertProgress.ERROR -> channel.send("progress", new JSONObject()
+            case ChatTurnRunner.ExpertProgress.ERROR -> channel.send("progress", new JSONObject()
                     .fluentPut("text", event.agent() + " 执行失败：" + event.text()));
             default -> log.warn("[Workbench] 未知专家进度阶段 {}", event.phase());
         }

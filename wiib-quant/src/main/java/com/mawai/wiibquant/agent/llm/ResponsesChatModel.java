@@ -356,8 +356,8 @@ public class ResponsesChatModel implements ChatModel {
                 //   always —— 每次都强制。单次结构化调用用（router 要的就是一个 tool_call）
                 //   first  —— 只强制首轮。ReactAgent 循环用，拿到工具结果后必须放开才收得了尾；
                 //             判据是"最后一条用户消息之后还没有 ToolResponseMessage"。
-                //             只看这一段：summarizer 子图与主图共享 state，它用过深研判工具后
-                //             TRM 会永留会话历史，扫全历史会让之后每个专家的首轮都被误判成非首轮
+                //             只看这一段：summarizer 用过深研判工具后 TRM 会随会话历史落库、
+                //             下一轮又被喂给专家，扫全历史会让之后每个专家的首轮都被误判成非首轮
                 // 没设过工具上下文时 getToolContext() 给的是 null（summarizer 就是这种）
                 Map<String, Object> toolContext = toolOptions.getToolContext();
                 Object always = toolContext == null ? null : toolContext.get(ResilientChatService.FORCE_TOOL_CHOICE);
@@ -379,8 +379,8 @@ public class ResponsesChatModel implements ChatModel {
 
     /**
      * 首轮判定：最后一条用户消息之后没有工具回执才算首轮。
-     * 只看这一段而非全历史——summarizer 子图与主图共享 state，它用过深研判工具后
-     * ToolResponseMessage 永留会话历史，扫全历史会让之后每个专家的首轮强制全部失效。
+     * 只看这一段而非全历史——summarizer 用过深研判工具后 ToolResponseMessage 会随会话历史落库、
+     * 下一轮原样喂给专家，扫全历史会让之后每个专家的首轮强制全部失效。
      */
     static boolean isFirstTurn(List<Message> history) {
         for (int i = history.size() - 1; i >= 0; i--) {

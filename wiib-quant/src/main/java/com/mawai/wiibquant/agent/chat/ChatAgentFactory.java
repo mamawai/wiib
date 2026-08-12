@@ -1,11 +1,8 @@
 package com.mawai.wiibquant.agent.chat;
 
-import com.alibaba.fastjson2.JSON;
-import com.alibaba.fastjson2.JSONArray;
 import com.mawai.wiibcommon.entity.UserLlmConfig;
 import com.mawai.wiibquant.agent.analysis.DeepAnalysisService;
 import com.mawai.wiibquant.agent.llm.ConversationSummarizer;
-import com.mawai.wiibquant.agent.llm.LlmErrorMessages;
 import com.mawai.wiibquant.agent.llm.ModelCallLimiter;
 import com.mawai.wiibquant.agent.llm.ResilientChatService;
 import com.mawai.wiibquant.agent.toolkit.MarketToolkit;
@@ -14,12 +11,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.bsc.async.AsyncGenerator;
 import org.bsc.langgraph4j.CompileConfig;
 import org.bsc.langgraph4j.CompiledGraph;
-import org.bsc.langgraph4j.RunnableConfig;
-import org.bsc.langgraph4j.StateGraph;
-import org.bsc.langgraph4j.SubGraphNode;
-import org.bsc.langgraph4j.action.NodeActionWithConfig;
-import org.bsc.langgraph4j.agent.Agent;
-import org.bsc.langgraph4j.checkpoint.BaseCheckpointSaver;
 import org.bsc.langgraph4j.hook.EdgeHook;
 import org.bsc.langgraph4j.hook.NodeHook;
 import org.bsc.langgraph4j.prebuilt.MessagesState;
@@ -27,53 +18,26 @@ import org.bsc.langgraph4j.serializer.StateSerializer;
 import org.bsc.langgraph4j.spring.ai.agent.ReactAgent;
 import org.bsc.langgraph4j.state.AgentState;
 import org.bsc.langgraph4j.state.AppenderChannel;
-import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
-import org.springframework.ai.chat.messages.SystemMessage;
-import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatModel;
-import org.springframework.ai.chat.model.ChatResponse;
-import org.springframework.ai.chat.prompt.Prompt;
-import org.springframework.ai.model.tool.ToolCallingChatOptions;
-import org.springframework.ai.tool.ToolCallback;
-import org.springframework.ai.tool.annotation.Tool;
-import org.springframework.ai.tool.annotation.ToolParam;
-import org.springframework.ai.tool.method.MethodToolCallbackProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.util.*;
 import java.util.concurrent.Executor;
-import java.util.function.Consumer;
 import java.util.function.Supplier;
-import java.util.stream.Stream;
-
-import static org.bsc.langgraph4j.StateGraph.END;
-import static org.bsc.langgraph4j.StateGraph.START;
-import static org.bsc.langgraph4j.action.AsyncEdgeAction.edge_async;
-import static org.bsc.langgraph4j.action.AsyncNodeAction.node_async;
-import static org.bsc.langgraph4j.action.AsyncNodeActionWithConfig.node_async;
 
 /**
- * 研判工作台对话图（P4）：深模型 supervisor 调度三个浅模型专家，自己画图。
- * <pre>
- * START → supervisor ──条件边──┬──────────────────────────────► END（已能作答）
- *                             └→ dispatch → [market ∥ quant ∥ news] → join ─┐
- *                                    ▲                                       │
- *                                    └───────────────────────────────────────┘ 回环再判断
- * </pre>
- * 几处关键取舍：
- * <ul>
- *   <li><b>并行是静态三条边</b>：langgraph4j 的条件边只能选单个目标（Command.gotoNode 是 String），
- *       表达不了"动态决定并行哪几个"。所以三个专家每轮都被调度，未派发者在节点里立即返回——
- *       空转成本是微秒级，且不触发任何模型调用</li>
- *   <li><b>专家用普通节点而非子图节点</b>：子图节点无条件执行，做不到"未派发就跳过"；
- *       而并行分支的内部节点本就冒不到父流（langgraph4j 的 ParallelNode 会 reduce 掉子流），
- *       用子图节点也换不来过程可见性，改手动调用零损失</li>
- *   <li><b>进度靠旁路</b>：专家的 token 流拿不到，节点自己经 RunnableConfig 里的 sink 推
- *       "开始/完成"事件，前端据此渲染真实进度</li>
- * </ul>
- * 模型是建图期绑定的，来自用户自己的 BYOK 配置；图按配置指纹缓存，见 {@link #chatGraph}。
+ * 对话链路的叶子 agent 工厂：按用户的 BYOK 配置建出两个专家（market/news）和一个汇总 agent，
+ * 每个都是独立编译的 ReactAgent。
+ * <p>
+ * <b>这里只管"造"，不管"怎么用"</b>：派谁、派几轮、结果怎么拼、历史怎么存，全在
+ * {@link ChatTurnRunner} 的平铺 Java 循环里。曾经的父 StateGraph 编排已退役——
+ * 图带来的全部东西（条件边、并行 fan-in、回环）在这个链路上都能用几十行普通代码写清楚，
+ * 而图额外附赠了一堆代价：hook 内联丢失、迭代硬顶算账、并行分支拿不到子流。
+ * <p>
+ * 模型是建叶子时绑死的（工具方法体里拿不到用户身份，{@code ChatService.execute} 的签名里
+ * 没有 RunnableConfig），所以叶子按配置指纹缓存，见 {@link #leavesFor}。
  */
 @Slf4j
 @Component
@@ -83,115 +47,24 @@ public class ChatAgentFactory {
     public static final String NEWS_AGENT = "news_agent";
     public static final Set<String> EXPERT_AGENTS = Set.of(MARKET_AGENT, NEWS_AGENT);
 
-    /** 结束派发、转去汇总的信号值。对齐 langgraph4j 官方 how-to 的 Router.next 值域（含 FINISH） */
-    static final String FINISH = "FINISH";
-
     /**
-     * 路由工具：只用来让模型**结构化地**表达"下一步给谁"，方法体永远不会被执行。
-     * <p>
-     * 为什么是工具而不是"让模型输出 JSON 数组再解析"：后者是我们自己发明的，四个框架没人这么做，
-     * 代价已经实测过——路由指令混在文本里会泄漏给用户（["news_agent"]["news_agent"]）、
-     * 会作为 AssistantMessage 进历史被模型照抄、解析还脆。alibaba 的 issue #4320/#4266
-     * 记录的 routing instability + infinite loops 是同一个病。
-     * 走 function calling 后参数天然结构化，且 tool_call 不进文本 token 流。
-     */
-    public static class RouterTool {
-        @Tool(name = "route", description = """
-                决定下一步。需要真实数据时给出专家名；专家数据已够、可以作答时给 ["FINISH"]。""")
-        public String route(@ToolParam(description = """
-                下一步去向：market_agent(行情/持仓/清算/期权)、news_agent(加密新闻快讯)，
-                或 ["FINISH"] 表示不再派发、直接作答。""") List<String> next) {
-            return "";
-        }
-    }
-
-    /** 路由结果在 state 里的键：router 节点写入，条件边只读它，绝不解析消息文本 */
-    static final String NEXT_KEY = "router_next";
-    /** 派发名单在 state 里的键：router 写入，专家节点读取判断"轮到我没有" */
-    static final String DISPATCH_KEY = "dispatch_list";
-    /** 本轮提问已经派过的专家（累积）：同一个不再派第二次，见 {@link #route} */
-    static final String DISPATCHED_KEY = "dispatched_agents";
-    /** 派发轮次计数键：主图回环的保险丝*/
-    static final String DISPATCH_ROUND_KEY = "dispatch_round";
-    /**
-     * 派发轮次上限。ModelCallLimiter 挂在 supervisor 的工具边上，管不到主图回环
-     * （supervisor → dispatch → 专家 → join → supervisor 不过工具节点），这条路得自己数。
-     * 一轮派发拿数据 + 一轮补充足够，留 3 是余量；超了强制收尾，总比撞迭代硬顶抛异常强。
-     * <p>
-     * 这个数也是 {@link #PARENT_RECURSION_LIMIT} 的一个乘数，改它要一起核对那边的账。
-     */
-    static final int MAX_DISPATCH_ROUNDS = 3;
-
-    /**
-     * 父图的迭代硬顶（框架默认 25，不够用）。图每走一步吃一格，超了直接抛
-     * {@code Maximum number of iterations (n) reached!}——它抛在<b>结果交出去之前</b>，
-     * 所以保险丝哪怕已经打完 {@code [CallLimit]} 日志也白搭，"截断但可用的回答"照样拿不到。
-     * <p>
-     * 实测账（打桩模型跑生产 {@link #chatGraph}，逐格上探"最小能跑通的硬顶"）：
-     * <pre>
-     * 迭代格 = 3L + 4R + 4    L = summarizer 的 ReAct 轮数(= run-model-call-limit)，R = 专家派发轮数
-     *   3/轮  summarizer 一轮：流式模型节点 2 格（交回 token 生成器 + 合并它的 resultValue）+ 工具边 1 格
-     *   4/轮  一轮派发：dispatch + __PARALLEL__ + join + 回环 router
-     *   4     固定开销：__START__ + 进 summarizer 前那次 router + __END__ + 跑完再问一次生成器的那格
-     * 实测点：L=1..9 且 R=0 逐个扫过，最小值恒为 3L+4（L=7→25、L=8→28）；
-     *         L=8 时 R=1 派 1 个专家→32、R=1 派 2 个→32、R=2→36。每个点都验过"减 1 格就抛硬顶"。
-     * token 帧不吃格：summarizer 每轮吐 1 帧、20 帧、200 帧、800 帧，最小值都是 28。
-     * </pre>
-     * <b>4R 里没有"专家个数"这一项</b>（R=1 派 1 个和派 2 个同为 32，实测隔离过）：扇出是
-     * {@code ParallelNode} 单个节点在自己 {@code apply()} 里做完的，而且没被派发的专家节点每轮
-     * 照样跑（立即 {@code return Map.of()}），专家个数在框架的计数里根本没有出场机会。
-     * <p>
-     * 取 40 = L 吃满 8、R 吃满 {@link #MAX_DISPATCH_ROUNDS}=3 的账（24+12+4）。
-     * 今天只有两个专家、派完就被 {@link #route} 的去重挡住，R 实际最多到 2 → 最坏 36，
-     * 余下 4 格正好是一轮派发的量。
-     * <p>
-     * <b>注意 R=3 是刚好吃满 40、零余量</b>（判据是 {@code > maxIterations} 所以 40 能过）。
-     * 也就是说加第三个专家时这个数还够用，但届时再往回环里加任何一个节点都会当场撞顶——
-     * 那时候要改的是这里，不是去调 L。
-     * <p>
-     * 硬顶不是越大越好——它兜的就是死循环，抬太高等于没有。真正的两道闸门（L 和 R）都锁在
-     * 40 以内，正常情况下永远轮不到硬顶说话；轮到了就说明有环没收住，那才是它该抛的时候。
-     * <p>
-     * 这本账的钉子在 {@code ChatIterationBudgetTest}，改图结构（往回环里加节点、给 summarizer
-     * 再挂一层）就会红，别只改代码不改这段。
-     */
-    static final int PARENT_RECURSION_LIMIT = 40;
-
-    /** 进度 sink 在 RunnableConfig metadata 里的键（值为 {@code Consumer<ExpertProgress>}） */
-    public static final String PROGRESS_SINK_KEY = "workbench_progress_sink";
-
-    /**
-     * 专家执行进度：并行分支的 token 流被框架 reduce 掉了拿不到，改由节点主动推这个。
+     * 一个专家叶子。
      *
-     * @param agent 专家名
-     * @param phase start=开始执行；done=完成，text 是结论原文；error=失败，text 是原因
-     * @param text  phase=start 时为 null
+     * @param preload 可空。非空则每次执行前先把数据取好、随消息喂进去——无参工具（news_search）
+     *                挂成 function tool 的话模型未必调，预取才 100% 保证数据到位
      */
-    public record ExpertProgress(String agent, String phase, String text) {
-        public static final String START = "start";
-        public static final String DONE = "done";
-        public static final String ERROR = "error";
+    public record Expert(CompiledGraph<MessagesState<Message>> graph, Supplier<String> preload) {
     }
 
-    private static final String NODE_ROUTER = "router";
-    private static final String NODE_DISPATCH = "dispatch";
-    private static final String NODE_JOIN = "join";
-    private static final String NODE_SUMMARIZER = "summarizer";
-    private static final String GOTO_DISPATCH = "dispatch";
-    private static final String GOTO_SUMMARIZE = "summarize";
-
-    private static final String ROUTER_INSTRUCTION = """
-            你是研判工作台的调度器。看完对话后，用 route 工具给出下一步：
-            - 还需要真实数据 → 给专家名：market_agent(实时行情/持仓/清算/期权)、
-              news_agent(加密新闻快讯，BlockBeats 快讯源)
-            - 涉及行情、新闻的问题必须先派专家取数，不要凭记忆判断
-            - 对话里已有专家返回的数据、足够回答用户了 → 给 ["FINISH"]
-            - 同一批专家已经取过数就不要重复派，改给 ["FINISH"]
-            只调用 route 工具，不要输出任何文字。""";
-
-    /** 路由工具的 callback：常量化，避免每次建图重新反射扫描 */
-    private static final List<ToolCallback> ROUTER_TOOLS = List.of(
-            MethodToolCallbackProvider.builder().toolObjects(new RouterTool()).build().getToolCallbacks());
+    /**
+     * 一份用户配置对应的全套叶子。
+     *
+     * @param light 浅模型本体：{@link ChatTurnRunner} 的路由问答是一次性的结构化调用，
+     *              没有 ReAct 循环也没有工具执行，用不上包一层 agent
+     */
+    public record Leaves(ChatModel light, Map<String, Expert> experts,
+                         CompiledGraph<MessagesState<Message>> summarizer) {
+    }
 
     private final ChatModelFactory chatModelFactory;
     private final MarketToolkit marketToolkit;
@@ -199,8 +72,7 @@ public class ChatAgentFactory {
     private final DeepAnalysisService deepAnalysisService;
     private final WorkbenchRunRegistry runRegistry;
     private final ApprovalRegistry approvalRegistry;
-    private final BaseCheckpointSaver checkpointSaver;
-    /** 与 saver 同一个实例：序列化格式不一致会导致 checkpoint 写得进读不出 */
+    /** 叶子与 {@link ChatContextStore} 共用同一个：会话历史存进去读出来要靠它，两边不一致就写得进读不出 */
     private final StateSerializer<MessagesState<Message>> stateSerializer;
     private final int runModelCallLimit;
     private final int summarizeThresholdTokens;
@@ -211,20 +83,19 @@ public class ChatAgentFactory {
     private final String mergedTag;
 
     /**
-     * 图缓存上限：与 {@link ChatModelFactory#MAX_ENTRIES} 同口径（一个配置指纹一份），
-     * 实际就是"能同时缓存几个活跃用户的图"。超了 LRU 抖动，被淘汰的人下次发消息重新建图。
+     * 叶子缓存上限：与 {@link ChatModelFactory#MAX_ENTRIES} 同口径（一个配置指纹一份），
+     * 实际就是"能同时缓存几个活跃用户的叶子"。超了 LRU 抖动，被淘汰的人下次发消息重建。
      * 对话已对全体用户开放，32 是拍的数，调它看的是轮流来聊的人数——理由详见 MAX_ENTRIES。
      */
-    private static final int MAX_GRAPHS = 32;
+    private static final int MAX_LEAVES = 32;
 
-    /** 按配置指纹缓存的图。LRU 与并发口径同 {@link ChatModelFactory#modelsFor}，建图不在锁里做 */
-    private final Map<String, CompiledGraph<MessagesState<Message>>> graphs =
+    /** 按配置指纹缓存的叶子。LRU 与并发口径同 {@link ChatModelFactory#modelsFor}，建叶子不在锁里做 */
+    private final Map<String, Leaves> cache =
             Collections.synchronizedMap(
                     new LinkedHashMap<>(16, 0.75f, true) {
                         @Override
-                        protected boolean removeEldestEntry(
-                                Map.Entry<String, CompiledGraph<MessagesState<Message>>> eldest) {
-                            return size() > MAX_GRAPHS;
+                        protected boolean removeEldestEntry(Map.Entry<String, Leaves> eldest) {
+                            return size() > MAX_LEAVES;
                         }
                     });
 
@@ -240,7 +111,6 @@ public class ChatAgentFactory {
                             DeepAnalysisService deepAnalysisService,
                             WorkbenchRunRegistry runRegistry,
                             ApprovalRegistry approvalRegistry,
-                            BaseCheckpointSaver checkpointSaver,
                             StateSerializer<MessagesState<Message>> stateSerializer,
                             @Value("${quant.workbench.run-model-call-limit:8}") int runModelCallLimit,
                             @Value("${quant.workbench.summarize-threshold-tokens:32000}") int summarizeThresholdTokens,
@@ -252,7 +122,6 @@ public class ChatAgentFactory {
         this.deepAnalysisService = deepAnalysisService;
         this.runRegistry = runRegistry;
         this.approvalRegistry = approvalRegistry;
-        this.checkpointSaver = checkpointSaver;
         this.stateSerializer = stateSerializer;
         this.runModelCallLimit = runModelCallLimit;
         this.summarizeThresholdTokens = summarizeThresholdTokens;
@@ -269,130 +138,63 @@ public class ChatAgentFactory {
     }
 
     /**
-     * 对话图（编译含 PostgresSaver），按用户配置的指纹缓存：配置一变指纹就变、自然拿到新图，
-     * 不需要任何显式失效。
+     * 取这份配置的叶子，按指纹缓存：配置一变指纹就变、自然拿到新叶子，不需要任何显式失效。
+     * <p>
+     * <b>为什么要缓存</b>：建一个 ReactAgent 要反射扫工具类、装配 ChatService 与序列化器，
+     * 几十到几百毫秒；这条路在请求线程上，每请求重建等于每句话先卡半秒。
      * <p>
      * <b>先查后建，不用 computeIfAbsent</b>：它会在整个 mapping 函数执行期间攥着互斥锁，
-     * 而这里的 mapping 是建一整张 langgraph4j 图（两个 ReactAgent 反射扫工具 + 编译 + 序列化器装配），
-     * 几十到几百毫秒。这条路后面要放到请求线程上，写成 computeIfAbsent 的话任何一个用户
-     * 首次建图期间，<b>其余所有用户的 /chat 请求全堵在这把锁上</b>。
+     * 于是任何一个用户首次建叶子期间，<b>其余所有用户的 /chat 请求全堵在这把锁上</b>。
      */
-    public CompiledGraph<MessagesState<Message>> chatGraph(UserLlmConfig llmConfig) {
+    public Leaves leavesFor(UserLlmConfig llmConfig) {
         String fp = ChatModelFactory.fingerprint(llmConfig);
-        CompiledGraph<MessagesState<Message>> hit = graphs.get(fp);
+        Leaves hit = cache.get(fp);
         if (hit != null) {
             return hit;
         }
-        CompiledGraph<MessagesState<Message>> built;
+        Leaves built;
         try {
-            built = build(llmConfig);               // 锁外建图，慢也只慢自己
+            built = build(llmConfig);               // 锁外建，慢也只慢自己
         } catch (Exception e) {
-            // build 抛检查异常；包成运行时，让上层当"这份配置建不出图"处理
-            throw new IllegalStateException("对话图构建失败", e);
+            // build 抛检查异常；包成运行时，让上层当"这份配置建不出模型"处理
+            throw new IllegalStateException("对话叶子构建失败", e);
         }
-        // 并发下可能有人先放好了，用先到的那张：图无状态，多建一张只是一次 GC
-        CompiledGraph<MessagesState<Message>> prev = graphs.putIfAbsent(fp, built);
+        // 并发下可能有人先放好了，用先到的那份：叶子无会话状态，多建一份只是一次 GC
+        Leaves prev = cache.putIfAbsent(fp, built);
         if (prev != null) {
             return prev;
         }
-        log.info("对话工作台图已构建 model={} 缓存数={}", llmConfig.getModel(), graphs.size());
+        log.info("对话工作台叶子已构建 model={} 缓存数={}", llmConfig.getModel(), cache.size());
         return built;
     }
 
-    // 形参叫 llmConfig 不叫 config：这个类里 config 一律是 RunnableConfig，重名会撞上 route 那个 lambda
-    private CompiledGraph<MessagesState<Message>> build(UserLlmConfig llmConfig) throws Exception {
+    // 形参叫 llmConfig 不叫 config：这个包里 config 一律指 RunnableConfig，重名读起来会误导
+    private Leaves build(UserLlmConfig llmConfig) throws Exception {
         ChatModelFactory.Models models = chatModelFactory.modelsFor(llmConfig);
         ChatModel deep = models.deep();
         ChatModel light = models.light();
 
-        Map<String, CompiledGraph<MessagesState<Message>>> experts = new LinkedHashMap<>();
-        experts.put(MARKET_AGENT, expertGraph(light, marketToolkit, "required", """
+        // LinkedHashMap 保序：派发顺序、结论拼进历史的顺序都跟着它，market 在前 news 在后
+        Map<String, Expert> experts = new LinkedHashMap<>();
+        // market 的工具要按问题选 symbol，只能交给模型现取，所以没有 preload
+        experts.put(MARKET_AGENT, new Expert(expertGraph(light, marketToolkit, "required", """
                 你是市场状态专家。用工具获取真实数据回答，所有结论必须引用工具返回的具体数字；
                 数据不可用(available=false)时如实告知，绝不编造。
                 只回答行情/持仓/清算/期权，新闻等其他领域即使知道也不要写，有对应专家负责。
-                回答精炼中文。"""));
+                回答精炼中文。"""), null));
         // 新闻专家只管 BlockBeats：数据走"预取"（news_search 无参数，预取 100% 保证快讯在
         // 上下文里，不依赖模型行为；不挂 function tool——实测挂着它 auto 下还会再调一次纯浪费）。
         // 联网补的那一路不归它：模型的服务端搜索关不掉（grok 实测所有请求参数/换模型均无效），
         // 与其在两处禁，不如把搜索正式划给 summarizer 当职责、这里明令禁用——预取喂饱后它没有搜索动机，禁得住
-        experts.put(NEWS_AGENT, expertGraph(light, null, null, """
+        experts.put(NEWS_AGENT, new Expert(expertGraph(light, null, null, """
                 你是加密新闻专家。对话里已附上 BlockBeats 快讯原文（约20条），只基于它输出清单：
                 每条格式：[BlockBeats] + 事件一句话 + 可能影响一句话，按市场影响力从高到低排序，
                 同一事件的多条快讯合并为一条，除合并外不要删减。
                 严禁把你联网搜索到的任何内容写进回答——这部分由上游汇总者负责。
-                不评价真伪、不给投资建议。原文为空时如实说"暂无快讯"，绝不编造。输出精炼中文。"""));
+                不评价真伪、不给投资建议。原文为空时如实说"暂无快讯"，绝不编造。输出精炼中文。"""),
+                newsToolkit::newsSearch));
 
-        // 序列化器必须显式给：默认重载装的是 Java 对象流，存 checkpoint 时 clone 不动 Spring AI Message
-        StateGraph<MessagesState<Message>> graph = new StateGraph<>(MessagesState.SCHEMA, stateSerializer);
-        graph.addNode(NODE_ROUTER, node_async((state, config) -> route(state, light, config)));
-        graph.addNode(NODE_DISPATCH, node_async(state -> Map.of()));
-        // 只有 news 需要预取（工具无参、必调）；market/quant 的工具要按问题选 symbol，交给模型
-        experts.forEach((name, expert) -> addExpertNode(graph, name, expert,
-                NEWS_AGENT.equals(name) ? newsToolkit::newsSearch : null));
-        graph.addNode(NODE_JOIN, node_async(state -> Map.of()));
-        // 工具的模型在建图这一层绑死："当前用的是谁的 key"只有这里知道，
-        // 工具方法体里拿不到用户身份（ChatService.execute 的签名里没有 RunnableConfig）
-        graph.addNode(NODE_SUMMARIZER, summarizerGraph(deep,
-                new DeepAnalysisToolkit(deep, deepAnalysisService, runRegistry)));
-
-        graph.addEdge(START, NODE_ROUTER);
-        // 条件边只读 router 写好的结构化结果，绝不解析消息文本（对齐官方 how-to 的 state.next()）
-        graph.addConditionalEdges(NODE_ROUTER, edge_async(ChatAgentFactory::nextFromState),
-                Map.of(GOTO_DISPATCH, NODE_DISPATCH, GOTO_SUMMARIZE, NODE_SUMMARIZER));
-        // 三条同源边 → 框架内部建 ParallelNode；三条边汇聚 join 完成 fan-in
-        for (String name : experts.keySet()) {
-            graph.addEdge(NODE_DISPATCH, name);
-            graph.addEdge(name, NODE_JOIN);
-        }
-        graph.addEdge(NODE_JOIN, NODE_ROUTER);      // 回环：带着专家数据再判一次还要不要补数据
-        graph.addEdge(NODE_SUMMARIZER, END);
-
-        // summarizer 的两个 hook 只能挂在这里。子 StateGraph 上注册的 hook 会在
-        // addNode(id, StateGraph) 内联时被框架整个丢掉（只搬 nodes/edges），挂在子图上一次都不执行；
-        // 而按内联后的 id 注册又会被 compile() 的图校验拒掉（校验跑在内联之前，那时还没有
-        // summarizer-action 这个 id）。于是只剩"全局注册 + hook 内自己按 id 过滤"这一条路
-        String toolsEdge = SubGraphNode.formatId(NODE_SUMMARIZER, Agent.ACTION_LABEL);   // summarizer-action
-        String modelNode = SubGraphNode.formatId(NODE_SUMMARIZER, Agent.AGENT_LABEL);    // summarizer-agent
-        for (EdgeHook.WrapCall<MessagesState<Message>> hook :
-                summarizerToolHooks(approvalRegistry, runModelCallLimit)) {
-            graph.addWrapCallEdgeHook(onlyOnEdge(toolsEdge, hook));
-        }
-        graph.addWrapCallNodeHook(onlyOnNode(modelNode, wrapBefore(
-                new ConversationSummarizer(light, summarizeThresholdTokens, summarizeKeepMessages))));
-
-        // 这是父图唯一的编译点，硬顶只能在这儿抬（框架默认 25 连一轮专家都跑不完，见 PARENT_RECURSION_LIMIT）
-        return graph.compile(CompileConfig.builder()
-                .checkpointSaver(checkpointSaver)
-                .recursionLimit(PARENT_RECURSION_LIMIT)
-                .build());
-    }
-
-    /**
-     * 父图的全局 edge hook 会命中<b>每一处带 mapping 的跳转</b>，按 sourceId 收窄到目标那处。
-     * 本图里实测命中两处：{@code router}（真条件边）和 {@code summarizer-action}
-     * （其实是 Command 节点，{@code addNode(String, AsyncCommandAction, Map)} 建的，不是边）。
-     * <p>
-     * 漏了这层过滤的直接后果：ModelCallLimiter 在 router 那处短路回 {@code Command("end")}，
-     * 而 router 的 mapping 只有 {dispatch, summarize}，当场 "cannot find edge mapping"；
-     * 而且 router 那一跳也会被计进模型调用数，上限提前一轮触发。
-     */
-    static EdgeHook.WrapCall<MessagesState<Message>> onlyOnEdge(
-            String sourceId, EdgeHook.WrapCall<MessagesState<Message>> delegate) {
-        return (id, state, config, action) -> sourceId.equals(id)
-                ? delegate.applyWrap(id, state, config, action)
-                : action.apply(state, config);
-    }
-
-    /**
-     * 同上，node 版。全局 node hook 会命中图里每一个节点（router / 专家 / summarizer-action 都在内），
-     * 不收窄的话 ConversationSummarizer 会在这些地方也压一遍：白烧浅模型的钱，
-     * 还会在错误的时机整体替换 messages。
-     */
-    static NodeHook.WrapCall<MessagesState<Message>> onlyOnNode(
-            String nodeId, NodeHook.WrapCall<MessagesState<Message>> delegate) {
-        return (id, state, config, action) -> nodeId.equals(id)
-                ? delegate.applyWrap(id, state, config, action)
-                : action.apply(state, config);
+        return new Leaves(light, experts, summarizerLeaf(deep, light));
     }
 
     /**
@@ -404,23 +206,20 @@ public class ChatAgentFactory {
      * 但模型已经没配额把这件事告诉用户"——卡片弹出来了，用户收不到任何解释。
      * 写反了代码照跑什么都不报错，钉子在 {@code ApprovalGateOrderTest}。
      * <p>
-     * 上限值不是随便取的：它就是迭代账里的 <b>L</b>，直接决定父图的硬顶要开多大，
-     * 改它必须一起核对 {@link #PARENT_RECURSION_LIMIT}。生产取 8。
+     * 上限值就是迭代账里的 <b>L</b>，直接决定 summarizer 叶子的硬顶要开多大，
+     * 改它要一起核对 {@link #summarizerLeaf} 结尾那笔账。生产取 8。
      * <p>
-     * <b>同一个配置也喂着专家图，但两边的账不一样，别当成有一处写错了</b>：
+     * <b>同一个配置也喂着专家叶子，但两边的账不一样，别当成有一处写错了</b>：
      * {@link #expertGraph} 没有 {@code .streaming(true)}，非流式模型节点只吃 1 格，
-     * 一轮 {@code 2} 格、共 {@code 2L+3} → L=8 实测吃 19 格；专家图结尾是无参 {@code .compile()}，
-     * 吃框架默认 25，够用（这也是它这次不用改的原因）。
+     * 一轮 {@code 2} 格、共 {@code 2L+3} → L=8 实测吃 19 格，框架默认 25 够用。
      * <p>
      * 还要注意这<b>一个</b>配置项管的是"每个 agent 各自的上限"而不是"整轮总量"：
      * summarizer 和每个带工具的专家各跑各的 state，{@link ModelCallLimiter#CALL_COUNT_KEY}
      * 计数互不相通。所以一轮对话的模型调用是各家相加（summarizer ≤8、每个带工具的专家各 ≤8，
-     * 再加上 router 每轮一次），不是 8 次封顶。想收总量得另立机制，不是把这个数调小。
+     * 再加上路由每轮一次），不是 8 次封顶。想收总量得另立机制，不是把这个数调小。
      * <p>
-     * <b>"一轮"这个作用域是撑出来的，不是天生的</b>：计数存在 state 里，而父图带 checkpointSaver，
-     * 续聊按同一 threadId 从上次 checkpoint 起算。全靠 {@code ChatWorkbenchController.run()}
-     * 每轮把这个键清零；那行没了就退化成"一个会话累计 8 次"，第 8 轮起 summarizer 再也调不动工具。
-     * 专家侧不受影响——专家子图是无参 {@code .compile()}、没有 saver，每次 invoke 都从 schema 起算。
+     * <b>"一轮"这个作用域现在是天生的</b>：叶子全部无 checkpointSaver，每次 invoke/stream
+     * 都从 schema 起算，计数自然每轮从 0 开始，不需要任何显式清零。
      */
     static List<EdgeHook.WrapCall<MessagesState<Message>>> summarizerToolHooks(
             ApprovalRegistry registry, int limit) {
@@ -446,8 +245,7 @@ public class ChatAgentFactory {
         if (toolkit != null) {
             builder.toolsFromObject(toolkit);
             // 有工具才有 ReAct 循环，没保险丝就一路顶到框架 25 次迭代硬顶抛异常；而 market 的工具
-            // 每调一次就打一次真实上游，是行情配额账里唯一没封顶的一项。
-            // 这里 hook 真生效：结尾 .compile() 是独立编译，不走父图 addNode(id, StateGraph) 那条会丢掉子图 hook 的内联通道
+            // 每调一次就打一次真实上游，是行情配额账里唯一没封顶的一项
             builder.addExecuteToolsHook(new ModelCallLimiter(runModelCallLimit));
         }
         // 专家的立身之本是"用工具拿真实数据"：不强制的话模型可能用自带的内置搜索直接答，
@@ -460,16 +258,25 @@ public class ChatAgentFactory {
     /**
      * 汇总 agent：深模型 + 深研判工具，只管把专家数据写成最终回答。
      * <p>
-     * 派谁、还要不要再派，全归 {@link #route} 那个结构化路由节点管，这里一个字都不提——
+     * 派谁、还要不要再派，全归 {@link ChatTurnRunner} 的显式循环管，这里一个字都不提——
      * 角色单一，模型不会再纠结"该作答还是该派发"（那正是之前无限循环的病根）。
+     * <p>
+     * 三个 hook 就挂在框架自己的挂载点上：叶子是独立 {@code compile()} 的，
+     * {@code addCallModelHook} 落到模型节点、{@code addExecuteToolsHook} 落到工具边，
+     * 都真执行（从前挂不上是因为这张图会被 {@code addNode(id, StateGraph)} 内联进父图，
+     * 内联只搬 nodes/edges）。工具边那两个按 {@link #summarizerToolHooks} 的列表顺序注册，
+     * 末尾的保险丝因此在最外层。
+     *
+     * @param light 压缩用浅模型：摘要是简单活，用深模型纯烧钱
      */
-    private StateGraph<MessagesState<Message>> summarizerGraph(ChatModel deep, DeepAnalysisToolkit toolkit)
+    private CompiledGraph<MessagesState<Message>> summarizerLeaf(ChatModel deep, ChatModel light)
             throws Exception {
-        return ReactAgent.<MessagesState<Message>>builder()
+        // 工具的模型在这一层绑死："当前用的是谁的 key"只有这里知道
+        ReactAgent.Builder<MessagesState<Message>> builder = ReactAgent.<MessagesState<Message>>builder()
                 .chatModel(deep)
                 .stateSerializer(stateSerializer)
                 .streaming(true) // 答案要逐字推给前端
-                .toolsFromObject(toolkit)
+                .toolsFromObject(new DeepAnalysisToolkit(deep, deepAnalysisService, runRegistry))
                 .defaultSystem("""
                         你是加密货币研判工作台的分析师。对话里已经有专家 agent 取回的真实数据，
                         你的职责是据此写出最终回答（新闻的联网补充也归你，见原则2）。
@@ -491,14 +298,25 @@ public class ChatAgentFactory {
                            "怎么看走势"这类普通提问不要调它、也不要主动推销，直接按专家数据作答
 
                         输出精炼中文。""".formatted(supplementTag, mergedTag))
-                // 调用上限与历史压缩两个 hook 不在这儿挂：这张子图会被 addNode(id, StateGraph) 内联进主图，
-                // 内联只搬 nodes/edges，挂在这里的 hook 一次都不会执行。见 build() 末尾
-                .build(ResilientChatService.builder()
+                .addCallModelHook(wrapBefore(
+                        new ConversationSummarizer(light, summarizeThresholdTokens, summarizeKeepMessages)));
+        for (EdgeHook.WrapCall<MessagesState<Message>> hook :
+                summarizerToolHooks(approvalRegistry, runModelCallLimit)) {
+            builder.addExecuteToolsHook(hook);
+        }
+        return builder.build(ResilientChatService.builder()
                         // 不给兜底模型：BYOK 只有一个端点，切到同端点的另一个模型没意义
                         //（端点挂了两个一起挂）。ResilientChatService 支持兜底为空，退避重试照旧
                         .model(deep)
                         .maxAttempts(3).initialDelay(500).maxDelay(4000)
-                        .asFactory());
+                        .asFactory())
+                // 框架默认硬顶 25 不够：流式模型节点一轮吃 2 格（交回 token 生成器 + 合并它的
+                // resultValue）+ 工具边 1 格，加上 START/END/收尾三格，最小可跑值就是 3L+3——
+                // L=8 实测 27 恰好跑通、26 当场抛 "Maximum number of iterations (26) reached!"。
+                // 抬到 3L+8 留一轮多的余量。真正管事的闸门是 ModelCallLimiter（就是那个 L），
+                // 硬顶只兜"环没收住"这一种情况——它抛在结果交出去之前，一抛用户连截断回答都拿不到。
+                // token 帧不吃格（它们由 WithEmbed 消费，不走图的 next()），所以回答多长都不影响这本账
+                .compile(CompileConfig.builder().recursionLimit(3 * runModelCallLimit + 8).build());
     }
 
     /**
@@ -583,158 +401,6 @@ public class ChatAgentFactory {
                 return stream.executor();
             }
         };
-    }
-
-    /**
-     * 路由节点：一次模型调用，强制用 route 工具**结构化**给出去向。
-     * <p>
-     * 产出只写 state 的 {@link #NEXT_KEY}/{@link #DISPATCH_KEY}，<b>不进 messages</b>——
-     * 路由是控制流不是对话内容。之前把它当消息塞进历史，直接导致三件事：
-     * 泄漏给用户看、被模型照抄着反复派发、解析 {@code ["a"]["a"]} 失败。
-     */
-    Map<String, Object> route(MessagesState<Message> state, ChatModel model, RunnableConfig config) {
-        // 深研判确认后的续跑轮：存在未消费授权说明这一轮的使命就是让 summarizer 重调工具。
-        // 专家数据上一轮刚取过、深研判也不消费它们，重派一遍纯烧钱——代码直通，不指望模型自觉 FINISH
-        // threadId 拿不到时不再兜底到全局活跃槽（该槽已删，多用户下它返回的是别人的会话号）
-        String sessionId = config.threadId().orElse(null);
-        if (sessionId != null && approvalRegistry.hasApproval(sessionId)) {
-            log.info("[Workbench] 存在未消费的深研判授权，跳过派发直通汇总 session={}", sessionId);
-            return Map.of(NEXT_KEY, FINISH);
-        }
-        int round = state.<Number>value(DISPATCH_ROUND_KEY).map(Number::intValue).orElse(0);
-        if (round >= MAX_DISPATCH_ROUNDS) {
-            log.warn("[Workbench] 派发轮次达上限 {}，转汇总", MAX_DISPATCH_ROUNDS);
-            return Map.of(NEXT_KEY, FINISH);
-        }
-        List<String> next = askRouter(model, state.messages());
-        if (next.isEmpty() || next.contains(FINISH)) {
-            return Map.of(NEXT_KEY, FINISH);
-        }
-        // 同一专家不重复派：它取的数这一轮内不会变，再派一次只是空转烧钱，
-        // 而且这正是死循环的来源（模型总觉得"再查一次说不定有新东西"）。
-        // 靠代码收敛，不指望模型自觉说 FINISH
-        List<String> done = state.<List<String>>value(DISPATCHED_KEY).orElse(List.of());
-        List<String> fresh = next.stream().filter(name -> !done.contains(name)).toList();
-        if (fresh.isEmpty()) {
-            log.info("[Workbench] {} 本轮已取过数，转汇总", next);
-            return Map.of(NEXT_KEY, FINISH);
-        }
-        log.info("[Workbench] 派发 {}（第 {} 轮）", fresh, round + 1);
-        return Map.of(NEXT_KEY, GOTO_DISPATCH,
-                DISPATCH_KEY, fresh,
-                DISPATCHED_KEY, Stream.concat(done.stream(), fresh.stream()).toList(),
-                DISPATCH_ROUND_KEY, round + 1);
-    }
-
-    /** 问模型"下一步给谁"。强制走 route 工具，模型没法用自由文本糊弄过去。 */
-    private List<String> askRouter(ChatModel model, List<Message> history) {
-        List<Message> messages = new ArrayList<>(history.size() + 1);
-        messages.add(new SystemMessage(ROUTER_INSTRUCTION));
-        messages.addAll(history);
-        try {
-            ChatResponse response = model.call(new Prompt(messages, ToolCallingChatOptions.builder()
-                    .toolCallbacks(ROUTER_TOOLS)
-                    // 用"每次都强制"而非"首轮强制"：router 是单次调用，
-                    // 而 summarizer 用过工具后主图历史里就有 ToolResponseMessage，会被误判成非首轮
-                    .toolContext(Map.of(ResilientChatService.FORCE_TOOL_CHOICE, "required"))
-                    .build()));
-            return parseRouteCall(Objects.requireNonNull(response.getResult()).getOutput());
-        } catch (Exception e) {
-            // 路由失败不该把整轮对话拖死：退化成"不派发直接作答"，用户至少拿得到回复
-            log.warn("[Workbench] 路由调用失败，转汇总", e);
-            return List.of(FINISH);
-        }
-    }
-
-    /** 从 tool_call 参数里取专家名单。结构化解析，不碰自由文本。 */
-    static List<String> parseRouteCall(AssistantMessage message) {
-        for (AssistantMessage.ToolCall call : message.getToolCalls()) {
-            if (!"route".equals(call.name())) {
-                continue;
-            }
-            JSONArray next = JSON.parseObject(call.arguments()).getJSONArray("next");
-            if (next == null || next.isEmpty()) {
-                return List.of();
-            }
-            List<String> names = new ArrayList<>(next.size());
-            for (Object item : next) {
-                if (FINISH.equals(item)) {
-                    return List.of(FINISH);
-                }
-                if (item instanceof String name && EXPERT_AGENTS.contains(name)) {
-                    names.add(name);
-                }
-            }
-            return names;
-        }
-        return List.of();
-    }
-
-    /** 条件边：只读 state 里的结构化结果，读不到就保守收尾（绝不悬空）。 */
-    static String nextFromState(MessagesState<Message> state) {
-        return state.<String>value(NEXT_KEY).filter(GOTO_DISPATCH::equals).isPresent()
-                ? GOTO_DISPATCH : GOTO_SUMMARIZE;
-    }
-
-    /**
-     * 专家节点：没轮到自己就零成本返回，轮到了才真跑并推进度事件。
-     *
-     * @param preload 可空。非空则先把数据取好随消息喂进去，不指望模型自己调工具——
-     *                无参工具（如 news_search）用这种方式才能保证数据一定到位
-     */
-    private void addExpertNode(StateGraph<MessagesState<Message>> graph, String name,
-                               CompiledGraph<MessagesState<Message>> expert, Supplier<String> preload) {
-        NodeActionWithConfig<MessagesState<Message>> action = (state, config) -> {
-            if (!dispatched(state, name)) {
-                return Map.of();
-            }
-            progress(config, new ExpertProgress(name, ExpertProgress.START, null));
-            try {
-                List<Message> input = new ArrayList<>(state.messages());
-                // 包装文案保持中性：怎么用这份数据（独占还是与搜索合并）由各专家的 instruction 定
-                if (preload != null) {
-                    input.add(new UserMessage("【以下是系统预取的原始数据】\n" + preload.get()));
-                }
-                Message reply = expert
-                        .invoke(Map.of("messages", input), subConfig(config, name))
-                        .flatMap(MessagesState::lastMessage)
-                        .orElse(null);
-                String text = reply == null ? "" : reply.getText();
-                progress(config, new ExpertProgress(name, ExpertProgress.DONE, text));
-                return reply == null ? Map.of() : Map.of("messages", reply);
-            } catch (Exception e) {
-                // 单个专家失败不该拖垮整轮：把失败作为一条消息交回，supervisor 自行判断要不要绕开。
-                // 两个出口都过归类：原始 SDK 异常可能几百字符，喂回模型既白烧 token，
-                // 又把上游细节（可能含 key）连同答案一起写进 checkpoint 持久化
-                log.warn("[Workbench] 专家 {} 执行失败", name, e);
-                String reason = LlmErrorMessages.classify(e);
-                progress(config, new ExpertProgress(name, ExpertProgress.ERROR, reason));
-                return Map.of("messages", new AssistantMessage("[" + name + " 暂时不可用：" + reason + "]"));
-            }
-        };
-        try {
-            graph.addNode(name, node_async(action));
-        } catch (Exception e) {
-            throw new IllegalStateException("专家节点注册失败: " + name, e);
-        }
-    }
-
-    /** 子图独立 threadId，避免专家的中间消息污染主会话的 checkpoint。 */
-    private static RunnableConfig subConfig(RunnableConfig config, String name) {
-        return RunnableConfig.builder(config)
-                .threadId(config.threadId().map(id -> id + "_" + name).orElse(name))
-                .build();
-    }
-
-    @SuppressWarnings("unchecked")
-    private static void progress(RunnableConfig config, ExpertProgress event) {
-        config.metadata(PROGRESS_SINK_KEY)
-                .filter(Consumer.class::isInstance)
-                .ifPresent(sink -> ((Consumer<ExpertProgress>) sink).accept(event));
-    }
-
-    private static boolean dispatched(MessagesState<Message> state, String name) {
-        return state.<List<String>>value(DISPATCH_KEY).orElse(List.of()).contains(name);
     }
 
 }

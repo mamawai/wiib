@@ -4,7 +4,6 @@ import com.mawai.wiibquant.agent.analysis.DeepAnalysisService;
 import com.mawai.wiibquant.agent.toolkit.MarketToolkit;
 import com.mawai.wiibquant.agent.toolkit.NewsToolkit;
 import org.bsc.langgraph4j.CompiledGraph;
-import org.bsc.langgraph4j.checkpoint.BaseCheckpointSaver;
 import org.bsc.langgraph4j.prebuilt.MessagesState;
 import org.bsc.langgraph4j.spring.ai.serializer.jackson.SpringAIJacksonStateSerializer;
 import org.junit.jupiter.api.Test;
@@ -28,7 +27,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 /**
- * 专家子图的保险丝。专家也是 ReAct 循环，没有上限就能一路顶到框架 25 次迭代硬顶抛异常；
+ * 专家叶子的保险丝。专家也是 ReAct 循环，没有上限就能一路顶到框架 25 次迭代硬顶抛异常；
  * 而且 market 专家的工具（market_snapshot / orderbook_depth）每次调用都打真实上游，
  * 这是行情配额账里唯一没封顶的一项。
  * <p>
@@ -53,17 +52,17 @@ class ExpertCallLimitTest {
      * "Maximum number of iterations (25) reached!"，而且是 hook 挂得好好的情况下红，属假失败。
      * 取 3 留足余量，顺带跑得快。
      * <p>
-     * 生产的 8 落在这条线里（实测吃 19 格），所以专家图的 {@code .compile()} 保持无参、不抬硬顶。
-     * 父图那侧的账不一样（流式模型节点吃 2 格），见 {@link ChatAgentFactory#PARENT_RECURSION_LIMIT}。
+     * 生产的 8 落在这条线里（实测吃 19 格），所以专家叶子的 {@code .compile()} 保持无参、不抬硬顶。
+     * summarizer 叶子那侧的账不一样（流式模型节点吃 2 格，一轮共 3 格），所以那边抬了硬顶。
      */
     private static final int LIMIT = 3;
 
-    /** 与工厂的生产装配同款；模型工厂只在 chatGraph 用得到，这条路不碰它，不必打桩 */
+    /** 与工厂的生产装配同款；模型工厂只在 leavesFor 用得到，这条路不碰它，不必打桩 */
     private ChatAgentFactory factory() {
         return new ChatAgentFactory(mock(ChatModelFactory.class),
                 mock(MarketToolkit.class), mock(NewsToolkit.class),
                 mock(DeepAnalysisService.class), mock(WorkbenchRunRegistry.class),
-                new ApprovalRegistry(), mock(BaseCheckpointSaver.class),
+                new ApprovalRegistry(),
                 new SpringAIJacksonStateSerializer<>(MessagesState::new), LIMIT, 32000, 6, "X");
     }
 
