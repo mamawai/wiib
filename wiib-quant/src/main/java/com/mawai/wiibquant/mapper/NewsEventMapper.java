@@ -1,5 +1,6 @@
 package com.mawai.wiibquant.mapper;
 
+import com.mawai.wiibcommon.dto.NewsEventItem;
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
@@ -9,7 +10,7 @@ import java.util.List;
 
 /**
  * 快讯打标存档读写。刻意不建 entity 不继承 BaseMapper：写路就一条 insert，
- * 参数直进直出；查询等 K 线图标那期再按前端契约加。
+ * 查询按前端契约投影到 DTO，参数直进直出。
  */
 @Mapper
 public interface NewsEventMapper {
@@ -33,4 +34,22 @@ public interface NewsEventMapper {
             </script>
             """)
     List<Long> selectExistingSourceIds(@Param("sourceIds") List<Long> sourceIds);
+
+    /**
+     * 按标签查时间窗内的快讯（K 线图标数据源）。
+     * 标签匹配用逗号包夹：tags 是逗号串，裸 LIKE 会让词表未来加了有包含关系的词
+     * （如 GOLD 与 GOLDX）时互相误中；包夹后只按完整词命中。
+     * 倒序取最近的——窗口超限时牺牲的是最老的图标。
+     */
+    @Select("""
+            SELECT id, title, content, url,
+                   published_at AS publishedAt, tags
+              FROM news_event
+             WHERE ',' || tags || ',' LIKE '%,' || #{tag} || ',%'
+               AND published_at BETWEEN #{fromMs} AND #{toMs}
+             ORDER BY published_at DESC
+             LIMIT #{limit}
+            """)
+    List<NewsEventItem> selectByTagInRange(@Param("tag") String tag, @Param("fromMs") long fromMs,
+                                           @Param("toMs") long toMs, @Param("limit") int limit);
 }

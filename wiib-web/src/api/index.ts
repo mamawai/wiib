@@ -462,6 +462,18 @@ export const llmConfigApi = {
   test: (req: LlmConfigSaveRequest) => api.post<unknown, void>('/ai/llm-config/test', req),
 };
 
+/** 打标快讯（news_event 存档行，K 线新闻图标数据源） */
+export interface NewsEventItem {
+  id: number;
+  title: string;
+  content: string;
+  url: string;
+  /** 发稿时刻 epoch 毫秒，按 K 线周期桶定位图标 */
+  publishedAt: number;
+  /** 逗号标签串，如 BTC,GOLD */
+  tags: string;
+}
+
 export const quantApi = {
   latestAnalysis: (symbol?: string) =>
     api.get<unknown, QuantDeepAnalysisView>('/ai/quant/analysis/latest', { params: { symbol: symbol || 'BTCUSDT' } }),
@@ -469,6 +481,9 @@ export const quantApi = {
     api.get<unknown, QuantDeepAnalysisView[]>('/ai/quant/analysis/list', { params: { symbol: symbol || 'BTCUSDT', limit } }),
   /** 重要快讯（quant 侧内存缓存，未过期不打上游） */
   news: () => api.get<unknown, NewsFlashItem[]>('/ai/quant/news'),
+  /** 打标快讯：标签+时间窗（服务端上限 500 条，倒序取最近） */
+  newsEvents: (tag: string, from: number, to: number) =>
+    api.get<unknown, NewsEventItem[]>('/ai/quant/news-events', { params: { tag, from, to } }),
 };
 
 // ========== AI Trader 竞技场 ==========

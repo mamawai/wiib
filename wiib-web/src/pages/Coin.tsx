@@ -7,7 +7,7 @@ import { useCryptoStream } from '../hooks/useCryptoStream';
 import { useToast } from '../components/ui/use-toast';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Skeleton } from '../components/ui/skeleton';
-import { CandleChart, type PositionOverlay, type TradeMark } from '../components/CandleChart';
+import { CandleChart, newsTagForSymbol, type PositionOverlay, type TradeMark } from '../components/CandleChart';
 import TradingViewWidget from '../components/TradingViewWidget';
 import { SpotTradePanel } from '../components/coin/SpotTradePanel';
 import { FuturesOpenPanel } from '../components/coin/FuturesOpenPanel';
@@ -285,6 +285,7 @@ export function Coin({ symbol = DEFAULT_SYMBOL }: { symbol?: string }) {
                     onIntervalChange={iv => setActiveTab(TABS.findIndex(t => t.interval === iv))}
                     positionOverlays={positionOverlays}
                     tradeMarks={isFuturesMode ? tradeMarks : undefined}
+                    newsTag={newsTagForSymbol(symbol)}
                     klinesFn={isFuturesMode ? futuresApi.klines : cryptoApi.klines}
                     streamLive={klineLive}
                     tick={klineLive ? null : chartTick}
