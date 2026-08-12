@@ -12,6 +12,7 @@ const HUB_NAME = '北辰';
 const AGENT_CN: Record<string, string> = {
   market_agent: '市场专家',
   news_agent: '新闻专家',
+  trader_agent: '交易员',
   supervisor: HUB_NAME,
 };
 

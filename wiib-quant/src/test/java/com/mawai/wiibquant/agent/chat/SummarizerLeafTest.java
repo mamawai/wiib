@@ -5,6 +5,7 @@ import com.mawai.wiibcommon.entity.UserLlmConfig;
 import com.mawai.wiibquant.agent.analysis.DeepAnalysisService;
 import com.mawai.wiibquant.agent.toolkit.MarketToolkit;
 import com.mawai.wiibquant.agent.toolkit.NewsToolkit;
+import com.mawai.wiibquant.agent.trader.TraderChatService;
 import org.bsc.langgraph4j.NodeOutput;
 import org.bsc.langgraph4j.RunnableConfig;
 import org.bsc.langgraph4j.prebuilt.MessagesState;
@@ -84,11 +85,13 @@ class SummarizerLeafTest {
         when(chatModelFactory.modelsFor(any())).thenReturn(new ChatModelFactory.Models(deep, light));
         // run_deep_analysis 必须是能执行的真工具（要真走到工具边）——
         // 工厂内部自己 new DeepAnalysisToolkit，天然就是真的，这里只喂它的依赖
+        UserLlmConfig llmConfig = new UserLlmConfig();
+        llmConfig.setUserId(1L);   // 叶子指纹含 userId（trader 工具按它认人）
         return new ChatAgentFactory(chatModelFactory, mock(MarketToolkit.class), mock(NewsToolkit.class),
-                deepAnalysisService, mock(WorkbenchRunRegistry.class),
+                deepAnalysisService, mock(TraderChatService.class), mock(WorkbenchRunRegistry.class),
                 registry, new SpringAIJacksonStateSerializer<>(MessagesState::new),
                 limit, threshold, keep, "X")
-                .leavesFor(new UserLlmConfig());
+                .leavesFor(llmConfig);
     }
 
     /** 与 {@code ChatTurnRunner} 同款消费：普通迭代 + 带 threadId（闸门要拿会话号） */

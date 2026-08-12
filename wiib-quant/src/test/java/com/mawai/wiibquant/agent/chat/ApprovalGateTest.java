@@ -4,6 +4,8 @@ import org.bsc.langgraph4j.RunnableConfig;
 import org.bsc.langgraph4j.action.Command;
 import org.bsc.langgraph4j.prebuilt.MessagesState;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.ToolResponseMessage;
@@ -217,6 +219,121 @@ class ApprovalGateTest {
         assertThat(responseOf(command).getResponses())
                 .extracting(ToolResponseMessage.ToolResponse::id)
                 .containsExactly("c1", "c2");
+    }
+
+    // ===== 闸门管辖的另外两个贵操作：唤醒 trader（会真下单）与点播复盘（烧深模型） =====
+
+    /**
+     * 三个贵操作各自都要被拦下并登记。参数化而不是抄三遍：抄的话很容易只改工具名忘了改断言，
+     * 出现"看着覆盖了三个、其实测了三遍同一个"
+     */
+    @ParameterizedTest
+    @ValueSource(strings = {"run_deep_analysis", "wake_trader", "review_trader_now"})
+    void 三个贵操作未授权时都被拦下(String tool) {
+        AtomicBoolean toolRan = new AtomicBoolean();
+
+        Command command = gate.applyWrap("tools", stateWithToolCall(tool, "{}"), config(),
+                (s, c) -> {
+                    toolRan.set(true);
+                    return CompletableFuture.completedFuture(Command.emptyCommand());
+                }).join();
+
+        assertThat(toolRan).isFalse();
+        assertThat(responseOf(command).getResponses()).singleElement()
+                .satisfies(r -> assertThat(r.responseData()).contains("PENDING_APPROVAL"));
+        assertThat(registry.peekPending(SESSION)).isPresent()
+                .get().satisfies(p -> assertThat(p.toolName()).isEqualTo(tool));
+    }
+
+    /** 批准之后就得真放行，否则用户点了同意还是执行不了 */
+    @ParameterizedTest
+    @ValueSource(strings = {"wake_trader", "review_trader_now"})
+    void trader动作批准后放行(String tool) {
+        gate.applyWrap("tools", stateWithToolCall(tool, "{}"), config(),
+                (s, c) -> CompletableFuture.completedFuture(Command.emptyCommand())).join();
+        registry.approve(SESSION, registry.peekPending(SESSION).orElseThrow().requestId());
+        AtomicBoolean toolRan = new AtomicBoolean();
+
+        gate.applyWrap("tools", stateWithToolCall(tool, "{}"), config(), (s, c) -> {
+            toolRan.set(true);
+            return CompletableFuture.completedFuture(Command.emptyCommand());
+        }).join();
+
+        assertThat(toolRan).isTrue();
+    }
+
+    /**
+     * 两个 trader 动作没有 symbol，授权键的第三格是同一个固定值——只靠工具名区分。
+     * 工具名要是没进键，"批准复盘"就会顺手把"唤醒并下单"也放行了，这是最贵的那种错。
+     */
+    @Test
+    void 批了复盘不能放行唤醒() {
+        gate.applyWrap("tools", stateWithToolCall("review_trader_now", "{}"), config(),
+                (s, c) -> CompletableFuture.completedFuture(Command.emptyCommand())).join();
+        registry.approve(SESSION, registry.peekPending(SESSION).orElseThrow().requestId());
+        AtomicBoolean toolRan = new AtomicBoolean();
+
+        Command command = gate.applyWrap("tools", stateWithToolCall("wake_trader", "{}"), config(),
+                (s, c) -> {
+                    toolRan.set(true);
+                    return CompletableFuture.completedFuture(Command.emptyCommand());
+                }).join();
+
+        assertThat(toolRan).isFalse();
+        assertThat(responseOf(command).getResponses()).singleElement()
+                .satisfies(r -> assertThat(r.responseData()).contains("PENDING_APPROVAL"));
+    }
+
+    /** 卡片上的代价说明按工具区分：三个都写"3 次深模型调用"，用户是在为看不见的东西点头 */
+    @Test
+    void 确认卡的理由按工具区分() {
+        gate.applyWrap("tools", stateWithToolCall("wake_trader", "{}"), config(),
+                (s, c) -> CompletableFuture.completedFuture(Command.emptyCommand())).join();
+        assertThat(registry.peekPending(SESSION).orElseThrow().reason()).contains("开/平仓");
+
+        registry.reject(SESSION, registry.peekPending(SESSION).orElseThrow().requestId());
+        gate.applyWrap("tools", stateWithToolCall("review_trader_now", "{}"), config(),
+                (s, c) -> CompletableFuture.completedFuture(Command.emptyCommand())).join();
+        assertThat(registry.peekPending(SESSION).orElseThrow().reason()).contains("复盘调用");
+    }
+
+    /**
+     * 一批里同时来了两个贵操作：只有被登记的那个拿到 PENDING_APPROVAL 说明，
+     * 另一个必须是"未执行"。按工具名认领的话两个都会拿到同一份说明，
+     * 用户批的是 A，模型会以为 B 也批了。
+     */
+    @Test
+    void 同批两个贵操作只有正主拿到说明() {
+        MessagesState<Message> state = new MessagesState<>(Map.of("messages", List.of(
+                new UserMessage("唤醒它，顺便复盘"),
+                AssistantMessage.builder().content("")
+                        .toolCalls(List.of(
+                                new AssistantMessage.ToolCall("c1", "function", "wake_trader", "{}"),
+                                new AssistantMessage.ToolCall("c2", "function", "review_trader_now", "{}")))
+                        .build())));
+
+        Command command = gate.applyWrap("tools", state, config(),
+                (s, c) -> CompletableFuture.completedFuture(Command.emptyCommand())).join();
+
+        assertThat(responseOf(command).getResponses()).satisfiesExactly(
+                first -> assertThat(first.responseData()).contains("PENDING_APPROVAL"),
+                second -> assertThat(second.responseData()).isEqualTo("未执行：本轮存在待确认的贵操作。"));
+        assertThat(registry.peekPending(SESSION).orElseThrow().toolName()).isEqualTo("wake_trader");
+    }
+
+    /** 留言只写一行字，不烧钱也不动仓位——拦它只是平白多一次点击 */
+    @Test
+    void 留言工具不受闸门管辖() {
+        AtomicBoolean toolRan = new AtomicBoolean();
+
+        gate.applyWrap("tools", stateWithToolCall("leave_note_to_trader", "{\"note\":\"仓位轻点\"}"),
+                config(), (s, c) -> {
+                    toolRan.set(true);
+                    return CompletableFuture.completedFuture(Command.emptyCommand());
+                }).join();
+
+        assertThat(toolRan).isTrue();
+        assertThat(registry.peekPending(SESSION)).isEmpty();
     }
 
     /** 非贵操作的工具（专家那些）不该被闸门碰，原样放行 */

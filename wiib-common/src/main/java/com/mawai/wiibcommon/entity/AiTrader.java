@@ -52,6 +52,14 @@ public class AiTrader {
     @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private String memory;
 
+    /**
+     * 主人留言：对话轨的 leave_note_to_trader 写入，下次唤醒随提示词注入并立刻清空（读后即焚）。
+     * 与 memory 的分工：memory 是复盘沉淀的长期笔记，这里是主人临时说的一句话，说完就没。
+     * ALWAYS：焚毁=写 null
+     */
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
+    private String ownerNote;
+
     /** 每日复盘开关：learning agent 日线边界复盘并整理 memory；关掉只停复盘，已有笔记照常注入 */
     private Boolean reviewEnabled;
 

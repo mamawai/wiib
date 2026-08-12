@@ -160,6 +160,52 @@ public class TraderScheduler {
     }
 
     /**
+     * 手动唤醒（对话轨的 wake_trader 工具，已过 HITL 确认）：走与例行/警报同一套治理——
+     * 预算预检 → 每 trader 互斥 → 信号量，然后虚拟线程上异步跑。
+     * <p>
+     * <b>为什么异步而不是同步等结果</b>：唤醒预算最长 600s，对话侧同步等于把 SSE 通道压死几分钟；
+     * 而且 trader 本来就是"后台醒来做完事睡去"的回路，对话只负责扣扳机，结果去竞技场看。
+     * <p>
+     * <b>不占 firedBoundary</b>：那是例行调度的去重位，手动唤醒占了它会把本边界真正的
+     * K线收盘信号顶掉——手动是额外补一次，不该顶替例行。警报路径同理。
+     *
+     * @return null=已触发；非空=没触发的原因（原样给模型转述给用户）
+     */
+    public String tryManualWake(AiTrader trader) {
+        Long intervalMs = INTERVAL_MS.get(trader.getIntervalCode());
+        if (intervalMs == null) {
+            return "该 trader 的唤醒档位已下线，无法唤醒";
+        }
+        long now = nowMs.getAsLong();
+        long boundary = now - Math.floorMod(now, intervalMs);
+        // 距下一根K线太近就别烧这一次：例行唤醒马上到，内容几乎一样
+        if (TraderWakeupRunner.wakeBudgetSeconds(boundary, intervalMs, now) < TraderWakeupRunner.MIN_WAKE_SECONDS) {
+            return "距下一次例行唤醒不足" + TraderWakeupRunner.MIN_WAKE_SECONDS + "秒，本次手动唤醒省下了，稍等就有新决策";
+        }
+        if (!inFlight.add(trader.getId())) {
+            return "上一轮唤醒还在跑，本次手动唤醒跳过（同一 trader 不并行）";
+        }
+        // 一并记进冷静期基准：刚手动醒过，紧接着的波动警报就没有增量价值了
+        lastWakeAt.put(trader.getId(), now);
+        log.info("[TraderSched] 手动唤醒 traderId={} boundary={}", trader.getId(), boundary);
+        Thread.startVirtualThread(() -> {
+            try {
+                slots.acquire();
+                try {
+                    runner.wake(trader, boundary);
+                } finally {
+                    slots.release();
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            } finally {
+                inFlight.remove(trader.getId());
+            }
+        });
+        return null;
+    }
+
+    /**
      * K线收盘时刻 → interval 边界：Binance closeTime 是 xx:x9:59.999，
      * (closeTime+1) 恰好整除 interval 毫秒数才是该 interval 的收盘边界；否则 -1。
      */

@@ -4,6 +4,7 @@ import com.mawai.wiibcommon.entity.UserLlmConfig;
 import com.mawai.wiibquant.agent.analysis.DeepAnalysisService;
 import com.mawai.wiibquant.agent.toolkit.MarketToolkit;
 import com.mawai.wiibquant.agent.toolkit.NewsToolkit;
+import com.mawai.wiibquant.agent.trader.TraderChatService;
 import org.bsc.langgraph4j.prebuilt.MessagesState;
 import org.bsc.langgraph4j.spring.ai.serializer.jackson.SpringAIJacksonStateSerializer;
 import org.junit.jupiter.api.Test;
@@ -21,6 +22,7 @@ import reactor.core.publisher.Flux;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
@@ -58,6 +60,7 @@ class ChatTurnRunnerTest {
     private final ApprovalRegistry registry = new ApprovalRegistry();
     private final ChatContextStore contextStore = mock(ChatContextStore.class);
     private final NewsToolkit newsToolkit = mock(NewsToolkit.class);
+    private final TraderChatService traderChatService = mock(TraderChatService.class);
 
     /** 专家跑在虚拟线程上，事件从别的线程进来 */
     private final List<ChatTurnRunner.ExpertProgress> progress = new CopyOnWriteArrayList<>();
@@ -110,11 +113,14 @@ class ChatTurnRunnerTest {
         when(light.getOptions()).thenReturn(ToolCallingChatOptions.builder().build());
         ChatModelFactory chatModelFactory = mock(ChatModelFactory.class);
         when(chatModelFactory.modelsFor(any())).thenReturn(new ChatModelFactory.Models(deep, light));
+        UserLlmConfig llmConfig = new UserLlmConfig();
+        llmConfig.setUserId(1L);   // 叶子指纹含 userId（trader 工具按它认人）
         return new ChatAgentFactory(chatModelFactory, mock(MarketToolkit.class), newsToolkit,
-                mock(DeepAnalysisService.class), mock(WorkbenchRunRegistry.class),
+                mock(DeepAnalysisService.class), traderChatService,
+                mock(WorkbenchRunRegistry.class),
                 registry, new SpringAIJacksonStateSerializer<>(MessagesState::new),
                 LIMIT, NO_COMPRESSION, 6, "X")
-                .leavesFor(new UserLlmConfig());
+                .leavesFor(llmConfig);
     }
 
     private void turn(String message) {
@@ -166,6 +172,13 @@ class ChatTurnRunnerTest {
         assertThat(ChatTurnRunner.parseRouteCall(
                 toolCall("route", "{\"next\":[\"news_agent\",\"weather_agent\"]}")))
                 .containsExactly("news_agent");
+    }
+
+    /** 新专家要被路由认得：不在 EXPERT_AGENTS 里就会被当成不认识的名字静默丢掉，永远派不出去 */
+    @Test
+    void parsesTraderAgentFromRouteToolCall() {
+        assertThat(ChatTurnRunner.parseRouteCall(toolCall("route", "{\"next\":[\"trader_agent\"]}")))
+                .containsExactly("trader_agent");
     }
 
     @Test
@@ -221,6 +234,38 @@ class ChatTurnRunnerTest {
         // 结论按<b>派发顺序</b>接进上下文，不是先跑完先接：先完成先接的话同一个问题两次跑出来的
         // 上下文不一样，行为不可复现
         assertThat(summarizerInput()).containsSubsequence("市场结论", "新闻结论");
+    }
+
+    /**
+     * "我的 trader 怎么样"要派给 trader 专家，而且它得真调到只读工具。
+     * <p>
+     * 这条同时钉住三件容易各自坏掉的事：路由认得这个名字、生产叶子上真挂着
+     * {@link TraderQueryToolkit}、以及 <b>userId 是建叶子时烤死的</b>——
+     * 工具签名里没有用户参数，模型没有任何办法去读别人的 trader。
+     */
+    @Test
+    void trader专家被派发且工具只读自己那份() {
+        when(traderChatService.overview(1L)).thenReturn("{\"hasTrader\":true,\"status\":\"RUNNING\"}");
+        AtomicInteger traderTurns = new AtomicInteger();
+        when(light.call(any(Prompt.class))).thenAnswer(inv -> {
+            Prompt prompt = inv.getArgument(0);
+            if (prompt.getInstructions().getFirst().getText().contains(ROUTER_MARK)) {
+                return route("trader_agent");
+            }
+            expertPrompts.add(prompt);
+            // 先调工具再给结论：真走一遍 ReAct 的工具边，否则验不到工具挂没挂上
+            return traderTurns.getAndIncrement() == 0
+                    ? responseOf(toolCall("trader_overview", "{}"))
+                    : responseOf(new AssistantMessage("你的 trader 正在运行"));
+        });
+        summarizerAnswers("这是答案");
+
+        turn("我的 trader 怎么样");
+
+        assertThat(starts("trader_agent")).isEqualTo(1);
+        verify(traderChatService).overview(1L);
+        // 专家结论进了上下文，汇总者才写得出答案
+        assertThat(summarizerInput()).contains("你的 trader 正在运行");
     }
 
     /** 路由失败不该把整轮对话拖死：退化成"不派发直接作答"，用户至少拿得到回复 */

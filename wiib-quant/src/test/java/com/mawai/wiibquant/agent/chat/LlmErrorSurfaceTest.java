@@ -4,6 +4,7 @@ import com.mawai.wiibcommon.entity.UserLlmConfig;
 import com.mawai.wiibquant.agent.analysis.DeepAnalysisService;
 import com.mawai.wiibquant.agent.toolkit.MarketToolkit;
 import com.mawai.wiibquant.agent.toolkit.NewsToolkit;
+import com.mawai.wiibquant.agent.trader.TraderChatService;
 import org.bsc.langgraph4j.prebuilt.MessagesState;
 import org.bsc.langgraph4j.spring.ai.serializer.jackson.SpringAIJacksonStateSerializer;
 import org.junit.jupiter.api.Test;
@@ -75,12 +76,15 @@ class LlmErrorSurfaceTest {
         when(deep.stream(any(Prompt.class)))
                 .thenReturn(Flux.just(responseOf(new AssistantMessage("汇总一下"))));
 
+        UserLlmConfig llmConfig = new UserLlmConfig();
+        llmConfig.setUserId(1L);   // 叶子指纹含 userId（trader 工具按它认人）
         ChatAgentFactory.Leaves leaves = new ChatAgentFactory(chatModelFactory,
                 mock(MarketToolkit.class), mock(NewsToolkit.class),
-                mock(DeepAnalysisService.class), mock(WorkbenchRunRegistry.class),
+                mock(DeepAnalysisService.class), mock(TraderChatService.class),
+                mock(WorkbenchRunRegistry.class),
                 new ApprovalRegistry(),
                 new SpringAIJacksonStateSerializer<>(MessagesState::new), 8, 999_999, 6, "X")
-                .leavesFor(new UserLlmConfig());
+                .leavesFor(llmConfig);
 
         ChatContextStore contextStore = mock(ChatContextStore.class);
         List<ChatTurnRunner.ExpertProgress> progress = new CopyOnWriteArrayList<>();

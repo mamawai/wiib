@@ -7,6 +7,7 @@ import com.mawai.wiibcommon.util.Result;
 import com.mawai.wiibquant.agent.analysis.DeepAnalysisService;
 import com.mawai.wiibquant.agent.toolkit.MarketToolkit;
 import com.mawai.wiibquant.agent.toolkit.NewsToolkit;
+import com.mawai.wiibquant.agent.trader.TraderChatService;
 import com.mawai.wiibquant.mapper.WorkbenchChatContextMapper;
 import org.bsc.langgraph4j.prebuilt.MessagesState;
 import org.bsc.langgraph4j.spring.ai.serializer.jackson.SpringAIJacksonStateSerializer;
@@ -137,11 +138,13 @@ class ChatWorkbenchHitlTest {
                             : new AssistantMessage("这是第 " + seq.incrementAndGet() + " 段回答")));
         });
 
+        UserLlmConfig llmConfig = new UserLlmConfig();
+        llmConfig.setUserId(1L);   // 叶子指纹含 userId（trader 工具按它认人）
         return new ChatAgentFactory(chatModelFactory, mock(MarketToolkit.class), mock(NewsToolkit.class),
-                deepAnalysisService, mock(WorkbenchRunRegistry.class),
+                deepAnalysisService, mock(TraderChatService.class), mock(WorkbenchRunRegistry.class),
                 registry, new SpringAIJacksonStateSerializer<>(MessagesState::new),
                 PRODUCTION_LIMIT, NO_COMPRESSION, 6, "X")
-                .leavesFor(new UserLlmConfig());
+                .leavesFor(llmConfig);
     }
 
     /** 叶子改由 chat() 取好传进 run()，这条测试直接调 run()，所以工厂和配置服务都用不上了 */

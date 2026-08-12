@@ -3,6 +3,7 @@ package com.mawai.wiibquant.agent.chat;
 import com.mawai.wiibquant.agent.analysis.DeepAnalysisService;
 import com.mawai.wiibquant.agent.toolkit.MarketToolkit;
 import com.mawai.wiibquant.agent.toolkit.NewsToolkit;
+import com.mawai.wiibquant.agent.trader.TraderChatService;
 import org.bsc.langgraph4j.CompiledGraph;
 import org.bsc.langgraph4j.prebuilt.MessagesState;
 import org.bsc.langgraph4j.spring.ai.serializer.jackson.SpringAIJacksonStateSerializer;
@@ -61,7 +62,8 @@ class ExpertCallLimitTest {
     private ChatAgentFactory factory() {
         return new ChatAgentFactory(mock(ChatModelFactory.class),
                 mock(MarketToolkit.class), mock(NewsToolkit.class),
-                mock(DeepAnalysisService.class), mock(WorkbenchRunRegistry.class),
+                mock(DeepAnalysisService.class), mock(TraderChatService.class),
+                mock(WorkbenchRunRegistry.class),
                 new ApprovalRegistry(),
                 new SpringAIJacksonStateSerializer<>(MessagesState::new), LIMIT, 32000, 6, "X");
     }

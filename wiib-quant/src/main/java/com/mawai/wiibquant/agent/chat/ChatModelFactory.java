@@ -30,9 +30,13 @@ import java.util.Map;
  * 对话轨的 BYOK 模型工厂：配置 → 深/浅两个 ChatModel。建模路径与
  * {@link com.mawai.wiibquant.agent.trader.TraderModelFactory} 同款，区别只是配置来自哪张表。
  * <p>
- * 缓存键是<b>配置指纹</b>而不是 userId，实际效果是<b>一个用户一份</b>：指纹把 api_key_enc 算了进去，
- * 而它是 AES-GCM 随机 IV 的密文，两个用户的密文不可能相同——所以这里不存在跨用户共享实例。
- * 用指纹的好处在另一头：用户改了配置指纹就变、自然拿到新实例，不需要任何显式 evict。
+ * 缓存键是<b>配置指纹</b>，userId 是它的第一个分量，所以<b>一个用户一份</b>是键本身保证的。
+ * 用指纹而不是光用 userId 的好处在另一头：用户改了配置指纹就变、自然拿到新实例，不需要任何显式 evict。
+ * <p>
+ * <b>userId 那一格不能省</b>：{@link ChatAgentFactory} 的叶子里有按用户烤死的工具
+ *（trader 专家读的是"这个人的 trader"），两人共享一份叶子就是跨用户泄露。
+ * 曾经的理由是"api_key_enc 是随机 IV 的密文、两人不可能撞"——那对无身份的模型实例够用，
+ * 但拿密文的随机性当数据隔离的依据太脆：换成确定性加密或共享 key 就静默失效。
  * <p>
  * <b>什么时候会白重建一次</b>：用户重新输入 key（哪怕就是同一把），密文随机 IV 变了指纹就变。
  * 只改模型名之类、key 输入框留空的话密文沿用旧的（见 {@code UserLlmConfigService.toRow}），
@@ -111,7 +115,11 @@ public class ChatModelFactory {
      * Postgres 的 text 存不下这个字节，所以它绝不会出现在任何一个从库里读出来的字段值里。
      */
     public static String fingerprint(UserLlmConfig c) {
+        // userId 必须进指纹：叶子里有按用户烤死的工具（TraderQueryToolkit 读的是"这个人的 trader"），
+        // 两人共用一份叶子就是把别人的持仓/决策端到对方眼前。密文各不相同这件事只对
+        // "模型实例无身份"成立，不足以充当数据隔离的依据——隔离要靠键本身，不靠密文的随机性
         String raw = String.join("\0",
+                String.valueOf(c.getUserId()),
                 String.valueOf(c.getApiProtocol()), String.valueOf(c.getBaseUrl()),
                 String.valueOf(c.getModel()), String.valueOf(c.getLightModel()),
                 String.valueOf(c.getReasoningEffort()), String.valueOf(c.getApiKeyEnc()));

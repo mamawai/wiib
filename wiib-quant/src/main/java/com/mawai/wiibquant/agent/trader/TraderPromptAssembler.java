@@ -1,10 +1,14 @@
 package com.mawai.wiibquant.agent.trader;
 
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.mawai.wiibcommon.entity.AiTrader;
 import com.mawai.wiibcommon.entity.AiTraderDecision;
+import com.mawai.wiibquant.mapper.AiTraderMapper;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
+import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
@@ -19,13 +23,18 @@ import java.util.List;
  * ③ 状态与指令分层——账户状态是系统陈述的数据，工具预算留给行情求证，不花在查户口；
  * ④ 检验先于发明——先对上一轮的承诺（等待条件/失效条件）做检验，再考虑新机会，治翻烙饼；
  * ⑤ 固定收尾格式——结论块既是公开展示单元，也是下一轮回注后的检验基准；
- * ⑥ 用户风格指令放最后（近因权重最高）且明示优先级：风格冲突听主人的，硬规格不可覆盖。
+ * ⑥ 用户风格指令放最后（近因权重最高）且明示优先级：风格冲突听主人的，硬规格不可覆盖；
+ * ⑦ 主人留言压轴：一次性的临时交代，比常驻风格指令更近因，说完即焚。
  */
 @Component
+@RequiredArgsConstructor
 public class TraderPromptAssembler {
 
     private static final DateTimeFormatter TIME_FMT =
             DateTimeFormatter.ofPattern("MM-dd HH:mm").withZone(ZoneId.systemDefault());
+
+    /** 只为留言的"读后即焚"而来：注入的同一处就得把列清掉，见 {@link #burnOwnerNote} */
+    private final AiTraderMapper traderMapper;
 
     public String assemble(AiTrader trader, String accountStateJson, List<AiTraderDecision> recent) {
         StringBuilder sb = new StringBuilder();
@@ -66,7 +75,33 @@ public class TraderPromptAssembler {
                     .append("仓位规格与硬性规则由系统强制执行，不在可覆盖范围）—————\n")
                     .append(trader.getCustomPrompt()).append('\n');
         }
+
+        String note = trader.getOwnerNote();
+        if (note != null && !note.isBlank()) {
+            sb.append("\n————— 主人的留言（只在本次唤醒出现一次，之后你再也看不到它）—————\n")
+                    .append(note)
+                    .append("\n（这是主人临时交代的一句话，不是常驻规则；仓位规格与硬性规则仍由系统强制执行）\n");
+            burnOwnerNote(trader);
+        }
         return sb.toString();
+    }
+
+    /**
+     * 读后即焚：清空必须紧贴注入写在一起。
+     * 拆成两处（比如让唤醒回路事后清）迟早会掉进两个坑之一——注了没清，留言每轮重念、
+     * 模型把一次性交代当成长期规则；清了没注，主人的话直接蒸发且无人知晓。
+     * <p>
+     * 代价是<b>注入即消费</b>：这一轮唤醒后面若失败，留言不会退回来。选它是因为反过来更糟——
+     * 留言不清就会重放，而"可能重复执行一条主人指令"比"偶发丢一条留言"危险得多。
+     */
+    private void burnOwnerNote(AiTrader trader) {
+        // 列级更新：唤醒回路同时在并发改 status/连败计数，整行 updateById 会把它们盖回快照旧值
+        traderMapper.update(null, new LambdaUpdateWrapper<AiTrader>()
+                .eq(AiTrader::getId, trader.getId())
+                .set(AiTrader::getOwnerNote, null)
+                .set(AiTrader::getUpdatedAt, LocalDateTime.now()));
+        // 同一次唤醒里这个对象还会被别处读到，内存里的副本一并置空，别让它再露一次面
+        trader.setOwnerNote(null);
     }
 
     /** 平台系统提示词模板（身份/工具/规格/成本/分析流程/纪律）——前端预览与唤醒组装共用同一份文本。 */
