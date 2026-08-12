@@ -213,8 +213,11 @@ public class ReviewMaterialAssembler {
         return sb.toString();
     }
 
-    /** 同 symbol/side 里选开仓时刻最贴近该仓位开仓时间的计划（懒归档时刻粗糙，openedWakeTime 才可靠）。 */
-    private static AiTraderPlan bestMatch(List<AiTraderPlan> plans, FuturesPositionDTO pos, Set<AiTraderPlan> used) {
+    /**
+     * 同 symbol/side 里选开仓时刻最贴近该仓位开仓时间的计划（懒归档时刻粗糙，openedWakeTime 才可靠）。
+     * 对同包 PeerInsightService 开放：同侪详情的论点→结局配对必须与复盘同一套算法，两处各配一套就会自相矛盾。
+     */
+    static AiTraderPlan bestMatch(List<AiTraderPlan> plans, FuturesPositionDTO pos, Set<AiTraderPlan> used) {
         long posOpen = msOf(pos.getCreatedAt());
         long posClose = msOf(pos.getUpdatedAt());
         return plans.stream()
@@ -491,6 +494,8 @@ public class ReviewMaterialAssembler {
     }
 
     // ==================== 小工具 ====================
+    // msOf/plain/signed/nullSafe/humanize 对同包 PeerInsightService 开放：
+    // 同侪详情与复盘素材是同一批数字的两种视角，格式化各写一套迟早会出现"两处口径对不上"
 
     private static List<FuturesPositionDTO> inWindow(List<FuturesPositionDTO> fetched, long fromMs, long toMs) {
         return fetched.stream()
@@ -503,22 +508,22 @@ public class ReviewMaterialAssembler {
                 .toList();
     }
 
-    private static long msOf(java.time.LocalDateTime t) {
+    static long msOf(java.time.LocalDateTime t) {
         return t == null ? 0 : t.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
     }
 
-    private static String plain(BigDecimal v) {
+    static String plain(BigDecimal v) {
         return v == null ? "?" : v.stripTrailingZeros().toPlainString();
     }
 
-    private static String signed(BigDecimal v) {
+    static String signed(BigDecimal v) {
         if (v == null) {
             return "?";
         }
         return v.signum() >= 0 ? "+" + v.toPlainString() : v.toPlainString();
     }
 
-    private static String nullSafe(String s) {
+    static String nullSafe(String s) {
         return s == null ? "—" : s;
     }
 
@@ -530,7 +535,7 @@ public class ReviewMaterialAssembler {
         return count;
     }
 
-    private static String humanize(long ms) {
+    static String humanize(long ms) {
         long min = Math.max(0, ms / 60_000);
         if (min < 120) {
             return min + "分钟";
