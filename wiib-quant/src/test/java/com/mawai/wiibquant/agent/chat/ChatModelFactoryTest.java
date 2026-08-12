@@ -159,6 +159,24 @@ class ChatModelFactoryTest {
     }
 
     /**
+     * userId 必须进指纹。叶子（{@link ChatAgentFactory}）与模型共用这个指纹当缓存键，而叶子里有
+     * 按用户烤死的工具——两个人的配置若算出同一个指纹，就会共用一份叶子，
+     * 一个人的持仓/决策会端到另一个人眼前。
+     * <p>
+     * 光靠"api_key_enc 是随机 IV 的密文、两人不可能撞"是不够的：那是加密实现的性质，
+     * 不是隔离的依据；这里刻意让两份配置<b>连密文都一样</b>，只有 userId 不同。
+     */
+    @Test
+    void 指纹区分用户() {
+        UserLlmConfig mine = config("gpt-5", "gpt-5-mini");
+        UserLlmConfig others = config("gpt-5", "gpt-5-mini");
+        others.setUserId(2L);
+
+        assertThat(ChatModelFactory.fingerprint(others))
+                .isNotEqualTo(ChatModelFactory.fingerprint(mine));
+    }
+
+    /**
      * 分隔符不能省，而且不能挑用户打得出来的字符：两份配置拼成同一个串就会共用一个 ChatModel。
      * 第二组用带空格的模型名——model/lightModel 是前端自由输入的，拿空格当分隔符照样撞。
      */

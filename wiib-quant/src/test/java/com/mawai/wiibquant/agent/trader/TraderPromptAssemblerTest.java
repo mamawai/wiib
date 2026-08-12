@@ -1,17 +1,36 @@
 package com.mawai.wiibquant.agent.trader;
 
+import com.baomidou.mybatisplus.core.MybatisConfiguration;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.mawai.wiibcommon.entity.AiTrader;
 import com.mawai.wiibcommon.entity.AiTraderDecision;
+import com.mawai.wiibquant.mapper.AiTraderMapper;
+import org.apache.ibatis.builder.MapperBuilderAssistant;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 
 class TraderPromptAssemblerTest {
 
-    private final TraderPromptAssembler assembler = new TraderPromptAssembler();
+    /** 留言焚毁走 Lambda 条件构造器，要查 TableInfo；不预热的话本类单独跑会炸 */
+    @BeforeAll
+    static void initTableInfoCache() {
+        TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""), AiTrader.class);
+    }
+
+    private final AiTraderMapper traderMapper = mock(AiTraderMapper.class);
+    private final TraderPromptAssembler assembler = new TraderPromptAssembler(traderMapper);
 
     private AiTrader trader() {
         AiTrader t = new AiTrader();
@@ -30,6 +49,61 @@ class TraderPromptAssemblerTest {
         d.setReasoning(reasoning);
         d.setActionsJson("[{\"tool\":\"open_position\",\"status\":\"ok\"}]");
         return d;
+    }
+
+    // ---------- 主人留言：读后即焚 ----------
+
+    /**
+     * 注入与清空必须是同一件事：注了没清，一句临时交代会每轮重念、被模型当成长期规则；
+     * 清了没注，主人的话直接蒸发。所以这条一次断言两头。
+     */
+    @Test
+    void 留言注入的同时就被焚毁() {
+        AiTrader t = trader();
+        t.setId(7L);
+        t.setOwnerNote("今晚有 CPI 数据，仓位放轻一点");
+
+        String prompt = assembler.assemble(t, "{}", List.of());
+
+        assertThat(prompt).contains("今晚有 CPI 数据，仓位放轻一点").contains("主人的留言");
+        verify(traderMapper).update(isNull(), any(LambdaUpdateWrapper.class));   // 注了就一定清了
+        assertThat(t.getOwnerNote()).isNull();  // 同一轮里别处再读到它就会重复露面
+    }
+
+    /** 焚过之后再组一次提示词：留言不该复活，也不该再写一次库 */
+    @Test
+    void 留言只出现一次() {
+        AiTrader t = trader();
+        t.setId(7L);
+        t.setOwnerNote("今晚有 CPI 数据");
+        assembler.assemble(t, "{}", List.of());
+
+        String second = assembler.assemble(t, "{}", List.of());
+
+        assertThat(second).doesNotContain("今晚有 CPI 数据").doesNotContain("主人的留言");
+        verify(traderMapper, times(1)).update(isNull(), any(LambdaUpdateWrapper.class));
+    }
+
+    /** 没留言就别去动库：每轮唤醒都白写一次 UPDATE 是纯浪费 */
+    @Test
+    void 没有留言时不写库() {
+        String prompt = assembler.assemble(trader(), "{}", List.of());
+
+        assertThat(prompt).doesNotContain("主人的留言");
+        verify(traderMapper, never()).update(any(), any());
+    }
+
+    /** 空白留言等于没有：不注入也不写库 */
+    @Test
+    void 空白留言不注入() {
+        AiTrader t = trader();
+        t.setId(7L);
+        t.setOwnerNote("   ");
+
+        String prompt = assembler.assemble(t, "{}", List.of());
+
+        assertThat(prompt).doesNotContain("主人的留言");
+        verify(traderMapper, never()).update(any(), any());
     }
 
     @Test

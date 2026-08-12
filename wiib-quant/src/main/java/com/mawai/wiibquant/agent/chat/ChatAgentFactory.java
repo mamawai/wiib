@@ -7,6 +7,7 @@ import com.mawai.wiibquant.agent.llm.ModelCallLimiter;
 import com.mawai.wiibquant.agent.llm.ResilientChatService;
 import com.mawai.wiibquant.agent.toolkit.MarketToolkit;
 import com.mawai.wiibquant.agent.toolkit.NewsToolkit;
+import com.mawai.wiibquant.agent.trader.TraderChatService;
 import lombok.extern.slf4j.Slf4j;
 import org.bsc.async.AsyncGenerator;
 import org.bsc.langgraph4j.CompileConfig;
@@ -28,7 +29,7 @@ import java.util.concurrent.Executor;
 import java.util.function.Supplier;
 
 /**
- * 对话链路的叶子 agent 工厂：按用户的 BYOK 配置建出两个专家（market/news）和一个汇总 agent，
+ * 对话链路的叶子 agent 工厂：按用户的 BYOK 配置建出三个专家（market/news/trader）和一个汇总 agent，
  * 每个都是独立编译的 ReactAgent。
  * <p>
  * <b>这里只管"造"，不管"怎么用"</b>：派谁、派几轮、结果怎么拼、历史怎么存，全在
@@ -45,7 +46,8 @@ public class ChatAgentFactory {
 
     public static final String MARKET_AGENT = "market_agent";
     public static final String NEWS_AGENT = "news_agent";
-    public static final Set<String> EXPERT_AGENTS = Set.of(MARKET_AGENT, NEWS_AGENT);
+    public static final String TRADER_AGENT = "trader_agent";
+    public static final Set<String> EXPERT_AGENTS = Set.of(MARKET_AGENT, NEWS_AGENT, TRADER_AGENT);
 
     /**
      * 一个专家叶子。
@@ -70,6 +72,8 @@ public class ChatAgentFactory {
     private final MarketToolkit marketToolkit;
     private final NewsToolkit newsToolkit;
     private final DeepAnalysisService deepAnalysisService;
+    /** 对话轨读写 trader 的唯一入口；两条 agent 链路只经它与 DB 打交道，从不互相对话 */
+    private final TraderChatService traderChatService;
     private final WorkbenchRunRegistry runRegistry;
     private final ApprovalRegistry approvalRegistry;
     /** 叶子与 {@link ChatContextStore} 共用同一个：会话历史存进去读出来要靠它，两边不一致就写得进读不出 */
@@ -109,6 +113,7 @@ public class ChatAgentFactory {
                             MarketToolkit marketToolkit,
                             NewsToolkit newsToolkit,
                             DeepAnalysisService deepAnalysisService,
+                            TraderChatService traderChatService,
                             WorkbenchRunRegistry runRegistry,
                             ApprovalRegistry approvalRegistry,
                             StateSerializer<MessagesState<Message>> stateSerializer,
@@ -120,6 +125,7 @@ public class ChatAgentFactory {
         this.marketToolkit = marketToolkit;
         this.newsToolkit = newsToolkit;
         this.deepAnalysisService = deepAnalysisService;
+        this.traderChatService = traderChatService;
         this.runRegistry = runRegistry;
         this.approvalRegistry = approvalRegistry;
         this.stateSerializer = stateSerializer;
@@ -193,8 +199,17 @@ public class ChatAgentFactory {
                 严禁把你联网搜索到的任何内容写进回答——这部分由上游汇总者负责。
                 不评价真伪、不给投资建议。原文为空时如实说"暂无快讯"，绝不编造。输出精炼中文。"""),
                 newsToolkit::newsSearch));
+        // trader 专家只读这个用户自己的 trader：userId 在这里烤进工具实例，不做成模型可填的参数
+        //（做成参数就等于让模型自己说要看谁的档案）。无预取——四个工具各答一类问题，取哪个得看问题
+        experts.put(TRADER_AGENT, new Expert(expertGraph(light,
+                new TraderQueryToolkit(traderChatService, llmConfig.getUserId()), "required", """
+                你是用户那个 AI 交易员的档案员。用工具读取真实数据回答，所有结论只能引用工具返回的内容；
+                工具返回 hasTrader=false 就直接说"你还没有创建 AI Trader"，绝不编造持仓、决策或复盘内容。
+                被问"为什么做那笔交易"时，把对应决策的 reasoning 原文摘出来说，不要自己另编一套理由。
+                只回答这个 trader 自身的状态/持仓/决策/计划/复盘笔记，大盘行情与新闻有别的专家负责。
+                回答精炼中文。"""), null));
 
-        return new Leaves(light, experts, summarizerLeaf(deep, light));
+        return new Leaves(light, experts, summarizerLeaf(deep, light, llmConfig.getUserId()));
     }
 
     /**
@@ -267,16 +282,19 @@ public class ChatAgentFactory {
      * 内联只搬 nodes/edges）。工具边那两个按 {@link #summarizerToolHooks} 的列表顺序注册，
      * 末尾的保险丝因此在最外层。
      *
-     * @param light 压缩用浅模型：摘要是简单活，用深模型纯烧钱
+     * @param light  压缩用浅模型：摘要是简单活，用深模型纯烧钱
+     * @param userId 动作类工具烤死的归属；查询归专家，动手归汇总者，理由见 {@link TraderActionToolkit}
      */
-    private CompiledGraph<MessagesState<Message>> summarizerLeaf(ChatModel deep, ChatModel light)
-            throws Exception {
+    private CompiledGraph<MessagesState<Message>> summarizerLeaf(ChatModel deep, ChatModel light,
+                                                                 long userId) throws Exception {
         // 工具的模型在这一层绑死："当前用的是谁的 key"只有这里知道
         ReactAgent.Builder<MessagesState<Message>> builder = ReactAgent.<MessagesState<Message>>builder()
                 .chatModel(deep)
                 .stateSerializer(stateSerializer)
                 .streaming(true) // 答案要逐字推给前端
                 .toolsFromObject(new DeepAnalysisToolkit(deep, deepAnalysisService, runRegistry))
+                // 可以多次调用：两套工具分别是"研判"与"对 trader 动手"，合成一个类只会让职责糊掉
+                .toolsFromObject(new TraderActionToolkit(traderChatService, runRegistry, userId))
                 .defaultSystem("""
                         你是加密货币研判工作台的分析师。对话里已经有专家 agent 取回的真实数据，
                         你的职责是据此写出最终回答（新闻的联网补充也归你，见原则2）。
@@ -296,6 +314,11 @@ public class ChatAgentFactory {
                         5. 仅当用户明确说出"深度研判/全面分析"这类字眼时 → 调 run_deep_analysis 工具（昂贵，需用户确认：
                            返回 PENDING_APPROVAL 时告知用户确认卡片已弹出，等确认后你会被再次唤起执行）；
                            "怎么看走势"这类普通提问不要调它、也不要主动推销，直接按专家数据作答
+                        6. 对用户自己 AI 交易员动手的三个工具，同样只在用户明确要求时才调，绝不主动推销：
+                           · wake_trader（立刻唤醒它做一次决策，可能真开/平仓）与 review_trader_now（立刻复盘）
+                             都昂贵、需用户确认，PENDING_APPROVAL 的处理同上
+                           · leave_note_to_trader（给它留一句话，下次唤醒看一次就焚毁）便宜，不需要确认
+                           查询类问题（它现在怎么样/持了什么仓/那笔为什么开）不归你，trader_agent 专家已经取回数据了
 
                         输出精炼中文。""".formatted(supplementTag, mergedTag))
                 .addCallModelHook(wrapBefore(

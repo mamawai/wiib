@@ -6,6 +6,7 @@ import com.mawai.wiibquant.agent.llm.ModelCallLimiter;
 import com.mawai.wiibquant.agent.llm.ResilientChatService;
 import com.mawai.wiibquant.agent.toolkit.MarketToolkit;
 import com.mawai.wiibquant.agent.toolkit.NewsToolkit;
+import com.mawai.wiibquant.agent.trader.TraderChatService;
 import org.bsc.langgraph4j.CompiledGraph;
 import org.bsc.langgraph4j.RunnableConfig;
 import org.bsc.langgraph4j.hook.EdgeHook;
@@ -120,7 +121,7 @@ class ApprovalGateOrderTest {
                         new Generation(new AssistantMessage("已请你确认"))))));
 
         CompiledGraph<MessagesState<Message>> summarizer =
-                factory(deep, light, registry).leavesFor(new UserLlmConfig()).summarizer();
+                factory(deep, light, registry).leavesFor(llmConfig()).summarizer();
         // 闸门只从 config.threadId() 取会话号，没有它整条 HITL 直接哑掉
         for (var ignored : summarizer.stream(Map.of("messages", List.of(new UserMessage("深度研判 BTC"))),
                 RunnableConfig.builder().threadId(SESSION).build())) {
@@ -144,8 +145,16 @@ class ApprovalGateOrderTest {
         when(chatModelFactory.modelsFor(any())).thenReturn(new ChatModelFactory.Models(deep, light));
         return new ChatAgentFactory(chatModelFactory,
                 mock(MarketToolkit.class), mock(NewsToolkit.class),
-                mock(DeepAnalysisService.class), mock(WorkbenchRunRegistry.class), registry,
+                mock(DeepAnalysisService.class), mock(TraderChatService.class),
+                mock(WorkbenchRunRegistry.class), registry,
                 // summarizeThresholdTokens 给足，别让历史压缩掺进来干扰
                 new SpringAIJacksonStateSerializer<>(MessagesState::new), 12, 999_999, 6, "X");
+    }
+
+    /** 叶子指纹含 userId（trader 工具按它认人），配置里不能缺 */
+    private static UserLlmConfig llmConfig() {
+        UserLlmConfig c = new UserLlmConfig();
+        c.setUserId(1L);
+        return c;
     }
 }

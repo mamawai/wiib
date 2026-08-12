@@ -18,6 +18,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 
 /**
@@ -42,10 +43,26 @@ import java.util.concurrent.CompletableFuture;
 @Slf4j
 public class ApprovalGate implements EdgeHook.WrapCall<MessagesState<Message>> {
 
-    /** 唯一受管辖的贵操作：Bull∥Bear + Judge 三次深模型调用 */
+    /** Bull∥Bear + Judge 三次深模型调用 */
     public static final String DEEP_ANALYSIS_TOOL = "run_deep_analysis";
+    /** 手动唤醒 trader：会真下单 */
+    public static final String WAKE_TRADER_TOOL = "wake_trader";
+    /** 点播复盘：烧一次深模型 */
+    public static final String REVIEW_TRADER_TOOL = "review_trader_now";
 
-    private static final String REASON = "深度研判需 3 次深模型调用（Bull/Bear 辩论 + Judge 裁决）";
+    /**
+     * 受管辖的贵操作。判据是"烧钱或动真钱"，不是"慢"——
+     * {@code leave_note_to_trader} 只写一行字，拦它只会平白多一次点击。
+     */
+    static final Set<String> GUARDED_TOOLS =
+            Set.of(DEEP_ANALYSIS_TOOL, WAKE_TRADER_TOOL, REVIEW_TRADER_TOOL);
+
+    /**
+     * 无标的的贵操作在授权三元组里占的第三格，同时也是确认卡上显示的"标的"。
+     * 三元组不能缺格（缺了授权就退化成"十分钟内的通用票"），而这两个工具的作用域
+     * 天然就是"这个用户的那一个 trader"——每人只有一个，用固定值足够精确。
+     */
+    static final String TRADER_SCOPE = "我的 trader";
 
     private final ApprovalRegistry registry;
 
@@ -63,15 +80,16 @@ public class ApprovalGate implements EdgeHook.WrapCall<MessagesState<Message>> {
             return passThrough(sessionId, state, config, action);
         }
         AssistantMessage.ToolCall call = guarded.get();
-        String symbol = normalizedSymbol(call);
+        String symbol = approvalKey(call);
 
         // 用户上一轮拒绝过同一件事：如实告诉模型，别再弹一次卡（标记是一次性的，
         // 用户改主意重新问时不该还被挡着）
         Optional<ApprovalRegistry.PendingRequest> rejected = registry.consumeRejected(sessionId);
         if (rejected.isPresent() && sameRequest(rejected.get(), call.name(), symbol)) {
-            log.info("[HITL] 用户已拒绝，回执告知模型 session={} symbol={}", sessionId, symbol);
-            return CompletableFuture.completedFuture(shortCircuit(state,
-                    "用户已拒绝本次深度研判，请直接用现有专家数据作答，不要再次请求。"));
+            log.info("[HITL] 用户已拒绝，回执告知模型 session={} tool={} symbol={}",
+                    sessionId, call.name(), symbol);
+            return CompletableFuture.completedFuture(shortCircuit(state, call.id(),
+                    "用户已拒绝本次" + label(call.name()) + "，请如实告知并用现有数据作答，不要再次请求。"));
         }
 
         if (registry.consumeApproval(sessionId, call.name(), symbol)) {
@@ -79,16 +97,40 @@ public class ApprovalGate implements EdgeHook.WrapCall<MessagesState<Message>> {
             return passThrough(sessionId, state, config, action);
         }
 
-        // 又要弹卡 = 上一条授权已经用不上了（模型改口换了 symbol）。留着它，ChatTurnRunner 会在
-        // TTL 内一直跳过专家派发，用户之后每问一句都拿不到真数据，且没有任何日志说明原因
+        // 又要弹卡 = 上一条授权已经用不上了（模型改口换了 symbol、或换了另一个贵操作）。留着它，
+        // ChatTurnRunner 会在 TTL 内一直跳过专家派发，用户之后每问一句都拿不到真数据，
+        // 且没有任何日志说明原因
         registry.discardApprovals(sessionId);
-        registry.requestApproval(sessionId, call.name(), symbol, REASON);
+        registry.requestApproval(sessionId, call.name(), symbol, reason(call.name()));
         log.info("[HITL] 未授权，登记待确认 session={} tool={} symbol={}", sessionId, call.name(), symbol);
         JSONObject out = new JSONObject();
         out.put("status", "PENDING_APPROVAL");
-        out.put("message", "深度研判是昂贵操作（3 次深模型调用），已向用户请求确认。"
-                + "请告知用户等待确认卡片，确认后你会被再次调用。");
-        return CompletableFuture.completedFuture(shortCircuit(state, out.toJSONString()));
+        out.put("message", label(call.name()) + "是昂贵操作（" + reason(call.name())
+                + "），已向用户请求确认。请告知用户等待确认卡片，确认后你会被再次调用。");
+        return CompletableFuture.completedFuture(shortCircuit(state, call.id(), out.toJSONString()));
+    }
+
+    /** 确认卡与回执上的中文名。 */
+    private static String label(String toolName) {
+        return switch (toolName) {
+            case WAKE_TRADER_TOOL -> "手动唤醒 trader";
+            case REVIEW_TRADER_TOOL -> "点播复盘";
+            default -> "深度研判";
+        };
+    }
+
+    /** 卡片上给用户看的代价说明——用户要为"贵在哪"点头，笼统说一句"这很贵"等于没说。 */
+    private static String reason(String toolName) {
+        return switch (toolName) {
+            case WAKE_TRADER_TOOL -> "将真实执行一次交易决策，可能开/平仓";
+            case REVIEW_TRADER_TOOL -> "将消耗一次深模型复盘调用";
+            default -> "深度研判需 3 次深模型调用（Bull/Bear 辩论 + Judge 裁决）";
+        };
+    }
+
+    /** 授权三元组的第三格：深研判按标的归一，trader 动作用固定作用域（见 {@link #TRADER_SCOPE}）。 */
+    private static String approvalKey(AssistantMessage.ToolCall call) {
+        return DEEP_ANALYSIS_TOOL.equals(call.name()) ? normalizedSymbol(call) : TRADER_SCOPE;
     }
 
     /**
@@ -101,8 +143,9 @@ public class ApprovalGate implements EdgeHook.WrapCall<MessagesState<Message>> {
      * 短路后要让模型看到回执并转述给用户。action 节点的 EdgeMappings 只有这两个合法值
      *（{@code Agent.Builder.build()}：{@code .to("agent").toEND("end")}）。
      */
-    private static Command shortCircuit(MessagesState<Message> state, String body) {
-        return new Command(Agent.AGENT_LABEL, Map.of("messages", List.of(reply(state, body))));
+    private static Command shortCircuit(MessagesState<Message> state, String guardedCallId, String body) {
+        return new Command(Agent.AGENT_LABEL,
+                Map.of("messages", List.of(reply(state, guardedCallId, body))));
     }
 
     /**
@@ -122,14 +165,14 @@ public class ApprovalGate implements EdgeHook.WrapCall<MessagesState<Message>> {
         }
     }
 
-    /** 本批 tool_call 里受管辖的那个（一批里最多关心一个贵操作）。 */
+    /** 本批 tool_call 里受管辖的那个（一批里最多处理一个贵操作，其余的连同它一起等下一轮）。 */
     private static Optional<AssistantMessage.ToolCall> guardedCall(MessagesState<Message> state) {
         return state.lastMessage()
                 .filter(AssistantMessage.class::isInstance)
                 .map(AssistantMessage.class::cast)
                 .filter(AssistantMessage::hasToolCalls)
                 .flatMap(a -> a.getToolCalls().stream()
-                        .filter(c -> DEEP_ANALYSIS_TOOL.equals(c.name()))
+                        .filter(c -> GUARDED_TOOLS.contains(c.name()))
                         .findFirst());
     }
 
@@ -179,8 +222,12 @@ public class ApprovalGate implements EdgeHook.WrapCall<MessagesState<Message>> {
     /**
      * 短路时必须给**这一批**每个 tool_call 都配对回执。只回一条 = 留下孤儿 tool_call，
      * 这段历史被 {@link ChatContextStore} 持久化后，续聊重放时上游直接 400，会话只能删掉重开。
+     * <p>
+     * 按 id 而不是按工具名认领正主：一批里可能同时有两个受管辖的工具（比如既要唤醒又要复盘），
+     * 按名字匹配会把只针对其中一个的说明同时发给两个，用户批的是 A、模型以为 B 也批了。
      */
-    private static ToolResponseMessage reply(MessagesState<Message> state, String body) {
+    private static ToolResponseMessage reply(MessagesState<Message> state, String guardedCallId,
+                                             String body) {
         List<ToolResponseMessage.ToolResponse> responses = new ArrayList<>();
         state.lastMessage()
                 .filter(AssistantMessage.class::isInstance)
@@ -189,7 +236,7 @@ public class ApprovalGate implements EdgeHook.WrapCall<MessagesState<Message>> {
                 .ifPresent(a -> {
                     for (AssistantMessage.ToolCall c : a.getToolCalls()) {
                         responses.add(new ToolResponseMessage.ToolResponse(c.id(), c.name(),
-                                DEEP_ANALYSIS_TOOL.equals(c.name()) ? body
+                                c.id().equals(guardedCallId) ? body
                                         : "未执行：本轮存在待确认的贵操作。"));
                     }
                 });

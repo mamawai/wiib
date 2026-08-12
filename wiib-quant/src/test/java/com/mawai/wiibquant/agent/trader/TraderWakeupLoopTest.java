@@ -75,7 +75,7 @@ class TraderWakeupLoopTest {
     private final TraderRequestService requestService = mock(TraderRequestService.class);
 
     private final TraderWakeupRunner runner = new TraderWakeupRunner(
-            modelFactory, new TraderPromptAssembler(), simTradeClient, binanceRestClient,
+            modelFactory, new TraderPromptAssembler(traderMapper), simTradeClient, binanceRestClient,
             new IndicatorToolkit(new KlineFetcher(binanceRestClient, 60_000)),
             new MarketToolkit(mock(MarketDataService.class)),
             new NewsToolkit(mock(NewsCache.class)),

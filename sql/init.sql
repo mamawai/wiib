@@ -825,6 +825,7 @@ CREATE TABLE IF NOT EXISTS ai_trader (
     custom_prompt   TEXT,
     use_default_prompt BOOLEAN NOT NULL DEFAULT TRUE,
     memory          TEXT,
+    owner_note      TEXT,
     api_protocol    VARCHAR(16) NOT NULL DEFAULT 'openai',
     base_url        VARCHAR(255) NOT NULL,
     model           VARCHAR(128) NOT NULL,
@@ -855,6 +856,7 @@ COMMENT ON COLUMN ai_trader.alert_enabled IS '波动哨兵警报开关（仅1h/4
 COMMENT ON COLUMN ai_trader.alert_threshold_mult IS '警报灵敏度系数≥1.0只能调高：生效阈值=每币基准(BTC0.6/ETH0.8/XRP0.8/SOL0.9/DOGE1.0%)×本系数，180天历史校准见VolatilitySentinel';
 COMMENT ON COLUMN ai_trader.use_default_prompt IS '是否使用平台系统提示词（默认true）；false=自定义提示词成为唯一指令来源（护栏仍硬校验）';
 COMMENT ON COLUMN ai_trader.memory IS '复盘笔记：learning agent每日复盘整理写入（限长文本，≤2000字覆盖写），每次唤醒注入提示词——trader侧只读只注入，本列即记忆学习的接口';
+COMMENT ON COLUMN ai_trader.owner_note IS '主人留言：对话轨leave_note_to_trader写入，下次唤醒随提示词注入并立刻清空（读后即焚，注入与清空在TraderPromptAssembler同一处）。与memory的分工：memory是复盘沉淀的长期笔记，本列是主人临时说的一句话，说完就没';
 COMMENT ON COLUMN ai_trader.api_key_enc IS 'AES-GCM密文base64(iv+cipher)，密钥走环境变量WIIB_TRADER_KEY_SECRET';
 COMMENT ON COLUMN ai_trader.sim_user_id IS '当前局sim子账户userId，每局独立，重置开新账户';
 COMMENT ON COLUMN ai_trader.round_no IS '局数：爆仓/手动重置+1开新局，历史留档';

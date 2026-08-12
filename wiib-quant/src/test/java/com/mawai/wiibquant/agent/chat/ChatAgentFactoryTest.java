@@ -4,6 +4,7 @@ import com.mawai.wiibcommon.entity.UserLlmConfig;
 import com.mawai.wiibquant.agent.analysis.DeepAnalysisService;
 import com.mawai.wiibquant.agent.toolkit.MarketToolkit;
 import com.mawai.wiibquant.agent.toolkit.NewsToolkit;
+import com.mawai.wiibquant.agent.trader.TraderChatService;
 import org.bsc.langgraph4j.StateGraph;
 import org.bsc.langgraph4j.prebuilt.MessagesState;
 import org.bsc.langgraph4j.serializer.StateSerializer;
@@ -45,7 +46,8 @@ class ChatAgentFactoryTest {
         when(chatModelFactory.modelsFor(any())).thenReturn(new ChatModelFactory.Models(model, model));
         return new ChatAgentFactory(chatModelFactory,
                 mock(MarketToolkit.class), mock(NewsToolkit.class),
-                mock(DeepAnalysisService.class), mock(WorkbenchRunRegistry.class),
+                mock(DeepAnalysisService.class), mock(TraderChatService.class),
+                mock(WorkbenchRunRegistry.class),
                 new ApprovalRegistry(), serializer, 12, 32000, 6, "X");
     }
 
@@ -62,21 +64,24 @@ class ChatAgentFactoryTest {
     }
 
     @Test
-    void 建出两个专家和一个汇总叶子() {
+    void 建出三个专家和一个汇总叶子() {
         ChatAgentFactory.Leaves leaves = factory().leavesFor(config("gpt-5"));
 
         // 保序：派发顺序、结论进历史的顺序都跟着它
-        assertThat(leaves.experts()).containsOnlyKeys("market_agent", "news_agent");
-        assertThat(leaves.experts().keySet()).containsExactly("market_agent", "news_agent");
-        // news 走预取（无参工具，不指望模型自己调），market 的工具要按问题选 symbol 只能现取
+        assertThat(leaves.experts()).containsOnlyKeys("market_agent", "news_agent", "trader_agent");
+        assertThat(leaves.experts().keySet())
+                .containsExactly("market_agent", "news_agent", "trader_agent");
+        // news 走预取（无参工具，不指望模型自己调）；market 的工具要按问题选 symbol 只能现取，
+        // trader 的四个工具各答一类问题，取哪个也得看问题
         assertThat(leaves.experts().get("news_agent").preload()).isNotNull();
         assertThat(leaves.experts().get("market_agent").preload()).isNull();
+        assertThat(leaves.experts().get("trader_agent").preload()).isNull();
         assertThat(leaves.summarizer()).isNotNull();
         assertThat(leaves.light()).isNotNull();
     }
 
     /**
-     * 同一份配置反复取是同一套叶子（一个用户一份，指纹把随机 IV 的密文算进去了，跨用户共享不可能发生）；
+     * 同一份配置反复取是同一套叶子（一个用户一份——userId 是指纹的第一个分量）；
      * 配置一变指纹就变、自然拿到新叶子——不需要任何显式 evict，也就不会有"改了配置还用旧模型"。
      */
     @Test

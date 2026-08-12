@@ -109,6 +109,16 @@ public class TraderPlanStore {
         }).toList();
     }
 
+    /** 本局最近归档的计划（最新在前）：对话轨要回答"上一笔为什么平了"，只看 LIVE 是答不了的。 */
+    public List<AiTraderPlan> recentClosed(long traderId, int roundNo, int limit) {
+        return mapper.selectList(new LambdaQueryWrapper<AiTraderPlan>()
+                .eq(AiTraderPlan::getTraderId, traderId)
+                .eq(AiTraderPlan::getRoundNo, roundNo)
+                .eq(AiTraderPlan::getStatus, AiTraderPlan.STATUS_CLOSED)
+                .orderByDesc(AiTraderPlan::getClosedWakeTime)
+                .last("LIMIT " + limit));
+    }
+
     /** 重置开新局：本局存活计划一并归档（历史局的计划是那局决策的公开凭证，早已归档在册）。 */
     public void archiveRound(long traderId, int roundNo, long closedAt) {
         for (AiTraderPlan p : list(traderId, roundNo)) {

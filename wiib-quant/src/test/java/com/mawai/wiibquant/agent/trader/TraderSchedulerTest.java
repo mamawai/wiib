@@ -81,6 +81,70 @@ class TraderSchedulerTest {
         verify(runner, after(300).never()).wakeAlert(any(), any());
     }
 
+    // ---------- 手动唤醒（对话轨 wake_trader，已过 HITL） ----------
+
+    /** 手动唤醒走的是例行入口 wake()：它就是一次普通的交易决策，只是扳机在人手里 */
+    @Test
+    void manualWakeRunsRoutineWake() {
+        TraderScheduler s = new TraderScheduler(traderMapper, runner, reviewRunner);
+        s.nowMs = () -> H1_BOUNDARY + 600_000L; // 1h 周期中段，预算充足
+
+        assertThat(s.tryManualWake(trader1h())).isNull();   // null=已触发
+
+        verify(runner, timeout(2_000)).wake(any(AiTrader.class), eq(H1_BOUNDARY));
+    }
+
+    /**
+     * 同一 trader 不并行：上一轮还在跑时手动唤醒必须落空。
+     * 两个唤醒会话同时对着一个 sim 子账户下单，仓位会被重复开。
+     */
+    @Test
+    void manualWakeBlockedWhileAnotherWakeInFlight() {
+        TraderScheduler s = new TraderScheduler(traderMapper, runner, reviewRunner);
+        s.nowMs = () -> H1_BOUNDARY + 600_000L;
+        AiTrader t = trader1h();
+        // 第一次占住互斥位；runner 是 mock 会立刻返回，所以卡住它来维持"还在跑"
+        java.util.concurrent.CountDownLatch hold = new java.util.concurrent.CountDownLatch(1);
+        org.mockito.Mockito.doAnswer(inv -> {
+            hold.await();
+            return null;
+        }).when(runner).wake(any(), anyLong());
+        s.tryManualWake(t);
+        verify(runner, timeout(2_000)).wake(any(), anyLong());
+
+        String why = s.tryManualWake(t);
+
+        assertThat(why).contains("上一轮唤醒还在跑");
+        verify(runner, after(300).times(1)).wake(any(), anyLong());
+        hold.countDown();
+    }
+
+    /** 距下一根K线太近：例行唤醒马上到，这一次手动的省下来（同 alert 的判据） */
+    @Test
+    void manualWakeBlockedWhenRoutineWakeImminent() {
+        TraderScheduler s = new TraderScheduler(traderMapper, runner, reviewRunner);
+        s.nowMs = () -> H1_BOUNDARY + 3_590_000L; // 距下一 1h 边界仅 10s
+
+        String why = s.tryManualWake(trader1h());
+
+        assertThat(why).contains("距下一次例行唤醒不足");
+        verify(runner, after(300).never()).wake(any(), anyLong());
+    }
+
+    /** 手动唤醒也记进冷静期基准：刚被手动叫醒过，紧接着的波动警报没有增量价值 */
+    @Test
+    void manualWakeFeedsAlertCooldown() {
+        TraderScheduler s = new TraderScheduler(traderMapper, runner, reviewRunner);
+        s.nowMs = () -> H1_BOUNDARY + 600_000L;
+
+        s.tryManualWake(trader1h());
+        verify(runner, timeout(2_000)).wake(any(), anyLong());
+
+        s.tryAlertWake(trader1h(), trig());
+
+        verify(runner, after(300).never()).wakeAlert(any(), any());
+    }
+
     // ---------- 日线边界复盘接入 ----------
 
     /** 日线边界：例行唤醒完成后同一虚拟线程接复盘（先交易后复盘，共用互斥绝不并行） */
