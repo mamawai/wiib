@@ -59,13 +59,61 @@ public class BaseUrlGuard {
             return "baseUrl 主机名无法解析";
         }
         for (InetAddress a : addrs) {
-            if (a.isLoopbackAddress() || a.isSiteLocalAddress() || a.isLinkLocalAddress()
-                    || a.isAnyLocalAddress() || a.isMulticastAddress()
-                    || isUniqueLocalV6(a) || isSharedAddressSpace(a)) {
+            // 原地址与嵌入其中的 v4 双重受检：::1 这类原生 v6 属性只在原地址上，
+            // 而 NAT64 嵌着的 169.254.169.254 只在抠出来的 v4 上——判一头必漏另一头
+            if (isBlocked(a) || isBlocked(unwrapEmbeddedV4(a))) {
                 return "baseUrl 不允许指向内网/本机地址";
             }
         }
         return null;
+    }
+
+    private static boolean isBlocked(InetAddress a) {
+        return a.isLoopbackAddress() || a.isSiteLocalAddress() || a.isLinkLocalAddress()
+                || a.isAnyLocalAddress() || a.isMulticastAddress()
+                || isUniqueLocalV6(a) || isSharedAddressSpace(a);
+    }
+
+    /**
+     * 嵌 v4 的 v6 归一化：NAT64(64:ff9b::/96) / 6to4(2002::/16) / SIIT(::ffff:0:a.b.c.d) /
+     * IPv4-compatible(::a.b.c.d) 解析出来是真 Inet6Address，全部 IPv4 判断都不命中——
+     * 而有 NAT64 网关的网络里，64:ff9b::a9fe:a9fe 会被翻译成 169.254.169.254 打到云元数据端点。
+     * 把嵌着的 v4 抠出来按 v4 受检；不含 v4 的普通 v6 原样返回。
+     * （标准 mapped 形态 ::ffff:a.b.c.d 被 Java 直接解析成 Inet4Address，不经这里。）
+     */
+    private static InetAddress unwrapEmbeddedV4(InetAddress a) {
+        if (!(a instanceof Inet6Address)) {
+            return a;
+        }
+        byte[] b = a.getAddress();
+        int off;
+        if ((b[0] & 0xFF) == 0x20 && (b[1] & 0xFF) == 0x02) {
+            off = 2;   // 6to4：v4 在字节 2~5
+        } else if ((b[0] & 0xFF) == 0 && (b[1] & 0xFF) == 0x64
+                && (b[2] & 0xFF) == 0xFF && (b[3] & 0xFF) == 0x9B && isZero(b, 4, 12)) {
+            off = 12;  // NAT64 well-known 前缀
+        } else if (isZero(b, 0, 8) && (b[8] & 0xFF) == 0xFF && (b[9] & 0xFF) == 0xFF
+                && b[10] == 0 && b[11] == 0) {
+            off = 12;  // SIIT translated ::ffff:0:a.b.c.d
+        } else if (isZero(b, 0, 12)) {
+            off = 12;  // IPv4-compatible ::a.b.c.d
+        } else {
+            return a;
+        }
+        try {
+            return InetAddress.getByAddress(Arrays.copyOfRange(b, off, off + 4));
+        } catch (UnknownHostException e) {
+            return a;  // 4 字节的 getByAddress 不会抛，只为编译器
+        }
+    }
+
+    private static boolean isZero(byte[] b, int from, int to) {
+        for (int i = from; i < to; i++) {
+            if (b[i] != 0) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /** IPv6 unique-local fc00::/7：isSiteLocalAddress 只认已废弃的 fec0::/10，这段要手判 */
