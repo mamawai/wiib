@@ -152,7 +152,10 @@ class ChatWorkbenchHitlTest {
         ChatMemoryService memory = mock(ChatMemoryService.class);
         when(memory.recall(anyLong())).thenReturn(""); // 空前缀：记忆拼接不是这里要验的
         WorkbenchChatContextMapper contextMapper = mock(WorkbenchChatContextMapper.class);
-        when(contextMapper.selectState(anyString())).thenAnswer(inv -> contextRows.get(inv.getArgument(0)));
+        when(contextMapper.selectState(anyString())).thenAnswer(inv -> {
+            byte[] row = contextRows.get(inv.getArgument(0));   // 无行=空表，跟 MyBatis selectList 一个语义
+            return row == null ? List.of() : List.of(row);
+        });
         when(contextMapper.upsert(anyString(), anyLong(), any())).thenAnswer(inv -> {
             contextRows.put(inv.getArgument(0), inv.getArgument(2));
             return 1;

@@ -59,7 +59,7 @@ class ChatContextStoreTest {
         // 截住落库字节，喂回读取路：验的是"序列化往返"这一整条，不是 mapper 的搬运
         ArgumentCaptor<byte[]> bytes = ArgumentCaptor.forClass(byte[].class);
         verify(mapper).upsert(eq(SESSION), eq(1L), bytes.capture());
-        when(mapper.selectState(SESSION)).thenReturn(bytes.getValue());
+        when(mapper.selectState(SESSION)).thenReturn(List.of(bytes.getValue()));
 
         List<Message> loaded = store.load(SESSION);
 
@@ -85,7 +85,7 @@ class ChatContextStoreTest {
 
     @Test
     void 新会话无行返回空历史() {
-        when(mapper.selectState(SESSION)).thenReturn(null);
+        when(mapper.selectState(SESSION)).thenReturn(List.of());
 
         assertThat(store.load(SESSION)).isEmpty();
     }
@@ -99,7 +99,7 @@ class ChatContextStoreTest {
 
     @Test
     void 坏字节降级为空历史不炸对话() {
-        when(mapper.selectState(SESSION)).thenReturn(new byte[]{1, 2, 3});
+        when(mapper.selectState(SESSION)).thenReturn(List.of(new byte[]{1, 2, 3}));
 
         assertThat(store.load(SESSION)).isEmpty();
     }

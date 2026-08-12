@@ -33,16 +33,17 @@ public class ChatContextStore {
      * 对话还能继续，比整轮拒绝服务强。降级有代价（模型忘了之前聊的），所以是 error 级日志。
      */
     public List<Message> load(String sessionId) {
-        byte[] bytes;
+        List<byte[]> rows;
         try {
-            bytes = contextMapper.selectState(sessionId);
+            rows = contextMapper.selectState(sessionId);
         } catch (Exception e) {
             log.error("[ChatContext] 上下文读取失败，本轮无历史续跑 sessionId={}", sessionId, e);
             return List.of();
         }
-        if (bytes == null) {
+        if (rows.isEmpty()) {
             return List.of();
         }
+        byte[] bytes = rows.getFirst();
         try {
             return stateSerializer.stateOf(stateSerializer.dataFromBytes(bytes)).messages();
         } catch (Exception e) {
