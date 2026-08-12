@@ -39,10 +39,11 @@ import java.util.stream.Collectors;
 @Component
 public class AiAgentRuntimeManager {
 
-    // 管理口径（种子/Admin白名单/配置删除保护）：只列本进程要建模型的功能位，refresh()按名建
-    // 只剩 behavior：quant/quant-light/chat 随对话轨 BYOK 化删除，sim 是 wiib-sim 自读 DB 的位。
+    // 管理口径（种子/Admin白名单/配置删除保护）：只列本进程要建模型的功能位，refresh()按名建。
+    // quant/quant-light/chat 随对话轨 BYOK 化删除，sim 是 wiib-sim 自读 DB 的位；
     // 这些名字在 ai_model_assignment 里的残行是孤儿，无害——种子、白名单、删除保护都只认这个常量
-    private static final List<String> MANAGED_FUNCTIONS = List.of(AiFunctions.BEHAVIOR);
+    private static final List<String> MANAGED_FUNCTIONS =
+            List.of(AiFunctions.BEHAVIOR, AiFunctions.NEWS_TAGGING);
 
     private final BehaviorAnalysisWorkflow behaviorAnalysisWorkflow;
     private final AiRuntimeConfigMapper configMapper;
@@ -100,8 +101,12 @@ public class AiAgentRuntimeManager {
                     Map<Long, AiRuntimeConfig> configMap = configs.stream()
                             .collect(Collectors.toMap(AiRuntimeConfig::getId, c -> c));
                     List<AiModelAssignment> assignments = assignmentMapper.selectAll();
+                    // 打标模型名随行落库（news_event.tagged_model 坏标追责用），所以这一位要留住配置行
+                    AiRuntimeConfig newsTagging = configFor(assignments, AiFunctions.NEWS_TAGGING, configMap);
                     runtimeRef.set(new AiAgentRuntime(
-                            buildFromAssignment(assignments, AiFunctions.BEHAVIOR, configMap)));
+                            buildChatModel(configFor(assignments, AiFunctions.BEHAVIOR, configMap)),
+                            buildChatModel(newsTagging),
+                            newsTagging.getModel()));
                     log.info("AI运行时已刷新，共{}个LLM配置，{}个功能位分配", configMap.size(), assignments.size());
                 }
                 ok = true;
@@ -130,8 +135,9 @@ public class AiAgentRuntimeManager {
                 .anyMatch(a -> configId.equals(a.getConfigId()));
     }
 
-    private ChatModel buildFromAssignment(List<AiModelAssignment> assignments, String functionName,
-                                          Map<Long, AiRuntimeConfig> configMap) {
+    /** 功能位 → 校验过的配置行（分配缺失/指针悬空/缺模型名都在这儿拦） */
+    private AiRuntimeConfig configFor(List<AiModelAssignment> assignments, String functionName,
+                                      Map<Long, AiRuntimeConfig> configMap) {
         AiModelAssignment assignment = assignments.stream()
                 .filter(a -> functionName.equals(a.getFunctionName()))
                 .findFirst()
@@ -145,8 +151,7 @@ public class AiAgentRuntimeManager {
         if (config.getModel() == null || config.getModel().isBlank()) {
             throw new IllegalStateException(functionName + "所选LLM配置'" + config.getConfigName() + "'缺模型名，请在Admin页完善");
         }
-
-        return buildChatModel(config);
+        return config;
     }
 
     /**

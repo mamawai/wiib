@@ -14,6 +14,7 @@ import { RefreshCw, Calendar, Plus, Trash2, Pencil, Save, Ban } from 'lucide-rea
 
 const FUNCTION_LABELS: Record<string, string> = {
   behavior: '行为分析',
+  'news-tagging': '新闻打标',
 };
 const MODEL_ASSIGNMENT_FUNCTIONS = new Set(Object.keys(FUNCTION_LABELS));
 

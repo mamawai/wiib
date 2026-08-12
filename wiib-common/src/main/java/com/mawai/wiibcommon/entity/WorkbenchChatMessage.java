@@ -12,7 +12,7 @@ import java.time.LocalDateTime;
 /**
  * 工作台对话历史（展示用）：user/assistant 消息按会话落库，支撑历史会话列表与回看。
  * <p>
- * 续聊上下文不靠它——那是 langgraph4j checkpoint（lg4j* 三张表）的事，threadId=sessionId 原样复用；
+ * 续聊上下文不靠它——那是 workbench_chat_context（模型侧完整消息历史）的事，sessionId 同值；
  * 本表只为前端展示，所以 agent 调度/HITL 过程事件不存。
  */
 @Data
@@ -22,7 +22,7 @@ public class WorkbenchChatMessage {
     @TableId(type = IdType.AUTO)
     private Long id;
 
-    /** 会话号，形如 wb-{userId}-{uuid}；与 checkpoint 的 thread_name 同值 */
+    /** 会话号，形如 wb-{userId}-{uuid}；与 workbench_chat_context.session_id 同值 */
     private String sessionId;
 
     private Long userId;
