@@ -99,7 +99,7 @@ const DEFAULT_SPEC: TraderSpec = {
 const EMPTY_FORM: TraderUpsertRequest = {
   name: '', symbols: 'BTCUSDT', intervalCode: '15m', customPrompt: '',
   apiProtocol: 'openai', baseUrl: '', model: '', apiKey: '', useDefaultPrompt: true,
-  spec: DEFAULT_SPEC, alertEnabled: true, alertThresholdMult: 1, reviewEnabled: true,
+  spec: DEFAULT_SPEC, alertEnabled: true, alertThresholdMult: 1, reviewEnabled: true, learningEnabled: true,
 };
 
 /**
@@ -130,7 +130,7 @@ export function MyTrader() {
           baseUrl: v.baseUrl, model: v.pub.model, apiKey: '', useDefaultPrompt: v.useDefaultPrompt,
           spec: v.spec,
           alertEnabled: v.alertEnabled, alertThresholdMult: v.alertThresholdMult,
-          reviewEnabled: v.reviewEnabled,
+          reviewEnabled: v.reviewEnabled, learningEnabled: v.learningEnabled,
         });
         loadRequests();
       }
@@ -418,15 +418,29 @@ export function MyTrader() {
           </p>
         </div>
 
-        {/* 每日复盘：reviewer 在日线边界读全天交易痕迹，复盘上时间线、教训写进记忆笔记 */}
-        <div className="space-y-2 rounded-lg border border-border/60 bg-card-2/40 p-3">
-          <div className="flex items-baseline justify-between">
-            <span className="microlabel">每日复盘</span>
-            <span className="text-[10px] text-muted-foreground">复盘公开上时间线；记忆笔记之后每次唤醒自动注入</span>
+        {/* 两条学习轨并列：复盘看自己（reviewer），学习看同侪（learning agent），各自单独开关、各自一份笔记 */}
+        <div className="grid sm:grid-cols-2 gap-3 items-start">
+          {/* 每日复盘：reviewer 在日线边界读全天交易痕迹，复盘上时间线、教训写进记忆笔记 */}
+          <div className="space-y-2 rounded-lg border border-border/60 bg-card-2/40 p-3">
+            <div className="flex flex-wrap items-baseline justify-between gap-x-2">
+              <span className="microlabel">每日复盘</span>
+              <span className="text-[10px] text-muted-foreground">复盘公开上时间线；记忆笔记之后每次唤醒自动注入</span>
+            </div>
+            <SpecToggle checked={form.reviewEnabled} onChange={v => set({ reviewEnabled: v })}
+                        label="启用每日复盘"
+                        hint="日线边界自动跑一次（烧你的 key，单次调用）；当天无交易自动跳过；关掉只停复盘，已有笔记照常注入" />
           </div>
-          <SpecToggle checked={form.reviewEnabled} onChange={v => set({ reviewEnabled: v })}
-                      label="启用每日复盘"
-                      hint="日线边界自动跑一次（烧你的 key，单次调用）；当天无交易自动跳过；关掉只停复盘，已有笔记照常注入" />
+
+          {/* 同侪学习：全体复盘跑完后 learning agent 读别人的成绩与复盘，学到的写进学习笔记 */}
+          <div className="space-y-2 rounded-lg border border-border/60 bg-card-2/40 p-3">
+            <div className="flex flex-wrap items-baseline justify-between gap-x-2">
+              <span className="microlabel">同侪学习</span>
+              <span className="text-[10px] text-muted-foreground">排行榜与同侪复盘都是它的素材</span>
+            </div>
+            <SpecToggle checked={form.learningEnabled} onChange={v => set({ learningEnabled: v })}
+                        label="启用同侪学习"
+                        hint="全体复盘完成后自动跑一次（烧你的 key，多轮调用）；同侪不足时自动跳过；学习笔记之后每次唤醒自动注入；关掉只停学习，已有笔记照常注入" />
+          </div>
         </div>
 
         <div data-tour="byok">

@@ -733,6 +733,8 @@ export interface TraderOwnerView {
   alertThresholdMult: number;
   /** 每日复盘开关：reviewer 日线边界复盘写 REVIEW 行并整理记忆笔记 */
   reviewEnabled: boolean;
+  /** 同侪学习开关：learning agent 在全体复盘完成后向同侪学习写 LEARN 行并整理学习笔记 */
+  learningEnabled: boolean;
 }
 
 /**
@@ -812,8 +814,11 @@ export interface AiTraderDecisionView {
   roundNo: number;
   wakeTime: number;
   intervalCode: string;
-  /** TRADE=例行K线唤醒 ALERT=波动哨兵警报唤醒 REVIEW=每日复盘（reasoning=复盘全文，无equity） */
-  kind: 'TRADE' | 'ALERT' | 'REVIEW';
+  /**
+   * TRADE=例行K线唤醒 ALERT=波动哨兵警报唤醒 REVIEW=每日复盘（reasoning=复盘全文，无equity）
+   * LEARN=向同侪学习（reasoning=学习全文，无equity）
+   */
+  kind: 'TRADE' | 'ALERT' | 'REVIEW' | 'LEARN';
   status: 'OK' | 'ERROR' | 'SKIPPED';
   equity: number | null;
   reasoning: string | null;
@@ -851,6 +856,7 @@ export interface TraderUpsertRequest {
   alertEnabled: boolean;
   alertThresholdMult: number;
   reviewEnabled: boolean;
+  learningEnabled: boolean;
 }
 
 /** 重要快讯（BlockBeats 缓存透传，plain 为脱 HTML 纯文本） */

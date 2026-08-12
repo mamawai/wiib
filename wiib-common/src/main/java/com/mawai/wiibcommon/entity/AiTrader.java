@@ -70,6 +70,9 @@ public class AiTrader {
     /** 每日复盘开关：reviewer 日线边界复盘并整理 memory；关掉只停复盘，已有笔记照常注入 */
     private Boolean reviewEnabled;
 
+    /** 同侪学习开关：learning agent 在全体复盘完成后向同侪学习并整理 learningNotes；关掉只停学习，已有笔记照常注入 */
+    private Boolean learningEnabled;
+
     /** 波动哨兵警报开关（仅 1h/4h 档生效） */
     private Boolean alertEnabled;
 

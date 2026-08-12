@@ -100,7 +100,8 @@ export function ModelConfig() {
       const req: TraderUpsertRequest = {
         name: t.pub.name, symbols: t.pub.symbols, intervalCode: t.pub.intervalCode,
         customPrompt: t.customPrompt ?? '', useDefaultPrompt: t.useDefaultPrompt, spec: t.spec,
-        alertEnabled: t.alertEnabled, alertThresholdMult: t.alertThresholdMult, reviewEnabled: t.reviewEnabled,
+        alertEnabled: t.alertEnabled, alertThresholdMult: t.alertThresholdMult,
+        reviewEnabled: t.reviewEnabled, learningEnabled: t.learningEnabled,
         apiProtocol: traderForm.apiProtocol, baseUrl: traderForm.baseUrl,
         model: traderForm.model, apiKey: traderForm.apiKey,
       };

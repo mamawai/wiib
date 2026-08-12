@@ -54,7 +54,7 @@ public class TraderService {
                             Boolean allowMultiPosition, Boolean allowHedge,
                             Boolean allowSelfAdd, Boolean allowSelfReduce,
                             Boolean alertEnabled, BigDecimal alertThresholdMult,
-                            Boolean reviewEnabled) {
+                            Boolean reviewEnabled, Boolean learningEnabled) {
     }
 
     public record ListModelsReq(String apiProtocol, String baseUrl, String apiKey) {
@@ -185,6 +185,7 @@ public class TraderService {
                 .set(AiTrader::getAlertEnabled, probe.getAlertEnabled())
                 .set(AiTrader::getAlertThresholdMult, probe.getAlertThresholdMult())
                 .set(AiTrader::getReviewEnabled, probe.getReviewEnabled())
+                .set(AiTrader::getLearningEnabled, probe.getLearningEnabled())
                 .set(AiTrader::getUpdatedAt, LocalDateTime.now()));
         if (modelChanged) {
             modelFactory.evict(t.getId());
@@ -411,6 +412,7 @@ public class TraderService {
         t.setAlertEnabled(!Boolean.FALSE.equals(req.alertEnabled()));
         t.setAlertThresholdMult(req.alertThresholdMult() == null ? BigDecimal.ONE : req.alertThresholdMult());
         t.setReviewEnabled(!Boolean.FALSE.equals(req.reviewEnabled()));
+        t.setLearningEnabled(!Boolean.FALSE.equals(req.learningEnabled()));
     }
 
     private static String stripTrailingSlash(String baseUrl) {

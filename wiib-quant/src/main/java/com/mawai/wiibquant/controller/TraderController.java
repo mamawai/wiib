@@ -51,7 +51,7 @@ public class TraderController {
     public record TraderOwnerView(TraderPublicView pub, String apiProtocol, String baseUrl,
                                   String customPrompt, String apiKeyTail, boolean useDefaultPrompt,
                                   TraderSpec spec, boolean alertEnabled, BigDecimal alertThresholdMult,
-                                  boolean reviewEnabled) {
+                                  boolean reviewEnabled, boolean learningEnabled) {
     }
 
     /** 仓位规格：配置回显与提示词预览共用一个形状，前端改一处两边同步。 */
@@ -83,7 +83,8 @@ public class TraderController {
                 !Boolean.FALSE.equals(t.getUseDefaultPrompt()), TraderSpec.of(t),
                 !Boolean.FALSE.equals(t.getAlertEnabled()),
                 t.getAlertThresholdMult() == null ? BigDecimal.ONE : t.getAlertThresholdMult(),
-                !Boolean.FALSE.equals(t.getReviewEnabled())));
+                !Boolean.FALSE.equals(t.getReviewEnabled()),
+                !Boolean.FALSE.equals(t.getLearningEnabled())));
     }
 
     /** 提示词预览的入参：规格项太多，走 POST 带 body 比堆十个 query 参数干净。 */
@@ -105,7 +106,7 @@ public class TraderController {
                                 String apiProtocol, String baseUrl, String model, String apiKey,
                                 Boolean useDefaultPrompt, TraderSpec spec,
                                 Boolean alertEnabled, BigDecimal alertThresholdMult,
-                                Boolean reviewEnabled) {
+                                Boolean reviewEnabled, Boolean learningEnabled) {
         TraderService.UpsertReq toReq() {
             TraderSpec s = spec;
             return new TraderService.UpsertReq(name, symbols, intervalCode, customPrompt,
@@ -114,7 +115,7 @@ public class TraderController {
                     s == null ? null : s.marginPctMin(), s == null ? null : s.marginPctMax(),
                     s == null ? null : s.allowMultiPosition(), s == null ? null : s.allowHedge(),
                     s == null ? null : s.allowSelfAdd(), s == null ? null : s.allowSelfReduce(),
-                    alertEnabled, alertThresholdMult, reviewEnabled);
+                    alertEnabled, alertThresholdMult, reviewEnabled, learningEnabled);
         }
     }
 

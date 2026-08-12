@@ -59,7 +59,7 @@ public class TraderChatService {
 
     // ===== 查询（纯读库） =====
 
-    /** 概况：状态/权益/轮次/配置 + 复盘笔记全文（笔记是"它学到了什么"的唯一载体，必须给全）。 */
+    /** 概况：状态/权益/轮次/配置 + 复盘与学习两份笔记全文（笔记是"它学到了什么"的唯一载体，必须给全）。 */
     public String overview(long userId) {
         AiTrader t = traderService.mine(userId);
         if (t == null) {
@@ -78,11 +78,14 @@ public class TraderChatService {
                 .fluentPut("model", t.getModel())
                 .fluentPut("consecutiveFailures", t.getConsecutiveFailures())
                 .fluentPut("reviewEnabled", t.getReviewEnabled())
+                .fluentPut("learningEnabled", t.getLearningEnabled())
                 .fluentPut("alertEnabled", t.getAlertEnabled())
                 .fluentPut("leverageRange", t.getLeverageMin() + "~" + t.getLeverageMax() + "倍")
                 .fluentPut("marginPctRange", plain(t.getMarginPctMin()) + "~" + plain(t.getMarginPctMax()) + "%")
                 .fluentPut("memory", t.getMemory())
                 .fluentPut("memoryNote", "复盘笔记全文：reviewer 每日复盘写的，trader 每次唤醒都会看到")
+                .fluentPut("learningNotes", t.getLearningNotes())
+                .fluentPut("learningNotesNote", "学习笔记全文：learning agent 向同侪学习写的，trader 每次唤醒都会看到")
                 .fluentPut("customPrompt", t.getCustomPrompt())
                 .fluentPut("pendingOwnerNote", t.getOwnerNote())
                 .toJSONString();
@@ -147,7 +150,7 @@ public class TraderChatService {
                 .fluentPut("hasTrader", true)
                 .fluentPut("roundNo", t.getRoundNo())
                 .fluentPut("decisions", arr)
-                .fluentPut("kindNote", "TRADE=K线收盘唤醒 ALERT=波动警报唤醒 REVIEW=每日复盘（reasoning是复盘全文）")
+                .fluentPut("kindNote", "TRADE=K线收盘唤醒 ALERT=波动警报唤醒 REVIEW=每日复盘（reasoning是复盘全文） LEARN=向同侪学习（reasoning是学习全文）")
                 .toJSONString();
     }
 

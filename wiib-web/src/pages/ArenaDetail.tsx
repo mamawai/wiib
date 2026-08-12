@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import {
-  ArrowDownRight, ArrowUpRight, Bot, ChevronDown, ChevronLeft, ChevronUp, ClipboardList, Loader2, NotebookPen,
-  RefreshCcw, Zap,
+  ArrowDownRight, ArrowUpRight, Bot, ChevronDown, ChevronLeft, ChevronUp, ClipboardList, GraduationCap, Loader2,
+  NotebookPen, RefreshCcw, Zap,
 } from 'lucide-react';
 import { traderApi } from '../api';
 import { STATUS_META } from './Arena';
@@ -72,11 +72,16 @@ function tradeArgsSummary(a: ActionRow): string {
 function DecisionCard({ d }: { d: AiTraderDecisionView }) {
   const [open, setOpen] = useState(false);
   // 复盘行不是交易决策，徽章与配色单独一套：reviewer 的每日日志，时间线上要一眼认出
+  // 学习行同样不交易，但来源不同（复盘看自己、学习看同侪），再分一套色——两种日志行混在时间线上要能一眼分清
   const meta = d.kind === 'REVIEW'
     ? (d.status === 'OK'
         ? { label: '每日复盘', tone: 'bg-violet-500/15 text-violet-500' }
         : { label: '复盘失败', tone: 'bg-loss/15 text-loss' })
-    : DECISION_STATUS[d.status] ?? DECISION_STATUS.OK;
+    : d.kind === 'LEARN'
+      ? (d.status === 'OK'
+          ? { label: '同侪学习', tone: 'bg-sky-500/15 text-sky-500' }
+          : { label: '学习失败', tone: 'bg-loss/15 text-loss' })
+      : DECISION_STATUS[d.status] ?? DECISION_STATUS.OK;
   const actions = useMemo<ActionRow[]>(() => {
     try {
       return d.actionsJson ? JSON.parse(d.actionsJson) as ActionRow[] : [];
@@ -92,10 +97,12 @@ function DecisionCard({ d }: { d: AiTraderDecisionView }) {
 
   return (
     <div className={cn('rounded-md border bg-card p-3 space-y-2',
-      d.kind === 'REVIEW' ? 'border-violet-500/35 bg-violet-500/[0.04]' : 'border-border')}>
+      d.kind === 'REVIEW' ? 'border-violet-500/35 bg-violet-500/[0.04]'
+        : d.kind === 'LEARN' ? 'border-sky-500/35 bg-sky-500/[0.04]' : 'border-border')}>
       <div className="flex items-center gap-2 flex-wrap">
         <span className={cn('inline-flex items-center gap-0.5 text-[10px] font-bold px-1.5 py-0.5 rounded', meta.tone)}>
-          {d.kind === 'REVIEW' && <NotebookPen className="w-3 h-3" />}{meta.label}
+          {d.kind === 'REVIEW' && <NotebookPen className="w-3 h-3" />}
+          {d.kind === 'LEARN' && <GraduationCap className="w-3 h-3" />}{meta.label}
         </span>
         {/* 警报唤醒凸显：这条不是例行K线节奏，是哨兵在极端波动时叫醒的 */}
         {d.kind === 'ALERT' && (
@@ -110,7 +117,7 @@ function DecisionCard({ d }: { d: AiTraderDecisionView }) {
         <span className="ml-auto text-[10px] text-muted-foreground/70 num">
           {[
             d.latencyMs != null && `${(d.latencyMs / 1000).toFixed(1)}s`,
-            // 复盘无工具（单次调用），不显示"0次工具"占位
+            // 复盘无工具（单次调用）不显示"0次工具"占位；学习是 ReactAgent 有 peer_insights 工具，照常显示
             d.kind !== 'REVIEW' && `${d.toolCalls}次工具`,
             d.modelCalls != null && `${d.modelCalls}次模型`,
             // token 为 null＝上游端点没报 usage，显示「—」而不是 0：0 会被读成"这轮没花钱"
