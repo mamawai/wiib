@@ -14,7 +14,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.List;
 
 /**
- * trader 系统提示词组装：平台模板 + 账户状态 + 最近决策 + 复盘笔记 + 用户自定义段。
+ * trader 系统提示词组装：平台模板 + 账户状态 + 最近决策 + 复盘笔记 + 学习笔记 + 用户自定义段。
  * 每次唤醒现读现拼——用户改完 customPrompt，下一根 K 线自然生效，热更新零机制。
  * <p>
  * 模板的认知设计（顺序即优先级）：
@@ -68,6 +68,12 @@ public class TraderPromptAssembler {
         if (trader.getMemory() != null && !trader.getMemory().isBlank()) {
             sb.append("\n————— 复盘笔记（你过去交易教训的整理，供决策参考）—————\n")
                     .append(trader.getMemory()).append('\n');
+        }
+
+        // 与复盘笔记并列注入不合并：来源分开，模型才分得清"自己的教训"与"从别人学的"
+        if (trader.getLearningNotes() != null && !trader.getLearningNotes().isBlank()) {
+            sb.append("\n————— 学习笔记（你研究同侪交易后的整理，来自别人的经验，供决策参考）—————\n")
+                    .append(trader.getLearningNotes()).append('\n');
         }
 
         if (trader.getCustomPrompt() != null && !trader.getCustomPrompt().isBlank()) {

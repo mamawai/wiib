@@ -418,7 +418,7 @@ export function MyTrader() {
           </p>
         </div>
 
-        {/* 每日复盘：learning agent 在日线边界读全天交易痕迹，复盘上时间线、教训写进记忆笔记 */}
+        {/* 每日复盘：reviewer 在日线边界读全天交易痕迹，复盘上时间线、教训写进记忆笔记 */}
         <div className="space-y-2 rounded-lg border border-border/60 bg-card-2/40 p-3">
           <div className="flex items-baseline justify-between">
             <span className="microlabel">每日复盘</span>

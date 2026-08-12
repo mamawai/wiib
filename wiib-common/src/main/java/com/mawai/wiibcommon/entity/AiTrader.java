@@ -46,11 +46,18 @@ public class AiTrader {
     private Boolean useDefaultPrompt;
 
     /**
-     * 复盘笔记：由 learning agent 每日复盘整理写入（限长文本），每次唤醒注入提示词。
+     * 复盘笔记：由 reviewer 每日复盘整理写入（限长文本），每次唤醒注入提示词。
      * trader 侧只读只注入——本字段即记忆学习的接口。ALWAYS：清空笔记=写 null
      */
     @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private String memory;
+
+    /**
+     * 学习笔记：learning agent 向同侪学习后整理写入（≤2000字覆盖写），每次唤醒与复盘笔记并列注入。
+     * 与 memory 分开存——来源分开模型才分得清"自己的教训"与"从别人学的"。ALWAYS：清空=写 null
+     */
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
+    private String learningNotes;
 
     /**
      * 主人留言：对话轨的 leave_note_to_trader 写入，下次唤醒随提示词注入并立刻清空（读后即焚）。
@@ -60,7 +67,7 @@ public class AiTrader {
     @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private String ownerNote;
 
-    /** 每日复盘开关：learning agent 日线边界复盘并整理 memory；关掉只停复盘，已有笔记照常注入 */
+    /** 每日复盘开关：reviewer 日线边界复盘并整理 memory；关掉只停复盘，已有笔记照常注入 */
     private Boolean reviewEnabled;
 
     /** 波动哨兵警报开关（仅 1h/4h 档生效） */

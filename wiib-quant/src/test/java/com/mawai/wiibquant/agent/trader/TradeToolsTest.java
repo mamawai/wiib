@@ -409,7 +409,7 @@ class TradeToolsTest {
 
         new TraderPlanStore(planMapper).upsert(neu, false);
 
-        // 归档不删：论点→结局配对是 learning agent 的复盘原料
+        // 归档不删：论点→结局配对是 reviewer 的复盘原料
         ArgumentCaptor<AiTraderPlan> archived = ArgumentCaptor.forClass(AiTraderPlan.class);
         verify(planMapper).updateById(archived.capture());
         assertThat(archived.getValue().getId()).isEqualTo(21L);

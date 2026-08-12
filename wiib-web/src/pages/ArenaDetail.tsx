@@ -71,7 +71,7 @@ function tradeArgsSummary(a: ActionRow): string {
 /** 单条决策卡：时间/权益 + 数据工具chip + 交易动作行（参数/拒因） + 推理 markdown 折叠——竞技场的观赏核心。 */
 function DecisionCard({ d }: { d: AiTraderDecisionView }) {
   const [open, setOpen] = useState(false);
-  // 复盘行不是交易决策，徽章与配色单独一套：learning agent 的每日日志，时间线上要一眼认出
+  // 复盘行不是交易决策，徽章与配色单独一套：reviewer 的每日日志，时间线上要一眼认出
   const meta = d.kind === 'REVIEW'
     ? (d.status === 'OK'
         ? { label: '每日复盘', tone: 'bg-violet-500/15 text-violet-500' }

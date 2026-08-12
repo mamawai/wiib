@@ -61,8 +61,8 @@ public class AiTraderPlan {
     private String revisionsJson;
 
     /**
-     * LIVE=仓位/挂单存活 CLOSED=已了结归档。归档不删：论点→结局的配对数据是将来
-     * learning agent 复盘的原料（结局按 symbol/side/时间窗 join sim 已平仓位）。
+     * LIVE=仓位/挂单存活 CLOSED=已了结归档。归档不删：论点→结局的配对数据是
+     * reviewer 复盘的原料（结局按 symbol/side/时间窗 join sim 已平仓位）。
      */
     private String status;
 

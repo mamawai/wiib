@@ -15,7 +15,7 @@ import java.util.Set;
 
 /**
  * 交易计划存取（存活键：trader+round+symbol+side，DB 部分唯一索引只约束 LIVE）。
- * 计划了结一律归档不删——"当初的论点/失效条件"与"实际结局"的配对是 learning agent
+ * 计划了结一律归档不删——"当初的论点/失效条件"与"实际结局"的配对是 reviewer
  * 每日复盘的原料（ReviewMaterialAssembler 按 symbol/side/时间窗 join sim 已平仓位配对）。
  * 单 trader 的唤醒是串行的（调度层抢占互斥），select-then-write 无并发问题。
  */

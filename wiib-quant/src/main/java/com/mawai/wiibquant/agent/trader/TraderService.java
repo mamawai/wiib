@@ -230,7 +230,7 @@ public class TraderService {
         }
         int newRound = t.getRoundNo() + 1;
         Long simUserId = simTradeClient.ensureAccount(accountName(userId, newRound), INITIAL_BALANCE);
-        // 本局存活计划随重置归档（不删）：论点/失效条件/修订史是公开凭证，也是learning agent的复盘原料
+        // 本局存活计划随重置归档（不删）：论点/失效条件/修订史是公开凭证，也是reviewer的复盘原料
         planStore.archiveRound(t.getId(), t.getRoundNo(), System.currentTimeMillis());
         // 未处理的请求随本局一并作废：换了新账户，那个 positionId 早已不存在，留着也永远处理不掉
         requestMapper.update(null, new LambdaUpdateWrapper<AiTraderRequest>()

@@ -82,7 +82,7 @@ public class TraderChatService {
                 .fluentPut("leverageRange", t.getLeverageMin() + "~" + t.getLeverageMax() + "倍")
                 .fluentPut("marginPctRange", plain(t.getMarginPctMin()) + "~" + plain(t.getMarginPctMax()) + "%")
                 .fluentPut("memory", t.getMemory())
-                .fluentPut("memoryNote", "复盘笔记全文：learning agent 每日复盘写的，trader 每次唤醒都会看到")
+                .fluentPut("memoryNote", "复盘笔记全文：reviewer 每日复盘写的，trader 每次唤醒都会看到")
                 .fluentPut("customPrompt", t.getCustomPrompt())
                 .fluentPut("pendingOwnerNote", t.getOwnerNote())
                 .toJSONString();

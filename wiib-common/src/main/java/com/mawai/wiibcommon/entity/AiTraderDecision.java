@@ -34,7 +34,7 @@ public class AiTraderDecision {
 
     private String intervalCode;
 
-    /** TRADE=例行K线唤醒 ALERT=波动哨兵警报唤醒 REVIEW=learning agent复盘（reasoning=复盘全文，无equity） */
+    /** TRADE=例行K线唤醒 ALERT=波动哨兵警报唤醒 REVIEW=reviewer复盘（reasoning=复盘全文，无equity） */
     private String kind;
 
     /** OK / ERROR / SKIPPED（上一唤醒未完被跳过） */

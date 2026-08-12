@@ -27,7 +27,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
 /**
- * learning agent 复盘回路：单次模型调用（无工具，素材由代码组装齐）→ 两段固定格式解析 →
+ * reviewer 复盘回路（自学习，看自己不看同侪；向同侪学习见 LearningRunner）：
+ * 单次模型调用（无工具，素材由代码组装齐）→ 两段固定格式解析 →
  * 【本期复盘】进 REVIEW 决策行公开上时间线、【记忆更新】全文覆盖 ai_trader.memory。
  * 与 trader 只经 DB 解耦：这里写 memory，trader 每次唤醒只读注入，互相没有直接调用。
  * 失败语义：ERROR 行留痕、不动 memory、不计连败——复盘失败没有资金风险，不值得暂停机制。

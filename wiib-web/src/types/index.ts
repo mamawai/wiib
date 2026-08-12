@@ -731,7 +731,7 @@ export interface TraderOwnerView {
   alertEnabled: boolean;
   /** 警报灵敏度系数 >=1 只能调高：生效阈值 = 每币基准 x 系数 */
   alertThresholdMult: number;
-  /** 每日复盘开关：learning agent 日线边界复盘写 REVIEW 行并整理记忆笔记 */
+  /** 每日复盘开关：reviewer 日线边界复盘写 REVIEW 行并整理记忆笔记 */
   reviewEnabled: boolean;
 }
 
