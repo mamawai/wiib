@@ -14,6 +14,7 @@ import { getCoinPriceDecimals } from '../lib/coinConfig';
 import { bollSeries, emaSeries, macdSeries, maSeries, rsiSeries } from '../lib/indicators';
 import type { ChartCtx } from '../lib/chartDrawings';
 import { useDrawings, type Tool } from './chart/useDrawings';
+import { NewsMarkersLayer } from './chart/NewsMarkersLayer';
 
 /** 一根 K：series 只用 OHLC，量/额留给气泡和成交量柱。 */
 interface Bar { time: number; openMs: number; open: number; high: number; low: number; close: number; volume: number; quote: number; }
@@ -399,11 +400,6 @@ export function newsTagForSymbol(symbol: string): string | undefined {
   return ['OIL', 'GOLD', 'COIN', 'MSTR', 'TSLA', 'NVDA'].includes(symbol) ? symbol : undefined;
 }
 
-/** lucide globe 的原始 path（图标走 DOM 覆盖层，canvas 标记画不了 SVG；不用 emoji） */
-const GLOBE_SVG = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor"'
-  + ' stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
-  + '<circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>';
-
 /** 快讯是外部内容，进 innerHTML 前必须转义（标题/正文/URL 都不可信） */
 const esc = (s: string) => s.replace(/[&<>"']/g, c =>
   ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string));
@@ -454,9 +450,9 @@ export function CandleChart({ symbol, interval, limit = 300, visibleBars = 110, 
   const [showMarks, setShowMarks] = useState(() => localStorage.getItem('wiib-chart-trade-marks') === '1');
   const marksByTimeRef = useRef<Map<number, { b: number[]; s: number[] }>>(new Map());
   const markTipRef = useRef<HTMLDivElement>(null);
-  // 新闻图标：默认开（关一次记住）。图标是 DOM 覆盖层（globe SVG），定位由 250ms 循环维护
+  // 新闻标记：默认开（关一次记住）。globe 画在主图画布上（NewsMarkersLayer），随蜡烛同帧移动
   const [showNews, setShowNews] = useState(() => localStorage.getItem('wiib-chart-news') !== '0');
-  const newsIconsRef = useRef<{ el: HTMLDivElement; time: number }[]>([]);
+  const newsLayerRef = useRef<NewsMarkersLayer | null>(null);
   const newsTipRef = useRef<HTMLDivElement>(null);
   const cdRef = useRef<HTMLDivElement>(null);
   /** 仓位参考线的悬浮小签（写在线上、贴着价格轴左侧），由 250ms 循环随缩放平移重新定位 */
@@ -844,21 +840,29 @@ export function CandleChart({ symbol, interval, limit = 300, visibleBars = 110, 
     };
   }, [tradeMarks, showMarks, interval, chartEpoch]);
 
-  // 新闻图标：打标快讯按 K 线时间桶聚合，globe 悬在所属那根上方，点开看内容。
+  // 新闻标记：打标快讯按 K 线时间桶聚合，globe 悬在所属那根上方，点开看内容。
   // 语义是"这根K线覆盖的时间段内发生过什么新闻"——按发稿时刻定位，不承诺行情因果。
-  // 图标/弹窗都走 DOM 覆盖层：canvas 系的 series marker 只能画字符，放不下 SVG 和富文本弹窗；
-  // 定位复用倒计时那条 250ms 循环（与仓位小签同一套），平移缩放都跟得上
+  // 标记画在主图画布上（NewsMarkersLayer 挂蜡烛 series）：与蜡烛同帧渲染，平移缩放零延迟；
+  // 弹窗仍是 DOM（富文本+可点链接，画布画不了），点击命中在 pointerdown 里主动 pick
   useEffect(() => {
-    const wrap = wrapRef.current;
-    if (!newsTag || !showNews || !wrap) return;
+    const wrap = wrapRef.current, candle = candleRef.current;
+    if (!newsTag || !showNews || !wrap || !candle) return;
     let disposed = false;
     const bucketMs = BUCKET_MS[interval];
-    const icons: { el: HTMLDivElement; time: number }[] = [];
+    /** time → 该桶的快讯组，点击标记时按命中的时间桶取内容 */
+    const groups = new Map<number, NewsEventItem[]>();
+    const layer = new NewsMarkersLayer(time => {
+      const i = idxRef.current.get(time);
+      return i == null ? null : barsRef.current[i].high;
+    });
+    layer.dark = isDarkRef.current;
+    candle.attachPrimitive(layer);
+    newsLayerRef.current = layer;
 
     const fmtClock = (ms: number) => new Date(ms).toLocaleString('zh-CN',
       { timeZone: 'Asia/Singapore', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
-    const showPopup = (icon: HTMLDivElement, events: NewsEventItem[]) => {
-      const tip = newsTipRef.current; if (!tip) return;
+    const showPopup = (rect: { x: number; y: number; w: number }, events: NewsEventItem[]) => {
+      const tip = newsTipRef.current; if (!tip || !events.length) return;
       tip.innerHTML = events.map(e =>
         '<div style="padding:6px 0;border-bottom:1px solid rgba(0,0,0,.07)">'
         + `<div style="color:#6b7280;font-weight:700;margin-bottom:2px">${fmtClock(e.publishedAt)} · ${esc(e.tags)}</div>`
@@ -867,53 +871,52 @@ export function CandleChart({ symbol, interval, limit = 300, visibleBars = 110, 
         + (e.url ? `<a href="${esc(e.url)}" target="_blank" rel="noopener noreferrer" style="color:#2962ff;font-weight:700">源 ↗</a>` : '')
         + '</div>').join('');
       tip.style.display = 'block';
-      // 内容定了再量尺寸：横向对中图标并夹在图内，纵向优先弹图标上方、顶部放不下翻到下方
+      // 内容定了再量尺寸：横向对中标记并夹在图内，纵向优先弹标记上方、顶部放不下翻到下方
       const W = wrap.clientWidth, tw = tip.offsetWidth, th = tip.offsetHeight;
-      const ix = parseFloat(icon.style.left) + 9, iy = parseFloat(icon.style.top);
+      const ix = rect.x + rect.w / 2, iy = rect.y;
       tip.style.left = `${Math.min(Math.max(4, ix - tw / 2), W - tw - 4)}px`;
-      tip.style.top = `${iy - th - 8 >= 4 ? iy - th - 8 : iy + 24}px`;
+      tip.style.top = `${iy - th - 8 >= 4 ? iy - th - 8 : iy + 26}px`;
     };
 
-    // 窗口按内存上限的最远可翻历史算：翻到底图标也都在；服务端上限 500 条倒序保最近
+    // 窗口按内存上限的最远可翻历史算：翻到底标记也都在；服务端上限 500 条倒序保最近
     quantApi.newsEvents(newsTag, Date.now() - bucketMs * MAX_BARS, Date.now() + bucketMs).then(events => {
       if (disposed || !events.length) return;
-      const byTime = new Map<number, NewsEventItem[]>();
       for (const e of events) {
         const time = toBarTime(Math.floor(e.publishedAt / bucketMs) * bucketMs);
-        const g = byTime.get(time) ?? [];
+        const g = groups.get(time) ?? [];
         g.push(e);
-        byTime.set(time, g);
+        groups.set(time, g);
       }
-      for (const [time, group] of byTime) {
-        group.sort((a, b) => a.publishedAt - b.publishedAt);
-        const el = document.createElement('div');
-        el.innerHTML = GLOBE_SVG + (group.length > 1
-          ? `<span style="position:absolute;top:-5px;right:-6px;background:#2962ff;color:#fff;border-radius:6px;padding:0 3px;font:700 8px/1.5 ui-monospace,Consolas,monospace">${group.length}</span>`
-          : '');
-        el.style.cssText = 'position:absolute;display:none;z-index:4;width:18px;height:18px;cursor:pointer;'
-          + 'align-items:center;justify-content:center;border-radius:50%;color:#2962ff;'
-          + 'background:rgba(246,246,244,.92);border:1px solid rgba(41,98,255,.35);box-shadow:0 1px 4px rgba(0,0,0,.18)';
-        el.onclick = ev => { ev.stopPropagation(); showPopup(el, group); };
-        wrap.appendChild(el);
-        icons.push({ el, time });
-      }
-      newsIconsRef.current = icons;
-    }).catch(() => { /* 未登录/接口失败：没有图标而已，图表照常 */ });
+      for (const g of groups.values()) g.sort((a, b) => a.publishedAt - b.publishedAt);
+      layer.markers = [...groups.entries()].map(([time, g]) => ({ time, count: g.length }));
+      layer.update();
+    }).catch(() => { /* 未登录/接口失败：没有标记而已，图表照常 */ });
 
-    // 点弹窗和图标以外的任何地方都收起
+    // 点击命中：capture 在 document 上——点中标记时截住事件（LWC 的拖拽别跟着起步），
+    // 点在标记与弹窗之外的任何地方都收起弹窗
     const onDown = (ev: PointerEvent) => {
       const tip = newsTipRef.current;
-      if (!tip || tip.style.display === 'none') return;
-      const t = ev.target as Node;
-      if (tip.contains(t) || icons.some(i => i.el.contains(t))) return;
-      tip.style.display = 'none';
+      const target = ev.target as Node;
+      if (tip && tip.style.display !== 'none' && tip.contains(target)) return;   // 弹窗内（链接等）放行
+      const paneCanvas = chartRef.current?.panes()[0]?.getHTMLElement()?.querySelector('canvas');
+      const r = paneCanvas?.getBoundingClientRect();
+      const hit = r ? layer.pick(ev.clientX - r.left, ev.clientY - r.top) : null;
+      if (hit !== null) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        const rect = layer.rects.get(hit);
+        if (rect) showPopup(rect, groups.get(hit) ?? []);
+        return;
+      }
+      if (tip && tip.style.display !== 'none') tip.style.display = 'none';
     };
-    document.addEventListener('pointerdown', onDown);
+    document.addEventListener('pointerdown', onDown, true);
     return () => {
       disposed = true;
-      document.removeEventListener('pointerdown', onDown);
-      newsIconsRef.current = [];
-      icons.forEach(i => i.el.remove());
+      document.removeEventListener('pointerdown', onDown, true);
+      newsLayerRef.current = null;
+      // 图整体重建时 series 已死，detach 会抛，吞掉即可（同成交标记的清理）
+      try { candle.detachPrimitive(layer); } catch { /* chart disposed */ }
       if (newsTipRef.current) newsTipRef.current.style.display = 'none';
     };
   }, [newsTag, showNews, interval, chartEpoch]);
@@ -941,19 +944,6 @@ export function CandleChart({ symbol, interval, limit = 300, visibleBars = 110, 
         label.style.top = `${y}px`;
         label.style.right = `${axisW + 4}px`;
         label.style.display = 'block';
-      }
-
-      // ---- 新闻图标：悬在所属那根 K 线最高价上方，随平移缩放走 ----
-      // 桶里没有对应 bar（休市时段的快讯/超出已载历史）就不显示——图标没有可依附的蜡烛
-      const paneW = chart ? chart.paneSize(0).width : 0;
-      for (const { el: icon, time } of newsIconsRef.current) {
-        const x = chart?.timeScale().timeToCoordinate(time as UTCTimestamp);
-        const bi = idxRef.current.get(time);
-        const hi = bi != null ? candle?.priceToCoordinate(barsRef.current[bi].high) : null;
-        if (x == null || hi == null || x < 0 || x > paneW) { icon.style.display = 'none'; continue; }
-        icon.style.left = `${x - 9}px`;
-        icon.style.top = `${Math.min(Math.max(4, hi - 26), paneH - 22)}px`;
-        icon.style.display = 'flex';
       }
 
       if (!chart || !candle || !last) { el.style.display = 'none'; return; }
@@ -993,6 +983,8 @@ export function CandleChart({ symbol, interval, limit = 300, visibleBars = 110, 
       grid: { vertLines: { color: grid }, horzLines: { color: grid } },
       rightPriceScale: { borderColor: border }, timeScale: { borderColor: border },
     });
+    const news = newsLayerRef.current;
+    if (news) { news.dark = isDark; news.update(); }
   }, [isDark]);
 
   // 外部价格 tick 驱动（streamLive=false）：桶对齐后更新/追加最后一根，量额保持历史值（价格流无量数据）
