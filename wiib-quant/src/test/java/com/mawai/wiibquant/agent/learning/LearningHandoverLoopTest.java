@@ -147,7 +147,8 @@ class LearningHandoverLoopTest {
                 })
                 .extracting(AiTraderDecision::getTraderId)
                 .containsExactlyInAnyOrder(7L, 8L, 9L);
-        // 3 份学习笔记各自覆盖写
-        verify(traderMapper, times(3)).update(any(), any());
+        // 3 份学习笔记各自覆盖写。必须带 timeout：LEARN 行 insert 在前、笔记 update 在后，
+        // 上面的 verify 只等到了 insert，不等的话会撞见"行已落、笔记还没写完"的窗口（偶发红）
+        verify(traderMapper, timeout(10_000).times(3)).update(any(), any());
     }
 }

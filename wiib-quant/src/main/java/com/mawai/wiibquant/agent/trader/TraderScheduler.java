@@ -6,6 +6,7 @@ import com.mawai.wiibquant.agent.learning.LearningRunner;
 import com.mawai.wiibquant.agent.learning.ReviewRunner;
 import com.mawai.wiibquant.agent.quant.domain.KlineClosedEvent;
 import com.mawai.wiibquant.mapper.AiTraderMapper;
+import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.event.EventListener;
@@ -61,16 +62,15 @@ public class TraderScheduler {
     private final Map<Long, Long> lastWakeAt = new ConcurrentHashMap<>();
     /** 日线交接的边界去重位：多 symbol 在日线边界各发一次事件，交接只许启动一次 */
     private final AtomicLong lastHandoverBoundary = new AtomicLong(-1);
-    /** 停工窗口位：交接编排线程独写，事件/警报/手动入口只读 */
+    /** 停工窗口位：交接编排线程独写，事件/警报/手动入口只读
+     * -- GETTER --
+     * 停工窗口是否开着：点播复盘（chat 轨）入场前也要看它，三阶段期间不许旁路写复盘
+     */
+    @Getter
     private volatile boolean handoverActive = false;
 
     /** 墙钟注入点：警报准入的冷静期/预算预检要可测 */
     java.util.function.LongSupplier nowMs = System::currentTimeMillis;
-
-    /** 停工窗口是否开着：点播复盘（chat 轨）入场前也要看它，三阶段期间不许旁路写复盘 */
-    public boolean isHandoverActive() {
-        return handoverActive;
-    }
 
     /** 主触发：任意 watch 币的 5m 收盘都是一次时钟滴答。 */
     @EventListener
