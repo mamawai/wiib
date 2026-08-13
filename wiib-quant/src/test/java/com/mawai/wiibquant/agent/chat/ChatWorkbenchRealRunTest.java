@@ -64,7 +64,8 @@ class ChatWorkbenchRealRunTest {
 
         // 纯新闻问题复刻实测暴露过的病：summarizer 拿到专家清单后用自己的搜索重写一遍
         chatTurnRunner.run(leaves, ADMIN_USER_ID, sessionId,
-                "最近有什么重要的加密货币新闻？", answer::append, events::add);
+                "最近有什么重要的加密货币新闻？", answer::append, events::add,
+                ChatTurnRunner.TurnYield.NONE);
 
         for (ChatTurnRunner.ExpertProgress e : events) {
             log.info("[RealRun] 专家事件 agent={} phase={} text={}", e.agent(), e.phase(),

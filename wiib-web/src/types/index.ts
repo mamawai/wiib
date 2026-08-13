@@ -631,7 +631,9 @@ export type WorkbenchEvent =
   | { type: 'progress'; text: string }
   // requestId：这张卡的唯一标识，点同意/拒绝时原样回传，服务端据此确认"点的是哪张卡"
   | { type: 'hitl_request'; sessionId: string; symbol: string; reason: string; requestId: string; resumeMessage: string }
-  | { type: 'done'; sessionId: string; answer: string }
+  // deferred=true：让位收尾（专家还在取数就来了新消息），answer 只是过渡话术；
+  // 真答案由后端补答轮落历史，前端靠 status 轮询等它落库后整体回放补显
+  | { type: 'done'; sessionId: string; answer: string; deferred?: boolean }
   | { type: 'error'; message: string };
 
 // ========== 策略账户监控 ==========

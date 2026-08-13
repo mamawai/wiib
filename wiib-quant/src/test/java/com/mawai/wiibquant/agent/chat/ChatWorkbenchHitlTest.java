@@ -76,6 +76,9 @@ class ChatWorkbenchHitlTest {
     /** 会话上下文表的假实现：字节真存真取，跨轮上下文这条链才算真的被跑到 */
     private final Map<String, byte[]> contextRows = new HashMap<>();
 
+    /** controller() 里装配，turn() 造让位句柄用 */
+    private ChatYieldCoordinator yieldCoordinator;
+
     /** 记账用的 emitter：SseChannel 的每一次 send 都从这里过，事件原文攒起来供断言 */
     private static final class RecordingEmitter extends SseEmitter {
         private final List<String> raw = new ArrayList<>();
@@ -162,10 +165,14 @@ class ChatWorkbenchHitlTest {
         });
         ChatContextStore contextStore = new ChatContextStore(
                 contextMapper, new SpringAIJacksonStateSerializer<>(MessagesState::new));
+        ChatTurnRunner turnRunner = new ChatTurnRunner(contextStore, registry);
+        ChatConcurrencyGate gate = new ChatConcurrencyGate(10);
+        WorkbenchRunRegistry runRegistry = mock(WorkbenchRunRegistry.class);
+        ChatHistoryService history = mock(ChatHistoryService.class);
+        yieldCoordinator = new ChatYieldCoordinator(gate, runRegistry, turnRunner, history, memory);
         return new ChatWorkbenchController(mock(ChatAgentFactory.class), mock(UserLlmConfigService.class),
-                registry, memory, mock(ChatHistoryService.class), contextStore,
-                new ChatTurnRunner(contextStore, registry),
-                mock(WorkbenchRunRegistry.class), new ChatConcurrencyGate(10));
+                registry, memory, history, contextStore, turnRunner,
+                runRegistry, gate, yieldCoordinator);
     }
 
     /** 跑一轮，返回这一轮发出去的全部 SSE 事件 */
@@ -173,7 +180,8 @@ class ChatWorkbenchHitlTest {
                                   ChatAgentFactory.Leaves leaves, String message) {
         deepCallsThisTurn.set(0);
         RecordingEmitter emitter = new RecordingEmitter();
-        controller.run(new ChatWorkbenchController.SseChannel(emitter), 1L, SESSION, message, leaves);
+        controller.run(new ChatWorkbenchController.SseChannel(emitter), 1L, SESSION, message, leaves,
+                yieldCoordinator.openTurn(1L));
         return emitter;
     }
 

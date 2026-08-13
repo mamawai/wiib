@@ -89,7 +89,8 @@ class LlmErrorSurfaceTest {
         ChatContextStore contextStore = mock(ChatContextStore.class);
         List<ChatTurnRunner.ExpertProgress> progress = new CopyOnWriteArrayList<>();
         new ChatTurnRunner(contextStore, new ApprovalRegistry())
-                .run(leaves, 1L, "wb-1-expert-fail", "看看行情", chunk -> { }, progress::add);
+                .run(leaves, 1L, "wb-1-expert-fail", "看看行情", chunk -> { }, progress::add,
+                        ChatTurnRunner.TurnYield.NONE);
 
         String pushedToUser = progress.stream()
                 .filter(e -> ChatTurnRunner.ExpertProgress.ERROR.equals(e.phase()))
@@ -123,13 +124,19 @@ class LlmErrorSurfaceTest {
         when(memory.recall(anyLong())).thenReturn("");
         ChatTurnRunner turnRunner = mock(ChatTurnRunner.class);
         doThrow(new RuntimeException(RAW)).when(turnRunner)
-                .run(any(), anyLong(), any(), any(), any(), any());
+                .run(any(), anyLong(), any(), any(), any(), any(), any());
+        ChatConcurrencyGate gate = new ChatConcurrencyGate(10);
+        WorkbenchRunRegistry runRegistry = mock(WorkbenchRunRegistry.class);
+        ChatHistoryService history = mock(ChatHistoryService.class);
+        ChatYieldCoordinator coordinator =
+                new ChatYieldCoordinator(gate, runRegistry, turnRunner, history, memory);
         ChatWorkbenchController controller = new ChatWorkbenchController(mock(ChatAgentFactory.class),
                 mock(UserLlmConfigService.class), new ApprovalRegistry(), memory,
-                mock(ChatHistoryService.class), mock(ChatContextStore.class), turnRunner,
-                mock(WorkbenchRunRegistry.class), new ChatConcurrencyGate(10));
+                history, mock(ChatContextStore.class), turnRunner,
+                runRegistry, gate, coordinator);
 
-        controller.run(new ChatWorkbenchController.SseChannel(emitter), 1L, "wb-1-boom", "看看行情", null);
+        controller.run(new ChatWorkbenchController.SseChannel(emitter), 1L, "wb-1-boom", "看看行情", null,
+                coordinator.openTurn(1L));
 
         String errorEvent = sent.stream().filter(text -> text.startsWith("{") && text.contains("message"))
                 .reduce((first, second) -> second).orElseThrow();

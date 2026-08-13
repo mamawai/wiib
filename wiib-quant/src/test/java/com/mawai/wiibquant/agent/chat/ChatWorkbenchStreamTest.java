@@ -49,22 +49,26 @@ class ChatWorkbenchStreamTest {
         when(memory.recall(anyLong())).thenReturn("");
         ChatTurnRunner turnRunner = mock(ChatTurnRunner.class);
         // runner 分两帧把答案交出来，controller 的 sink 得把它们攒全
-        doAnswer((Answer<Void>) inv -> {
+        doAnswer((Answer<ChatTurnRunner.TurnResult>) inv -> {
             Consumer<String> sink = inv.getArgument(4);
             sink.accept("前半段");
             sink.accept("后半段");
-            return null;
-        }).when(turnRunner).run(any(), anyLong(), any(), any(), any(), any());
+            return ChatTurnRunner.TurnResult.COMPLETED;
+        }).when(turnRunner).run(any(), anyLong(), any(), any(), any(), any(), any());
+        ChatConcurrencyGate gate = new ChatConcurrencyGate(10);
+        WorkbenchRunRegistry runRegistry = mock(WorkbenchRunRegistry.class);
+        ChatYieldCoordinator coordinator =
+                new ChatYieldCoordinator(gate, runRegistry, turnRunner, historyService, memory);
         ChatWorkbenchController controller = new ChatWorkbenchController(mock(ChatAgentFactory.class),
                 mock(UserLlmConfigService.class), new ApprovalRegistry(), memory,
                 historyService, mock(ChatContextStore.class), turnRunner,
-                mock(WorkbenchRunRegistry.class), new ChatConcurrencyGate(10));
+                runRegistry, gate, coordinator);
 
         RecordingEmitter emitter = new RecordingEmitter();
         ChatWorkbenchController.SseChannel channel = new ChatWorkbenchController.SseChannel(emitter);
         channel.markClosed();   // 用户切页：连接已经断了，这一轮才刚开始
 
-        controller.run(channel, 1L, SESSION, "看看行情", null);
+        controller.run(channel, 1L, SESSION, "看看行情", null, coordinator.openTurn(1L));
 
         // 答案完整进历史（也进记忆）——这是断连用户唯一还拿得到东西的途径
         verify(historyService).append(eq(SESSION), eq(1L), eq("assistant"), eq("前半段后半段"));

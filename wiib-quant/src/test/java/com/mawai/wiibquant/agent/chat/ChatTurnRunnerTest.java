@@ -125,7 +125,8 @@ class ChatTurnRunnerTest {
 
     private void turn(String message) {
         new ChatTurnRunner(contextStore, registry)
-                .run(leaves(), 1L, SESSION, message, answer::append, progress::add);
+                .run(leaves(), 1L, SESSION, message, answer::append, progress::add,
+                        ChatTurnRunner.TurnYield.NONE);
     }
 
     /** 某个专家被真跑起来的次数（START 事件即"开始执行"） */

@@ -7,7 +7,7 @@ import { chatStore, type ChatItem } from './chatStore';
 import type { WorkbenchSessionSummary } from '../../types';
 
 /** 调度中枢的对外名字：后端事件里仍叫 supervisor，只在展示层换 */
-const HUB_NAME = '北辰';
+const HUB_NAME = 'Polaris';
 
 const AGENT_CN: Record<string, string> = {
   market_agent: '市场专家',
@@ -16,8 +16,8 @@ const AGENT_CN: Record<string, string> = {
   supervisor: HUB_NAME,
 };
 
-/** 输入区上方的快捷提问（点击直发） */
-const SUGGESTS = ['BTC 现在市场结构怎么样？', '对 ETH 做一次深度研判', '你的 vol 预测战绩靠谱吗'];
+/** 输入区上方的快捷提问（点击直发）：行情/新闻/交易员/深研判四能力各一条 */
+const SUGGESTS = ['BTC 现在的市场结构怎么样？', '最近有什么值得注意的加密新闻？', '我的 AI 交易员最近表现如何？', '对 ETH 做一次深度研判'];
 
 /** 过程类条目（调度/专家/进度）归进工作过程轨；其余各自成块 */
 const isRailKind = (it: ChatItem) => it.kind === 'agent' || it.kind === 'expert' || it.kind === 'progress';
@@ -246,7 +246,7 @@ export function ChatPanel({ onClose, onGoConfig }: ChatPanelProps) {
       <div className="flex items-center gap-2 px-4 py-3 border-b border-border shrink-0">
         <Bot className="w-4.5 h-4.5 text-primary" />
         <span className="text-sm font-black">研判对话</span>
-        <span className="text-[10px] text-muted-foreground hidden sm:inline">{HUB_NAME}调度 · 关窗后台继续</span>
+        <span className="text-[10px] text-muted-foreground hidden sm:inline">{HUB_NAME} 调度 · 关窗后台继续</span>
         <button
           onClick={() => showHistory ? setShowHistory(false) : openHistory()}
           className={cn(
@@ -286,7 +286,7 @@ export function ChatPanel({ onClose, onGoConfig }: ChatPanelProps) {
                 <Bot className="w-6 h-6" />
               </div>
               <p className="text-sm text-muted-foreground">问点什么——下面的快捷提问可以直接点</p>
-              <p className="text-[10px] text-muted-foreground/70">市场结构 · 深度研判 · 预测战绩，都归{HUB_NAME}调度</p>
+              <p className="text-[10px] text-muted-foreground/70">行情 · 新闻 · 你的交易员 · 深度研判，都归 {HUB_NAME} 调度</p>
             </div>
           )}
           {blocks.map(block => {
@@ -352,7 +352,7 @@ export function ChatPanel({ onClose, onGoConfig }: ChatPanelProps) {
           {loading && !streamingNow && (
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              {background ? `${HUB_NAME}在后台继续研判，完成后自动展示答案` : `${HUB_NAME}分析问题中...`}
+              {background ? `${HUB_NAME} 在后台继续研判，完成后自动展示答案` : `${HUB_NAME} 分析问题中...`}
             </div>
           )}
         </div>
@@ -408,7 +408,7 @@ export function ChatPanel({ onClose, onGoConfig }: ChatPanelProps) {
                   handleSend();
                 }
               }}
-              placeholder={loading ? `${HUB_NAME}工作中——继续输入会排队发送` : '问市场、要研判、查战绩…'}
+              placeholder={loading ? `${HUB_NAME} 工作中——可继续发消息插话` : '问行情、查新闻、看你的交易员…'}
               className="flex-1 bg-transparent text-sm leading-relaxed resize-none max-h-24 focus:outline-none placeholder:text-muted-foreground/60"
             />
             <button
@@ -422,7 +422,7 @@ export function ChatPanel({ onClose, onGoConfig }: ChatPanelProps) {
           </div>
           <div className="flex justify-between px-0.5 text-[10px] text-muted-foreground/60">
             <span>Enter 发送 · Shift+Enter 换行</span>
-            <span className="num">{loading ? `${HUB_NAME}工作中 · 新消息将排队` : `${HUB_NAME}就绪`}</span>
+            <span className="num">{loading ? `${HUB_NAME} 工作中 · 可直接插话` : `${HUB_NAME} 就绪`}</span>
           </div>
         </div>
 

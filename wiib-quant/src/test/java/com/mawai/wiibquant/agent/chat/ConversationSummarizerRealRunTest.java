@@ -269,7 +269,8 @@ class ConversationSummarizerRealRunTest {
     private String ask(ChatAgentFactory.Leaves leaves, String sessionId, String question) {
         StringBuilder answer = new StringBuilder();
         chatTurnRunner.run(leaves, ADMIN_USER_ID, sessionId, question, answer::append,
-                event -> log.info("[SummarizeRealRun] 专家 {} {}", event.agent(), event.phase()));
+                event -> log.info("[SummarizeRealRun] 专家 {} {}", event.agent(), event.phase()),
+                ChatTurnRunner.TurnYield.NONE);
         return answer.toString();
     }
 

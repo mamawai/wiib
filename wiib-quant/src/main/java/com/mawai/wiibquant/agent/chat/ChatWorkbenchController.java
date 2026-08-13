@@ -25,17 +25,21 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * 研判工作台对话入口（P4）：SSE 流式暴露多 agent 调度全过程。
  * 事件协议：session(会话号) / agent_start(调度切换) / token(LLM流，带 agent+role 区分专家过程/答案)
- * / progress(长工具阶段进度) / done(完整回答) / error。
+ * / progress(长工具阶段进度) / done(完整回答；deferred=true 是让位收尾，真答案由补答轮落库、
+ * 前端轮询补显) / error。
  * 续聊上下文按 sessionId 存在自建的 {@link ChatContextStore} 表里，带同一 sessionId 再发即续聊；
  * 断连不中止本轮：{@link ChatTurnRunner} 跑完照样落历史，前端靠 status 接口+历史回放补答案。
  */
@@ -55,6 +59,7 @@ public class ChatWorkbenchController {
     private final ChatTurnRunner turnRunner;
     private final WorkbenchRunRegistry runRegistry;
     private final ChatConcurrencyGate concurrencyGate;
+    private final ChatYieldCoordinator yieldCoordinator;
     /** 包私有：名额泄漏那条钉子（{@code ChatWorkbenchAdmissionTest}）要关掉它来制造 submit 失败 */
     final ExecutorService streamExecutor = Executors.newVirtualThreadPerTaskExecutor();
     /** 心跳专用：只发注释帧(微秒级)，单线程够所有会话用；虚拟线程不支持定时调度故用平台线程 */
@@ -108,6 +113,11 @@ public class ChatWorkbenchController {
         // 拒因由闸门自己给，不去 runRegistry 二次推断：那边 finish 先摘、名额后还，
         // 中间那个窗口会把"你还有一轮在跑"误报成"人满了"
         ChatConcurrencyGate.Acquire acquired = concurrencyGate.tryAcquire(userId);
+        if (acquired == ChatConcurrencyGate.Acquire.USER_BUSY) {
+            // 自己的上一轮还在跑：正处专家等待期就要求让位（用户消息优先，专家结果转入补答队列），
+            // 等它退位后抢回名额；不可让位（路由/汇总中）维持占线拒绝，前端回落本地排队
+            acquired = awaitYield(userId);
+        }
         if (acquired != ChatConcurrencyGate.Acquire.OK) {
             throw new BizException(acquired == ChatConcurrencyGate.Acquire.USER_BUSY
                     ? ErrorCode.CHAT_ALREADY_RUNNING : ErrorCode.CHAT_CAPACITY_FULL);
@@ -128,27 +138,51 @@ public class ChatWorkbenchController {
         });
         emitter.onError(ex -> channel.markClosed());
 
+        ChatYieldCoordinator.TurnHandle turn = yieldCoordinator.openTurn(userId);
         try {
             streamExecutor.submit(() -> {
                 // 名额收在这一层还，而不是 run() 的 finally：run() 开头那句
                 // heartbeatScheduler.scheduleWithFixedDelay 在它自己的 try 之外，
                 // scheduler 关闭时它抛出去，run() 的 finally 根本不执行，名额就永久漏了
                 try {
-                    run(channel, userId, sessionId, request.getMessage(), leaves);
+                    run(channel, userId, sessionId, request.getMessage(), leaves, turn);
                 } catch (Throwable e) {
                     // submit 返回的 Future 没人 get()，不自己记一笔的话异常被完全吞掉
                     log.error("[Workbench] 对话任务异常退出 sessionId={}", sessionId, e);
                 } finally {
                     concurrencyGate.release(userId);
+                    // 必须在还名额之后：turnDone 是让位等待者抢名额的发令枪
+                    yieldCoordinator.closeTurn(turn);
                 }
             });
         } catch (Throwable e) {
             // 兜 Throwable 不是 RuntimeException：submit 失败的极端形态（线程建不出来）可能是 Error。
             // 名额漏满就对所有人永久拒绝，是全套设计里唯一不可恢复的失败模式，宁可多兜一层
             concurrencyGate.release(userId);
+            yieldCoordinator.closeTurn(turn);
             throw e;
         }
         return emitter;
+    }
+
+    /** 让位握手：发信号 → 等在跑轮退位（有硬顶）→ 抢名额。任何一步不成都归于"占线"。 */
+    private ChatConcurrencyGate.Acquire awaitYield(long userId) {
+        CompletableFuture<Void> turnDone = yieldCoordinator.requestYield(userId);
+        if (turnDone == null) {
+            return ChatConcurrencyGate.Acquire.USER_BUSY;
+        }
+        try {
+            turnDone.get(ChatYieldCoordinator.YIELD_HANDSHAKE_MS, TimeUnit.MILLISECONDS);
+            return concurrencyGate.tryAcquire(userId);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return ChatConcurrencyGate.Acquire.USER_BUSY;
+        } catch (ExecutionException | TimeoutException e) {
+            return ChatConcurrencyGate.Acquire.USER_BUSY;
+        } finally {
+            // 抢没抢到都要解除"等待者在场"的登记，否则补答被永久挡住
+            yieldCoordinator.yieldHandshakeDone(userId);
+        }
     }
 
     @GetMapping("/sessions")
@@ -163,7 +197,8 @@ public class ChatWorkbenchController {
         if (sessionId == null || !sessionId.startsWith("wb-" + userId + "-")) {
             return Result.fail("会话不存在或无权限");
         }
-        return Result.ok(runRegistry.isRunning(sessionId));
+        // 有轮在跑或欠着补答都算"还在跑"：让位收尾后前端靠这个口径继续轮询等补答落库
+        return Result.ok(runRegistry.isRunning(sessionId) || yieldCoordinator.hasPending(sessionId));
     }
 
     @GetMapping("/sessions/{sessionId}/messages")
@@ -211,7 +246,7 @@ public class ChatWorkbenchController {
      * 而 {@link #chat} 自己 new emitter、事件出不来。
      */
     void run(SseChannel channel, long userId, String sessionId, String message,
-             ChatAgentFactory.Leaves leaves) {
+             ChatAgentFactory.Leaves leaves, ChatYieldCoordinator.TurnHandle turn) {
         // 本轮开跑的时刻：结尾只发"这一轮新登记"的确认卡，见下面 hitl_request 那段
         long turnStartedAt = System.currentTimeMillis();
         // 答案流/过程流分离：专家的结论是"工作过程"（前端折叠展示、不落历史），
@@ -232,7 +267,7 @@ public class ChatWorkbenchController {
             String memory = chatMemoryService.recall(userId);
             String enriched = memory.isEmpty() ? message : memory + "\n用户问题：" + message;
 
-            turnRunner.run(leaves, userId, sessionId, enriched,
+            ChatTurnRunner.TurnResult result = turnRunner.run(leaves, userId, sessionId, enriched,
                     chunk -> {
                         // 攒答案在断连判断之外：断连后这轮照跑完，答案仍要进历史，
                         // 只是不再往已经断掉的通道里写帧
@@ -244,7 +279,23 @@ public class ChatWorkbenchController {
                                     .fluentPut("role", "answer"));
                         }
                     },
-                    event -> onExpertProgress(channel, expertLog, event));
+                    event -> onExpertProgress(channel, expertLog, event), turn);
+
+            if (result.yielded()) {
+                // 让位收尾：答案欠着（记账给协调器补答），本轮不落 assistant 历史也不记记忆——
+                // 补答轮会补齐。registerDeferred 必须在本轮结束（runRegistry.finish）之前：
+                // status 口径是 isRunning || hasPending，先摘运行标记再记账会闪出空窗，轮询端误判已结束。
+                // done 带 deferred 标记：前端据此转入轮询等补答，answer 只是过渡话术不进历史
+                yieldCoordinator.registerDeferred(userId, sessionId, leaves, message, result.deferredExperts());
+                if (!channel.isClosed()) {
+                    channel.send("done", new JSONObject()
+                            .fluentPut("sessionId", sessionId)
+                            .fluentPut("deferred", true)
+                            .fluentPut("answer", "收到新消息，先处理它——这个问题的专家还在取数，答案稍后自动补上"));
+                    channel.complete();
+                }
+                return;
+            }
 
             // HITL：本轮 agent 触发了贵操作待确认 → 弹确认卡（approve 后前端自动补发继续指令）。
             // 只发本轮新登记的那张：pending 是 approve/reject 才摘的，用户不点、接着问下一个问题的话

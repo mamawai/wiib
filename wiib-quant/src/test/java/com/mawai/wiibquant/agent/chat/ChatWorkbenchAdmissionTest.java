@@ -36,9 +36,15 @@ class ChatWorkbenchAdmissionTest {
     private ChatWorkbenchController controller(ChatConcurrencyGate gate) {
         ChatMemoryService memory = mock(ChatMemoryService.class);
         when(memory.recall(anyLong())).thenReturn(""); // 空前缀：记忆拼接不是这里要验的
+        // mock runner 默认返回 null，controller 会在 result.yielded() 上 NPE——真跑到 run 的用例要正常收尾
+        when(turnRunner.run(any(), anyLong(), any(), any(), any(), any(), any()))
+                .thenReturn(ChatTurnRunner.TurnResult.COMPLETED);
+        ChatHistoryService history = mock(ChatHistoryService.class);
+        WorkbenchRunRegistry runRegistry = mock(WorkbenchRunRegistry.class);
         return new ChatWorkbenchController(factory, llmConfigService, new ApprovalRegistry(), memory,
-                mock(ChatHistoryService.class), mock(ChatContextStore.class), turnRunner,
-                mock(WorkbenchRunRegistry.class), gate);
+                history, mock(ChatContextStore.class), turnRunner,
+                runRegistry, gate,
+                new ChatYieldCoordinator(gate, runRegistry, turnRunner, history, memory));
     }
 
     private static void chat(ChatWorkbenchController controller, long userId) {
