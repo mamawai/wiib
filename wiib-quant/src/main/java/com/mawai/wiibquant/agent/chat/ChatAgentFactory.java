@@ -253,7 +253,7 @@ public class ChatAgentFactory {
     CompiledGraph<MessagesState<Message>> expertGraph(ChatModel model, Object toolkit,
                                                       String forceFirstToolChoice, String instruction)
             throws Exception {
-        ReactAgent.Builder<MessagesState<Message>> builder = ReactAgent.<MessagesState<Message>>builder()
+        ReactAgent.Builder<MessagesState<Message>> builder = ReactAgent.builder()
                 .chatModel(model)
                 .stateSerializer(stateSerializer)
                 .defaultSystem(instruction);
@@ -288,7 +288,7 @@ public class ChatAgentFactory {
     private CompiledGraph<MessagesState<Message>> summarizerLeaf(ChatModel deep, ChatModel light,
                                                                  long userId) throws Exception {
         // 工具的模型在这一层绑死："当前用的是谁的 key"只有这里知道
-        ReactAgent.Builder<MessagesState<Message>> builder = ReactAgent.<MessagesState<Message>>builder()
+        ReactAgent.Builder<MessagesState<Message>> builder = ReactAgent.builder()
                 .chatModel(deep)
                 .stateSerializer(stateSerializer)
                 .streaming(true) // 答案要逐字推给前端
@@ -308,9 +308,9 @@ public class ChatAgentFactory {
                            news_agent 的条目一条不丢、保留 [BlockBeats] 标；你搜到的独有条目一律标 %s 并尽量附出处；
                            同一事件两边都有则合并为一条标 %s。按市场影响力排序取前30条，
                            不足30就全部输出，除去重外不删减。只列真实搜到的，搜不到就只用专家清单
-                        3. 被问涨跌方向时不要生硬拒绝：本系统不做方向预测，给"双向情景 + 当前市场状态
-                           （资金费/持仓/清算等实测数据）+ 仓位/止损等风控参考"，并说明方向确定性低的原因
-                        4. 信号矛盾时大方说"看不清"，这是专业而不是失职
+                        3. 被问涨跌方向时直接给出你的方向判断（偏多/偏空/震荡）与大致把握，鼓励表态：
+                           判断必须落在专家给的实测数据上（资金费/持仓/清算等），并附失效条件与仓位/止损等风控参考
+                        4. 信号确实矛盾、给不出任何倾向时才说"看不清"，并点出关键分歧在哪——这是例外，不是回避表态的出口
                         5. 仅当用户明确说出"深度研判/全面分析"这类字眼时 → 调 run_deep_analysis 工具（昂贵，需用户确认：
                            返回 PENDING_APPROVAL 时告知用户确认卡片已弹出，等确认后你会被再次唤起执行）；
                            "怎么看走势"这类普通提问不要调它、也不要主动推销，直接按专家数据作答
