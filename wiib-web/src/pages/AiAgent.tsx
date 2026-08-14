@@ -4,17 +4,16 @@ import { useSearchParams } from 'react-router-dom';
 import { aiAgentApi } from '../api';
 import { useToast } from '../components/ui/use-toast';
 import { Button } from '../components/ui/button';
-import { MarketPanel } from '../components/workbench/MarketPanel';
 import { ModelConfig } from '../components/ModelConfig';
 import { cn } from '../lib/utils';
 import {
-  BarChart3, Bomb, Brain, BrainCircuit, CheckCircle2, Coins, Dices, Gem,
+  BarChart3, Bomb, Brain, CheckCircle2, Coins, Dices, Gem,
   KeyRound, Rocket, ShieldAlert, Target, User, Zap,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { BehaviorAnalysisReport } from '../types';
 
-const TABS = ['market', 'behavior', 'config'] as const;
+const TABS = ['behavior', 'config'] as const;
 type Tab = typeof TABS[number];
 
 const RISK_TONE: Record<string, string> = {
@@ -65,12 +64,12 @@ function pnl(v: number): { text: string; tone: 'gain' | 'loss' } {
 
 export function AiAgent() {
   const { toast } = useToast();
-  // Tab 落 URL（?tab=config 供对话气泡的"去配置"直达）；非法值当默认 market
+  // Tab 落 URL（?tab=config 供对话气泡的"去配置"直达）；非法值（含已下线的 market）当默认 behavior
   const [searchParams, setSearchParams] = useSearchParams();
   const rawTab = searchParams.get('tab') as Tab | null;
-  const tab: Tab = rawTab && TABS.includes(rawTab) ? rawTab : 'market';
+  const tab: Tab = rawTab && TABS.includes(rawTab) ? rawTab : 'behavior';
   const setTab = useCallback((t: Tab) => {
-    setSearchParams(t === 'market' ? {} : { tab: t }, { replace: true });
+    setSearchParams(t === 'behavior' ? {} : { tab: t }, { replace: true });
   }, [setSearchParams]);
   const [behaviorLoading, setBehaviorLoading] = useState(false);
   const [behaviorReport, setBehaviorReport] = useState<BehaviorAnalysisReport | null>(null);
@@ -97,10 +96,10 @@ export function AiAgent() {
         投资有风险，当前分析结果仅供参考不构成任何建议
       </div>
 
-      {/* Tab：内凹滑槽 + 浮起选中块（拟物分段控件）。对话已拆去全站悬浮气泡（ChatDock） */}
+      {/* Tab：内凹滑槽 + 浮起选中块（拟物分段控件）。对话已拆去全站悬浮气泡（ChatDock），
+          市场研判 tab 已下线（研判只在对话里触发时看，全站共享旧数据的展示没有价值） */}
       <div className="border border-border bg-card-2 rounded-lg p-1 flex">
         {([
-          { key: 'market', icon: BrainCircuit, label: '市场研判' },
           { key: 'behavior', icon: User, label: '行为分析' },
           { key: 'config', icon: KeyRound, label: '模型配置' },
         ] as { key: Tab; icon: LucideIcon; label: string }[]).map(({ key, icon: Icon, label }) => (
@@ -117,9 +116,6 @@ export function AiAgent() {
           </button>
         ))}
       </div>
-
-      {/* 市场研判：最新深研判数据视图（对话在气泡里，历史时间线已删） */}
-      {tab === 'market' && <MarketPanel />}
 
       {/* 模型配置（BYOK）：对话 agent + 交易员 agent 两份端点 */}
       {tab === 'config' && <ModelConfig />}
