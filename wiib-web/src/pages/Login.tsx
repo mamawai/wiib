@@ -5,6 +5,7 @@ import { authApi } from '../api';
 import { useUserStore } from '../stores/userStore';
 import { useCryptoStream } from '../hooks/useCryptoStream';
 import { DecryptedText } from '../components/fx/DecryptedText';
+import { DitherSmoke } from '../components/fx/DitherSmoke';
 import { Input } from '../components/ui/input';
 import { Button } from '../components/ui/button';
 import { Loader2, BarChart3, Wallet, LineChart, LogIn } from 'lucide-react';
@@ -170,26 +171,23 @@ export function Login() {
 
   return (
     <div className="min-h-screen relative overflow-hidden bg-background lg:grid lg:grid-cols-[1.1fr_1fr]">
-      {/* 背景：图纸网格（顶部渐隐）+ 橙色辉光 */}
+      {/* 背景：抖色烟雾（WebGL）+ 点阵纹理（顶部渐隐）。点阵和烟雾颗粒是同一套像素语言 */}
       <div aria-hidden className="absolute inset-0 pointer-events-none">
+        <DitherSmoke className="absolute inset-0 w-full h-full" />
         <div
-          className="absolute inset-0 opacity-50"
+          className="absolute inset-0"
           style={{
             backgroundImage:
-              'linear-gradient(var(--color-border) 1px, transparent 1px), linear-gradient(90deg, var(--color-border) 1px, transparent 1px)',
-            backgroundSize: '44px 44px',
-            maskImage: 'radial-gradient(ellipse 90% 70% at 50% 0%, black 30%, transparent 75%)',
-            WebkitMaskImage: 'radial-gradient(ellipse 90% 70% at 50% 0%, black 30%, transparent 75%)',
+              'radial-gradient(color-mix(in srgb, var(--color-foreground) 16%, transparent) 1.1px, transparent 1.1px)',
+            backgroundSize: '22px 22px',
+            maskImage: 'radial-gradient(ellipse 90% 75% at 50% 0%, black 30%, transparent 80%)',
+            WebkitMaskImage: 'radial-gradient(ellipse 90% 75% at 50% 0%, black 30%, transparent 80%)',
           }}
-        />
-        <div
-          className="absolute -top-44 left-1/2 -translate-x-1/2 w-[52rem] h-[26rem] rounded-full"
-          style={{ background: 'radial-gradient(closest-side, color-mix(in srgb, var(--color-primary) 15%, transparent), transparent)' }}
         />
       </div>
 
       {/* 左：品牌面板（桌面） */}
-      <div className="hidden lg:flex relative flex-col justify-between p-14 border-r border-border/60">
+      <div className="hidden lg:flex relative flex-col justify-between p-14">
         <div className="flex items-baseline gap-3">
           <span className="text-lg font-extrabold tracking-wide">WIIB<span className="text-primary">.</span></span>
           <span className="microlabel font-semibold">SIMULATED TRADING TERMINAL</span>
