@@ -6,7 +6,7 @@ import com.mawai.wiibcommon.config.BinanceProperties;
 import com.mawai.wiibcommon.entity.AiTrader;
 import com.mawai.wiibcommon.entity.AiTraderDecision;
 import com.mawai.wiibcommon.entity.AiTraderRequest;
-import com.mawai.wiibquant.agent.strategy.execution.SimTradeClient;
+import com.mawai.wiibquant.external.sim.SimTradeClient;
 import com.mawai.wiibquant.mapper.AiTraderDecisionMapper;
 import com.mawai.wiibquant.mapper.AiTraderMapper;
 import com.mawai.wiibquant.mapper.AiTraderRequestMapper;

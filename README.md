@@ -431,25 +431,27 @@ whatifibought/                        # Maven 多 module 聚合 reactor
 │   └── BinanceWsClient / PolymarketWsClient / KlineStreamCache / health(内部流健康+重试)
 │
 ├── wiib-quant/                       # ② agent harness + 策略研究进程（:8082，下单只走 sim 子账户）
-│   ├── agent/
+│   ├── agent/                        # 纯 LLM harness：五套装置 + 共享底座（非 LLM 代码都不在这）
 │   │   ├── trader/                   # trader agent：调度/唤醒回路/提示词/交易工具/护栏
 │   │   │                             # + 计划存取 + 审批 + 波动哨兵 + BYOK 模型工厂
-│   │   ├── learning/                 # reviewer workflow：素材组装（硬事实）+ 复盘回路
-│   │   ├── quant/                    # 行情特征与跨市场/期权/资金面取数节点
-│   │   ├── analysis/                 # 深研判（工作台触发）+ 叙事对账
-│   │   ├── research/                 # 回测 / 样本外评估 REST
-│   │   ├── toolkit/                  # 统一工具层（trader / chat / MCP 三处共用）
-│   │   │                             # + K线取数层（一份缓存喂三个 K 线工具，并发只放一个去拉）
+│   │   ├── learning/                 # reviewer workflow + learning agent：素材组装（硬事实）+ 复盘/学习回路
 │   │   ├── chat/                     # chat agent：router + 子 agent 并行 + summarizer + checkpoint
 │   │   │                             # + BYOK 配置读写/建模 + HITL 授权闸门 + 并发闸门
-│   │   ├── strategy/                 # FIBO/LIQFADE/SQZMOM/TURTLE + 回测引擎
-│   │   │                             # + 执行层(testnet|sim) + 账户监控
+│   │   ├── behavior/                 # 行为分析 workflow
+│   │   ├── analysis/                 # 深研判（工作台触发）+ 叙事对账
+│   │   ├── toolkit/                  # LLM 工具类（trader / chat / MCP 三处共用，取数底座在 market/）
 │   │   ├── llm/                      # ResilientChatService / Responses API / 摘要 / 调用限额
 │   │   │                             # + 上游异常归类（给用户看的一句话）
-│   │   └── mcp/ behavior/ binance/ external/ ...
-│   │                                 # MCP server / 行为分析 workflow / Testnet 客户端
-│   │                                 # / ETF 流爬取 / SimInternalClient
-│   └── controller/ task/ mapper/ config/   # ResearchEval/Strategy/Testnet/Backtest... / 调度 / Deribit
+│   │   ├── mcp/                      # MCP server
+│   │   └── runtime/                  # 平台功能位模型分配（behavior / newsTagging，Admin 热更）
+│   ├── market/                       # 行情数据链路：领域事件 / 采集→特征快照 / 取数缓存
+│   │                                 # + 指标·结构计算器 + 期权/资金面/跨市场服务 + 收盘流消费
+│   ├── research/                     # 量化研究库：因子/预测/标注/评估/风险指标
+│   ├── strategy/                     # FIBO/LIQFADE/SQZMOM/TURTLE + 回测引擎
+│   │                                 # + 执行层(testnet|sim) + 账户监控
+│   ├── external/                     # 进程外客户端：binance testnet / blockbeats / deribit
+│   │                                 # / ETF 流爬取 / sim internal（行为数据 + 合约下单）
+│   └── controller/ task/ mapper/ monitor/  # ResearchEval/Strategy/Testnet/Backtest... / 调度 / JVM 监控
 │
 ├── wiib-sim/                         # ③ 真人模拟交易进程（:8080，账本=自研模拟盘 DB，对外）
 │   ├── ledger/                       # 资金记账切面：@Ledger + LedgerAspect + 行映射

@@ -5,7 +5,7 @@ import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.mawai.wiibcommon.util.JsonUtils;
 import com.mawai.wiibcommon.util.Result;
-import com.mawai.wiibquant.agent.config.AiAgentRuntimeManager;
+import com.mawai.wiibquant.agent.runtime.AiAgentRuntimeManager;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;

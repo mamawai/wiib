@@ -1,7 +1,7 @@
 package com.mawai.wiibquant.task;
 
 import com.mawai.wiibquant.agent.analysis.NarrativeVerificationService;
-import com.mawai.wiibquant.agent.quant.domain.KlineClosedEvent;
+import com.mawai.wiibquant.market.domain.KlineClosedEvent;
 import org.junit.jupiter.api.Test;
 
 import static org.mockito.Mockito.mock;

@@ -1,12 +1,13 @@
 package com.mawai.wiibquant.agent.toolkit;
+import com.mawai.wiibquant.market.service.KlineFetcher;
 
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
 import com.mawai.wiibcommon.constant.QuantConstants;
 import com.mawai.wiibcommon.market.KlineBar;
-import com.mawai.wiibquant.agent.tool.CryptoIndicatorCalculator;
-import com.mawai.wiibquant.agent.tool.KlineStructureCalculator;
+import com.mawai.wiibquant.market.indicator.CryptoIndicatorCalculator;
+import com.mawai.wiibquant.market.indicator.KlineStructureCalculator;
 import lombok.RequiredArgsConstructor;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;

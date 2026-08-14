@@ -1,6 +1,6 @@
 package com.mawai.wiibquant.agent.behavior;
 
-import com.mawai.wiibquant.agent.config.AiAgentRuntimeManager;
+import com.mawai.wiibquant.agent.runtime.AiAgentRuntimeManager;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 

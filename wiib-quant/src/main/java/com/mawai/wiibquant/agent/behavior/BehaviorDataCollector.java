@@ -1,6 +1,6 @@
 package com.mawai.wiibquant.agent.behavior;
 
-import com.mawai.wiibquant.agent.SimInternalClient;
+import com.mawai.wiibquant.external.sim.SimInternalClient;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 

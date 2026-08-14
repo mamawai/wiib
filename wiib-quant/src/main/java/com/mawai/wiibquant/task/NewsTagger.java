@@ -3,7 +3,7 @@ package com.mawai.wiibquant.task;
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
-import com.mawai.wiibquant.agent.quant.domain.news.NewsFlash;
+import com.mawai.wiibquant.market.domain.news.NewsFlash;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.prompt.Prompt;

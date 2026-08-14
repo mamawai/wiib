@@ -1,4 +1,5 @@
 package com.mawai.wiibquant.agent.toolkit;
+import com.mawai.wiibquant.market.service.KlineFetcher;
 
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONArray;

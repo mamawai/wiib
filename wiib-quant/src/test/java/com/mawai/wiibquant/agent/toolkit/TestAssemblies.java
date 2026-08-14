@@ -1,7 +1,8 @@
 package com.mawai.wiibquant.agent.toolkit;
+import com.mawai.wiibquant.market.service.MarketAssembly;
 
-import com.mawai.wiibquant.agent.quant.domain.FeatureSnapshot;
-import com.mawai.wiibquant.agent.quant.domain.MarketRegime;
+import com.mawai.wiibquant.market.domain.FeatureSnapshot;
+import com.mawai.wiibquant.market.domain.MarketRegime;
 
 import java.math.BigDecimal;
 import java.time.Instant;

@@ -3,7 +3,7 @@ package com.mawai.wiibquant.agent.trader;
 import com.mawai.wiibcommon.entity.AiTrader;
 import com.mawai.wiibquant.agent.learning.LearningRunner;
 import com.mawai.wiibquant.agent.learning.ReviewRunner;
-import com.mawai.wiibquant.agent.quant.domain.KlineClosedEvent;
+import com.mawai.wiibquant.market.domain.KlineClosedEvent;
 import com.mawai.wiibquant.mapper.AiTraderMapper;
 import org.junit.jupiter.api.Test;
 

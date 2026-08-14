@@ -2,7 +2,7 @@ package com.mawai.wiibquant.task;
 
 import com.mawai.wiibcommon.constant.QuantConstants;
 import com.mawai.wiibquant.agent.analysis.NarrativeVerificationService;
-import com.mawai.wiibquant.agent.quant.domain.KlineClosedEvent;
+import com.mawai.wiibquant.market.domain.KlineClosedEvent;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;

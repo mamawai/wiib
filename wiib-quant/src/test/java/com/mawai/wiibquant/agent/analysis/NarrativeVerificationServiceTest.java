@@ -4,7 +4,7 @@ import com.mawai.wiibcommon.entity.QuantDeepAnalysis;
 import com.mawai.wiibcommon.entity.QuantNarrativeVerification;
 import com.mawai.wiibcommon.market.KlineBar;
 import com.mawai.wiibcommon.market.KlineHistoryStore;
-import com.mawai.wiibquant.agent.research.ForecastHorizon;
+import com.mawai.wiibquant.research.ForecastHorizon;
 import com.mawai.wiibquant.mapper.QuantDeepAnalysisMapper;
 import com.mawai.wiibquant.mapper.QuantNarrativeVerificationMapper;
 import org.junit.jupiter.api.Test;

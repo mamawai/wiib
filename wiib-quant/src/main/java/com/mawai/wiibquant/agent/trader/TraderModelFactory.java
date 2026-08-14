@@ -26,7 +26,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * BYOK 模型工厂：按 trader 构建/缓存 ChatModel。
- * 建模路径与 {@link com.mawai.wiibquant.agent.config.AiAgentRuntimeManager} 完全同款
+ * 建模路径与 {@link com.mawai.wiibquant.agent.runtime.AiAgentRuntimeManager} 完全同款
  * （openai→OpenAiChatModel / responses→ResponsesChatModel），区别只是配置来源换成 ai_trader 行。
  * 缓存按配置指纹失效：改了 baseUrl/model/key/protocol 下次唤醒自动重建，无需显式刷新。
  */

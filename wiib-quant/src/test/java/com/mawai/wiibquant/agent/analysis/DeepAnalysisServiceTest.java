@@ -2,9 +2,9 @@ package com.mawai.wiibquant.agent.analysis;
 
 import com.alibaba.fastjson2.JSONObject;
 import com.mawai.wiibcommon.entity.QuantDeepAnalysis;
-import com.mawai.wiibquant.agent.toolkit.MarketAssembly;
-import com.mawai.wiibquant.agent.toolkit.MarketDataService;
-import com.mawai.wiibquant.agent.toolkit.NewsCache;
+import com.mawai.wiibquant.market.service.MarketAssembly;
+import com.mawai.wiibquant.market.service.MarketDataService;
+import com.mawai.wiibquant.market.service.NewsCache;
 import com.mawai.wiibquant.mapper.QuantDeepAnalysisMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.messages.AssistantMessage;

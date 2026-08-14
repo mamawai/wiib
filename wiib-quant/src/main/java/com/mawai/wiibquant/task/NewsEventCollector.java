@@ -1,9 +1,9 @@
 package com.mawai.wiibquant.task;
 
-import com.mawai.wiibquant.agent.config.AiAgentRuntime;
-import com.mawai.wiibquant.agent.config.AiAgentRuntimeManager;
-import com.mawai.wiibquant.agent.quant.domain.news.NewsFlash;
-import com.mawai.wiibquant.agent.toolkit.NewsCache;
+import com.mawai.wiibquant.agent.runtime.AiAgentRuntime;
+import com.mawai.wiibquant.agent.runtime.AiAgentRuntimeManager;
+import com.mawai.wiibquant.market.domain.news.NewsFlash;
+import com.mawai.wiibquant.market.service.NewsCache;
 import com.mawai.wiibquant.mapper.NewsEventMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;

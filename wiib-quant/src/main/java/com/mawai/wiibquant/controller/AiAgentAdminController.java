@@ -7,7 +7,7 @@ import com.mawai.wiibcommon.entity.AiRuntimeConfig;
 import com.mawai.wiibcommon.util.Result;
 import com.mawai.wiibcommon.mapper.AiModelAssignmentMapper;
 import com.mawai.wiibcommon.mapper.AiRuntimeConfigMapper;
-import com.mawai.wiibquant.agent.config.AiAgentRuntimeManager;
+import com.mawai.wiibquant.agent.runtime.AiAgentRuntimeManager;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.Data;

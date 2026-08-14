@@ -1,4 +1,6 @@
 package com.mawai.wiibquant.agent.toolkit;
+import com.mawai.wiibquant.market.service.MarketAssembly;
+import com.mawai.wiibquant.market.service.MarketDataService;
 
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONArray;

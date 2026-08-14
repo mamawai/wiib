@@ -1,6 +1,6 @@
 package com.mawai.wiibquant.agent.behavior;
 
-import com.mawai.wiibquant.agent.SimInternalClient;
+import com.mawai.wiibquant.external.sim.SimInternalClient;
 import com.openai.errors.OpenAIInvalidDataException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
