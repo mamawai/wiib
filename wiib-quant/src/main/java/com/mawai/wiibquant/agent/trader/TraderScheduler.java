@@ -43,7 +43,11 @@ public class TraderScheduler {
             "5m", 300_000L, "15m", 900_000L, "1h", 3_600_000L, "4h", 14_400_000L, "1d", 86_400_000L);
     /** 例行唤醒只遍历四档（1d 档位已下线，存量 1d trader 自然停摆） */
     static final Set<String> WAKE_INTERVALS = Set.of("5m", "15m", "1h", "4h");
-    /** 学习的同侪门槛：全库不足 3 行（自己+至少2个同侪）学习整体跳过——一个人的竞技场没有同侪可学 */
+    /**
+     * 学习的同侪门槛：<b>同意学习</b>(learning_enabled)的不足 3 人（自己+至少2个可看的同侪）学习整体跳过。
+     * 不勾选的双向出局：自己不学（阶段2过滤），数据也不被别人学（PeerInsightService 同口径不上榜不可查），
+     * 所以门槛只数同意的人——不同意的既凑不了数，也进不了任何人的素材。
+     */
     static final int MIN_TRADERS_FOR_LEARNING = 3;
 
     private final AiTraderMapper traderMapper;
@@ -126,10 +130,13 @@ public class TraderScheduler {
                         .filter(t -> !Boolean.FALSE.equals(t.getReviewEnabled())).toList(),
                         t -> reviewRunner.review(t, boundary), "复盘"));
                 // ===== 屏障已过：全部复盘落库，learning 读到的同侪世界是同一天的 =====
-                Long total = traderMapper.selectCount(null);
+                // 只数同意学习的（null 当 true，与 !Boolean.FALSE.equals 口径一致）：不勾选的不在互看池里
+                Long total = traderMapper.selectCount(new LambdaQueryWrapper<AiTrader>()
+                        .and(w -> w.isNull(AiTrader::getLearningEnabled)
+                                .or().eq(AiTrader::getLearningEnabled, true)));
                 if (total == null || total < MIN_TRADERS_FOR_LEARNING) {
                     // 设计定案的降级：同侪不足整体静默跳过，不写空话也不留 ERROR 行
-                    log.info("[TraderSched] 同侪不足{}人（现{}人），本日学习整体跳过", MIN_TRADERS_FOR_LEARNING, total);
+                    log.info("[TraderSched] 同意学习的 trader 不足{}人（现{}人），本日学习整体跳过", MIN_TRADERS_FOR_LEARNING, total);
                     return;
                 }
                 // 阶段2：全体学习并行。再 fresh 一次——阶段1刚写完 memory，learner 注入要拿最新的

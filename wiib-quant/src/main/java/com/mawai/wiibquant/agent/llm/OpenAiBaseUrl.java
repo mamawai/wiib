@@ -30,4 +30,26 @@ public final class OpenAiBaseUrl {
         }
         return url.endsWith("/v1") ? url : url + "/v1";
     }
+
+    /**
+     * Responses 路（{@link ResponsesChatModel} 自拼 {@code /v1/responses}）：带了 {@code /v1} 的剥掉。
+     * 与 {@link #forSdk} 互为镜像——不镜像的话同一份带 /v1 的配置 openai 协议好用、
+     * responses 协议打到 {@code /v1/v1/responses} 拿 404，用户只会觉得"换个协议就坏了"。
+     */
+    public static String forResponses(String baseUrl) {
+        if (baseUrl == null || baseUrl.isBlank()) {
+            return baseUrl;
+        }
+        String url = baseUrl.trim();
+        while (url.endsWith("/")) {
+            url = url.substring(0, url.length() - 1);
+        }
+        if (url.endsWith("/v1")) {
+            url = url.substring(0, url.length() - 3);
+        }
+        while (url.endsWith("/")) {
+            url = url.substring(0, url.length() - 1);
+        }
+        return url;
+    }
 }

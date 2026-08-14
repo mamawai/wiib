@@ -3,10 +3,12 @@ package com.mawai.wiibsim.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.mawai.wiibcommon.entity.CryptoOrder;
 import com.mawai.wiibcommon.entity.FuturesPosition;
+import com.mawai.wiibcommon.entity.User;
 import com.mawai.wiibcommon.enums.ErrorCode;
 import com.mawai.wiibcommon.exception.BizException;
 import com.mawai.wiibsim.mapper.CryptoOrderMapper;
 import com.mawai.wiibsim.mapper.FuturesPositionMapper;
+import com.mawai.wiibsim.mapper.UserMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -17,7 +19,7 @@ import java.time.LocalDate;
 import java.util.List;
 
 /**
- * 账户重置：清空全部交易与游戏数据，账户回到初始状态。
+ * 账户重置：清空全部交易与游戏数据，账户回到初始状态；另承接量化子账户销户（清完直接删行）。
  * <p>
  * 顺序是先清 Redis 触发索引再删表，且删表失败要把索引装回去。反过来（先删表）会留下
  * 指向已删仓位的幽灵索引，而 {@code FuturesLiquidationServiceImpl} 命中索引后处理失败会
@@ -42,6 +44,7 @@ public class AccountResetService {
     private final FuturesPositionIndexService indexService;
     private final AccountPurgeTx purgeTx;
     private final StringRedisTemplate redis;
+    private final UserMapper userMapper;
 
     /** 策略账户（quant-FIBO 这类）是 user 表里的真实行，永不可重置；用户名须逐字匹配，防误点 */
     public static void assertResettable(String actualUsername, String confirmUsername) {
@@ -71,6 +74,31 @@ public class AccountResetService {
     }
 
     void reset(long userId) {
+        int cleared = wipe(userId, () -> purgeTx.purge(userId));
+        log.info("[AccountReset] 账户已重置 userId={} 清理仓位数={}", userId, cleared);
+    }
+
+    /**
+     * 量化子账户销户（内部 API，AI Trader 过期轮次清理用）：清索引→清表→删 user 行。
+     * 双重护栏：用户名须 ai_trader_ 开头且 user 行是量化建号（linuxDoId internal: 前缀）——
+     * quant-FIBO 策略常驻账户和真人用户都拒；账户不存在视为已删（幂等，quant 重试无害）。
+     */
+    public void deleteQuantAccount(String username) {
+        User user = userMapper.selectOne(new LambdaQueryWrapper<User>()
+                .eq(User::getUsername, username).last("LIMIT 1"));
+        if (user == null) {
+            return;
+        }
+        if (!username.startsWith("ai_trader_")
+                || user.getLinuxDoId() == null || !user.getLinuxDoId().startsWith("internal:")) {
+            throw new BizException("仅允许删除 ai_trader 量化子账户: " + username);
+        }
+        wipe(user.getId(), () -> purgeTx.deleteAccount(user.getId()));
+        log.info("[AccountReset] 量化子账户已删除 username={} userId={}", username, user.getId());
+    }
+
+    /** 重置/销户共用骨架：先摘触发索引再清表，清表失败装回索引（顺序理由见类注释）；返回清理仓位数 */
+    private int wipe(long userId, Runnable purge) {
         List<FuturesPosition> openPositions = futuresPositionMapper.selectList(
                 new LambdaQueryWrapper<FuturesPosition>()
                         .eq(FuturesPosition::getUserId, userId)
@@ -78,7 +106,7 @@ public class AccountResetService {
 
         unregisterIndexes(userId, openPositions);
         try {
-            purgeTx.purge(userId);
+            purge.run();
         } catch (RuntimeException e) {
             // 删表失败=仓位还在，但触发保护已经摘了，必须装回去，否则强平/止损静默失效
             for (FuturesPosition p : openPositions) {
@@ -91,7 +119,7 @@ public class AccountResetService {
             throw e;
         }
         redis.delete(RANKING_KEY);   // 榜单缓存 15min，不清的话重置结果要等下一轮才可见
-        log.info("[AccountReset] 账户已重置 userId={} 清理仓位数={}", userId, openPositions.size());
+        return openPositions.size();
     }
 
     /** 清掉本用户挂在 Redis 上的两类触发索引：合约 LIQ/SL/TP、现货限价单 */

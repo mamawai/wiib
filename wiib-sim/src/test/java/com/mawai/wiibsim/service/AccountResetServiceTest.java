@@ -2,8 +2,11 @@ package com.mawai.wiibsim.service;
 
 import com.mawai.wiibcommon.entity.CryptoOrder;
 import com.mawai.wiibcommon.entity.FuturesPosition;
+import com.mawai.wiibcommon.entity.User;
+import com.mawai.wiibcommon.exception.BizException;
 import com.mawai.wiibsim.mapper.CryptoOrderMapper;
 import com.mawai.wiibsim.mapper.FuturesPositionMapper;
+import com.mawai.wiibsim.mapper.UserMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
@@ -35,6 +38,7 @@ class AccountResetServiceTest {
     private AccountPurgeTx purgeTx;
     private StringRedisTemplate redis;
     private ZSetOperations<String, String> zSetOps;
+    private UserMapper userMapper;
     private AccountResetService service;
 
     @SuppressWarnings("unchecked")
@@ -44,6 +48,7 @@ class AccountResetServiceTest {
         cryptoOrderMapper = mock(CryptoOrderMapper.class);
         indexService = mock(FuturesPositionIndexService.class);
         purgeTx = mock(AccountPurgeTx.class);
+        userMapper = mock(UserMapper.class);
 
         redis = mock(StringRedisTemplate.class);
         zSetOps = mock(ZSetOperations.class);
@@ -52,7 +57,7 @@ class AccountResetServiceTest {
         when(positionMapper.selectList(any())).thenReturn(List.of());
         when(cryptoOrderMapper.selectList(any())).thenReturn(List.of());
 
-        service = new AccountResetService(positionMapper, cryptoOrderMapper, indexService, purgeTx, redis);
+        service = new AccountResetService(positionMapper, cryptoOrderMapper, indexService, purgeTx, redis, userMapper);
     }
 
     private static FuturesPosition openPosition() {
@@ -119,5 +124,54 @@ class AccountResetServiceTest {
         service.reset(7L);
 
         verify(zSetOps).remove("crypto:limit:buy:BTCUSDT", "500");
+    }
+
+    // ==================== 量化子账户销户（AI Trader 过期轮次清理） ====================
+
+    private static User robotUser(long id, String username) {
+        User u = new User();
+        u.setId(id);
+        u.setUsername(username);
+        u.setLinuxDoId("internal:" + username);
+        return u;
+    }
+
+    @Test
+    void deleteQuantAccountUnregistersIndexThenDeletes() {
+        when(userMapper.selectOne(any())).thenReturn(robotUser(9L, "ai_trader_1_r1"));
+        FuturesPosition p = openPosition();
+        when(positionMapper.selectList(any())).thenReturn(List.of(p));
+
+        service.deleteQuantAccount("ai_trader_1_r1");
+
+        // 弃局账户可能还挂着仓位，同样必须先摘触发索引再删表（幽灵索引问题与重置一致）
+        InOrder order = inOrder(indexService, purgeTx);
+        order.verify(indexService).unregisterAll(p);
+        order.verify(purgeTx).deleteAccount(9L);
+    }
+
+    @Test
+    void deleteQuantAccountIdempotentWhenMissing() {
+        when(userMapper.selectOne(any())).thenReturn(null);
+
+        service.deleteQuantAccount("ai_trader_1_r1");   // 不抛：quant 重试无害
+
+        verify(purgeTx, never()).deleteAccount(anyLong());
+    }
+
+    /** 护栏：quant-FIBO 策略常驻账户、真人用户（linuxDoId 非 internal:）都不许从这条路删 */
+    @Test
+    void deleteQuantAccountGuardsNonTraderAccounts() {
+        when(userMapper.selectOne(any())).thenReturn(robotUser(9L, "quant-FIBO"));
+        assertThrows(BizException.class, () -> service.deleteQuantAccount("quant-FIBO"));
+
+        User human = new User();
+        human.setId(10L);
+        human.setUsername("ai_trader_9_r1");
+        human.setLinuxDoId("linuxdo-oauth-123");
+        when(userMapper.selectOne(any())).thenReturn(human);
+        assertThrows(BizException.class, () -> service.deleteQuantAccount("ai_trader_9_r1"));
+
+        verify(purgeTx, never()).deleteAccount(anyLong());
     }
 }

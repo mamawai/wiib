@@ -33,6 +33,8 @@ import java.util.Set;
 public class TraderService {
 
     public static final BigDecimal INITIAL_BALANCE = new BigDecimal("10000");
+    /** 轮次保留窗口：每 trader 只留最近 10 局（R10），开新局时更早的整局数据连同 sim 子账户一并清除 */
+    public static final int MAX_ROUNDS_KEPT = 10;
     /** 唤醒档位四档（1d 已下线：一天一醒的观赏性与反馈密度都撑不起一个档位） */
     private static final Set<String> INTERVALS = Set.of("5m", "15m", "1h", "4h");
 
@@ -248,8 +250,34 @@ public class TraderService {
                 .set(AiTrader::getPausedReason, null)
                 .set(AiTrader::getConsecutiveFailures, 0)
                 .set(AiTrader::getUpdatedAt, LocalDateTime.now()));
+        purgeExpiredRounds(t.getId(), userId, newRound);
         log.info("[Trader] 重置开新局 traderId={} round={}", t.getId(), newRound);
         return null;
+    }
+
+    /**
+     * 清保留窗口（{@link #MAX_ROUNDS_KEPT}）外的旧局：决策/请求/计划三表按 roundNo ≤ 界外号
+     * 整段删（顺带自愈历史漏删），sim 子账户只删刚出窗那一局。
+     * sim 删失败不阻断开新局（新局账户已就绪），留 warn——遗留的孤儿账户无业务引用，无害。
+     */
+    private void purgeExpiredRounds(long traderId, long userId, int newRound) {
+        int expired = newRound - MAX_ROUNDS_KEPT;
+        if (expired < 1) {
+            return;
+        }
+        decisionMapper.delete(new LambdaQueryWrapper<AiTraderDecision>()
+                .eq(AiTraderDecision::getTraderId, traderId)
+                .le(AiTraderDecision::getRoundNo, expired));
+        requestMapper.delete(new LambdaQueryWrapper<AiTraderRequest>()
+                .eq(AiTraderRequest::getTraderId, traderId)
+                .le(AiTraderRequest::getRoundNo, expired));
+        planStore.purgeRounds(traderId, expired);
+        try {
+            simTradeClient.deleteAccount(accountName(userId, expired));
+        } catch (Exception e) {
+            log.warn("[Trader] 过期轮次 sim 子账户删除失败 traderId={} round={}", traderId, expired, e);
+        }
+        log.info("[Trader] 清理过期轮次 traderId={} round<={}", traderId, expired);
     }
 
     /** 该 trader 最新权益（最近一条带 equity 的决策行；开局无决策时=初始资金）。 */

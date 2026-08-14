@@ -42,9 +42,10 @@ class TraderServiceTest {
     private final SimTradeClient simTradeClient = mock(SimTradeClient.class);
     private final TraderPlanStore planStore = mock(TraderPlanStore.class);
     private final AiTraderRequestMapper requestMapper = mock(AiTraderRequestMapper.class);
+    private final AiTraderDecisionMapper decisionMapper = mock(AiTraderDecisionMapper.class);
 
     private final TraderService service = new TraderService(
-            traderMapper, mock(AiTraderDecisionMapper.class), modelFactory, apiKeyCrypto,
+            traderMapper, decisionMapper, modelFactory, apiKeyCrypto,
             simTradeClient, binanceProperties, new BaseUrlGuard(""), planStore, requestMapper);
 
     /** SSRF 防线必须接进 listModels 入口 */
@@ -193,6 +194,45 @@ class TraderServiceTest {
         verify(planStore).archiveRound(org.mockito.ArgumentMatchers.eq(7L),
                 org.mockito.ArgumentMatchers.eq(3), org.mockito.ArgumentMatchers.anyLong());
         verify(requestMapper).update(any(), any());     // 待确认请求一并作废
+        // 窗口内（R4 ≤ 10 局）不触发过期清理
+        verify(planStore, never()).purgeRounds(org.mockito.ArgumentMatchers.anyLong(),
+                org.mockito.ArgumentMatchers.anyInt());
+        verify(simTradeClient, never()).deleteAccount(any());
+    }
+
+    /** 保留窗口 10 局：开 R11 时 R1 整局清除——三表 roundNo≤1 删 + sim 子账户 ai_trader_1_r1 销户 */
+    @Test
+    void resetBeyondWindowPurgesOldestRound() {
+        AiTrader t = new AiTrader();
+        t.setId(7L);
+        t.setUserId(1L);
+        t.setRoundNo(10);
+        when(traderMapper.selectOne(any())).thenReturn(t);
+        when(simTradeClient.ensureAccount(any(), any())).thenReturn(99L);
+
+        assertThat(service.reset(1L)).isNull();
+
+        verify(decisionMapper).delete(any());
+        verify(requestMapper).delete(any());
+        verify(planStore).purgeRounds(7L, 1);
+        verify(simTradeClient).deleteAccount("ai_trader_1_r1");
+    }
+
+    /** sim 销户失败不阻断开新局：新局账户已就绪，孤儿账户无业务引用留 warn 即可 */
+    @Test
+    void simDeleteFailureDoesNotBlockReset() {
+        AiTrader t = new AiTrader();
+        t.setId(7L);
+        t.setUserId(1L);
+        t.setRoundNo(10);
+        when(traderMapper.selectOne(any())).thenReturn(t);
+        when(simTradeClient.ensureAccount(any(), any())).thenReturn(99L);
+        org.mockito.Mockito.doThrow(new IllegalStateException("sim down"))
+                .when(simTradeClient).deleteAccount(any());
+
+        assertThat(service.reset(1L)).isNull();
+
+        verify(planStore).purgeRounds(7L, 1);   // quant 三表照删
     }
 
     /** 单仓 + 双开是自相矛盾的组合（双开本身要两个仓位），入口就拦掉 */

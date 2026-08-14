@@ -181,6 +181,32 @@ class PeerInsightServiceTest {
         assertThat(lineOf(out, "[id=9]")).doesNotContain("（这是你）");
     }
 
+    /** 不同意学习的双向出局（数据侧）：不上榜——不勾选的人不该出现在任何人的学习素材里 */
+    @Test
+    void 不同意学习的不上排行榜() {
+        AiTrader me = trader(7L, "我", AiTrader.STATUS_RUNNING);
+        AiTrader optOut = trader(8L, "独行侠", AiTrader.STATUS_RUNNING);
+        optOut.setLearningEnabled(false);
+        stubTraders(me, optOut);
+        stubEquity(Map.of(7L, "10500", 8L, "12000"));
+        stubClosedCount(me, 2);
+        stubClosedCount(optOut, 3);
+
+        String out = service.leaderboard(7L);
+
+        assertThat(out).contains("[id=7]").doesNotContain("[id=8]").doesNotContain("独行侠");
+    }
+
+    /** 不同意学习的双向出局（detail 侧）：拿旧 id 直查也要拒，中文文本透传给模型自己换人 */
+    @Test
+    void 不同意学习的detail拒查() {
+        AiTrader optOut = trader(8L, "独行侠", AiTrader.STATUS_RUNNING);
+        optOut.setLearningEnabled(false);
+        stubTraders(optOut);
+
+        assertThat(service.detail(8L)).contains("未开启同侪学习共享");
+    }
+
     /** 好的和差的都看：已暂停/已爆仓不许从榜上消失，爆仓那份是前车之鉴 */
     @Test
     void 三种状态都上榜且渲染成中文() {

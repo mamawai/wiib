@@ -126,6 +126,13 @@ public class TraderPlanStore {
         }
     }
 
+    /** 保留窗口外的过期轮次整局清除：连归档行一起删——那局的决策行都没了，凭证失去对照对象。 */
+    public void purgeRounds(long traderId, int maxRoundNo) {
+        mapper.delete(new LambdaQueryWrapper<AiTraderPlan>()
+                .eq(AiTraderPlan::getTraderId, traderId)
+                .le(AiTraderPlan::getRoundNo, maxRoundNo));
+    }
+
     private void archive(AiTraderPlan plan, long closedAt) {
         plan.setStatus(AiTraderPlan.STATUS_CLOSED);
         plan.setClosedWakeTime(closedAt);

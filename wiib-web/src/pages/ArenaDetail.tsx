@@ -313,10 +313,12 @@ export function ArenaDetail() {
               <span className="microlabel">
                 {viewingRound === t?.roundNo ? '本局' : `R${viewingRound}`}净值（初始 10000）
               </span>
-              {/* 局次切换：每局是独立子账户各自注资 10000，曲线与时间线必须同进同出，不能混排 */}
+              {/* 局次切换：每局是独立子账户各自注资 10000，曲线与时间线必须同进同出，不能混排。
+                  只列保留窗口内的局——后端只留最近 10 局（TraderService.MAX_ROUNDS_KEPT），更早的已整局清除 */}
               {(t?.roundNo ?? 1) > 1 && (
                 <div className="ml-auto flex gap-1">
-                  {Array.from({ length: t?.roundNo ?? 1 }, (_, i) => i + 1).map(r => (
+                  {Array.from({ length: Math.min(t?.roundNo ?? 1, 10) },
+                    (_, i) => Math.max(1, (t?.roundNo ?? 1) - 9) + i).map(r => (
                     <button key={r} type="button"
                             onClick={() => setRound(r === t?.roundNo ? null : r)}
                             className={cn('px-1.5 h-6 rounded border text-[10px] font-bold num',

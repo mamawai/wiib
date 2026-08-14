@@ -23,6 +23,8 @@ import java.util.Set;
 /**
  * 同侪只读查询（learning agent 的眼睛）：排行榜快照 + 单 trader 深看详情，两个方法都返回拼好的中文文本块。
  * 只读——不碰账本、不写任何人的数据，包括看的人自己的。
+ * <b>互看以勾选为准</b>：learning_enabled=false 的 trader 不上榜、detail 也拒查——
+ * 不同意学习的人，自己不学（调度侧过滤），数据也不进任何人的学习素材。
  * 事实裁定归代码、模型只做甄别：收益率/笔数/论点→结局配对全在这里算死，模型拿到的是既成事实，
  * 它要判断的是"这份战绩值不值得学"，而不是"这个数对不对"。
  * 每行硬带已了结笔数：样本量不摆出来，模型就会把 1 笔的运气当成方法论。
@@ -49,7 +51,7 @@ public class PeerInsightService {
     }
 
     /**
-     * 本局排行榜快照：全体 trader，好的坏的都上榜。
+     * 本局排行榜快照：同意学习的 trader 全上榜，好的坏的都在（不勾选学习的不在互看池，直接不进榜）。
      * 每行 = 谁 + 什么状态 + 赚亏多少 + 几笔样本 + 一句话复盘画像，selfTraderId 那行标出来。
      * 每个 trader 三次查询（权益/复盘/已平仓）不合并：trader 数量级几十，省这点查询不值得把 SQL 绕复杂。
      */
@@ -57,6 +59,9 @@ public class PeerInsightService {
         List<Row> rows = new ArrayList<>();
         for (AiTrader t : traderMapper.selectList(new LambdaQueryWrapper<AiTrader>()
                 .orderByAsc(AiTrader::getId))) {
+            if (Boolean.FALSE.equals(t.getLearningEnabled())) {
+                continue;   // 不同意学习 → 数据不给任何人看（自己也不会走到这，调度侧已过滤）
+            }
             AiTraderDecision review = assembler.lastReview(t.getId(), t.getRoundNo());
             rows.add(new Row(t, returnPct(t), closedPositions(t).size(),
                     review == null ? null : review.getReasoning()));
@@ -94,6 +99,10 @@ public class PeerInsightService {
         AiTrader t = traderMapper.selectById(traderId);
         if (t == null) {
             return "查无此 trader（id=" + traderId + "）：可能已被删除，请回排行榜取有效 id。";
+        }
+        if (Boolean.FALSE.equals(t.getLearningEnabled())) {
+            // 榜上没有它，但模型可能拿着旧笔记里的 id 来查：同样中文拒绝，透传给模型自己换人
+            return "该 trader（id=" + traderId + "）未开启同侪学习共享，数据不可查看，请回排行榜换一个。";
         }
         List<FuturesPositionDTO> closed = closedPositions(t);
         // 一次拉本局全部计划在内存里分用：LIVE 的进在场计划块，其余的给已了结交易配对

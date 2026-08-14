@@ -63,4 +63,7 @@ public interface SimTradeApi {
 
     @PostExchange("/ensure-account")
     Result<Map<String, Object>> ensureAccount(@RequestParam String username, @RequestParam BigDecimal initialBalance);
+
+    @PostExchange("/delete-account")
+    Result<Void> deleteAccount(@RequestParam String username);
 }

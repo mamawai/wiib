@@ -10,6 +10,7 @@ import com.mawai.wiibcommon.entity.User;
 import com.mawai.wiibcommon.enums.ErrorCode;
 import com.mawai.wiibcommon.exception.BizException;
 import com.mawai.wiibcommon.util.Result;
+import com.mawai.wiibsim.service.AccountResetService;
 import com.mawai.wiibsim.service.FuturesRiskService;
 import com.mawai.wiibsim.service.FuturesTradingService;
 import com.mawai.wiibsim.service.UserService;
@@ -42,6 +43,7 @@ public class InternalFuturesTradeController {
     private final FuturesTradingService tradingService;
     private final FuturesRiskService riskService;
     private final UserService userService;
+    private final AccountResetService accountResetService;
 
     @PostMapping("/{userId}/open")
     public Result<FuturesOrderResponse> open(@PathVariable Long userId, @RequestBody FuturesOpenRequest request) {
@@ -113,5 +115,15 @@ public class InternalFuturesTradeController {
                                                      @RequestParam BigDecimal initialBalance) {
         User user = userService.ensureQuantAccount(username, initialBalance);
         return Result.ok(Map.of("userId", user.getId(), "balance", user.getBalance()));
+    }
+
+    /**
+     * 量化子账户销户（AI Trader 过期轮次清理）：交易数据+账户行一并删；账户不存在视为成功（幂等）。
+     * 只认 ai_trader_ 前缀的量化建号，护栏在 {@link AccountResetService#deleteQuantAccount}。
+     */
+    @PostMapping("/delete-account")
+    public Result<Void> deleteAccount(@RequestParam String username) {
+        accountResetService.deleteQuantAccount(username);
+        return Result.ok();
     }
 }

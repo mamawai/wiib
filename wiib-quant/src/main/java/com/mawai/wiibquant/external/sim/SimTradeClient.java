@@ -111,6 +111,11 @@ public class SimTradeClient {
         return Long.valueOf(String.valueOf(data.get("userId")));
     }
 
+    /** 量化子账户销户（AI Trader 过期轮次清理）：sim 侧幂等，账户不存在也算成功。 */
+    public void deleteAccount(String username) {
+        unwrap(api.deleteAccount(username));
+    }
+
     /** 拆 Result 壳：sim 业务失败统一转异常抛出（sim 异常一律 200+Result.fail，不靠 HTTP 状态码）。 */
     private static <T> T unwrap(Result<T> result) {
         if (result == null) {

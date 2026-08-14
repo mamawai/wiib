@@ -79,9 +79,10 @@ public class ResponsesChatModel implements ChatModel {
         this.temperature = temperature;
         this.reasoningEffort = reasoningEffort;
         this.toolCallingManager = toolCallingManager;
-        // 深研判单次回包可达数百KB，默认256KB codec上限不够
+        // 深研判单次回包可达数百KB，默认256KB codec上限不够。
+        // baseUrl 过 forResponses 剥掉手滑带上的 /v1——与 openai 协议路的 forSdk 同等容忍
         this.webClient = WebClient.builder()
-                .baseUrl(baseUrl)
+                .baseUrl(OpenAiBaseUrl.forResponses(baseUrl))
                 .defaultHeader(HttpHeaders.AUTHORIZATION, "Bearer " + apiKey)
                 .codecs(c -> c.defaultCodecs().maxInMemorySize(16 * 1024 * 1024))
                 .build();

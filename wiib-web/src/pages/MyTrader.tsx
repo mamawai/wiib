@@ -255,7 +255,7 @@ export function MyTrader() {
             </button>
           )}
           <button
-            onClick={() => { if (window.confirm(`重置将开新一局（R${(mine?.pub.roundNo ?? 1) + 1}）：新账户重新注资10000，历史战绩留档。确定？`)) void run('reset', traderApi.reset, '已重置开新一局'); }}
+            onClick={() => { if (window.confirm(`重置将开新一局（R${(mine?.pub.roundNo ?? 1) + 1}）：新账户重新注资10000，历史战绩留档（最多保留最近10局，更早的整局记录会被清除）。确定？`)) void run('reset', traderApi.reset, '已重置开新一局'); }}
             disabled={busy != null}
             className="border border-border hover:bg-surface-hover rounded-lg px-3 py-1.5 text-xs font-bold text-muted-foreground flex items-center gap-1.5 disabled:opacity-50">
             {busy === 'reset' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />} 重置开新局
@@ -439,7 +439,7 @@ export function MyTrader() {
             </div>
             <SpecToggle checked={form.learningEnabled} onChange={v => set({ learningEnabled: v })}
                         label="启用同侪学习"
-                        hint="全体复盘完成后自动跑一次（烧你的 key，多轮调用）；同侪不足时自动跳过；学习笔记之后每次唤醒自动注入；关掉只停学习，已有笔记照常注入" />
+                        hint="全体复盘完成后自动跑一次（烧你的 key，多轮调用）；同意学习的 trader ≥3 人才会执行，不足自动跳过；不勾选则双向退出——自己不学习，你的数据也不会被其他 trader 学习；学习笔记之后每次唤醒自动注入；关掉只停学习，已有笔记照常注入" />
           </div>
         </div>
 
