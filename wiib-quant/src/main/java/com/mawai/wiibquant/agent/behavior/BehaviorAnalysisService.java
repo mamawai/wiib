@@ -5,17 +5,11 @@ import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.mawai.wiibcommon.util.JsonUtils;
 import com.mawai.wiibcommon.util.Result;
-import com.mawai.wiibquant.agent.config.AiAgentRuntimeManager;
+import com.mawai.wiibquant.agent.runtime.AiAgentRuntimeManager;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.bsc.langgraph4j.RunnableConfig;
-import org.bsc.langgraph4j.StateGraph;
-import org.bsc.langgraph4j.prebuilt.MessagesState;
-import org.springframework.ai.chat.messages.Message;
-import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.stereotype.Service;
 
-import java.util.Map;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 
@@ -31,8 +25,8 @@ public class BehaviorAnalysisService {
             .expireAfterWrite(30, TimeUnit.MINUTES)
             .maximumSize(10_000)
             .build();
-    // 失败负缓存：失败不进 reportCache 的话，用户每点一次重试就全额烧一遍 agent（ReAct 十几次
-    // 工具调用）且永远烧不出缓存。失败也短存，把重试风暴钝化成每 2 分钟最多一次真跑；
+    // 失败负缓存：失败不进 reportCache 的话，用户每点一次重试就全额烧一遍分析（10 个端点 + 一次
+    // 大 prompt 的 LLM 调用）且永远烧不出缓存。失败也短存，把重试风暴钝化成每 2 分钟最多一次真跑；
     // TTL 刻意远短于成功缓存——给上游（模型/网络）故障恢复留窗口
     private final Cache<Long, String> failCache = Caffeine.newBuilder()
             .expireAfterWrite(2, TimeUnit.MINUTES)
@@ -69,21 +63,15 @@ public class BehaviorAnalysisService {
     private Result<BehaviorAnalysisReport> doAnalyze(long userId) {
         log.info("用户{}请求行为分析", userId);
 
-        StateGraph<MessagesState<Message>> agent;
-        try {
-            agent = aiAgentRuntimeManager.createBehaviorAgent(step -> log.info("用户{} 工具调用: {}", userId, step));
-        } catch (Exception e) {
-            log.error("行为分析 agent 构建失败 userId={}", userId, e);
-            return Result.fail("分析执行失败: " + e.getMessage());
-        }
-
         String text;
         try {
-            text = collectResponse(agent, userId);
+            text = aiAgentRuntimeManager.runBehaviorAnalysis(userId,
+                    step -> log.info("用户{} 行为分析进度: {}", userId, step));
         } catch (Exception e) {
             log.error("行为分析执行失败 userId={}", userId, e);
             return Result.fail("分析执行失败: " + e.getMessage());
         }
+        log.info("用户{} 行为分析模型返回, responseLength={}", userId, text.length());
 
         BehaviorAnalysisReport report;
         try {
@@ -100,23 +88,5 @@ public class BehaviorAnalysisService {
 
         log.info("用户{} 行为分析完成", userId);
         return Result.ok(report);
-    }
-
-    /** 阻塞跑完整个 ReAct 循环，取最终助手消息——中间的工具调用轮次文本为空，不参与结果。 */
-    private String collectResponse(StateGraph<MessagesState<Message>> agent, long userId) throws Exception {
-        String prompt = "分析用户#" + userId + "的全部行为数据，用户ID为" + userId;
-
-        String finalText = agent.compile()
-                .invoke(Map.of("messages", new UserMessage(prompt)),
-                        RunnableConfig.builder().threadId("behavior-" + userId).build())
-                .flatMap(MessagesState::lastMessage)
-                .map(Message::getText)
-                .orElse("");
-
-        if (finalText.isBlank()) {
-            throw new IllegalStateException("行为分析未返回有效内容");
-        }
-        log.info("用户{} 行为分析完成, responseLength={}", userId, finalText.length());
-        return finalText;
     }
 }

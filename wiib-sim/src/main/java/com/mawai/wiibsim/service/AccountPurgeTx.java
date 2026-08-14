@@ -13,7 +13,8 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 
 /**
- * 重置账户的事务段：先固化活动遗留积分，再 12 张用户表清空 + user 复位，全成功或全回滚。
+ * 账户清除的事务段：重置路径先固化活动遗留积分，再 12 张用户表清空 + user 复位；
+ * 销户路径清表后直接删行。全成功或全回滚。
  * <p>
  * 单独成 bean 而不是放 {@link AccountResetService} 里，是因为 @Transactional 走 Spring 代理，
  * 同类内部自调用会绕过代理导致事务根本不生效——这种 bug 平时看不出来，只在出错回滚时才暴露。
@@ -56,6 +57,24 @@ public class AccountPurgeTx {
             campaignCarryoverService.chargeExtraReset(userId);
         }
 
+        clearUserData(userId);
+        userMapper.resetToInitial(userId, initialBalance);
+        // 账本刚清空、resetToInitial 又是整体覆写（切面抓不到），补一条初始资金让不变量重新成立。
+        // 这儿不需要 selectByIdForUpdate 读旧值：旧账本整张删了，新账本从这一笔起算
+        userService.recordInitialGrant(userId, initialBalance);
+    }
+
+    /**
+     * 量化子账户销户：同一套清表后直接删 user 行（不复位不入金，也不动活动积分——
+     * 机器人不参加活动），AI Trader 过期轮次清理用。
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public void deleteAccount(long userId) {
+        clearUserData(userId);
+        userMapper.deleteById(userId);
+    }
+
+    private void clearUserData(long userId) {
         // 交易
         futuresPositionMapper.delete(eq(FuturesPosition.class, FuturesPosition::getUserId, userId));
         futuresOrderMapper.delete(eq(FuturesOrder.class, FuturesOrder::getUserId, userId));
@@ -71,11 +90,6 @@ public class AccountPurgeTx {
         userAssetSnapshotMapper.delete(eq(UserAssetSnapshot.class, UserAssetSnapshot::getUserId, userId));
         userBuffMapper.delete(eq(UserBuff.class, UserBuff::getUserId, userId));
         userLedgerMapper.deleteByUserId(userId);   // 账本随账户一起重来
-
-        userMapper.resetToInitial(userId, initialBalance);
-        // 账本刚清空、resetToInitial 又是整体覆写（切面抓不到），补一条初始资金让不变量重新成立。
-        // 这儿不需要 selectByIdForUpdate 读旧值：旧账本整张删了，新账本从这一笔起算
-        userService.recordInitialGrant(userId, initialBalance);
     }
 
     /** 这 11 张表都是同一个 user_id 条件，抽掉重复的 wrapper 构造（账本第 12 张走自己的 deleteByUserId） */

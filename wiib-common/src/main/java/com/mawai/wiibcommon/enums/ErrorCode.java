@@ -122,7 +122,13 @@ public enum ErrorCode {
     COMMENT_CONTENT_INVALID(2102, "评论内容为空或超过500字"),
     COMMENT_TOO_FREQUENT(2103, "评论过于频繁，请稍后再试"),
     COMMENT_NOT_FOUND(2104, "评论不存在或已删除"),
-    COMMENT_ALREADY_VOTED(2105, "你已经表过态了");
+    COMMENT_ALREADY_VOTED(2105, "你已经表过态了"),
+
+    // 研判工作台错误码 2200+（1600 段已被 Crypto 占用，别再往那儿塞）
+    LLM_CONFIG_MISSING(2201, "尚未配置 LLM 端点"),
+    LLM_CONFIG_INVALID(2202, "LLM 配置无法建立连接"),
+    CHAT_ALREADY_RUNNING(2203, "你已有一轮对话进行中"),
+    CHAT_CAPACITY_FULL(2204, "当前对话人数已满，请稍后再试");
 
     private final int code;
     private final String msg;

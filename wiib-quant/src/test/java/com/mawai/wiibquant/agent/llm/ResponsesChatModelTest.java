@@ -1,5 +1,7 @@
 package com.mawai.wiibquant.agent.llm;
 
+import com.alibaba.fastjson2.JSON;
+import com.alibaba.fastjson2.JSONObject;
 import org.bsc.langgraph4j.spring.ai.agent.ReactAgent;
 import org.bsc.langgraph4j.spring.ai.agent.ReactAgentBuilder;
 import org.junit.jupiter.api.Test;
@@ -9,6 +11,7 @@ import org.springframework.ai.chat.messages.ToolResponseMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.model.tool.ToolCallingChatOptions;
 import org.springframework.ai.model.tool.ToolCallingManager;
+import org.springframework.ai.retry.NonTransientAiException;
 import org.springframework.ai.tool.ToolCallback;
 
 import java.util.List;
@@ -16,6 +19,7 @@ import java.util.Map;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -53,6 +57,35 @@ class ResponsesChatModelTest {
         assertThat(options.getToolCallbacks()).hasSize(1);
         assertThat(options.getToolContext())
                 .containsEntry(ResilientChatService.FORCE_FIRST_TOOL_CHOICE, "required");
+    }
+
+    /**
+     * Responses 除了 failed 还有 incomplete（含 max_output_tokens 截断），它照常带着半截 output。
+     * 阻塞路径当正常收尾发 STOP 的话，被截断的【本轮结论】会以 status=OK 落库，
+     * 下一轮还被当"上一轮的承诺"回注给模型做检验基准。流式路径（response.incomplete）早就当失败处理了。
+     */
+    @Test
+    void 阻塞路径必须把incomplete当截断失败() {
+        JSONObject truncated = JSON.parseObject("""
+                {"id":"resp_1","status":"incomplete","model":"grok-test",
+                 "incomplete_details":{"reason":"max_output_tokens"},
+                 "output":[{"type":"message","content":[
+                     {"type":"output_text","text":"【本轮结论】方向：做多 BTC，止损放在"}]}]}""");
+
+        assertThatThrownBy(() -> model().parseResponse(truncated))
+                .isInstanceOf(NonTransientAiException.class)
+                .hasMessageContaining("max_output_tokens");
+    }
+
+    @Test
+    void 阻塞路径正常收尾照常解析出正文() {
+        JSONObject completed = JSON.parseObject("""
+                {"id":"resp_2","status":"completed","model":"grok-test",
+                 "output":[{"type":"message","content":[
+                     {"type":"output_text","text":"【本轮结论】HOLD，等待突破确认。"}]}]}""");
+
+        assertThat(model().parseResponse(completed).getResult().getOutput().getText())
+                .isEqualTo("【本轮结论】HOLD，等待突破确认。");
     }
 
     @Test

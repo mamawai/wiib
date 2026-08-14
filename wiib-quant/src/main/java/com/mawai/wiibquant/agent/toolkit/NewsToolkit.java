@@ -1,8 +1,9 @@
 package com.mawai.wiibquant.agent.toolkit;
+import com.mawai.wiibquant.market.service.NewsCache;
 
 import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
-import com.mawai.wiibquant.agent.quant.domain.news.NewsFlash;
+import com.mawai.wiibquant.market.domain.news.NewsFlash;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.tool.annotation.Tool;

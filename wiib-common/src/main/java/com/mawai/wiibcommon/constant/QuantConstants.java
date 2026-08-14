@@ -19,9 +19,13 @@ public final class QuantConstants {
     public static String normalizeSymbol(String symbol) {
         if (symbol == null || symbol.isBlank()) return "BTCUSDT";
         symbol = symbol.trim().toUpperCase();
-        String substring = symbol.substring(0, symbol.length() - 4);
-        if (symbol.endsWith("USDT")) symbol = substring;
-        else if (symbol.endsWith("USDC")) symbol = substring;
+        // 截后缀必须在 endsWith 判定之内算：放外面先算的话，"BTC" 这类短于 4 字符的简写
+        // 会走到 substring(0, -1) 当场 StringIndexOutOfBoundsException——
+        // 而本函数存在的意义正是接受简写，且它抛的是 IndexOutOfBounds，调用方 catch
+        // IllegalArgumentException 也兜不住
+        if (symbol.endsWith("USDT") || symbol.endsWith("USDC")) {
+            symbol = symbol.substring(0, symbol.length() - 4);
+        }
         if (symbol.isBlank()) return "BTCUSDT";
         String normalized = symbol + "USDT";
         if (!ALLOWED_SYMBOLS.contains(normalized)) {

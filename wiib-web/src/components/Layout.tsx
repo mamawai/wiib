@@ -8,6 +8,7 @@ import { Button } from './ui/button';
 import { NotificationBell } from './NotificationBell';
 import { TickerStrip } from './TickerStrip';
 import { OfflineBanner } from './OfflineBanner';
+import { ChatDock } from './workbench/ChatDock';
 import { cn } from '../lib/utils';
 import {
   Home, Briefcase, LogOut, LogIn, TrendingUp, Sun, Moon,
@@ -93,12 +94,12 @@ export function Layout({ children }: Props) {
                 资金流水跟持仓是两件事，藏在别的页面里找不着 */}
             <HeaderNavItem to="/ledger" label="账单" />
             <HeaderNavItem to="/ai" label="AI" />
+            <HeaderNavItem to="/arena" label="竞技场" />
             <HeaderNavItem to="/ranking" label="排行" />
             <HeaderNavItem to="/games" label="游戏" />
             <HeaderNavItem to="/testnet" label="模拟盘" />
             <HeaderNavItem to="/strategies" label="策略" />
-            {/* 回测入口暂摘：后端 /api/ai/backtest/* 随下版本发，先别挂死页 */}
-            {/* <HeaderNavItem to="/backtest" label="回测" /> */}
+            <HeaderNavItem to="/backtest" label="回测" />
             {/* 活动：桌面端入口。手机端底部 Tab 只有 5 格且已满，收在「我的」页里 */}
             <HeaderNavItem to="/campaign" label="活动" />
             <HeaderNavItem to="/comments" label="留言" />
@@ -170,6 +171,9 @@ export function Layout({ children }: Props) {
         <BottomNavItem to="/me" icon={<User className="w-5 h-5" />} label="我的" />
         <BottomNavItem to="/ai" icon={<Brain className="w-5 h-5" />} label="AI" />
       </nav>
+
+      {/* 全站悬浮研判对话（BYOK）：对话要登录，游客不给气泡 */}
+      {user && <ChatDock />}
     </div>
   );
 }

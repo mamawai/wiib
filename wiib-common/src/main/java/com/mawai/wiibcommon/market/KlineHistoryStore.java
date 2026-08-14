@@ -156,6 +156,16 @@ public class KlineHistoryStore extends ServiceImpl<KlineHistoryMapper, KlineHist
         return row != null ? row.getOpenTime() : null;
     }
 
+    /** 最早一根的 openTime（可视化回测/复盘选随机起点要知道覆盖范围）；无数据返回 null。 */
+    public Long earliestOpenTime(String symbol, String intervalCode) {
+        KlineHistory row = baseMapper.selectOne(new LambdaQueryWrapper<KlineHistory>()
+                .eq(KlineHistory::getSymbol, normalizeSymbol(symbol))
+                .eq(KlineHistory::getIntervalCode, normalizeInterval(intervalCode))
+                .orderByAsc(KlineHistory::getOpenTime)   // 同样走唯一索引，免filesort
+                .last("LIMIT 1"));
+        return row != null ? row.getOpenTime() : null;
+    }
+
     public Long latestCloseTime(String symbol, String intervalCode) {
         KlineHistory row = selectLatest(symbol, intervalCode);
         return row != null ? row.getCloseTime() : null;

@@ -67,7 +67,9 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     <ToastContext.Provider value={{ toast }}>
       {children}
       <div
-        className="fixed bottom-20 md:bottom-4 right-4 left-auto w-[min(24rem,calc(100vw-2rem))] z-[100] flex flex-col gap-2 pointer-events-none"
+        // z 必须高过 Dialog(200)：不然弹窗里点「检测/测试连通性」的反馈会被遮罩压着，
+        // 而且点 toast 会打到遮罩上把弹窗关掉，用户刚填的 key 就没了。容器 pointer-events-none，抬高不挡弹窗交互
+        className="fixed bottom-20 md:bottom-4 right-4 left-auto w-[min(24rem,calc(100vw-2rem))] z-[300] flex flex-col gap-2 pointer-events-none"
         aria-live="polite"
         aria-relevant="additions removals"
       >

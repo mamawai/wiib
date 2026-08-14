@@ -14,7 +14,7 @@ const QUANT_POLL_MS = 60_000;
  * - sim   = 前端到 sim(8080) 的 STOMP 连接态
  * - feed  = 行情心跳：借 BTC 现货 topic 当脉搏（stompClient 同 topic 共享订阅，无额外开销），
  *           行情链路是 feed→Redis→sim→前端，静默即上游断
- * - quant = 60s 轻量探活最新快照接口
+ * - quant = 60s 轻量探活快讯接口（内存缓存，零上游成本）
  */
 export function useSystemHealth(): SystemHealth {
   const [sim, setSim] = useState<HealthLevel>('unknown');
@@ -39,7 +39,7 @@ export function useSystemHealth(): SystemHealth {
 
   useEffect(() => {
     let alive = true;
-    const probe = () => quantApi.latestSnapshot().then(
+    const probe = () => quantApi.news().then(
       () => { if (alive) setQuant('ok'); },
       () => { if (alive) setQuant('down'); },
     );

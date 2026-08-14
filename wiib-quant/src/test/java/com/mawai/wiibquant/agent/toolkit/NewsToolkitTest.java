@@ -1,6 +1,7 @@
 package com.mawai.wiibquant.agent.toolkit;
+import com.mawai.wiibquant.market.service.NewsCache;
 
-import com.mawai.wiibquant.agent.quant.domain.news.NewsFlash;
+import com.mawai.wiibquant.market.domain.news.NewsFlash;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;

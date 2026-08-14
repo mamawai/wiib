@@ -13,7 +13,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="WIIB" />
     <title>WhatIfIBought</title>
-    <!-- ===== 开屏动画（网格溶解）=====
+    <!-- ===== 开屏动画（噪点场 + 像素块随机点亮拼字）=====
          整段必须内联：它要在 bundle 之前就铺满屏幕，晚一步就是白屏。
          配色全部硬编码——index.css 的 token 跟 bundle 一起到，这时候还不存在，
          取值须同 index.css（改主题色记得同步这里） -->
@@ -24,80 +24,32 @@
 
       #splash {
         position: fixed; inset: 0; z-index: 9999;
-        --c-bg: #f6f6f4; --c-fg: #17181a; --c-line: #e4e4df;
-        --c-pri: #f97316; --c-cell: #ececea; --c-mut: #71737b;
-        /* 溶解延迟/呼吸相位的兜底：真值由下方 JS 逐格内联覆写 */
-        --d: 0s; --bd: 0s;
+        --c-bg: #f6f6f4; --c-fg: #17181a; --c-cell: #dfdfd7;
+        --c-pri: #f97316; --c-mut: #71737b;
       }
       html.dark #splash {
-        --c-bg: #0b0c0f; --c-fg: #eceef0; --c-line: #23262e;
-        --c-pri: #f97316; --c-cell: #181b21; --c-mut: #878b96;
+        --c-bg: #0b0c0f; --c-fg: #eceef0; --c-cell: #1b1f27;
+        --c-pri: #f97316; --c-mut: #878b96;
       }
-      /* 溶解一开始就放行点击，别让残留的 1s 挡住首屏操作 */
-      #splash.sp-out { pointer-events: none }
+      /* 退场：字标格随机熄灭由 JS 画，整体淡出交给 CSS；退场一开始就放行点击 */
+      #splash.sp-out { pointer-events: none; opacity: 0; transition: opacity .5s ease }
 
-      #sp-grid { position: absolute; inset: 0; display: grid }
-      /* 只画右边和下边，相邻格不叠成 2px 粗线 */
-      .sp-c { background: var(--c-bg); box-shadow: inset -1px -1px 0 var(--c-line) }
-      /* 等待态：加载慢时零星格子明暗呼吸，像终端在刷新。
-         延迟 1.2s 起——加载快的话根本看不到，不打扰 */
-      .sp-c.b { animation: sp-blink 2.4s ease-in-out infinite; animation-delay: calc(1.2s + var(--bd)) }
-      @keyframes sp-blink { 0%,100% { background: var(--c-bg) } 50% { background: var(--c-cell) } }
-      /* 溶解：写在 blink 之后，同权重后来居上，直接顶掉呼吸 */
-      #splash.sp-out .sp-c {
-        animation: sp-gone .4s cubic-bezier(.4,0,.3,1) both; animation-delay: var(--d);
-      }
-      @keyframes sp-gone { to { opacity: 0; transform: scale(.82) } }
-
-      .sp-mid {
-        position: absolute; left: 50%; top: 50%; translate: -50% -50%;
-        text-align: center; font-family: system-ui, "Microsoft YaHei", sans-serif;
-      }
-      #splash.sp-out .sp-mid { animation: sp-fade .45s .18s ease both }
-      @keyframes sp-fade { to { opacity: 0; transform: translateY(-14px) } }
-
-      /* 字标走 SVG 描边：@fontsource 跟 bundle 一起到，这时候用文字必然 fallback 走形 */
-      .sp-wm { display: block; width: 190px; height: auto }
-      .sp-p {
-        fill: none; stroke: var(--c-fg); stroke-width: 6;
-        stroke-linecap: square; stroke-linejoin: miter;
-        stroke-dasharray: 100; stroke-dashoffset: 100;
-        animation: sp-draw .42s cubic-bezier(.5,0,.3,1) both;
-        animation-delay: calc(.2s + var(--i) * .06s);
-      }
-      @keyframes sp-draw { to { stroke-dashoffset: 0 } }
-      .sp-dot {
-        fill: var(--c-pri); opacity: 0; transform: scale(.2);
-        transform-origin: 165px 48px;
-        animation: sp-dot .3s .54s cubic-bezier(.34,1.56,.64,1) both;
-      }
-      @keyframes sp-dot { to { opacity: 1; transform: scale(1) } }
+      /* 一张 canvas 全包：不透明底色遮页面 + 背景噪点 + 字标格，同一介质同一张格 */
+      #sp-cv { position: absolute; inset: 0; width: 100%; height: 100%; display: block }
 
       .sp-lbl {
-        margin-top: 18px; font-size: 10px; letter-spacing: .12em; font-weight: 700;
-        color: var(--c-mut); opacity: 0; animation: sp-in .5s .78s ease both;
+        position: absolute; left: 50%; translate: -50%; white-space: nowrap;
+        font-family: system-ui, "Microsoft YaHei", sans-serif;
+        font-size: 10px; letter-spacing: .12em; font-weight: 700;
+        color: var(--c-mut); opacity: 0; animation: sp-in .5s .95s ease both;
       }
       .sp-lbl b { color: var(--c-pri) }
-      .sp-wide { display: none; font-style: normal }
       @keyframes sp-in { to { opacity: 1 } }
 
-      @media (min-width: 768px) {
-        .sp-wm { width: 300px }
-        .sp-lbl { margin-top: 22px }
-        .sp-wide { display: inline }
-      }
-
-      /* 减弱动效：不做逐格溶解和书写，整块淡出即可——但绝不能不显示，
-         否则白屏又回来了 */
+      /* 减弱动效：噪点不漂、字标不闪直接满亮（JS 认同一媒体查询），
+         退场整块淡出——但绝不能不显示，否则白屏又回来了 */
       @media (prefers-reduced-motion: reduce) {
-        .sp-c, #splash.sp-out .sp-c, .sp-p, .sp-dot, .sp-lbl, #splash.sp-out .sp-mid {
-          animation: none !important;
-        }
-        .sp-p { stroke-dashoffset: 0 }
-        .sp-dot { opacity: 1; transform: none }
-        .sp-lbl { opacity: 1 }
-        #splash { transition: opacity .35s ease }
-        #splash.sp-out { opacity: 0 }
+        .sp-lbl { animation: none; opacity: 1 }
       }
     </style>
     <script>
@@ -121,60 +73,143 @@
     </script>
   </head>
   <body>
-    <!-- 开屏放在 #root 前：解析到就上屏，不等 bundle。格子多，交给紧随其后的内联脚本生成 -->
+    <!-- 开屏放在 #root 前：解析到就上屏，不等 bundle。画面交给紧随其后的内联脚本绘制 -->
     <div id="splash" aria-hidden="true">
-      <div id="sp-grid"></div>
-      <div class="sp-mid">
-        <svg class="sp-wm" viewBox="0 0 176 60">
-          <path class="sp-p" style="--i:0" pathLength="100" d="M8 8 L19 52 L33 22 L47 52 L58 8"/>
-          <path class="sp-p" style="--i:1" pathLength="100" d="M76 8 L76 52"/>
-          <path class="sp-p" style="--i:2" pathLength="100" d="M94 8 L94 52"/>
-          <path class="sp-p" style="--i:3" pathLength="100" d="M112 52 L112 8 L138 8 L146 16 L146 23 L139 30 L112 30"/>
-          <path class="sp-p" style="--i:4" pathLength="100" d="M112 30 L140 30 L148 38 L148 45 L140 52 L112 52"/>
-          <rect class="sp-dot" x="160" y="43" width="10" height="10"/>
-        </svg>
-        <div class="sp-lbl">GRID ONLINE <b>·</b> 数据接入中</div>
-      </div>
+      <canvas id="sp-cv"></canvas>
+      <div class="sp-lbl">GRID ONLINE <b>·</b> 数据接入中</div>
     </div>
     <script>
       (function () {
         var el = document.getElementById('splash');
-        var grid = document.getElementById('sp-grid');
-        var pc = innerWidth >= 768;   // 768 对齐 index.css 的 md: 断点
-
-        // 格子尽量接近正方：按目标边长反推行列。两头夹住，超宽屏别爆出几百个元素
-        var t = pc ? 92 : 66;
-        var cols = Math.max(4, Math.min(18, Math.round(innerWidth / t)));
-        var rows = Math.max(5, Math.min(12, Math.round(innerHeight / t)));
-        grid.style.gridTemplateColumns = 'repeat(' + cols + ',1fr)';
-        grid.style.gridTemplateRows = 'repeat(' + rows + ',1fr)';
-
-        var buf = '', cx = (cols - 1) / 2, cy = (rows - 1) / 2;
-        for (var r = 0; r < rows; r++) {
-          for (var c = 0; c < cols; c++) {
-            // 宽屏从中心向外辐射铺得开；手机竖长，自上而下逐行更顺眼
-            var d = pc
-              ? Math.hypot((c - cx) / cx, (r - cy) / cy) * 0.36
-              : r * 0.045 + (c % 3) * 0.02;
-            var st = '--d:' + d.toFixed(3) + 's';
-            var blink = Math.random() < 0.12;   // 零星几格参与等待呼吸
-            if (blink) st += ';--bd:' + (Math.random() * 2).toFixed(2) + 's';
-            buf += '<span class="sp-c' + (blink ? ' b' : '') + '" style="' + st + '"></span>';
-          }
+        var cv = document.getElementById('sp-cv');
+        var ctx = cv.getContext('2d');
+        if (!ctx) {
+          // canvas 拿不到就别演了：定个短时限撤掉遮罩，绝不能挡住应用
+          window.__wiibSplashDone = function () {};
+          setTimeout(function () { el.remove(); }, 400);
+          return;
         }
-        grid.innerHTML = buf;
+        var vw = innerWidth, vh = innerHeight;
+        cv.width = vw; cv.height = vh;           // 大像素本就要糙，1x 分辨率足够
 
-        // 网页拿不到真实加载百分比，只有"好了/没好"一个布尔信号，所以不做假进度条。
-        // 最短 950ms 等字标写完（加载太快时闪一下更难看），最长 6s 强制放行——
-        // 接口挂了也不能一直遮着人家页面
-        var t0 = Date.now(), fired = false;
+        // 配色从 #splash 的 CSS 变量取一次：主题在 head 里已定，中途不会变
+        var st = getComputedStyle(el);
+        var BG = st.getPropertyValue('--c-bg').trim();
+        var FG = st.getPropertyValue('--c-fg').trim();
+        var CELL = st.getPropertyValue('--c-cell').trim();
+        var PRI = st.getPropertyValue('--c-pri').trim();
+        var REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+        var C = vw >= 768 ? 9 : 6;               // 大像素边长，768 对齐 index.css 的 md: 断点
+        var cols = Math.ceil(vw / C), rows = Math.ceil(vh / C);
+
+        function hs(x, y) { var s = Math.sin(x * 127.1 + y * 311.7) * 43758.5453; return s - Math.floor(s); }
+        function smo(t) { return t * t * (3 - 2 * t); }
+        // 双线性插值的 value noise：噪点成团不成雪花
+        function vn(x, y) {
+          var xi = Math.floor(x), yi = Math.floor(y), xf = smo(x - xi), yf = smo(y - yi);
+          return (hs(xi, yi) * (1 - xf) + hs(xi + 1, yi) * xf) * (1 - yf)
+               + (hs(xi, yi + 1) * (1 - xf) + hs(xi + 1, yi + 1) * xf) * yf;
+        }
+
+        // 字标量化：离屏 3x 超采样描边（路径同旧版 SVG 字标），按覆盖率取格。
+        // 手机屏窄，字标占屏宽 82% 才有足够格数撑住字形
+        var PATHS = [
+          'M8 8 L19 52 L33 22 L47 52 L58 8', 'M76 8 L76 52', 'M94 8 L94 52',
+          'M112 52 L112 8 L138 8 L146 16 L146 23 L139 30 L112 30',
+          'M112 30 L140 30 L148 38 L148 45 L140 52 L112 52'];
+        var wpx = vw >= 768 ? Math.min(vw * 0.6, 500) : vw * 0.82;
+        var wc = Math.round(wpx / C), hc = Math.round(wc * 60 / 176), SS = 3;
+        var off = document.createElement('canvas');
+        off.width = wc * SS; off.height = hc * SS;
+        var oc = off.getContext('2d', { willReadFrequently: true });
+        oc.scale(wc * SS / 176, hc * SS / 60);
+        oc.lineWidth = 9;                        // 比原描边 6 加粗：量化后笔画才有 2~3 格厚
+        oc.lineCap = 'square'; oc.lineJoin = 'miter'; oc.strokeStyle = '#fff';
+        for (var pi = 0; pi < PATHS.length; pi++) oc.stroke(new Path2D(PATHS[pi]));
+        var img = oc.getImageData(0, 0, wc * SS, hc * SS).data;
+        var cells = [], i, p;
+        for (var yy = 0; yy < hc; yy++)
+          for (var xx = 0; xx < wc; xx++) {
+            var cov = 0;
+            for (var sy = 0; sy < SS; sy++)
+              for (var sx = 0; sx < SS; sx++)
+                if (img[((yy * SS + sy) * wc * SS + xx * SS + sx) * 4 + 3] > 127) cov++;
+            if (cov >= 5) cells.push({ cx: xx, cy: yy, o: 0 });   // 过半覆盖才算字格
+          }
+        // 橙点定死 2x2 格：右对齐 B 之后，底边压字底线（56.5 = 52 + 半个描边宽）
+        var dcx = Math.floor(167 / 176 * wc) - 1, dcy = Math.floor(56.5 / 60 * hc) - 1;
+        for (var dy = 0; dy < 2; dy++)
+          for (var dx = 0; dx < 2; dx++)
+            cells.push({ cx: dcx + dx, cy: dcy + dy, o: 1 });
+        // 按量化后实际内容的包围盒居中：路径右侧给点留了空，按框居中字母会偏左
+        var x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9;
+        for (i = 0; i < cells.length; i++) {
+          p = cells[i];
+          x0 = Math.min(x0, p.cx); x1 = Math.max(x1, p.cx);
+          y0 = Math.min(y0, p.cy); y1 = Math.max(y1, p.cy);
+        }
+        var ox = Math.round((cols - (x1 - x0 + 1)) / 2) - x0;
+        var oy = Math.round((rows - (y1 - y0 + 1)) / 2 - 16 / C) - y0;   // 略高于中心，给标签留位
+        for (i = 0; i < cells.length; i++) {
+          p = cells[i];
+          p.cx += ox; p.cy += oy;
+          p.onT = 0.1 + Math.random() * 0.9;     // 原地随机时刻点亮，无序中拼出整字
+          p.offT = Math.random() * 0.35;         // 退场随机熄灭
+        }
+        el.querySelector('.sp-lbl').style.top = ((y1 + oy + 1) * C + 22) + 'px';
+
+        // 主循环 30fps 上限：开屏期正在解析 bundle，别抢主线程
+        var t0 = performance.now(), prev = 0, exitFrom = -1, removed = false, drawn = false;
+        function draw(now) {
+          if (removed) return;
+          requestAnimationFrame(draw);
+          if (now - prev < 33) return;
+          prev = now;
+          if (REDUCED && drawn) return;          // 减弱动效：一帧定格，退场靠 CSS 淡出
+          drawn = true;
+          var t = (now - t0) / 1000, ft = REDUCED ? 0 : t;
+          ctx.fillStyle = BG; ctx.fillRect(0, 0, vw, vh);
+          // 背景噪点场：缓慢漂移，中心静音把舞台让给字标
+          for (var ry = 0; ry < rows; ry++) {
+            var y = ry * C, nyc = y / vh - 0.5;
+            for (var rx = 0; rx < cols; rx++) {
+              var n = vn(rx * 0.10 - ft * 0.55, ry * 0.16);
+              if (n < 0.60) continue;
+              var a = Math.min((n - 0.60) / 0.40, 1) * 0.85;
+              var cd = Math.hypot(rx * C / vw - 0.5, nyc);
+              a *= 0.22 + 0.78 * smo(Math.min(Math.max((cd - 0.16) / 0.30, 0), 1));
+              ctx.globalAlpha = a;
+              ctx.fillStyle = hs(rx * 3.7, ry * 9.1) > 0.995 ? PRI : CELL;  // 千分之五的橙点提神
+              ctx.fillRect(rx * C, y, C - 1, C - 1);   // 留 1px 缝，颗粒清爽
+            }
+          }
+          // 字标格：到点翻实色；退场随机熄灭
+          var et = exitFrom >= 0 ? (now - exitFrom) / 1000 : -1;
+          for (var j = 0; j < cells.length; j++) {
+            var q = cells[j];
+            if (!REDUCED && t < q.onT) continue;
+            if (!REDUCED && et >= 0 && et > q.offT) continue;
+            var k = REDUCED ? 1 : Math.min((t - q.onT) / 0.12, 1);
+            ctx.globalAlpha = 0.45 + 0.55 * k;
+            ctx.fillStyle = q.o ? PRI : FG;
+            ctx.fillRect(q.cx * C, q.cy * C, C - 1, C - 1);
+          }
+          ctx.globalAlpha = 1;
+        }
+        requestAnimationFrame(draw);
+
+        // 放行协议不变：应用就绪喊 __wiibSplashDone。最短 1.9s 让字拼完站一会
+        // （加载快时闪一下更难看），最长 6s 强制放行——接口挂了也不能一直遮着页面
+        var fired = false;
         function finish() {
           if (fired) return;
           fired = true;
           setTimeout(function () {
+            exitFrom = performance.now();
             el.classList.add('sp-out');
-            setTimeout(function () { el.remove(); }, 1000);
-          }, Math.max(0, 950 - (Date.now() - t0)));
+            setTimeout(function () { removed = true; el.remove(); }, 700);
+          }, Math.max(0, 1900 - (performance.now() - t0)));
         }
         window.__wiibSplashDone = finish;
         setTimeout(finish, 6000);

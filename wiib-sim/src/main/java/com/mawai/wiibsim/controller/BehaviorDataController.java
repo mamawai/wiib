@@ -36,7 +36,7 @@ import java.util.Map;
  * 用户行为数据 internal API（sim 暴露给 quant 调用）。
  * <p>quant 的 behavior/持仓建议等 AI agent 通过 HTTP 拿用户账本统计，不直连 sim 库表——
  * sim 改表结构 quant 不受影响。鉴权走 {@code InternalApiFilter} 的 X-Internal-Token，已在 SaToken 放行。
- * <p>每个端点逻辑 = 原 BehaviorAnalysisTools 对应 @Tool，返回同样的统计 JSON。
+ * <p>一个端点 = 一个统计维度，quant 侧 BehaviorDataCollector 并发把它们全拉一遍。
  * <p>键名是与 quant 侧 BehaviorAnalysisReport 的反序列化契约，改名必须两端同步。
  */
 @RestController

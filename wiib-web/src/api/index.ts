@@ -1,14 +1,28 @@
 import axios from 'axios';
 import type { TnOverview, TnTrade, TnDailyCell, TnEquityPoint, TnFillStats, TnManualOrderReq, TnOrderResult, TnAck } from '../types/testnet';
-import type { BacktestStrategyMeta, BacktestTaskStatus, BacktestEventsPage, BacktestKlinesPage, BacktestResultPayload } from '../types';
+import type { BacktestStrategyMeta, BacktestTaskStatus, BacktestEventsPage, BacktestKlinesPage, BacktestResultPayload, ReplayCoverage, HistoryKlinesPayload } from '../types';
 import type { LedgerEntry, LedgerBizTypeOption, PublicTrade, UserProfile, PositionHistoryItem, RankingSort } from '../types';
 import type { CampaignInfo, CampaignReward, CampaignScore, MyCampaignView } from '../types';
-import type { User, PageResult, RankingItem, CommentItem, NotificationItem, BuffStatus, UserBuff, BlackjackStatus, GameState, ConvertResult, MinesStatus, MinesGameState, VideoPokerStatus, VideoPokerGameState, CryptoPrice, CryptoOrderRequest, CryptoOrder, CryptoPosition, BStock, FuturesOpenRequest, FuturesCloseRequest, FuturesAddMarginRequest, FuturesReduceMarginRequest, FuturesStopLossRequest, FuturesTakeProfitRequest, FuturesAdjustLeverageRequest, FuturesCrossAccount, WalletTransferPreview, FuturesPosition, FuturesOrder, FuturesBracket, TradeFilterMap, PredictionRound, PredictionBet, PredictionBuyRequest, PredictionBetLive, PredictionPnl, AssetSnapshot, CategoryAverages, BehaviorAnalysisReport, ForceOrder, AiKeyConfig, AiModelAssignment, InviteCode, WorkbenchEvent, QuantSnapshotView, QuantSnapshotSeriesPoint, QuantDeepAnalysisView, Scorecard, StrategyAccountView, StrategySignalState, FeedStreamHealth, WorkbenchSessionSummary, WorkbenchChatMessage, NewsFlashItem } from '../types';
+import type { LlmConfigView, LlmConfigSaveRequest } from '../types';
+import type { User, PageResult, RankingItem, CommentItem, NotificationItem, BuffStatus, UserBuff, BlackjackStatus, GameState, ConvertResult, MinesStatus, MinesGameState, VideoPokerStatus, VideoPokerGameState, CryptoPrice, CryptoOrderRequest, CryptoOrder, CryptoPosition, BStock, FuturesOpenRequest, FuturesCloseRequest, FuturesAddMarginRequest, FuturesReduceMarginRequest, FuturesStopLossRequest, FuturesTakeProfitRequest, FuturesAdjustLeverageRequest, FuturesCrossAccount, WalletTransferPreview, FuturesPosition, FuturesOrder, FuturesBracket, TradeFilterMap, PredictionRound, PredictionBet, PredictionBuyRequest, PredictionBetLive, PredictionPnl, AssetSnapshot, CategoryAverages, BehaviorAnalysisReport, ForceOrder, AiKeyConfig, AiModelAssignment, InviteCode, WorkbenchEvent, StrategyAccountView, TraderPublicView, TraderOwnerView, TraderDetailView, AiTraderDecisionView, TraderEquityPoint, TraderUpsertRequest, TraderSpec, TraderRequestView, StrategySignalState, FeedStreamHealth, WorkbenchSessionSummary, WorkbenchChatMessage, NewsFlashItem } from '../types';
 
 const api = axios.create({
   baseURL: '/api',
   withCredentials: true,
 });
+
+/**
+ * 业务错误：带上后端的 code，让调用方能按类型分流（比如"没配 key"要引导去配置）。
+ * code 显式声明再赋值，不用构造器参数属性——本仓 tsconfig 开了 erasableSyntaxOnly，那个语法编译不过
+ */
+export class ApiError extends Error {
+  readonly code: number;
+
+  constructor(message: string, code: number) {
+    super(message);
+    this.code = code;
+  }
+}
 
 // 请求拦截器：添加Token到Header
 api.interceptors.request.use((config) => {
@@ -31,17 +45,18 @@ api.interceptors.response.use(
     if (code === 401) {
       localStorage.removeItem('wiib-user');
       window.location.href = '/login';
-      return Promise.reject(new Error(msg || '未登录'));
+      return Promise.reject(new ApiError(msg || '未登录', code));
     }
     if (code !== 0) {
-      return Promise.reject(new Error(msg || '请求失败'));
+      return Promise.reject(new ApiError(msg || '请求失败', code));
     }
     return data;
   },
   (err) => {
     const msg = err.response?.data?.msg || err.response?.data?.message || err.message;
     console.error('API错误:', msg);
-    return Promise.reject(new Error(msg));
+    // 这条分支是 HTTP 层错误（网络断、5xx），响应体不一定是 Result，code 取不到就填 -1
+    return Promise.reject(new ApiError(msg, err.response?.data?.code ?? -1));
   }
 );
 
@@ -186,10 +201,6 @@ export const adminApi = {
   listAssignments: () => api.get<unknown, AiModelAssignment[]>('/admin/ai-agent/assignments'),
   saveAssignments: (assignments: AiModelAssignment[]) =>
     api.post<unknown, void>('/admin/ai-agent/assignments', assignments),
-  triggerQuant: (symbol: string) =>
-    api.post<unknown, string>('/admin/ai-agent/quant/trigger', null, { params: { symbol } }),
-  triggerQuantVerification: (symbol: string) =>
-    api.post<unknown, string>('/admin/ai-agent/quant/verify/trigger', null, { params: { symbol } }),
   // feed WS 流健康：进面板拉快照 + 手动重试（实时更新走 STOMP /topic/feed/streams）
   feedStreams: () => api.get<unknown, FeedStreamHealth[]>('/monitor/streams'),
   retryFeedStream: (name: string) =>
@@ -425,13 +436,14 @@ export const workbenchApi = {
     const contentType = response.headers.get('content-type') || '';
     if (contentType.includes('application/json')) {
       const payload = await response.json() as { code?: number; msg?: string };
-      throw new Error(payload.msg || '请求失败');
+      throw new ApiError(payload.msg || '请求失败', payload.code ?? -1);
     }
     if (!response.ok) throw new Error(`请求失败: ${response.status}`);
     await streamWorkbenchEvents(response, onEvent);
   },
-  approve: (sessionId: string, approved: boolean) =>
-    api.post<unknown, void>('/ai/workbench/approve', { sessionId, approved }),
+  /** requestId 从 hitl_request 事件原样回传：卡片被新请求覆盖后点它，服务端会拒掉 */
+  approve: (sessionId: string, approved: boolean, requestId: string) =>
+    api.post<unknown, void>('/ai/workbench/approve', { sessionId, approved, requestId }),
   /** 历史会话列表（标题=首条提问，按最后活跃倒序） */
   sessions: () => api.get<unknown, WorkbenchSessionSummary[]>('/ai/workbench/sessions'),
   /** 会话是否还在后台跑（切页/刷新回来判断，结束后拉历史补答案） */
@@ -440,24 +452,66 @@ export const workbenchApi = {
   /** 单会话消息记录；续聊仍走 chat 带同一 sessionId */
   sessionMessages: (sessionId: string) =>
     api.get<unknown, WorkbenchChatMessage[]>(`/ai/workbench/sessions/${sessionId}/messages`),
-  /** 删除历史会话（展示记录 + 后端 checkpoint 上下文） */
+  /** 删除历史会话（展示记录 + 后端续聊上下文） */
   deleteSession: (sessionId: string) =>
     api.delete<unknown, void>(`/ai/workbench/sessions/${sessionId}`),
 };
 
+// ========== 用户 BYOK 端点配置（工作台对话用） ==========
+export const llmConfigApi = {
+  mine: () => api.get<unknown, LlmConfigView | null>('/ai/llm-config/mine'),
+  save: (req: LlmConfigSaveRequest) => api.post<unknown, void>('/ai/llm-config', req),
+  listModels: (req: LlmConfigSaveRequest) =>
+    api.post<unknown, string[]>('/ai/llm-config/models', req),
+  /** 连通性探测：与保存分离，对应表单里的"测试连通性"按钮 */
+  test: (req: LlmConfigSaveRequest) => api.post<unknown, void>('/ai/llm-config/test', req),
+};
+
+/** 打标快讯（news_event 存档行，K 线新闻图标数据源） */
+export interface NewsEventItem {
+  id: number;
+  title: string;
+  content: string;
+  url: string;
+  /** 发稿时刻 epoch 毫秒，按 K 线周期桶定位图标 */
+  publishedAt: number;
+  /** 逗号标签串，如 BTC,GOLD */
+  tags: string;
+}
+
 export const quantApi = {
-  latestSnapshot: (symbol?: string) =>
-    api.get<unknown, QuantSnapshotView>('/ai/quant/snapshots/latest', { params: { symbol: symbol || 'BTCUSDT' } }),
-  snapshotSeries: (symbol?: string, hours = 24) =>
-    api.get<unknown, QuantSnapshotSeriesPoint[]>('/ai/quant/snapshots/series', { params: { symbol: symbol || 'BTCUSDT', hours } }),
-  latestAnalysis: (symbol?: string) =>
-    api.get<unknown, QuantDeepAnalysisView>('/ai/quant/analysis/latest', { params: { symbol: symbol || 'BTCUSDT' } }),
-  analysisList: (symbol?: string, limit = 20) =>
-    api.get<unknown, QuantDeepAnalysisView[]>('/ai/quant/analysis/list', { params: { symbol: symbol || 'BTCUSDT', limit } }),
-  scorecard: (symbol?: string, days = 7) =>
-    api.get<unknown, Scorecard>('/ai/quant/scorecard', { params: { symbol: symbol || 'BTCUSDT', days } }),
   /** 重要快讯（quant 侧内存缓存，未过期不打上游） */
   news: () => api.get<unknown, NewsFlashItem[]>('/ai/quant/news'),
+  /** 打标快讯：标签+时间窗（服务端上限 500 条，倒序取最近） */
+  newsEvents: (tag: string, from: number, to: number) =>
+    api.get<unknown, NewsEventItem[]>('/ai/quant/news-events', { params: { tag, from, to } }),
+};
+
+// ========== AI Trader 竞技场 ==========
+export const traderApi = {
+  mine: () => api.get<unknown, TraderOwnerView | null>('/ai/trader/mine'),
+  /** 拉取端点可用模型清单（apiKey 传空=用已存 key） */
+  listModels: (req: { apiProtocol: string; baseUrl: string; apiKey: string }) =>
+    api.post<unknown, string[]>('/ai/trader/models', req),
+  /** 平台系统提示词预览（与唤醒组装同一份文本）：规格项多，走 POST 带 body */
+  promptTemplate: (intervalCode: string, symbols: string, spec: TraderSpec) =>
+    api.post<unknown, string>('/ai/trader/prompt-template', { intervalCode, symbols, spec }),
+  /** 待确认的加仓/减仓请求（自主开关关掉时才会有） */
+  requests: () => api.get<unknown, TraderRequestView[]>('/ai/trader/requests'),
+  approveRequest: (id: number) => api.post<unknown, void>(`/ai/trader/requests/${id}/approve`),
+  rejectRequest: (id: number) => api.post<unknown, void>(`/ai/trader/requests/${id}/reject`),
+  create: (req: TraderUpsertRequest) => api.post<unknown, void>('/ai/trader', req),
+  updateConfig: (req: TraderUpsertRequest) => api.put<unknown, void>('/ai/trader/config', req),
+  start: () => api.post<unknown, void>('/ai/trader/start'),
+  pause: () => api.post<unknown, void>('/ai/trader/pause'),
+  reset: () => api.post<unknown, void>('/ai/trader/reset'),
+  arena: () => api.get<unknown, TraderPublicView[]>('/ai/trader/arena'),
+  detail: (id: number) => api.get<unknown, TraderDetailView>(`/ai/trader/${id}`),
+  /** 决策时间线；round 传空=当前局。必须按局看——局与局是两个独立子账户，混排对不上净值曲线 */
+  decisions: (id: number, limit = 50, before?: number, round?: number) =>
+    api.get<unknown, AiTraderDecisionView[]>(`/ai/trader/${id}/decisions`, { params: { limit, before, round } }),
+  equityCurve: (id: number, round?: number) =>
+    api.get<unknown, TraderEquityPoint[]>(`/ai/trader/${id}/equity-curve`, { params: { round } }),
 };
 
 // ========== 策略账户监控 ==========
@@ -505,6 +559,11 @@ export const backtestApi = {
     api.get<unknown, BacktestKlinesPage>(`/ai/backtest/tasks/${taskId}/klines`, { params: { offset, limit } }),
   result: (taskId: string) =>
     api.get<unknown, BacktestResultPayload>(`/ai/backtest/tasks/${taskId}/result`),
+  /** 手动复盘数据源：覆盖范围 + 区间 K 线（只读本地 kline_history） */
+  historyCoverage: () =>
+    api.get<unknown, ReplayCoverage[]>('/ai/backtest/history/coverage'),
+  historyKlines: (symbol: string, fromMs: number, toMs: number) =>
+    api.get<unknown, HistoryKlinesPayload>('/ai/backtest/history/klines', { params: { symbol, fromMs, toMs } }),
 };
 
 // ========== LDC 瓜分活动 ==========

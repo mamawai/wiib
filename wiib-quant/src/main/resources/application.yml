@@ -14,7 +14,7 @@ spring:
         name: wiib-quant
         version: 1.0.0
         type: SYNC
-        instructions: "WhatIfIBought 量化只读工具：市场快照/脆弱度/期权IV/vol预测/regime/验证记分卡"
+        instructions: "WhatIfIBought 量化只读工具：市场快照/期权IV/资金费历史/盘口深度"
     # Spring AI 2.0 起弃用 spring-retry，spring.ai.retry.* 已无人读取；重试在
     # ResponsesChatModel(协议层) 与 ResilientChatService(ReactAgent 层) 两处代码里。
     # 下面 6 类必须全关：各自独立开关，只关 chat 其余仍会因缺 api-key 拒启动。LLM 配置唯一来源是 DB
@@ -71,20 +71,32 @@ management:
 trading:
   decision-interval: M5
 
-# AI 分析轨总开关：关掉则快照/深研判/预测验证不再自动跑(bar 收盘、哨兵异动、兜底 cron 全静默)，
-# Admin 页手动触发不受影响。只管这一轨——因子采集归 factor.*.enabled，策略下单归下面 strategy.*；
-# 别跟 quant.deep-analysis.*(本轨内部深研判的定频与冷却)混，此项是整轨开关
+# 叙事对账开关：关掉则 VerificationTask 不再自动对账(bar 收盘、兜底 cron 全静默)。
+# 纯数值计算不烧 LLM——快照/vol 预测轨已下线，深研判现只由工作台对话触发，都不归它管
 quant:
   analysis:
     enabled: true
   # 研判工作台对话轨(ChatAgentFactory)
   workbench:
-    run-model-call-limit: 12           # summarizer 单轮 ReAct 模型调用上限，达到即收尾，防死转烧钱
+    # 单个 agent 一轮 ReAct 的模型调用上限，达到即收尾，防死转烧钱。注意是"每个 agent 各自"而不是
+    # 整轮总量：summarizer 与每个带工具的专家各跑各的 state、计数互不相通，一轮对话的调用数是各家相加。
+    # 这个值就是迭代账里的 L：summarizer 叶子的硬顶按 3L+8 现算(ChatAgentFactory.summarizerLeaf)，改这里那边自动跟上
+    run-model-call-limit: 8
     summarize-threshold-tokens: 32000  # 历史估算 token 超此值触发压缩：浅模型把老消息总结成一段替换原文
     summarize-keep-messages: 6         # 压缩后保留的最近消息数(首条用户消息另外无条件保留原文)
     # summarizer 在 BlockBeats 之外补的新闻来自模型自带联网搜索，出自哪个平台随模型走(当前 grok 出 X)。
     # 这里配的是来源标签名，只影响 [X]/[BlockBeats+X] 怎么标；换模型改这里，提示词不用动。留空标 [Web]
     news-supplement-source: X
+
+# 快讯采集打标轨（NewsEventCollector）：定时经 NewsCache 拉重要快讯，新条目轻模型打标后落 news_event
+news:
+  collect:
+    enabled: true
+    # 采集周期。BlockBeats 免费额度一次性不回血：每周期最多真打一次 API（NewsCache 10min 缓存窗内
+    # 与对话/深研判共享同一次拉取）。30min≈每天最多48次，改小前先看额度余量
+    interval-ms: 1800000
+    # 打标封闭词表：OIL=原油 GOLD=黄金 BTC=比特币/加密大盘 + 美股白名单。模型只许从中选，选不出留空
+    vocabulary: OIL,GOLD,BTC,COIN,MSTR,TSLA,NVDA
 
 # 策略实盘信号运行时：读实时流并记录 LIVE 信号
 strategy:

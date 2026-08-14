@@ -1,11 +1,8 @@
 package com.mawai.wiibquant.agent.toolkit;
+import com.mawai.wiibquant.market.service.MarketAssembly;
 
-import com.mawai.wiibquant.agent.quant.domain.FeatureSnapshot;
-import com.mawai.wiibquant.agent.quant.domain.MarketRegime;
-import com.mawai.wiibquant.agent.quant.domain.fragility.FragileDirection;
-import com.mawai.wiibquant.agent.quant.domain.fragility.FragilityLevel;
-import com.mawai.wiibquant.agent.quant.domain.fragility.FragilityScore;
-import com.mawai.wiibquant.agent.quant.domain.signal.SignalPanel;
+import com.mawai.wiibquant.market.domain.FeatureSnapshot;
+import com.mawai.wiibquant.market.domain.MarketRegime;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -33,9 +30,6 @@ final class TestAssemblies {
                 MarketRegime.RANGE, null);
         return new MarketAssembly("BTCUSDT", true, Map.of(),
                 Map.of("price_change_map", Map.of("24h", "+2.3%")),
-                s, SignalPanel.empty(),
-                new FragilityScore(61, FragilityLevel.HIGH, 0.7, 0.4, 0.7,
-                        FragileDirection.DOWN, "多头拥挤+清算邻近，下行脆弱"),
-                Instant.now());
+                s, Instant.now());
     }
 }

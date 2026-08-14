@@ -2,11 +2,11 @@ package com.mawai.wiibquant.controller;
 
 import cn.dev33.satoken.stp.StpUtil;
 import com.mawai.wiibcommon.util.Result;
-import com.mawai.wiibquant.agent.binance.BinanceFuturesTestnetClient;
-import com.mawai.wiibquant.agent.binance.model.OrderResponse;
-import com.mawai.wiibquant.agent.binance.model.PlaceOrderRequest;
-import com.mawai.wiibquant.agent.binance.model.PositionRisk;
-import com.mawai.wiibquant.agent.binance.model.SimpleAck;
+import com.mawai.wiibquant.external.binance.BinanceFuturesTestnetClient;
+import com.mawai.wiibquant.external.binance.model.OrderResponse;
+import com.mawai.wiibquant.external.binance.model.PlaceOrderRequest;
+import com.mawai.wiibquant.external.binance.model.PositionRisk;
+import com.mawai.wiibquant.external.binance.model.SimpleAck;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -24,7 +24,7 @@ import java.util.Objects;
  * Binance Testnet 手动交易：上线/联调前人工开平仓冒烟，验证下单链路(签名→下单→持仓)通不通。
  *
  * <p>仅 admin(userId==1) 可调；symbol 受 {@link BinanceFuturesTestnetClient} 白名单约束；市价+限价都支持。
- * 与自动策略执行 {@link com.mawai.wiibquant.agent.strategy.execution.TestnetExecutionService} 互不感知，
+ * 与自动策略执行 {@link com.mawai.wiibquant.strategy.execution.TestnetExecutionService} 互不感知，
  * 手动冒烟期间建议关闭 strategy.execution.enabled，避免两套状态机互相干扰。</p>
  */
 @Slf4j

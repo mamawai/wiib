@@ -5,10 +5,12 @@ import com.mawai.wiibcommon.dto.FuturesOpenRequest;
 import com.mawai.wiibcommon.dto.FuturesOrderResponse;
 import com.mawai.wiibcommon.dto.FuturesPositionDTO;
 import com.mawai.wiibcommon.dto.FuturesStopLossRequest;
+import com.mawai.wiibcommon.dto.FuturesTakeProfitRequest;
 import com.mawai.wiibcommon.entity.User;
 import com.mawai.wiibcommon.enums.ErrorCode;
 import com.mawai.wiibcommon.exception.BizException;
 import com.mawai.wiibcommon.util.Result;
+import com.mawai.wiibsim.service.AccountResetService;
 import com.mawai.wiibsim.service.FuturesRiskService;
 import com.mawai.wiibsim.service.FuturesTradingService;
 import com.mawai.wiibsim.service.UserService;
@@ -41,6 +43,7 @@ public class InternalFuturesTradeController {
     private final FuturesTradingService tradingService;
     private final FuturesRiskService riskService;
     private final UserService userService;
+    private final AccountResetService accountResetService;
 
     @PostMapping("/{userId}/open")
     public Result<FuturesOrderResponse> open(@PathVariable Long userId, @RequestBody FuturesOpenRequest request) {
@@ -56,6 +59,13 @@ public class InternalFuturesTradeController {
     @PostMapping("/{userId}/stop-loss")
     public Result<Void> setStopLoss(@PathVariable Long userId, @RequestBody FuturesStopLossRequest request) {
         riskService.setStopLoss(userId, request);
+        return Result.ok();
+    }
+
+    /** 修改止盈（AI Trader 让利润奔跑：有利方向移动目标位）。 */
+    @PostMapping("/{userId}/take-profit")
+    public Result<Void> setTakeProfit(@PathVariable Long userId, @RequestBody FuturesTakeProfitRequest request) {
+        riskService.setTakeProfit(userId, request);
         return Result.ok();
     }
 
@@ -105,5 +115,15 @@ public class InternalFuturesTradeController {
                                                      @RequestParam BigDecimal initialBalance) {
         User user = userService.ensureQuantAccount(username, initialBalance);
         return Result.ok(Map.of("userId", user.getId(), "balance", user.getBalance()));
+    }
+
+    /**
+     * 量化子账户销户（AI Trader 过期轮次清理）：交易数据+账户行一并删；账户不存在视为成功（幂等）。
+     * 只认 ai_trader_ 前缀的量化建号，护栏在 {@link AccountResetService#deleteQuantAccount}。
+     */
+    @PostMapping("/delete-account")
+    public Result<Void> deleteAccount(@RequestParam String username) {
+        accountResetService.deleteQuantAccount(username);
+        return Result.ok();
     }
 }

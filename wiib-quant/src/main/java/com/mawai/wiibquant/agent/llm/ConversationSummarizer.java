@@ -30,11 +30,12 @@ import java.util.concurrent.CompletableFuture;
  * 压缩后的结构（借鉴 spring-ai-alibaba SummarizationHook）：
  * <pre>
  * [首条用户消息]  ← 原文保留，摘要再怎么压也不该丢掉"用户到底要什么"
- * [SystemMessage: 摘要]
+ * [SystemMessage: 摘要（分段追加，老段落原样留着）]
  * [最近 N 条消息] ← 原文保留
  * </pre>
- * 两处针对本项目的改动：token 估算按中英文分别校准（框架一律 charCount/4，中文会低估约 4 倍），
- * 摘要提示词改中文（对话本身是中文，英文指令压缩中文效果差）。
+ * 三处针对本项目的改动：token 估算按中英文分别校准（框架一律 charCount/4，中文会低估约 4 倍）；
+ * 摘要提示词改中文（对话本身是中文，英文指令压缩中文效果差）；摘要按段落追加而不是被反复重压
+ * （摘要套摘要几轮下来早期事实就没了，且除首条用户消息外再无原文锚点可归因）。
  */
 @Slf4j
 public class ConversationSummarizer implements NodeHook.BeforeCall<MessagesState<Message>> {
@@ -47,8 +48,12 @@ public class ConversationSummarizer implements NodeHook.BeforeCall<MessagesState
 
             对话历史：
             %s""";
+    /** 摘要段落分隔标记，同时充当"这条是摘要"的段数计数依据 */
+    private static final String SEGMENT_MARK = "── 第";
     /** 切点前后各扫这么多条，找是否有跨越切点的工具调用配对 */
     private static final int TOOL_PAIR_SEARCH_RANGE = 5;
+    /** 单段工具内容进摘要输入的字数上限：深研判一次回包几百KB，不截断的话摘要输入自己就先爆了 */
+    private static final int TOOL_TEXT_LIMIT = 1200;
 
     private final ChatModel summaryModel;
     private final int thresholdTokens;
@@ -75,6 +80,11 @@ public class ConversationSummarizer implements NodeHook.BeforeCall<MessagesState
         }
         try {
             List<Message> compressed = compress(messages, cutoff);
+            if (compressed.isEmpty()) {
+                // 切点前只剩首条用户消息与老摘要：没有新原文可压，压了也是白烧浅模型的钱
+                log.warn("[Summarize] 无新原文可压，跳过 tokens={} messages={}", tokens, messages.size());
+                return CompletableFuture.completedFuture(Map.of());
+            }
             log.info("[Summarize] 压缩 {} 条 → {} 条（原 ~{} tokens）", messages.size(), compressed.size(), tokens);
             return CompletableFuture.completedFuture(
                     Map.of("messages", new AppenderChannel.ReplaceAllWith<>(compressed)));
@@ -85,33 +95,98 @@ public class ConversationSummarizer implements NodeHook.BeforeCall<MessagesState
         }
     }
 
+    /** 返回空列表 = 没有新原文可压（调用方据此跳过本次压缩） */
     private List<Message> compress(List<Message> messages, int cutoff) {
         UserMessage firstUser = messages.stream()
                 .filter(UserMessage.class::isInstance).map(UserMessage.class::cast)
                 .findFirst().orElse(null);
 
+        SystemMessage previousSummary = null;
         List<Message> toSummarize = new ArrayList<>();
         for (int i = 0; i < cutoff; i++) {
-            if (messages.get(i) != firstUser) {
-                toSummarize.add(messages.get(i));
+            Message message = messages.get(i);
+            if (message == firstUser) {
+                continue;
             }
+            // 上次压缩留下的摘要靠固定前缀认出来，原样留着不再压第二遍——
+            // 它在 index 1，不挑出来的话每次压缩都会把它再揉一遍，几轮后早期事实彻底消失且无从归因
+            if (previousSummary == null && message instanceof SystemMessage system
+                    && system.getText() != null && system.getText().startsWith(SUMMARY_PREFIX)) {
+                previousSummary = system;
+                continue;
+            }
+            toSummarize.add(message);
+        }
+        if (toSummarize.isEmpty()) {
+            return List.of();
         }
 
         List<Message> compressed = new ArrayList<>();
         if (firstUser != null) {
             compressed.add(firstUser);
         }
-        compressed.add(new SystemMessage(SUMMARY_PREFIX + "\n" + summarize(toSummarize)));
+        compressed.add(new SystemMessage(appendSegment(previousSummary, summarize(toSummarize))));
         compressed.addAll(messages.subList(cutoff, messages.size()));
         return compressed;
+    }
+
+    /** 老摘要整段原样留下，新的一段接在后面并标号——分段是为了归因（第1段最早），不是把历史越揉越糊 */
+    private static String appendSegment(SystemMessage previousSummary, String freshSummary) {
+        String head = previousSummary == null ? SUMMARY_PREFIX : previousSummary.getText();
+        return head + "\n" + SEGMENT_MARK + (countSegments(head) + 1) + "段 ──\n" + freshSummary;
+    }
+
+    private static int countSegments(String summaryText) {
+        int count = 0;
+        for (int i = summaryText.indexOf(SEGMENT_MARK); i >= 0;
+             i = summaryText.indexOf(SEGMENT_MARK, i + SEGMENT_MARK.length())) {
+            count++;
+        }
+        return count;
     }
 
     private String summarize(List<Message> messages) {
         StringBuilder text = new StringBuilder();
         for (Message message : messages) {
-            text.append(roleOf(message)).append("：").append(message.getText() == null ? "" : message.getText()).append("\n");
+            text.append(roleOf(message)).append("：").append(textOf(message)).append("\n");
         }
         return summaryModel.call(new Prompt(SUMMARY_PROMPT.formatted(text))).getResult().getOutput().getText();
+    }
+
+    /**
+     * 摘要输入用的文本。ToolResponseMessage.getText() 恒为空串（构造时传的就是 ""），真内容在
+     * responseData()；AssistantMessage 的工具参数也不在正文里。阈值估算本就把这两样算进去了——
+     * 压缩是被工具结果的体积撑触发的，只读 getText() 等于把行情数字和研判结论正好全扔掉。
+     */
+    static String textOf(Message message) {
+        if (message instanceof ToolResponseMessage toolResponse) {
+            StringBuilder text = new StringBuilder();
+            for (ToolResponseMessage.ToolResponse response : toolResponse.getResponses()) {
+                if (!text.isEmpty()) {
+                    text.append('\n');
+                }
+                text.append(response.name()).append(" → ").append(clip(response.responseData()));
+            }
+            return text.toString();
+        }
+        if (message instanceof AssistantMessage assistant) {
+            StringBuilder text = new StringBuilder(assistant.getText() == null ? "" : assistant.getText());
+            for (AssistantMessage.ToolCall toolCall : assistant.getToolCalls()) {
+                if (!text.isEmpty()) {
+                    text.append('\n');
+                }
+                text.append("调用 ").append(toolCall.name()).append(' ').append(clip(toolCall.arguments()));
+            }
+            return text.toString();
+        }
+        return message.getText() == null ? "" : message.getText();
+    }
+
+    private static String clip(String text) {
+        if (text == null) {
+            return "";
+        }
+        return text.length() <= TOOL_TEXT_LIMIT ? text : text.substring(0, TOOL_TEXT_LIMIT) + "…（已截断）";
     }
 
     private static String roleOf(Message message) {
@@ -174,8 +249,10 @@ public class ConversationSummarizer implements NodeHook.BeforeCall<MessagesState
     /**
      * token 估算：CJK 字符按 1 字≈1 token，其余按 4 字符≈1 token。
      * 框架自带的计数器一律 charCount/4，中文会低估约 4 倍——阈值设 6000 实际到 20000+ 才触发。
+     * <p>
+     * public 是给 {@code ChatTurnRunner} 打轮次指标用的（跨包）。只是估算，不是计费口径。
      */
-    static int estimateTokens(List<Message> messages) {
+    public static int estimateTokens(List<Message> messages) {
         int total = 0;
         for (Message message : messages) {
             total += estimateTokens(message.getText());

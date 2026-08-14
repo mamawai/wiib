@@ -605,69 +605,17 @@ export interface FeedStreamHealth {
 }
 
 // ========== P7 研判工作台 ==========
-/** 快照时间线曲线点（/ai/quant/snapshots/series） */
-export interface QuantSnapshotSeriesPoint {
-  closeTime: number;
-  lastPrice: number;
-  h6SigmaBps: number | null;
-  h12SigmaBps: number | null;
-  h24SigmaBps: number | null;
-  volState: string | null;
-  fragilityScore: number | null;
-  fragilityLevel: string | null;
-  /** 各腿已验证实际波幅 |return| bps；到期才有，故尾部按各自腿长天然缺（H24 缺最多） */
-  realizedH6AbsBps: number | null;
-  realizedH12AbsBps: number | null;
-  realizedH24AbsBps: number | null;
-}
-
-/** 深研判（quant_deep_analysis 实体透传） */
-export interface QuantDeepAnalysisView {
-  id: number;
-  symbol: string;
-  closeTime: number;
-  triggerSource: string;
-  snapshotId: number | null;
-  narrative: string;
-  /** {bullPct, rangePct, bearPct} 和=100 */
-  scenariosJson: string;
-  noDirection: boolean;
-  invalidation: string;
-  bullArgument: string;
-  bearArgument: string;
-  judgeReasoning: string;
-  newsContext: string | null;
-  createdAt: string;
-}
-
-/** 记分卡（/ai/quant/scorecard） */
-export interface ScorecardHorizon {
-  horizon: string;
-  samples: number;
-  avgQlike: number;
-  avgBaselineQlike: number;
-  /** (baseline-forecast)/baseline，>0=跑赢基准 */
-  qlikeImprovement: number;
-  qlikeWinRate: number;
-  volStateHitRate: number;
-}
-export interface Scorecard {
-  symbol: string;
-  windowDays: number;
-  runningDays: number;
-  totalSamples: number;
-  horizons: ScorecardHorizon[];
-  note: string | null;
-}
-
 /** 工作台 SSE 事件（与 ChatWorkbenchController 协议一一对应） */
 export type WorkbenchEvent =
   | { type: 'session'; sessionId: string }
   | { type: 'agent_start'; node: string; agent: string }
   | { type: 'token'; text: string; agent: string; role: 'answer' | 'process' }
   | { type: 'progress'; text: string }
-  | { type: 'hitl_request'; sessionId: string; symbol: string; reason: string; resumeMessage: string }
-  | { type: 'done'; sessionId: string; answer: string }
+  // requestId：这张卡的唯一标识，点同意/拒绝时原样回传，服务端据此确认"点的是哪张卡"
+  | { type: 'hitl_request'; sessionId: string; symbol: string; reason: string; requestId: string; resumeMessage: string }
+  // deferred=true：让位收尾（专家还在取数就来了新消息），answer 只是过渡话术；
+  // 真答案由后端补答轮落历史，前端靠 status 轮询等它落库后整体回放补显
+  | { type: 'done'; sessionId: string; answer: string; deferred?: boolean }
   | { type: 'error'; message: string };
 
 // ========== 策略账户监控 ==========
@@ -708,6 +656,27 @@ export interface WorkbenchChatMessage {
   createdAt: number;
 }
 
+/** 我的对话端点配置（BYOK）。key 只回尾 4 位，明文不出服务端 */
+export interface LlmConfigView {
+  apiProtocol: string;
+  baseUrl: string;
+  model: string;
+  lightModel: string | null;
+  /** none/low/medium/high，null=不传给上游走模型默认 */
+  reasoningEffort: string | null;
+  apiKeyTail: string;
+}
+
+/** 保存/检测/探测三个端点共用这个体；apiKey 传空=沿用已存的 */
+export interface LlmConfigSaveRequest {
+  apiProtocol: string;
+  baseUrl: string;
+  model: string;
+  lightModel?: string;
+  reasoningEffort?: string;
+  apiKey: string;
+}
+
 /** 策略×币种实时信号状态快照（/ai/strategies/signals）：一句话状态 + 有序指标表 */
 export interface StrategySignalState {
   strategyId: string;
@@ -716,23 +685,162 @@ export interface StrategySignalState {
   metrics: Record<string, string>;
 }
 
-/** 最新数值快照（quant_snapshot 实体透传，/ai/quant/snapshots/latest） */
-export interface QuantSnapshotView {
+// ========== AI Trader 竞技场 ==========
+
+/** trader 公开视图（竞技场任何登录用户可见） */
+export interface TraderPublicView {
   id: number;
+  name: string;
+  model: string;
+  status: 'PAUSED' | 'RUNNING' | 'LIQUIDATED';
+  pausedReason: string | null;
+  symbols: string;
+  intervalCode: string;
+  roundNo: number;
+  equity: number;
+  pnlPct: number;
+  mine: boolean;
+}
+
+/** 主人视图：公开视图 + 配置回显（key 只回尾4位） */
+export interface TraderOwnerView {
+  pub: TraderPublicView;
+  apiProtocol: string;
+  baseUrl: string;
+  customPrompt: string | null;
+  apiKeyTail: string;
+  useDefaultPrompt: boolean;
+  spec: TraderSpec;
+  /** 波动哨兵警报开关（仅 1h/4h 档生效） */
+  alertEnabled: boolean;
+  /** 警报灵敏度系数 >=1 只能调高：生效阈值 = 每币基准 x 系数 */
+  alertThresholdMult: number;
+  /** 每日复盘开关：reviewer 日线边界复盘写 REVIEW 行并整理记忆笔记 */
+  reviewEnabled: boolean;
+  /** 同侪学习开关：learning agent 在全体复盘完成后向同侪学习写 LEARN 行并整理学习笔记 */
+  learningEnabled: boolean;
+}
+
+/**
+ * 仓位规格：主人设的硬参数，模型只能遵守不能评价。
+ * 区间是"允许集合"而非上限——配 50~100 时模型选 20 也会被护栏拒。
+ */
+export interface TraderSpec {
+  /** 杠杆区间，1~125；实际可用还受交易所按名义价值分档限制 */
+  leverageMin: number;
+  leverageMax: number;
+  /** 单笔保证金占权益%区间，0.1~100；只约束开新仓，加仓量由模型自己斟酌 */
+  marginPctMin: number;
+  marginPctMax: number;
+  /** 允许同时持有多个仓位；关=全账户至多一仓（挂单也占坑） */
+  allowMultiPosition: boolean;
+  /** 允许同币多空双开；仅在 allowMultiPosition 开启时有意义 */
+  allowHedge: boolean;
+  /** 允许模型自主加仓；关=转待确认请求 */
+  allowSelfAdd: boolean;
+  /** 允许模型自主减仓/平仓；关=转请求。止损止盈自动触发不受影响 */
+  allowSelfReduce: boolean;
+}
+
+/** 待确认的加仓/减仓请求：卡片给"请求时价"，前端另配实时价对照 */
+export interface TraderRequestView {
+  id: number;
+  /** ADD=加仓 / REDUCE=减仓 */
+  type: 'ADD' | 'REDUCE';
   symbol: string;
-  closeTime: number;
-  lastPrice: number;
-  /** {H6:{sigmaBps,percentile,tier,volState,lowCut,highCut,regime,regimeConfidence},H12,H24} */
-  volLegsJson: string;
-  regime: string | null;
-  regimeConfidence: number | null;
-  fragilityScore: number;
-  fragilityLevel: string;
-  fragilityDirection: string;
-  fragilityHeadline: string;
-  signalPanelJson: string;
-  qualityFlagsJson: string;
+  side: string;
+  positionId: number;
+  quantity: number;
+  leverage: number | null;
+  requestPrice: number;
+  reason: string;
+  createdAt: number;
+}
+
+/** 计划修订记录（revisionsJson 解析后）：修改必须留痕带理由 */
+export interface PlanRevision {
+  time: number;
+  type: string;
+  change: string;
+  reason: string;
+}
+
+/** 持仓交易计划：开仓立的论点/失效条件/原始快照 + 修订历史；当前生效止损止盈以仓位为准 */
+export interface AiTraderPlanView {
+  id: number;
+  traderId: number;
+  roundNo: number;
+  symbol: string;
+  side: 'LONG' | 'SHORT';
+  playType: string | null;
+  signalsUsed: string | null;
+  invalidationCondition: string;
+  entryPrice: number | null;
+  stopLossPrice: number | null;
+  takeProfitPrice: number | null;
+  openedWakeTime: number;
+  /** [{time,type,change,reason}] */
+  revisionsJson: string | null;
+}
+
+/** trader 详情：公开视图 + 实时持仓/挂单 + 各持仓交易计划 */
+export interface TraderDetailView {
+  trader: TraderPublicView;
+  positions: FuturesPosition[];
+  pendingOrders: FuturesOrder[];
+  plans: AiTraderPlanView[];
+}
+
+/** 每次唤醒一条决策（竞技场时间线） */
+export interface AiTraderDecisionView {
+  id: number;
+  traderId: number;
+  roundNo: number;
+  wakeTime: number;
+  intervalCode: string;
+  /**
+   * TRADE=例行K线唤醒 ALERT=波动哨兵警报唤醒 MANUAL=主人手动唤醒（对话轨 wake_trader）
+   * REVIEW=每日复盘（reasoning=复盘全文，无equity） LEARN=向同侪学习（reasoning=学习全文，无equity）
+   */
+  kind: 'TRADE' | 'ALERT' | 'MANUAL' | 'REVIEW' | 'LEARN';
+  status: 'OK' | 'ERROR' | 'SKIPPED';
+  equity: number | null;
+  reasoning: string | null;
+  /** [{tool,args,status,result/rejected/error}...] */
+  actionsJson: string | null;
+  toolCalls: number;
+  /** 本轮模型调用次数：ReAct 是循环，一次唤醒会调很多次 */
+  modelCalls: number | null;
+  /** token 合计；null=上游端点没返回 usage（BYOK 网关各不相同），不是 0，展示成「—」 */
+  promptTokens: number | null;
+  completionTokens: number | null;
+  totalTokens: number | null;
+  latencyMs: number | null;
+  error: string | null;
   createdAt: string;
+}
+
+export interface TraderEquityPoint {
+  wakeTime: number;
+  equity: number;
+}
+
+/** 创建/改配置入参（apiKey 改配置时传空=不换） */
+export interface TraderUpsertRequest {
+  name: string;
+  symbols: string;
+  intervalCode: string;
+  customPrompt: string | null;
+  apiProtocol: string;
+  baseUrl: string;
+  model: string;
+  apiKey: string;
+  useDefaultPrompt: boolean;
+  spec: TraderSpec;
+  alertEnabled: boolean;
+  alertThresholdMult: number;
+  reviewEnabled: boolean;
+  learningEnabled: boolean;
 }
 
 /** 重要快讯（BlockBeats 缓存透传，plain 为脱 HTML 纯文本） */
@@ -895,13 +1003,28 @@ export interface BacktestStrategyMeta {
 
 export interface BacktestTaskStatus {
   taskId: string;
-  state: 'RUNNING' | 'DONE' | 'FAILED';
+  state: 'QUEUED' | 'RUNNING' | 'DONE' | 'FAILED';
   strategyId: string;
   symbol: string;
   barsDone: number;
   totalBars: number;
   warmupBars: number;
   error: string | null;
+  /** 排队第几位；非 QUEUED 恒 0 */
+  queuePos: number;
+}
+
+/** 手动复盘数据源：本地 5m K 线覆盖范围（随机盲测在此区间抽起点） */
+export interface ReplayCoverage {
+  symbol: string;
+  earliestMs: number;
+  latestMs: number;
+}
+
+/** 本地历史 K 线区间拉取：rows = [openTime, open, high, low, close, volume] */
+export interface HistoryKlinesPayload {
+  total: number;
+  rows: number[][];
 }
 
 /** 工作记录事件：seq=任务内游标（=事件表下标），type 见后端 BacktestListener 常量 */

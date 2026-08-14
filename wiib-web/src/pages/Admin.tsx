@@ -14,9 +14,7 @@ import { RefreshCw, Calendar, Plus, Trash2, Pencil, Save, Ban } from 'lucide-rea
 
 const FUNCTION_LABELS: Record<string, string> = {
   behavior: '行为分析',
-  quant: '量化研判(深)',
-  'quant-light': '对话专家(浅)',
-  chat: '对话兜底',
+  'news-tagging': '新闻打标',
 };
 const MODEL_ASSIGNMENT_FUNCTIONS = new Set(Object.keys(FUNCTION_LABELS));
 
@@ -24,7 +22,6 @@ export function Admin() {
   const { user } = useUserStore();
   const { toast } = useToast();
   const [actionLoading, setActionLoading] = useState<string | null>(null);
-  const [quantSymbol, setQuantSymbol] = useState('BTCUSDT');
   const [interestRateDecimal, setInterestRateDecimal] = useState<number | null>(null);
   const [interestRatePct, setInterestRatePct] = useState('');
   const [rateLoading, setRateLoading] = useState(false);
@@ -103,6 +100,19 @@ export function Admin() {
     finally { setActionLoading(null); }
   };
 
+  /** 带结果文案的操作（活动结算等）：成功把返回的消息弹出来，失败弹错误 */
+  const handleMessageAction = async (action: () => Promise<string>, name: string) => {
+    setActionLoading(name);
+    try {
+      const message = await action();
+      toast(message, 'success');
+    } catch (e) {
+      toast((e as Error).message || '操作失败', 'error');
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
   const handleSaveRate = async () => {
     const pct = Number(interestRatePct);
     if (!Number.isFinite(pct) || pct < 0 || pct > 100) return;
@@ -179,17 +189,6 @@ export function Admin() {
     }
   };
 
-  const handleMessageAction = async (action: () => Promise<string>, name: string) => {
-    setActionLoading(name);
-    try {
-      const message = await action();
-      toast(message, 'success');
-    } catch (e) {
-      toast((e as Error).message || '操作失败', 'error');
-    } finally {
-      setActionLoading(null);
-    }
-  };
 
   const maskKey = (key: string) => {
     if (key.length <= 8) return '****';
@@ -475,17 +474,6 @@ export function Admin() {
                   <Button variant="outline" className="h-9 text-xs" onClick={() => handleAction(adminApi.assetSnapshot, 'assetSnapshot')} disabled={actionLoading !== null}>资产快照</Button>
                   {/* 活动结算：end_at 之后才会成功（服务端校验），幂等可重点 */}
                   <Button variant="outline" className="h-9 text-xs" onClick={() => void handleMessageAction(() => adminApi.settleCampaign().then(n => `活动已结算，生成 ${n} 行奖励`), 'settleCampaign')} disabled={actionLoading !== null}>结算 LDC 活动</Button>
-                </div>
-              </div>
-              {/* AI 量化 */}
-              <div>
-                <div className="text-xs text-muted-foreground mb-2">AI 量化</div>
-                <div className="space-y-2">
-                  <Input value={quantSymbol} onChange={e => setQuantSymbol(e.target.value.toUpperCase())} placeholder="币种，如 BTCUSDT" className="h-9" />
-                  <div className="grid grid-cols-2 gap-2">
-                    <Button variant="outline" className="h-9 text-xs" onClick={() => { const sym = quantSymbol.trim(); if (sym) void handleMessageAction(() => adminApi.triggerQuant(sym), 'triggerQuant'); }} disabled={actionLoading !== null || !quantSymbol.trim()}>触发量化分析</Button>
-                    <Button variant="outline" className="h-9 text-xs" onClick={() => { const sym = quantSymbol.trim(); if (sym) void handleMessageAction(() => adminApi.triggerQuantVerification(sym), 'triggerQuantVerification'); }} disabled={actionLoading !== null || !quantSymbol.trim()}>触发预测验证</Button>
-                  </div>
                 </div>
               </div>
             </CardContent>

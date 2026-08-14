@@ -8,7 +8,7 @@ import { Card, CardContent } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Skeleton } from '../components/ui/skeleton';
-import { CandleChart } from '../components/CandleChart';
+import { CandleChart, newsTagForSymbol } from '../components/CandleChart';
 import { FuturesActionButton } from '../components/FuturesActionButton';
 import { useQuantityAnimation } from '../components/coin/useQuantityAnimation';
 import { floorToStep } from '../components/coin/futuresMath';
@@ -185,6 +185,7 @@ function BStockDetail({ symbol }: { symbol: string }) {
               <CandleChart
                 symbol={symbol}
                 interval={CHART_TABS[chartTab].interval}
+                newsTag={newsTagForSymbol(symbol)}
                 klinesFn={bstockApi.klines}
                 streamLive={false}
                 onIntervalChange={iv => setChartTab(CHART_TABS.findIndex(t => t.interval === iv))}

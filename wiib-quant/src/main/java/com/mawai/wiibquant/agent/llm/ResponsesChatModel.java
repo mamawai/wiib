@@ -79,9 +79,10 @@ public class ResponsesChatModel implements ChatModel {
         this.temperature = temperature;
         this.reasoningEffort = reasoningEffort;
         this.toolCallingManager = toolCallingManager;
-        // 深研判单次回包可达数百KB，默认256KB codec上限不够
+        // 深研判单次回包可达数百KB，默认256KB codec上限不够。
+        // baseUrl 过 forResponses 剥掉手滑带上的 /v1——与 openai 协议路的 forSdk 同等容忍
         this.webClient = WebClient.builder()
-                .baseUrl(baseUrl)
+                .baseUrl(OpenAiBaseUrl.forResponses(baseUrl))
                 .defaultHeader(HttpHeaders.AUTHORIZATION, "Bearer " + apiKey)
                 .codecs(c -> c.defaultCodecs().maxInMemorySize(16 * 1024 * 1024))
                 .build();
@@ -356,8 +357,8 @@ public class ResponsesChatModel implements ChatModel {
                 //   always —— 每次都强制。单次结构化调用用（router 要的就是一个 tool_call）
                 //   first  —— 只强制首轮。ReactAgent 循环用，拿到工具结果后必须放开才收得了尾；
                 //             判据是"最后一条用户消息之后还没有 ToolResponseMessage"。
-                //             只看这一段：summarizer 子图与主图共享 state，它用过深研判工具后
-                //             TRM 会永留会话历史，扫全历史会让之后每个专家的首轮都被误判成非首轮
+                //             只看这一段：summarizer 用过深研判工具后 TRM 会随会话历史落库、
+                //             下一轮又被喂给专家，扫全历史会让之后每个专家的首轮都被误判成非首轮
                 // 没设过工具上下文时 getToolContext() 给的是 null（summarizer 就是这种）
                 Map<String, Object> toolContext = toolOptions.getToolContext();
                 Object always = toolContext == null ? null : toolContext.get(ResilientChatService.FORCE_TOOL_CHOICE);
@@ -379,8 +380,8 @@ public class ResponsesChatModel implements ChatModel {
 
     /**
      * 首轮判定：最后一条用户消息之后没有工具回执才算首轮。
-     * 只看这一段而非全历史——summarizer 子图与主图共享 state，它用过深研判工具后
-     * ToolResponseMessage 永留会话历史，扫全历史会让之后每个专家的首轮强制全部失效。
+     * 只看这一段而非全历史——summarizer 用过深研判工具后 ToolResponseMessage 会随会话历史落库、
+     * 下一轮原样喂给专家，扫全历史会让之后每个专家的首轮强制全部失效。
      */
     static boolean isFirstTurn(List<Message> history) {
         for (int i = history.size() - 1; i >= 0; i--) {
@@ -406,9 +407,16 @@ public class ResponsesChatModel implements ChatModel {
 
     // ========== 响应解析 ==========
 
-    private ChatResponse parseResponse(JSONObject response) {
-        if ("failed".equals(response.getString("status"))) {
+    ChatResponse parseResponse(JSONObject response) {
+        String status = response.getString("status");
+        if ("failed".equals(status)) {
             throw new NonTransientAiException("Responses API 失败: " + extractErrorMessage(response));
+        }
+        // incomplete = 服务端截断（多为 max_output_tokens 到顶），output 里只有半截正文。
+        // 当正常收尾发 STOP 的话，被腰斩的【本轮结论】会以 status=OK 落库，下一轮还被当
+        // "上一轮的承诺"回注给模型做检验基准。与流式路径（response.incomplete）同口径判失败
+        if ("incomplete".equals(status)) {
+            throw new NonTransientAiException("Responses API 截断: " + extractErrorMessage(response));
         }
         JSONArray output = response.getJSONArray("output");
         String text = extractOutputText(output);

@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
+import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.util.UriComponentsBuilder;
 
@@ -27,9 +28,67 @@ public class BinanceRestClient extends BaseRestTemplateConfig {
     private final RestTemplate restTemplate;
     private final BinanceProperties props;
 
+    /** 冷却时长：Binance 的 418 最短 2 分钟，冷却期设短了等于没熔断 */
+    public static final long COOLDOWN_MS = 120_000L;
+
+    /** 墙钟注入点：熔断的冷却判断要可测 */
+    java.util.function.LongSupplier nowMs = System::currentTimeMillis;
+
+    /**
+     * 熔断截止时刻（0=未熔断）。多线程共享用 volatile；写入取 Math.max 只往后推——
+     * 多个线程可能同时撞 429，先算出来的小值别把后算出来的大值盖掉、把冷却期缩短。
+     * （读改写非原子，极端交错下仍可能丢一次更新；熔断是尽力而为，够用。）
+     */
+    private volatile long blockedUntil = 0L;
+
     public BinanceRestClient(BinanceProperties props) {
         this.props = props;
         this.restTemplate = createRestTemplate(5000, 10000);
+    }
+
+    /**
+     * 裸网络调用，也是测试的接缝（Binance 请求经 getGuarded 进来，第三方 API 直接调）。
+     * 这里必须走 {@code getForObject(URI, ...)}：
+     * String 重载会过 RestTemplate 的 UriTemplateHandler（默认 URI_COMPONENT 模式）再编码一遍，
+     * 把已经 encode 过的 %5B 变成 %255B，Binance 收到字面量直接 400。
+     */
+    protected String get(String uri) {
+        return restTemplate.getForObject(URI.create(uri), String.class);
+    }
+
+    /**
+     * Binance 取数的唯一出口。撞到 429/418 就熔断一段时间：
+     * 继续按原速打只会把"慢点"催成"封 IP"，而封的是整个进程的出口 IP——
+     * 策略执行轨和对话轨共用同一个客户端，一起瘫。
+     * 失败/熔断期一律返回 null，下游（CollectDataNode.safeGet / MarketDataService.rawCached）已按 null 降级。
+     */
+    private String getGuarded(String uri) {
+        long now = nowMs.getAsLong();
+        if (now < blockedUntil) {
+            // WS 回退轮询会按 symbol 循环调用，冷却期内 warn 会刷屏；熔断触发那一刻已经 error 记过一次了
+            log.debug("Binance 限流冷却中，跳过请求（剩余 {}ms）: {}", blockedUntil - now, uri);
+            return null;
+        }
+        try {
+            return get(uri);
+        } catch (HttpClientErrorException e) {
+            int code = e.getStatusCode().value();
+            if (code == 429 || code == 418) {
+                // now 是入口处读的，这里必须现读：请求本身可能耗了 10s，用旧时间戳会把冷却期截短
+                blockedUntil = Math.max(blockedUntil, nowMs.getAsLong() + COOLDOWN_MS);
+                log.error("Binance 限流 {}，熔断 {}ms —— 继续打会升级成 IP ban 并连累策略轨", code, COOLDOWN_MS);
+            } else {
+                log.warn("Binance 请求失败 {}: {}", code, uri);
+            }
+            return null;
+        } catch (Exception e) {
+            log.warn("Binance 请求异常: {}", uri, e);
+            return null;
+        }
+    }
+
+    private String getGuarded(URI uri) {
+        return getGuarded(uri.toString());
     }
 
     /**
@@ -50,7 +109,7 @@ public class BinanceRestClient extends BaseRestTemplateConfig {
         }
         URI uri = builder.build().toUri();
         log.info("Binance REST klines: {}", uri);
-        return restTemplate.getForObject(uri, String.class);
+        return getGuarded(uri);
     }
 
     public String getKlinesLight(String symbol, String interval, int limit, Long endTime) {
@@ -95,7 +154,7 @@ public class BinanceRestClient extends BaseRestTemplateConfig {
                 .fromUriString(props.getRestBaseUrl() + "/api/v3/ticker/price")
                 .queryParam("symbol", symbol)
                 .build().toUri();
-        return restTemplate.getForObject(uri, String.class);
+        return getGuarded(uri);
     }
 
     /**
@@ -129,13 +188,8 @@ public class BinanceRestClient extends BaseRestTemplateConfig {
         String baseUrl = props.getFuturesRestBaseUrl();
         if (baseUrl == null || baseUrl.isBlank()) return null;
         URI uri = UriComponentsBuilder.fromUriString(baseUrl + "/fapi/v1/exchangeInfo").build().toUri();
-        try {
-            log.info("Binance REST futures exchangeInfo");
-            return restTemplate.getForObject(uri, String.class);
-        } catch (Exception e) {
-            log.warn("获取合约exchangeInfo失败: {}", e.getMessage());
-            return null;
-        }
+        log.info("Binance REST futures exchangeInfo");
+        return getGuarded(uri);
     }
 
     /** 现货 exchangeInfo（按 symbols 过滤，含 LOT_SIZE/NOTIONAL 过滤器）；失败返回 null。 */
@@ -147,13 +201,8 @@ public class BinanceRestClient extends BaseRestTemplateConfig {
                 .queryParam("symbols", arr)
                 .encode()
                 .build().toUri();
-        try {
-            log.info("Binance REST spot exchangeInfo: {} symbols", symbols.size());
-            return restTemplate.getForObject(uri, String.class);
-        } catch (Exception e) {
-            log.warn("获取现货exchangeInfo失败: {}", e.getMessage());
-            return null;
-        }
+        log.info("Binance REST spot exchangeInfo: {} symbols", symbols.size());
+        return getGuarded(uri);
     }
 
     /** premiumIndex 单次响应同时含 markPrice/indexPrice/lastFundingRate，mark 价与资金费率调用方共用。 */
@@ -164,7 +213,7 @@ public class BinanceRestClient extends BaseRestTemplateConfig {
                 .fromUriString(baseUrl + "/fapi/v1/premiumIndex")
                 .queryParam("symbol", symbol)
                 .build().toUri();
-        return restTemplate.getForObject(uri, String.class);
+        return getGuarded(uri);
     }
 
     /**
@@ -180,7 +229,7 @@ public class BinanceRestClient extends BaseRestTemplateConfig {
                     .queryParam("interval", "1m")
                     .queryParam("limit", 2)
                     .build().toUri();
-            String json = restTemplate.getForObject(uri, String.class);
+            String json = getGuarded(uri);
             return getHighLow(json);
         } catch (Exception e) {
             log.error("获取Mark Price高低价失败 symbol={}", symbol, e);
@@ -197,7 +246,7 @@ public class BinanceRestClient extends BaseRestTemplateConfig {
                 .queryParam("symbol", symbol)
                 .build().toUri();
         log.info("Binance REST 24hTicker: {}", uri);
-        return restTemplate.getForObject(uri, String.class);
+        return getGuarded(uri);
     }
 
     /**
@@ -212,13 +261,8 @@ public class BinanceRestClient extends BaseRestTemplateConfig {
                 .queryParam("symbols", arr)
                 .encode()
                 .build().toUri();
-        try {
-            log.info("Binance REST 24hTickers: {} symbols", symbols.size());
-            return restTemplate.getForObject(uri, String.class);
-        } catch (Exception e) {
-            log.warn("获取多symbol 24h行情失败: {}", e.getMessage());
-            return null;
-        }
+        log.info("Binance REST 24hTickers: {} symbols", symbols.size());
+        return getGuarded(uri);
     }
 
 
@@ -228,12 +272,7 @@ public class BinanceRestClient extends BaseRestTemplateConfig {
                 .queryParam("symbol", symbol)
                 .queryParam("limit", Math.min(limit, 400))
                 .build().toUri();
-        try {
-            return restTemplate.getForObject(uri, String.class);
-        } catch (Exception e) {
-            log.warn("获取{}盘口失败: {}", symbol, e.getMessage());
-            return null;
-        }
+        return getGuarded(uri);
     }
 
     /**
@@ -254,12 +293,7 @@ public class BinanceRestClient extends BaseRestTemplateConfig {
                 .queryParam("period", period)
                 .queryParam("limit", limit)
                 .build().toUri();
-        try {
-            return restTemplate.getForObject(uri, String.class);
-        } catch (Exception e) {
-            log.warn("获取{}OI历史失败: {}", symbol, e.getMessage());
-            return null;
-        }
+        return getGuarded(uri);
     }
 
     public String getLongShortRatio(String symbol) {
@@ -271,13 +305,8 @@ public class BinanceRestClient extends BaseRestTemplateConfig {
                 .queryParam("period", "5m")
                 .queryParam("limit", LONG_SHORT_RATIO_5M_LIMIT)
                 .build().toUri();
-        try {
-            log.info("Binance REST longShortRatio: {}", uri);
-            return restTemplate.getForObject(uri, String.class);
-        } catch (Exception e) {
-            log.warn("获取{}多空比失败: {}", symbol, e.getMessage());
-            return null;
-        }
+        log.info("Binance REST longShortRatio: {}", uri);
+        return getGuarded(uri);
     }
 
     // ==================== 新增数据源 ====================
@@ -294,6 +323,12 @@ public class BinanceRestClient extends BaseRestTemplateConfig {
                 b -> b.queryParam("symbol", symbol).queryParam("period", period).queryParam("limit", limit));
     }
 
+    /**
+     * 恐惧贪婪指数打的是 alternative.me，不是 Binance，所以刻意绕开熔断器：
+     * 它是个免费公共 API，被它限流一次就冻结全部 Binance 行情 2 分钟（连策略自动交易轨一起），
+     * 拿不相干供应商的配额去停自家主链路，比这个任务要防的故障还糟。
+     * 失败仍归一成 null（CollectDataNode / MarketSeriesStore 都按 null 降级），只是不写 blockedUntil。
+     */
     public String getFearGreedIndex(int limit) {
         URI uri = UriComponentsBuilder
                 .fromUriString(FEAR_GREED_URL)
@@ -302,7 +337,7 @@ public class BinanceRestClient extends BaseRestTemplateConfig {
                 .build().toUri();
         try {
             log.info("FearGreed API: {}", uri);
-            return restTemplate.getForObject(uri, String.class);
+            return get(uri.toString());
         } catch (Exception e) {
             log.warn("获取恐惧贪婪指数失败: {}", e.getMessage());
             return null;
@@ -316,13 +351,8 @@ public class BinanceRestClient extends BaseRestTemplateConfig {
         UriComponentsBuilder builder = UriComponentsBuilder.fromUriString(baseUrl + endpoint);
         paramConfigurer.accept(builder);
         URI uri = builder.build().toUri();
-        try {
-            log.info("Binance REST {}: {}", logLabel, uri);
-            return restTemplate.getForObject(uri, String.class);
-        } catch (Exception e) {
-            log.warn("获取{}失败: {}", logLabel, e.getMessage());
-            return null;
-        }
+        log.info("Binance REST {}: {}", logLabel, uri);
+        return getGuarded(uri);
     }
 
     // ==================== 合约专用 API ====================
@@ -340,7 +370,7 @@ public class BinanceRestClient extends BaseRestTemplateConfig {
         }
         URI uri = builder.build().toUri();
         log.info("Binance futures klines: {}", uri);
-        return restTemplate.getForObject(uri, String.class);
+        return getGuarded(uri);
     }
 
     public String getFutures24hTicker(String symbol) {
@@ -351,7 +381,7 @@ public class BinanceRestClient extends BaseRestTemplateConfig {
                 .queryParam("symbol", symbol)
                 .build().toUri();
         log.info("Binance futures 24hTicker: {}", uri);
-        return restTemplate.getForObject(uri, String.class);
+        return getGuarded(uri);
     }
 
     public String getFuturesOrderbook(String symbol, int limit) {
@@ -362,12 +392,7 @@ public class BinanceRestClient extends BaseRestTemplateConfig {
                 .queryParam("symbol", symbol)
                 .queryParam("limit", Math.min(limit, 1000))
                 .build().toUri();
-        try {
-            return restTemplate.getForObject(uri, String.class);
-        } catch (Exception e) {
-            log.warn("获取{}合约盘口失败: {}", symbol, e.getMessage());
-            return null;
-        }
+        return getGuarded(uri);
     }
 
     public String getFundingRateHistory(String symbol, int limit) {
@@ -378,13 +403,8 @@ public class BinanceRestClient extends BaseRestTemplateConfig {
                 .queryParam("symbol", symbol)
                 .queryParam("limit", Math.min(limit, 100))
                 .build().toUri();
-        try {
-            log.info("Binance REST fundingRateHistory: {}", uri);
-            return restTemplate.getForObject(uri, String.class);
-        } catch (Exception e) {
-            log.warn("获取{}资金费率历史失败: {}", symbol, e.getMessage());
-            return null;
-        }
+        log.info("Binance REST fundingRateHistory: {}", uri);
+        return getGuarded(uri);
     }
 
     /**
@@ -401,13 +421,8 @@ public class BinanceRestClient extends BaseRestTemplateConfig {
                 .queryParam("endTime", endTime)
                 .queryParam("limit", Math.min(limit, 1000))
                 .build().toUri();
-        try {
-            log.info("Binance REST fundingRateHistory(start/end): {}", uri);
-            return restTemplate.getForObject(uri, String.class);
-        } catch (Exception e) {
-            log.warn("获取{}资金费率历史(start/end)失败: {}", symbol, e.getMessage());
-            return null;
-        }
+        log.info("Binance REST fundingRateHistory(start/end): {}", uri);
+        return getGuarded(uri);
     }
 
     private BigDecimal[] getHighLow(String json) throws JsonProcessingException {

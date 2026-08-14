@@ -5,8 +5,8 @@ import {
   type IChartApi, type ISeriesApi, type UTCTimestamp, type MouseEventParams,
   type DeepPartial, type HandleScrollOptions, type IPriceLine, type SeriesMarker,
 } from 'lightweight-charts';
-import { History, Layers, Magnet, Maximize2, Minimize2, Minus, MousePointer2, Slash, Trash2, Type } from 'lucide-react';
-import { futuresApi } from '../api';
+import { Eye, EyeOff, Globe, History, Layers, Magnet, Maximize2, Minimize2, Minus, MousePointer2, Slash, Trash2, Type } from 'lucide-react';
+import { futuresApi, quantApi, type NewsEventItem } from '../api';
 import { useKlineStream } from '../hooks/useKlineStream';
 import { useIsDark } from '../hooks/useIsDark';
 import { useFullscreen } from '../hooks/useFullscreen';
@@ -14,6 +14,7 @@ import { getCoinPriceDecimals } from '../lib/coinConfig';
 import { bollSeries, emaSeries, macdSeries, maSeries, rsiSeries } from '../lib/indicators';
 import type { ChartCtx } from '../lib/chartDrawings';
 import { useDrawings, type Tool } from './chart/useDrawings';
+import { NewsMarkersLayer } from './chart/NewsMarkersLayer';
 
 /** 一根 K：series 只用 OHLC，量/额留给气泡和成交量柱。 */
 interface Bar { time: number; openMs: number; open: number; high: number; low: number; close: number; volume: number; quote: number; }
@@ -393,7 +394,18 @@ const TOOL_BTNS: { k: Tool; icon: ReactNode; title: string }[] = [
   { k: 'text', icon: <Type className="w-3.5 h-3.5" />, title: '文字标注：点一下再输入' },
 ];
 
-export function CandleChart({ symbol, interval, limit = 300, visibleBars = 110, klinesFn = futuresApi.klines, streamLive = true, tick = null, indicators = false, onIntervalChange, positionOverlays, tradeMarks }: { symbol: string; interval: Interval; limit?: number; visibleBars?: number; klinesFn?: (symbol: string, interval: string, limit: number, endTime?: number) => Promise<number[][]>; streamLive?: boolean; tick?: { price: number; ts: number } | null; indicators?: boolean; onIntervalChange?: (i: Interval) => void; positionOverlays?: PositionOverlay[]; tradeMarks?: TradeMark[] }) {
+/** symbol → 新闻标签：BTCUSDT 映射 BTC，美股/商品代码在词表内的直接同名；词表外无标签=不挂新闻轨 */
+export function newsTagForSymbol(symbol: string): string | undefined {
+  if (symbol === 'BTCUSDT') return 'BTC';
+  return ['OIL', 'GOLD', 'COIN', 'MSTR', 'TSLA', 'NVDA'].includes(symbol) ? symbol : undefined;
+}
+
+/** 快讯是外部内容，进 innerHTML 前必须转义（标题/正文/URL 都不可信） */
+const esc = (s: string) => s.replace(/[&<>"']/g, c =>
+  ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string));
+const clip = (s: string, n: number) => (s.length > n ? s.slice(0, n) + '…' : s);
+
+export function CandleChart({ symbol, interval, limit = 300, visibleBars = 110, klinesFn = futuresApi.klines, streamLive = true, tick = null, indicators = false, onIntervalChange, positionOverlays, tradeMarks, newsTag }: { symbol: string; interval: Interval; limit?: number; visibleBars?: number; klinesFn?: (symbol: string, interval: string, limit: number, endTime?: number) => Promise<number[][]>; streamLive?: boolean; tick?: { price: number; ts: number } | null; indicators?: boolean; onIntervalChange?: (i: Interval) => void; positionOverlays?: PositionOverlay[]; tradeMarks?: TradeMark[]; newsTag?: string }) {
   const isDark = useIsDark();
   const rootRef = useRef<HTMLDivElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -438,6 +450,10 @@ export function CandleChart({ symbol, interval, limit = 300, visibleBars = 110, 
   const [showMarks, setShowMarks] = useState(() => localStorage.getItem('wiib-chart-trade-marks') === '1');
   const marksByTimeRef = useRef<Map<number, { b: number[]; s: number[] }>>(new Map());
   const markTipRef = useRef<HTMLDivElement>(null);
+  // 新闻标记：默认开（关一次记住）。globe 画在主图画布上（NewsMarkersLayer），随蜡烛同帧移动
+  const [showNews, setShowNews] = useState(() => localStorage.getItem('wiib-chart-news') !== '0');
+  const newsLayerRef = useRef<NewsMarkersLayer | null>(null);
+  const newsTipRef = useRef<HTMLDivElement>(null);
   const cdRef = useRef<HTMLDivElement>(null);
   /** 仓位参考线的悬浮小签（写在线上、贴着价格轴左侧），由 250ms 循环随缩放平移重新定位 */
   const posLabelElsRef = useRef<{ el: HTMLDivElement; price: number }[]>([]);
@@ -448,7 +464,7 @@ export function CandleChart({ symbol, interval, limit = 300, visibleBars = 110, 
   const live = useKlineStream(symbol, interval);
   const fs = useFullscreen(rootRef);
   const {
-    attach: attachDrawings, tool, setTool, magnet, setMagnet,
+    attach: attachDrawings, tool, setTool, magnet, setMagnet, hiddenAll, setHiddenAll,
     selected: hasSelection, count: drawCount, trash, textEdit, commitText, cancelText,
   } = useDrawings();
 
@@ -824,6 +840,87 @@ export function CandleChart({ symbol, interval, limit = 300, visibleBars = 110, 
     };
   }, [tradeMarks, showMarks, interval, chartEpoch]);
 
+  // 新闻标记：打标快讯按 K 线时间桶聚合，globe 悬在所属那根上方，点开看内容。
+  // 语义是"这根K线覆盖的时间段内发生过什么新闻"——按发稿时刻定位，不承诺行情因果。
+  // 标记画在主图画布上（NewsMarkersLayer 挂蜡烛 series）：与蜡烛同帧渲染，平移缩放零延迟；
+  // 弹窗仍是 DOM（富文本+可点链接，画布画不了），点击命中在 pointerdown 里主动 pick
+  useEffect(() => {
+    const wrap = wrapRef.current, candle = candleRef.current;
+    if (!newsTag || !showNews || !wrap || !candle) return;
+    let disposed = false;
+    const bucketMs = BUCKET_MS[interval];
+    /** time → 该桶的快讯组，点击标记时按命中的时间桶取内容 */
+    const groups = new Map<number, NewsEventItem[]>();
+    const layer = new NewsMarkersLayer(time => {
+      const i = idxRef.current.get(time);
+      return i == null ? null : barsRef.current[i].high;
+    });
+    layer.dark = isDarkRef.current;
+    candle.attachPrimitive(layer);
+    newsLayerRef.current = layer;
+
+    const fmtClock = (ms: number) => new Date(ms).toLocaleString('zh-CN',
+      { timeZone: 'Asia/Singapore', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+    const showPopup = (rect: { x: number; y: number; w: number }, events: NewsEventItem[]) => {
+      const tip = newsTipRef.current; if (!tip || !events.length) return;
+      tip.innerHTML = events.map(e =>
+        '<div style="padding:6px 0;border-bottom:1px solid rgba(0,0,0,.07)">'
+        + `<div style="color:#6b7280;font-weight:700;margin-bottom:2px">${fmtClock(e.publishedAt)} · ${esc(e.tags)}</div>`
+        + `<div style="color:#1f2328;font-weight:700;margin-bottom:2px">${esc(e.title)}</div>`
+        + `<div style="color:#374151">${esc(clip(e.content ?? '', 160))}</div>`
+        + (e.url ? `<a href="${esc(e.url)}" target="_blank" rel="noopener noreferrer" style="color:#2962ff;font-weight:700">源 ↗</a>` : '')
+        + '</div>').join('');
+      tip.style.display = 'block';
+      // 内容定了再量尺寸：横向对中标记并夹在图内，纵向优先弹标记上方、顶部放不下翻到下方
+      const W = wrap.clientWidth, tw = tip.offsetWidth, th = tip.offsetHeight;
+      const ix = rect.x + rect.w / 2, iy = rect.y;
+      tip.style.left = `${Math.min(Math.max(4, ix - tw / 2), W - tw - 4)}px`;
+      tip.style.top = `${iy - th - 8 >= 4 ? iy - th - 8 : iy + 26}px`;
+    };
+
+    // 窗口按内存上限的最远可翻历史算：翻到底标记也都在；服务端上限 500 条倒序保最近
+    quantApi.newsEvents(newsTag, Date.now() - bucketMs * MAX_BARS, Date.now() + bucketMs).then(events => {
+      if (disposed || !events.length) return;
+      for (const e of events) {
+        const time = toBarTime(Math.floor(e.publishedAt / bucketMs) * bucketMs);
+        const g = groups.get(time) ?? [];
+        g.push(e);
+        groups.set(time, g);
+      }
+      for (const g of groups.values()) g.sort((a, b) => a.publishedAt - b.publishedAt);
+      layer.markers = [...groups.entries()].map(([time, g]) => ({ time, count: g.length }));
+      layer.update();
+    }).catch(() => { /* 未登录/接口失败：没有标记而已，图表照常 */ });
+
+    // 点击命中：capture 在 document 上——点中标记时截住事件（LWC 的拖拽别跟着起步），
+    // 点在标记与弹窗之外的任何地方都收起弹窗
+    const onDown = (ev: PointerEvent) => {
+      const tip = newsTipRef.current;
+      const target = ev.target as Node;
+      if (tip && tip.style.display !== 'none' && tip.contains(target)) return;   // 弹窗内（链接等）放行
+      const paneCanvas = chartRef.current?.panes()[0]?.getHTMLElement()?.querySelector('canvas');
+      const r = paneCanvas?.getBoundingClientRect();
+      const hit = r ? layer.pick(ev.clientX - r.left, ev.clientY - r.top) : null;
+      if (hit !== null) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        const rect = layer.rects.get(hit);
+        if (rect) showPopup(rect, groups.get(hit) ?? []);
+        return;
+      }
+      if (tip && tip.style.display !== 'none') tip.style.display = 'none';
+    };
+    document.addEventListener('pointerdown', onDown, true);
+    return () => {
+      disposed = true;
+      document.removeEventListener('pointerdown', onDown, true);
+      newsLayerRef.current = null;
+      // 图整体重建时 series 已死，detach 会抛，吞掉即可（同成交标记的清理）
+      try { candle.detachPrimitive(layer); } catch { /* chart disposed */ }
+      if (newsTipRef.current) newsTipRef.current.style.display = 'none';
+    };
+  }, [newsTag, showNews, interval, chartEpoch]);
+
   // 「最新价 + 收盘倒计时」合体框：顶在价格轴上原生最新价标签的位置（原生标签已关），
   // 上行价格、下行倒计时，一个框解决"倒计时和价格分家"。底色跟当根蜡烛的涨跌走。
   // 250ms 循环重取 Y 坐标与文案，价格跳动/缩放平移都跟得上；顺带把仓位参考线的悬浮小签
@@ -886,6 +983,8 @@ export function CandleChart({ symbol, interval, limit = 300, visibleBars = 110, 
       grid: { vertLines: { color: grid }, horzLines: { color: grid } },
       rightPriceScale: { borderColor: border }, timeScale: { borderColor: border },
     });
+    const news = newsLayerRef.current;
+    if (news) { news.dark = isDark; news.update(); }
   }, [isDark]);
 
   // 外部价格 tick 驱动（streamLive=false）：桶对齐后更新/追加最后一根，量额保持历史值（价格流无量数据）
@@ -1041,6 +1140,21 @@ export function CandleChart({ symbol, interval, limit = 300, visibleBars = 110, 
           </div>
         )}
 
+        {/* 新闻标记开关：只有词表内标的（传了 newsTag）才出现 */}
+        {newsTag != null && (
+          <div className={group}>
+            <button type="button"
+                    onClick={() => {
+                      const v = !showNews;
+                      setShowNews(v);
+                      localStorage.setItem('wiib-chart-news', v ? '1' : '0');
+                    }}
+                    className={iconCls(showNews)} title="新闻标记：globe 悬在对应K线上方，点击看快讯内容">
+              <Globe className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
+
         {/* 仓位参考线开关：只有页面传了仓位数据才出现（现货/代币化美股页没有）。
             双开时每个仓位一个 chip，激活色跟方向色走，可单独藏掉某一边 */}
         {positionOverlays != null && (
@@ -1073,6 +1187,11 @@ export function CandleChart({ symbol, interval, limit = 300, visibleBars = 110, 
           <button type="button" onClick={() => setMagnet(!magnet)} className={iconCls(magnet)}
                   title={magnet ? '磁吸开：端点自动贴住最近的开/高/低/收' : '磁吸关：自由落点'}>
             <Magnet className="w-3.5 h-3.5" />
+          </button>
+          <button type="button" onClick={() => setHiddenAll(!hiddenAll)} disabled={!drawCount}
+                  title={hiddenAll ? '画线已隐藏，点击恢复显示' : '隐藏当前所有画线（不删除）'}
+                  className={`${iconCls(hiddenAll)} disabled:opacity-30 disabled:cursor-default disabled:hover:bg-transparent disabled:hover:text-muted-foreground`}>
+            {hiddenAll ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
           </button>
           <button type="button" onClick={trash} disabled={!hasSelection && !drawCount}
                   title={hasSelection ? '删除选中（Del）' : '清空本币种全部画线'}
@@ -1143,6 +1262,14 @@ export function CandleChart({ symbol, interval, limit = 300, visibleBars = 110, 
           background: 'rgba(246,246,244,.9)', backdropFilter: 'blur(6px)',
           border: '1px solid rgba(0,0,0,.08)', borderRadius: 8, padding: '7px 10px',
           font: '12px/1.7 ui-monospace, Consolas, monospace', minWidth: 130, boxShadow: '0 6px 20px rgba(0,0,0,.18)',
+        }} />
+        {/* 新闻图标的点击弹窗：时间+标题+摘要+源链接。链接要能点，pointerEvents 保持默认 */}
+        <div ref={newsTipRef} style={{
+          position: 'absolute', display: 'none', zIndex: 6,
+          background: 'rgba(246,246,244,.94)', backdropFilter: 'blur(6px)',
+          border: '1px solid rgba(0,0,0,.08)', borderRadius: 8, padding: '2px 12px',
+          font: '12px/1.55 ui-monospace, Consolas, monospace', width: 280, maxHeight: 240,
+          overflowY: 'auto', boxShadow: '0 6px 20px rgba(0,0,0,.18)',
         }} />
         {/* 「最新价 + 收盘倒计时」合体框：顶替原生最新价轴标签。
             左侧圆角贴轴（右缘与图表齐平）、价格行字号对齐轴刻度、倒计时行细线分隔，

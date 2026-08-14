@@ -1,16 +1,13 @@
 package com.mawai.wiibquant.agent.chat;
 
-import com.mawai.wiibquant.agent.config.AiAgentRuntime;
-import com.mawai.wiibquant.agent.config.AiAgentRuntimeManager;
+import com.mawai.wiibcommon.entity.UserLlmConfig;
+import com.mawai.wiibquant.agent.analysis.DeepAnalysisService;
 import com.mawai.wiibquant.agent.toolkit.MarketToolkit;
 import com.mawai.wiibquant.agent.toolkit.NewsToolkit;
-import com.mawai.wiibquant.agent.toolkit.QuantForecastToolkit;
-import org.bsc.langgraph4j.CompiledGraph;
-import org.bsc.langgraph4j.GraphRepresentation;
-import org.bsc.langgraph4j.RunnableConfig;
+import com.mawai.wiibquant.agent.trader.TraderChatService;
 import org.bsc.langgraph4j.StateGraph;
-import org.bsc.langgraph4j.checkpoint.BaseCheckpointSaver;
 import org.bsc.langgraph4j.prebuilt.MessagesState;
+import org.bsc.langgraph4j.serializer.StateSerializer;
 import org.bsc.langgraph4j.spring.ai.serializer.jackson.SpringAIJacksonStateSerializer;
 import org.bsc.langgraph4j.state.AppenderChannel;
 import org.junit.jupiter.api.Test;
@@ -19,9 +16,6 @@ import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatModel;
-import org.springframework.ai.chat.model.ChatResponse;
-import org.springframework.ai.chat.model.Generation;
-import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.model.tool.ToolCallingChatOptions;
 
 import java.io.NotSerializableException;
@@ -32,202 +26,81 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+/**
+ * 叶子工厂本身：建出来的东西齐不齐、缓存有没有生效、序列化器挂没挂对。
+ * 编排（派发/去重/汇总/落库）在 {@link ChatTurnRunnerTest}，不在这里。
+ */
 class ChatAgentFactoryTest {
 
-    private final AiAgentRuntimeManager runtimeManager = mock(AiAgentRuntimeManager.class);
-    private final ApprovalRegistry approvalRegistry = new ApprovalRegistry();
+    private final ChatModelFactory chatModelFactory = mock(ChatModelFactory.class);
+    private final StateSerializer<MessagesState<Message>> serializer =
+            new SpringAIJacksonStateSerializer<>(MessagesState::new);
 
     private ChatAgentFactory factory() {
         ChatModel model = mock(ChatModel.class);
-        // 建图时 ChatService 会读 getOptions() 挂工具，null 会 NPE
+        // 建叶子时 ChatService 会读 getOptions() 挂工具，null 会 NPE
         when(model.getOptions()).thenReturn(ToolCallingChatOptions.builder().build());
-        when(runtimeManager.current()).thenReturn(new AiAgentRuntime(model, model, model, model));
-        return new ChatAgentFactory(runtimeManager,
-                mock(MarketToolkit.class), mock(QuantForecastToolkit.class), mock(NewsToolkit.class),
-                mock(DeepAnalysisToolkit.class), approvalRegistry, mock(BaseCheckpointSaver.class),
-                new SpringAIJacksonStateSerializer<>(MessagesState::new), 12, 32000, 6, "X");
+        when(chatModelFactory.modelsFor(any())).thenReturn(new ChatModelFactory.Models(model, model));
+        return new ChatAgentFactory(chatModelFactory,
+                mock(MarketToolkit.class), mock(NewsToolkit.class),
+                mock(DeepAnalysisService.class), mock(TraderChatService.class),
+                mock(WorkbenchRunRegistry.class),
+                new ApprovalRegistry(), serializer, 12, 32000, 6, "X");
     }
 
-    private static RunnableConfig runConfig() {
-        return RunnableConfig.builder().threadId("wb-1-t").build();
-    }
-
-    /** 路由用的 tool_call：模型按 route 工具的 schema 结构化地给出去向 */
-    private static AssistantMessage routeCall(String argumentsJson) {
-        return AssistantMessage.builder().content("")
-                .toolCalls(List.of(new AssistantMessage.ToolCall("c1", "function", "route", argumentsJson)))
-                .build();
-    }
-
-    @Test
-    void buildsRouterDispatchExpertsAndSummarizer() throws Exception {
-        CompiledGraph<MessagesState<Message>> graph = factory().chatGraph();
-
-        assertThat(graph).isNotNull();
-        String mermaid = graph.stateGraph
-                .getGraph(GraphRepresentation.Type.MERMAID, "workbench").content();
-        assertThat(mermaid).contains("market_agent").contains("quant_agent").contains("news_agent");
-        // 路由与汇总拆成两个角色：router 只决定去向，summarizer 只写答案
-        assertThat(mermaid).contains("router").contains("dispatch").contains("join").contains("summarizer");
+    private static UserLlmConfig config(String model) {
+        UserLlmConfig c = new UserLlmConfig();
+        c.setUserId(1L);
+        c.setApiProtocol("openai");
+        c.setBaseUrl("https://api.example.com");
+        c.setModel(model);
+        // 固定密文而不是真加密：ApiKeyCrypto 是 AES-GCM 随机 IV，真加密的话同一份配置
+        // 两次调用会算出不同指纹，下面那条 isSameAs 必挂
+        c.setApiKeyEnc("enc-fixed");
+        return c;
     }
 
     @Test
-    void cachesGraphAndRebuildsOnRuntimeRefresh() throws Exception {
+    void 建出三个专家和一个汇总叶子() {
+        ChatAgentFactory.Leaves leaves = factory().leavesFor(config("gpt-5"));
+
+        // 保序：派发顺序、结论进历史的顺序都跟着它
+        assertThat(leaves.experts()).containsOnlyKeys("market_agent", "news_agent", "trader_agent");
+        assertThat(leaves.experts().keySet())
+                .containsExactly("market_agent", "news_agent", "trader_agent");
+        // news 走预取（无参工具，不指望模型自己调）；market 的工具要按问题选 symbol 只能现取，
+        // trader 的四个工具各答一类问题，取哪个也得看问题
+        assertThat(leaves.experts().get("news_agent").preload()).isNotNull();
+        assertThat(leaves.experts().get("market_agent").preload()).isNull();
+        assertThat(leaves.experts().get("trader_agent").preload()).isNull();
+        assertThat(leaves.summarizer()).isNotNull();
+        assertThat(leaves.light()).isNotNull();
+    }
+
+    /**
+     * 同一份配置反复取是同一套叶子（一个用户一份——userId 是指纹的第一个分量）；
+     * 配置一变指纹就变、自然拿到新叶子——不需要任何显式 evict，也就不会有"改了配置还用旧模型"。
+     */
+    @Test
+    void 同配置共享叶子改配置后重建() {
         ChatAgentFactory factory = factory();
 
-        CompiledGraph<MessagesState<Message>> first = factory.chatGraph();
-        assertThat(factory.chatGraph()).isSameAs(first); // 单例缓存
+        ChatAgentFactory.Leaves first = factory.leavesFor(config("gpt-5"));
 
-        factory.onRuntimeRefreshed(); // 模型热更事件 → 缓存失效
-        assertThat(factory.chatGraph()).isNotSameAs(first);
+        assertThat(factory.leavesFor(config("gpt-5"))).isSameAs(first);
+        assertThat(factory.leavesFor(config("gpt-5.1"))).isNotSameAs(first);
+        // 两条 verify 各管一件事，都是 isSameAs 抓不到的：
+        // 1) 每份配置只建一次。把"先查缓存"那步删掉，第二次照样重建一整套、再被 putIfAbsent
+        //    换回旧的——断言全绿而每轮对话都在白建（实测过）
+        // 2) 取模型时用的就是调用方给的这份配置，而不是别处随便来的一份
+        verify(chatModelFactory).modelsFor(config("gpt-5"));
+        verify(chatModelFactory).modelsFor(config("gpt-5.1"));
     }
 
-    // ===== 结构化路由：只认 tool_call 参数，绝不解析消息文本 =====
-
-    @Test
-    void parsesExpertNamesFromRouteToolCall() {
-        List<String> next = ChatAgentFactory.parseRouteCall(
-                routeCall("{\"next\":[\"news_agent\",\"market_agent\"]}"));
-
-        assertThat(next).containsExactly("news_agent", "market_agent");
-    }
-
-    @Test
-    void parsesFinishFromRouteToolCall() {
-        assertThat(ChatAgentFactory.parseRouteCall(routeCall("{\"next\":[\"FINISH\"]}")))
-                .containsExactly(ChatAgentFactory.FINISH);
-    }
-
-    @Test
-    void dropsUnknownAgentNames() {
-        assertThat(ChatAgentFactory.parseRouteCall(
-                routeCall("{\"next\":[\"news_agent\",\"weather_agent\"]}")))
-                .containsExactly("news_agent");
-    }
-
-    @Test
-    void noToolCallMeansNoDispatch() {
-        // 模型没调 route（理论上被 tool_choice=required 挡住，兜底也要安全）→ 空名单 → 转汇总
-        assertThat(ChatAgentFactory.parseRouteCall(new AssistantMessage("我直接回答吧"))).isEmpty();
-    }
-
-    @Test
-    void malformedArgumentsDoNotBlowUp() {
-        assertThat(ChatAgentFactory.parseRouteCall(routeCall("{\"next\":[]}"))).isEmpty();
-    }
-
-    @Test
-    void conditionalEdgeReadsStateNotMessages() {
-        MessagesState<Message> dispatching = new MessagesState<>(
-                Map.of(ChatAgentFactory.NEXT_KEY, "dispatch"));
-        MessagesState<Message> finishing = new MessagesState<>(
-                Map.of(ChatAgentFactory.NEXT_KEY, ChatAgentFactory.FINISH));
-
-        assertThat(ChatAgentFactory.nextFromState(dispatching)).isEqualTo("dispatch");
-        assertThat(ChatAgentFactory.nextFromState(finishing)).isEqualTo("summarize");
-        // 没有路由结果时保守收尾，不能悬空
-        assertThat(ChatAgentFactory.nextFromState(new MessagesState<>(Map.of()))).isEqualTo("summarize");
-    }
-
-    @Test
-    void dispatchesExpertsWhenRouterSaysSo() {
-        ChatModel model = mock(ChatModel.class);
-        when(model.call(any(Prompt.class))).thenReturn(new ChatResponse(
-                List.of(new Generation(routeCall("{\"next\":[\"news_agent\"]}")))));
-        MessagesState<Message> state = new MessagesState<>(
-                Map.of("messages", List.of(new UserMessage("帮我查最新快讯"))));
-
-        Map<String, Object> update = factory().route(state, model, runConfig());
-
-        assertThat(update)
-                .containsEntry(ChatAgentFactory.NEXT_KEY, "dispatch")
-                .containsEntry(ChatAgentFactory.DISPATCH_KEY, List.of("news_agent"))
-                .containsEntry(ChatAgentFactory.DISPATCH_ROUND_KEY, 1);
-        // 路由结果只进 state，不许混进对话历史——这正是之前被模型照抄导致反复派发的根源
-        assertThat(update).doesNotContainKey("messages");
-    }
-
-    /** 同一专家取过的数不会变，重复派只会空转烧钱——死循环就是这么来的，靠代码收敛不指望模型自觉 */
-    @Test
-    void doesNotDispatchTheSameExpertTwice() {
-        ChatModel model = mock(ChatModel.class);
-        when(model.call(any(Prompt.class))).thenReturn(new ChatResponse(
-                List.of(new Generation(routeCall("{\"next\":[\"news_agent\"]}")))));
-        MessagesState<Message> state = new MessagesState<>(Map.of(
-                "messages", List.of(new UserMessage("帮我查最新快讯")),
-                ChatAgentFactory.DISPATCHED_KEY, List.of("news_agent")));
-
-        assertThat(factory().route(state, model, runConfig()))
-                .containsEntry(ChatAgentFactory.NEXT_KEY, ChatAgentFactory.FINISH);
-    }
-
-    @Test
-    void accumulatesDispatchedExpertsAcrossRounds() {
-        ChatModel model = mock(ChatModel.class);
-        when(model.call(any(Prompt.class))).thenReturn(new ChatResponse(
-                List.of(new Generation(routeCall("{\"next\":[\"news_agent\",\"market_agent\"]}")))));
-        MessagesState<Message> state = new MessagesState<>(Map.of(
-                "messages", List.of(new UserMessage("结合行情和新闻看看")),
-                ChatAgentFactory.DISPATCHED_KEY, List.of("news_agent")));
-
-        Map<String, Object> update = factory().route(state, model, runConfig());
-
-        // 只派没派过的那个，但累积名单要含全部
-        assertThat(update).containsEntry(ChatAgentFactory.DISPATCH_KEY, List.of("market_agent"));
-        assertThat(update.get(ChatAgentFactory.DISPATCHED_KEY))
-                .isEqualTo(List.of("news_agent", "market_agent"));
-    }
-
-    @Test
-    void routerFailureDegradesToSummarize() {
-        ChatModel model = mock(ChatModel.class);
-        when(model.call(any(Prompt.class))).thenThrow(new RuntimeException("上游挂了"));
-        MessagesState<Message> state = new MessagesState<>(
-                Map.of("messages", List.of(new UserMessage("帮我查最新快讯"))));
-
-        // 路由失败不该把整轮对话拖死，退化成直接作答
-        assertThat(factory().route(state, model, runConfig()))
-                .containsEntry(ChatAgentFactory.NEXT_KEY, ChatAgentFactory.FINISH);
-    }
-
-    /**
-     * 深研判确认后的续跑轮：存在未消费授权 → 直通汇总让 summarizer 重调工具。
-     * 专家数据上一轮刚取过且深研判不消费它们，重派一遍纯浪费（真跑实证过会重派）。
-     */
-    @Test
-    void unconsumedApprovalSkipsDispatchStraightToSummarizer() {
-        ChatModel model = mock(ChatModel.class);
-        approvalRegistry.approve("wb-1-t"); // 与 runConfig() 的 threadId 同一会话
-
-        Map<String, Object> update = factory().route(new MessagesState<>(
-                Map.of("messages", List.of(new UserMessage("已确认，请继续执行深度研判")))), model, runConfig());
-
-        assertThat(update).containsEntry(ChatAgentFactory.NEXT_KEY, ChatAgentFactory.FINISH);
-        verify(model, never()).call(any(Prompt.class)); // 直通不烧路由调用
-    }
-
-    /**
-     * 主图回环的保险丝。ModelCallLimiter 挂在 agent 的工具边上，管不到
-     * router → dispatch → 专家 → join → router 这条回环，只能自己数。
-     */
-    @Test
-    void stopsDispatchingAtRoundLimitWithoutCallingModel() {
-        ChatModel model = mock(ChatModel.class);
-        MessagesState<Message> state = new MessagesState<>(Map.of(
-                "messages", List.of(new UserMessage("帮我查最新快讯")),
-                ChatAgentFactory.DISPATCH_ROUND_KEY, ChatAgentFactory.MAX_DISPATCH_ROUNDS));
-
-        Map<String, Object> update = factory().route(state, model, runConfig());
-
-        assertThat(update).containsEntry(ChatAgentFactory.NEXT_KEY, ChatAgentFactory.FINISH);
-        verify(model, never()).call(any(Prompt.class)); // 到顶了就别再烧一次调用
-    }
-
-    // ===== checkpoint 序列化：图必须显式挂 Jackson 版，默认的 Java 对象流存不下 Spring AI Message =====
+    // ===== 序列化：叶子与会话上下文表共用的序列化器必须是 Jackson 版，默认的 Java 对象流存不下 Spring AI Message =====
 
     @Test
     void defaultObjectStreamSerializerCannotCloneSpringAiMessages() {
@@ -238,16 +111,18 @@ class ChatAgentFactoryTest {
                 .isInstanceOf(NotSerializableException.class);
     }
 
+    /** 叶子拿到的确实是注入进来那个序列化器（漏传的话它会自己兜一个默认的，落库当场炸） */
     @Test
-    void mainGraphSerializerCanCloneStateWithSpringAiMessages() throws Exception {
-        CompiledGraph<MessagesState<Message>> graph = factory().chatGraph();
+    void leafSerializerCanCloneStateWithSpringAiMessages() throws Exception {
+        ChatAgentFactory.Leaves leaves = factory().leavesFor(config("gpt-5"));
 
-        MessagesState<Message> cloned = graph.stateGraph.getStateSerializer()
+        MessagesState<Message> cloned = leaves.summarizer().stateGraph.getStateSerializer()
                 .cloneObject(Map.of("messages", List.of(
                         new UserMessage("我只关注 ETH"), new AssistantMessage("记住了"))));
 
         assertThat(cloned.messages()).hasSize(2);
         assertThat(cloned.messages().getFirst().getText()).isEqualTo("我只关注 ETH");
+        assertThat(leaves.summarizer().stateGraph.getStateSerializer()).isSameAs(serializer);
     }
 
     // ===== 长对话压缩：压缩结果必须活着进 state，否则每次调用都要重压 =====

@@ -2,13 +2,10 @@ package com.mawai.wiibquant.controller;
 
 import com.mawai.wiibcommon.constant.QuantConstants;
 import com.mawai.wiibcommon.util.Result;
-import com.mawai.wiibcommon.market.KlineBar;
 import com.mawai.wiibcommon.market.KlineHistoryStore;
-import com.mawai.wiibquant.agent.strategy.backtest.StrategyKlineBacktestEngine;
-import com.mawai.wiibquant.agent.strategy.core.WindowedMarketView;
-import com.mawai.wiibquant.agent.strategy.fibo.FiboParams;
-import com.mawai.wiibquant.agent.strategy.fibo.FiboRetracementStrategy;
-import com.mawai.wiibquant.agent.strategy.backtest.BacktestResult;
+import com.mawai.wiibquant.strategy.backtest.StrategyKlineBacktestEngine;
+import com.mawai.wiibquant.strategy.backtest.task.BacktestOrchestrator;
+import com.mawai.wiibquant.strategy.backtest.BacktestResult;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
@@ -20,10 +17,13 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.math.BigDecimal;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 
-/** 插拔式策略回测 API；数据只读本地 kline_history，不触发外部行情下载。 */
+/**
+ * 插拔式策略回测 API；数据只读本地 kline_history，不触发外部行情下载。
+ * 数据装载/策略工厂委托 {@link BacktestOrchestrator}（响应结构不变；warmup 取值随
+ * orchestrator 与 DbRun 对齐——含 SMA200 趋势闸预热，比旧口径更足）。
+ */
 @Slf4j
 @Tag(name = "插拔式策略回测")
 @RestController
@@ -34,6 +34,7 @@ public class StrategyBacktestController {
     private static final String FIBO_ID = "FIBO";
 
     private final KlineHistoryStore klineHistoryStore;
+    private final BacktestOrchestrator orchestrator;
 
     @Operation(summary = "Fibo 黄金口袋纯价格策略回测")
     @PostMapping("/fibo")
@@ -57,44 +58,27 @@ public class StrategyBacktestController {
                 return Result.fail("本地 kline_history 没有最新 5m K线: " + normalized);
             }
             long toMs = latestCloseTime;
-            long tradeWindowMs = (long) days * 86_400_000L;
-            long tradingStartMs = toMs - tradeWindowMs;
-            FiboParams params = FiboParams.defaults();
-            long warmupMs = warmupMs(params);
-            long fromMs = tradingStartMs - warmupMs;
+            long tradingStartMs = toMs - (long) days * 86_400_000L;
+            long fromMs = tradingStartMs - orchestrator.warmupMs(FIBO_ID);
 
-            List<KlineBar> bars = klineHistoryStore.load(
-                    normalized, KlineHistoryStore.DEFAULT_INTERVAL, fromMs, toMs);
-            if (bars.isEmpty()) {
-                return Result.fail("本地 kline_history 没有可用 5m K线: " + normalized);
-            }
-            String gap = WindowedMarketView.firstBaseGapDescription(bars).orElse(null);
-            if (gap != null) {
-                return Result.fail("本地 kline_history 5m K线不连续: " + normalized + " " + gap);
-            }
-            int warmupBars = (int) bars.stream()
-                    .filter(b -> b.closeTime() < tradingStartMs)
-                    .count();
+            BacktestOrchestrator.Prepared p = orchestrator.prepare(FIBO_ID, normalized, tradingStartMs, toMs);
 
             log.info("[StrategyBacktest] fibo symbol={} days={} bars={} warmupBars={} balance={} leverage={}",
-                    normalized, days, bars.size(), warmupBars, initialBalance, leverage);
+                    normalized, days, p.bars().size(), p.warmupBars(), initialBalance, leverage);
 
-            FiboRetracementStrategy strategy = new FiboRetracementStrategy(params, List.of(normalized));
             BacktestResult result = new StrategyKlineBacktestEngine(
-                    strategy, normalized, bars, initialBalance, leverage, warmupBars, tradingStartMs, null)
+                    p.strategy(), normalized, p.bars(), initialBalance, leverage,
+                    p.warmupBars(), tradingStartMs, null)
                     .run();
 
             return Result.ok(toResponse(normalized, days, leverage, fromMs, tradingStartMs, toMs,
-                    bars.size(), warmupBars, result));
+                    p.bars().size(), p.warmupBars(), result));
+        } catch (BacktestOrchestrator.BacktestSetupException e) {
+            return Result.fail(e.getMessage());
         } catch (Exception e) {
             log.error("[StrategyBacktest] fibo 回测失败", e);
             return Result.fail("fibo 回测失败: " + e.getMessage());
         }
-    }
-
-    /** 预热毫秒：覆盖找腿窗 + ATR 预热。 */
-    private static long warmupMs(FiboParams p) {
-        return (long) (p.swingLookbackBars() + p.atrPeriod() + 16) * p.swingTfMillis();
     }
 
     private Map<String, Object> toResponse(String symbol, int days, int leverage,
