@@ -146,6 +146,18 @@ class ChatTurnRunnerTest {
         return textOf(summarizerPrompts.getLast());
     }
 
+    /** 落库终态拼成一段文本比对：专家结论带出处前缀，逐字相等的断言不适用 */
+    private static String savedText(ArgumentCaptor<List<Message>> saved) {
+        return saved.getValue().stream()
+                .map(m -> m.getText() == null ? "" : m.getText())
+                .collect(Collectors.joining("\n"));
+    }
+
+    /** summarizer 真正收到的最后一条消息（形态钉子看的就是它） */
+    private Message summarizerLastInput() {
+        return summarizerPrompts.getLast().getInstructions().getLast();
+    }
+
     /** 只数路由那几次调用，别把专家的也算进来 */
     private static Prompt routerPrompt() {
         return argThat(prompt -> prompt != null && !prompt.getInstructions().isEmpty()
@@ -324,7 +336,7 @@ class ChatTurnRunnerTest {
         });
         // 失败也要进上下文：模型得知道"这一路没数据"，不然它会当作根本没问过
         assertThat(summarizerInput())
-                .contains("[market_agent 暂时不可用")
+                .contains("【market_agent 本轮取数失败】")
                 .contains("新闻结论");
         assertThat(answer.toString()).isEqualTo("这是答案");
     }
@@ -352,8 +364,9 @@ class ChatTurnRunnerTest {
         // 出：终态整体覆盖回存储，含本轮专家结论与答案
         ArgumentCaptor<List<Message>> saved = ArgumentCaptor.captor();
         verify(contextStore).save(eq(SESSION), eq(1L), saved.capture());
-        assertThat(saved.getValue().stream().map(Message::getText).toList())
-                .contains("上轮问题", "这一轮问题", "本轮市场结论", "这是本轮答案");
+        assertThat(savedText(saved))
+                .contains("上轮问题").contains("这一轮问题")
+                .contains("本轮市场结论").contains("这是本轮答案");
     }
 
     /** 专家的预取数据必须真喂进去：news 的工具无参，不预取就只能指望模型自己想起来调 */
@@ -403,8 +416,111 @@ class ChatTurnRunnerTest {
         // 存的是 working（用户消息 + 专家结论），下一轮带着它起跑，专家不必重派
         ArgumentCaptor<List<Message>> saved = ArgumentCaptor.captor();
         verify(contextStore).save(eq(SESSION), eq(1L), saved.capture());
-        assertThat(saved.getValue().stream().map(Message::getText).toList())
-                .contains("看看行情", "市场结论");
+        assertThat(savedText(saved)).contains("看看行情").contains("市场结论");
+    }
+
+    // ===== 专家数据交到汇总者手上的形态：钉住"数据取回来了却答没有数据" =====
+
+    /**
+     * 专家结论必须以<b>带出处的用户侧消息</b>进上下文，不能是裸 AssistantMessage——
+     * 裸助手消息在模型眼里是"我自己刚说过的话"，它会把刚取回的数据当成旧答案、答"没有数据"。
+     */
+    @Test
+    void 专家结论带出处以用户侧消息进上下文() {
+        lightAnswers(() -> route("market_agent"),
+                () -> responseOf(new AssistantMessage("市场结论")),
+                () -> responseOf(new AssistantMessage("新闻结论")));
+        summarizerAnswers("这是答案");
+
+        turn("看看行情");
+
+        Message expertMessage = summarizerPrompts.getLast().getInstructions().stream()
+                .filter(m -> m.getText() != null && m.getText().contains("市场结论"))
+                .findFirst().orElseThrow();
+        assertThat(expertMessage).isInstanceOf(UserMessage.class);
+        assertThat(expertMessage.getText()).startsWith("【market_agent 取回的数据】");
+    }
+
+    /**
+     * 派过专家就必须垫收尾指令，且排在<b>最后一条</b>——整段输入以用户侧消息结尾，
+     * 模型才知道该由它作答，而不是"我刚说完、没什么可补充的"。
+     */
+    @Test
+    void 专家数据之后垫收尾指令且排在最后() {
+        lightAnswers(() -> route("market_agent"),
+                () -> responseOf(new AssistantMessage("市场结论")),
+                () -> responseOf(new AssistantMessage("新闻结论")));
+        summarizerAnswers("这是答案");
+
+        turn("看看行情");
+
+        Message last = summarizerLastInput();
+        assertThat(last).isInstanceOf(UserMessage.class);
+        assertThat(last.getText()).isEqualTo(ChatTurnRunner.EXPERT_HANDOFF);
+    }
+
+    /** 一个专家都没派时不许垫：那句话说的是"依据上面的专家数据"，垫了就是凭空捏造不存在的数据 */
+    @Test
+    void 没派专家时不垫收尾指令() {
+        lightAnswers(() -> route("FINISH"), () -> responseOf(new AssistantMessage("市场结论")),
+                () -> responseOf(new AssistantMessage("新闻结论")));
+        summarizerAnswers("这是答案");
+
+        turn("你好呀");
+
+        assertThat(summarizerInput()).doesNotContain(ChatTurnRunner.EXPERT_HANDOFF);
+        assertThat(summarizerLastInput().getText()).isEqualTo("你好呀");
+    }
+
+    /** 专家一个字都没返回时不许冒充数据：上下文里要说清楚，进度事件里要留痕 */
+    @Test
+    void 专家没有产出时不冒充数据() {
+        lightAnswers(() -> route("market_agent"),
+                () -> responseOf(new AssistantMessage("")),
+                () -> responseOf(new AssistantMessage("新闻结论")));
+        summarizerAnswers("这是答案");
+
+        turn("看看行情");
+
+        assertThat(summarizerInput()).contains("【market_agent 本轮没有返回内容】");
+        assertThat(progress).anySatisfy(e -> {
+            assertThat(e.agent()).isEqualTo("market_agent");
+            assertThat(e.phase()).isEqualTo(ChatTurnRunner.ExpertProgress.ERROR);
+            assertThat(e.text()).isEqualTo("没有返回任何内容");
+        });
+    }
+
+    /**
+     * 内容相同的消息不许被静默丢弃。框架默认的 {@code ReducerDisallowDuplicate} 按
+     * {@code Objects.hash} 跟<b>整段历史</b>比对、命中就不 add 且无日志：同一句话问第二遍，
+     * 第二条进不了上下文，模型根本没看见本轮问题。
+     * <p>
+     * 钉子看<b>落库终态里那句话出现两次</b>，叶子换成 appenderWithDuplicate 之前必红。
+     */
+    @Test
+    void 内容相同的消息不再被静默丢弃() {
+        when(contextStore.load(SESSION)).thenReturn(List.of(new UserMessage("同一句话")));
+        lightAnswers(() -> route("FINISH"), () -> responseOf(new AssistantMessage("市场结论")),
+                () -> responseOf(new AssistantMessage("新闻结论")));
+        summarizerAnswers("这是答案");
+
+        turn("同一句话");
+
+        ArgumentCaptor<List<Message>> saved = ArgumentCaptor.captor();
+        verify(contextStore).save(eq(SESSION), eq(1L), saved.capture());
+        assertThat(saved.getValue()).filteredOn(m -> "同一句话".equals(m.getText())).hasSize(2);
+    }
+
+    /** 补答兜底是直接给用户看的：summarizer 零产出退专家原文时，内部出处标注必须剥掉 */
+    @Test
+    void 补答零产出时兜底剥掉出处标注() {
+        summarizerAnswers("");
+
+        String deferred = new ChatTurnRunner(contextStore, registry).runDeferredSummary(
+                leaves(), 1L, SESSION, "看看行情",
+                List.of(ChatTurnRunner.expertMessage("market_agent", "取回的数据", "资金费 0.01%")));
+
+        assertThat(deferred).isEqualTo("资金费 0.01%");
     }
 
     /** 一轮跑完必须落库，否则下一轮从零起跑（用户表现为 AI 失忆） */

@@ -51,6 +51,14 @@ class ChatMemoryServiceTest {
         verify(memoryMapper, never()).upsert(anyLong(), anyString(), anyString(), anyString());
     }
 
+    /** 周期单位贴着币名是高频输入形态（"未来1hbtc会涨吗"），单位的尾字母不能挡掉提及 */
+    @Test
+    void rememberMatchesCoinAfterTimeframeUnit() {
+        service.remember(1L, "未来1hbtc会涨吗", "偏多");
+
+        verify(memoryMapper).upsert(eq(1L), eq("BTCUSDT"), anyString(), anyString());
+    }
+
     /** 中文提问里币名两侧贴汉字是常态（"看看BTC行情"），词边界只认英文字母，这种必须认出来 */
     @Test
     void rememberMatchesCoinAdjacentToChinese() {

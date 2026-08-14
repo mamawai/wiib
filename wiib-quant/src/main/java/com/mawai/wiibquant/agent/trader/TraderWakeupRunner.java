@@ -15,6 +15,7 @@ import com.mawai.wiibcommon.entity.FuturesPosition;
 import com.mawai.wiibcommon.entity.FuturesStopLoss;
 import com.mawai.wiibcommon.entity.FuturesTakeProfit;
 import com.mawai.wiibcommon.market.BinanceRestClient;
+import com.mawai.wiibquant.agent.llm.MessagesSchema;
 import com.mawai.wiibquant.agent.llm.ModelCallLimiter;
 import com.mawai.wiibquant.agent.llm.ResilientChatService;
 import com.mawai.wiibquant.agent.llm.ToolCallTraceHook;
@@ -255,6 +256,7 @@ public class TraderWakeupRunner {
         CompiledGraph<MessagesState<Message>> graph = ReactAgent.<MessagesState<Message>>builder()
                 .chatModel(model)
                 .stateSerializer(stateSerializer)
+                .schema(MessagesSchema.SCHEMA)
                 .defaultSystem(prompt)
                 .toolsFromObject(tradeTools)
                 .toolsFromObject(indicatorToolkit)

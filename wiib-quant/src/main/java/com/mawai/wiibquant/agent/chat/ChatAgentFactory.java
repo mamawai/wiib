@@ -3,6 +3,7 @@ package com.mawai.wiibquant.agent.chat;
 import com.mawai.wiibcommon.entity.UserLlmConfig;
 import com.mawai.wiibquant.agent.analysis.DeepAnalysisService;
 import com.mawai.wiibquant.agent.llm.ConversationSummarizer;
+import com.mawai.wiibquant.agent.llm.MessagesSchema;
 import com.mawai.wiibquant.agent.llm.ModelCallLimiter;
 import com.mawai.wiibquant.agent.llm.ResilientChatService;
 import com.mawai.wiibquant.agent.toolkit.MarketToolkit;
@@ -256,6 +257,7 @@ public class ChatAgentFactory {
         ReactAgent.Builder<MessagesState<Message>> builder = ReactAgent.builder()
                 .chatModel(model)
                 .stateSerializer(stateSerializer)
+                .schema(MessagesSchema.SCHEMA)
                 .defaultSystem(instruction);
         if (toolkit != null) {
             builder.toolsFromObject(toolkit);
@@ -291,6 +293,7 @@ public class ChatAgentFactory {
         ReactAgent.Builder<MessagesState<Message>> builder = ReactAgent.builder()
                 .chatModel(deep)
                 .stateSerializer(stateSerializer)
+                .schema(MessagesSchema.SCHEMA)
                 .streaming(true) // 答案要逐字推给前端
                 .toolsFromObject(new DeepAnalysisToolkit(deep, deepAnalysisService, runRegistry))
                 // 可以多次调用：两套工具分别是"研判"与"对 trader 动手"，合成一个类只会让职责糊掉
@@ -353,7 +356,9 @@ public class ChatAgentFactory {
                     if (update.isEmpty()) {
                         return action.apply(state, config);
                     }
-                    Map<String, Object> merged = AgentState.updateState(state, update, MessagesState.SCHEMA);
+                    // 用叶子那份 schema，不是框架默认的：两边不一致的话这一步的合并语义
+                    // 与图内的追加语义就对不上（默认那份会静默丢掉内容重复的消息）
+                    Map<String, Object> merged = AgentState.updateState(state, update, MessagesSchema.SCHEMA);
                     return action.apply(new MessagesState<>(merged), config)
                             // 压缩结果要一并写回 state，否则下次调用又得重压一遍
                             .thenApply(result -> mergeUpdates(update, result));

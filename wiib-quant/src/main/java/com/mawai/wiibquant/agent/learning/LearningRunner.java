@@ -5,6 +5,7 @@ import com.alibaba.fastjson2.JSONObject;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.mawai.wiibcommon.entity.AiTrader;
 import com.mawai.wiibcommon.entity.AiTraderDecision;
+import com.mawai.wiibquant.agent.llm.MessagesSchema;
 import com.mawai.wiibquant.agent.llm.ModelCallLimiter;
 import com.mawai.wiibquant.agent.llm.ResilientChatService;
 import com.mawai.wiibquant.agent.llm.ToolCallTraceHook;
@@ -169,6 +170,7 @@ public class LearningRunner {
         CompiledGraph<MessagesState<Message>> graph = ReactAgent.<MessagesState<Message>>builder()
                 .chatModel(model)
                 .stateSerializer(stateSerializer)
+                .schema(MessagesSchema.SCHEMA)
                 .defaultSystem(systemPrompt())
                 .toolsFromObject(new PeerInsightToolkit(peerInsightService, trader.getId()))
                 .addExecuteToolsHook(new ModelCallLimiter(MAX_MODEL_CALLS))

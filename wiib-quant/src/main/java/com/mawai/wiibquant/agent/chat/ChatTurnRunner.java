@@ -147,6 +147,18 @@ public class ChatTurnRunner {
     static final String YIELD_PLACEHOLDER = "（该问题的专家数据仍在获取中，稍后单独补答，本轮暂不回答）";
 
     /**
+     * 派发结束、进汇总前垫的收尾指令：<b>整段输入必须以用户侧消息结尾</b>。
+     * 以 assistant 结尾等于让模型在"我刚说完"之后再补一句，产出多半是"没什么可补充的"。
+     * 补答轮（{@link #runDeferredSummary}）垫的那句同一用途。
+     */
+    // 措辞必须覆盖专家的三种产出形态（取回的数据/取数失败/没有返回内容）：
+    // 只说"取回的数据"的话，专家全失败时这句指向的消息不存在，模型可能把失败说明当数据引用
+    static final String EXPERT_HANDOFF =
+            "【系统】上面带【…】标注的消息是本轮专家的执行结果（取回的数据 / 取数失败 / 没有返回内容），"
+                    + "不是你说过的话。现在只依据其中真正取回的数据回答用户本轮的问题；"
+                    + "取数失败或没取到的项就如实说没取到。";
+
+    /**
      * 路由工具：只用来让模型**结构化地**表达"下一步给谁"，方法体永远不会被执行。
      * <p>
      * 为什么是工具而不是"让模型输出 JSON 数组再解析"：后者是我们自己发明的，四个框架没人这么做，
@@ -222,6 +234,8 @@ public class ChatTurnRunner {
             }
             List<String> next = askRouter(leaves.light(), working);
             if (next.isEmpty() || next.contains(FINISH)) {
+                // FINISH 与"解析不出专家名"（空）同型不同因，事后排查靠这行分辨；路由调用失败 askRouter 已有 warn
+                log.info("[Workbench] 路由结束派发 next={}（第 {} 轮后转汇总）", next, round);
                 break;
             }
             // 同一专家不重复派：它取的数这一轮内不会变，再派一次只是空转烧钱，
@@ -251,6 +265,10 @@ public class ChatTurnRunner {
             working.addAll(batch.join());
         }
 
+        // 没派专家时 working 已经以用户消息结尾，再垫"依据上面的专家数据"就是捏造不存在的数据
+        if (!dispatched.isEmpty()) {
+            working.add(new UserMessage(EXPERT_HANDOFF));
+        }
         NodeOutput<MessagesState<Message>> last =
                 streamSummarizer(leaves, working, userId, sessionId, answerTokenSink);
 
@@ -303,9 +321,11 @@ public class ChatTurnRunner {
         if (!answer.isEmpty()) {
             return answer.toString();
         }
-        // 极端场景（调用上限截停等）没有汇总产出：退专家结论原文，补答不至于空手
+        // 极端场景（调用上限截停等）没有汇总产出：退专家结论原文，补答不至于空手。
+        // 剥掉出处标注——它是给模型看的内部协议，兜底文案是直接给用户看的
         String fallback = expertReplies.stream().map(Message::getText)
-                .filter(Objects::nonNull).collect(Collectors.joining("\n")).strip();
+                .filter(Objects::nonNull).map(ChatTurnRunner::stripExpertTag)
+                .collect(Collectors.joining("\n")).strip();
         return fallback.isEmpty() ? "（补答未能生成内容，可重新提问）" : fallback;
     }
 
@@ -363,7 +383,7 @@ public class ChatTurnRunner {
                         .filter(Objects::nonNull).toList());
     }
 
-    /** 单个专家：推进度 → （可选预取）→ 阻塞跑 → 交回最后一条消息。 */
+    /** 单个专家：推进度 → （可选预取）→ 阻塞跑 → 交回带出处标注的产出。 */
     private Message runExpert(String name, ChatAgentFactory.Expert expert, List<Message> input,
                               Consumer<ExpertProgress> progressSink) {
         progressSink.accept(new ExpertProgress(name, ExpertProgress.START, null));
@@ -378,9 +398,15 @@ public class ChatTurnRunner {
                     .invoke(Map.of("messages", messages), RunnableConfig.builder().build())
                     .flatMap(MessagesState::lastMessage)
                     .orElse(null);
-            progressSink.accept(new ExpertProgress(name, ExpertProgress.DONE,
-                    reply == null ? "" : reply.getText()));
-            return reply;
+            String text = reply == null ? null : reply.getText();
+            if (text == null || text.isBlank()) {
+                // 空结论不当数据接：接了 summarizer 只会答"没有数据"，且无处排查
+                log.warn("[Workbench] 专家 {} 没有产出任何内容", name);
+                progressSink.accept(new ExpertProgress(name, ExpertProgress.ERROR, "没有返回任何内容"));
+                return expertMessage(name, "本轮没有返回内容", "（这一路没有数据）");
+            }
+            progressSink.accept(new ExpertProgress(name, ExpertProgress.DONE, text));
+            return expertMessage(name, "取回的数据", text);
         } catch (Exception e) {
             // 单个专家失败不该拖垮整轮：把失败作为一条消息交回，summarizer 自行判断要不要绕开。
             // 两个出口都过归类：原始 SDK 异常可能几百字符，喂回模型既白烧 token，
@@ -388,8 +414,25 @@ public class ChatTurnRunner {
             log.warn("[Workbench] 专家 {} 执行失败", name, e);
             String reason = LlmErrorMessages.classify(e);
             progressSink.accept(new ExpertProgress(name, ExpertProgress.ERROR, reason));
-            return new AssistantMessage("[" + name + " 暂时不可用：" + reason + "]");
+            return expertMessage(name, "本轮取数失败", reason);
         }
+    }
+
+    /**
+     * 专家产出接进上下文的统一形态：<b>带出处标注的用户侧消息</b>。
+     * <p>
+     * 裸 AssistantMessage 在模型眼里是"我自己刚说过的话"——既分不出哪些是取回来的数据，
+     * 整段输入还会以 assistant 结尾，于是倾向于答"没有数据"（实测）。
+     * 标注同时让这些消息在后续轮次里不冒充"助手以前给过的答案"。
+     */
+    // 包私有非 private：兜底剥标注的钉子要拿真实格式验往返
+    static Message expertMessage(String agent, String status, String body) {
+        return new UserMessage("【" + agent + " " + status + "】\n" + body);
+    }
+
+    /** 剥掉 {@link #expertMessage} 的出处标注行，格式与它配对维护 */
+    static String stripExpertTag(String text) {
+        return text.replaceFirst("^【[^】]*】\n", "");
     }
 
     /** 问模型"下一步给谁"。强制走 route 工具，模型没法用自由文本糊弄过去。 */

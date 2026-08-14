@@ -49,6 +49,16 @@ class LlmErrorMessagesTest {
         assertThat(LlmErrorMessages.classify(wrapped)).contains("API key");
     }
 
+    /** 兜底文案里的类名取最深层 cause：最外层几乎总是包装异常，用户拿它查不到病因 */
+    @Test
+    void 兜底类名取最深层cause() {
+        Throwable wrapped = new java.util.concurrent.CompletionException("wrapper",
+                new IllegalStateException("db down"));
+
+        assertThat(LlmErrorMessages.classify(wrapped))
+                .contains("IllegalStateException").doesNotContain("CompletionException");
+    }
+
     /**
      * 兜底分支要短且固定，避免几百字符的 SDK 异常灌进 SSE 和对话历史；
      * 而且<b>不许替用户判病因</b>——调用方的 catch 也罩着落历史、写记忆、上下文落库，

@@ -1,6 +1,8 @@
 package com.mawai.wiibquant.agent.chat;
 
+import com.alibaba.fastjson2.JSON;
 import com.mawai.wiibcommon.entity.UserLlmConfig;
+import com.mawai.wiibquant.agent.trader.TraderChatService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.slf4j.Logger;
@@ -8,6 +10,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
+import java.math.RoundingMode;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -52,6 +55,10 @@ class ChatWorkbenchRealRunTest {
     @Autowired
     private UserLlmConfigService userLlmConfigService;
 
+    /** 断言的期望值从这儿取：库里那份真 trader 数据，不在测试里另造 */
+    @Autowired
+    private TraderChatService traderChatService;
+
     @Test
     void 一轮新闻加行情提问全链路真跑() {
         UserLlmConfig llmConfig = userLlmConfigService.get(ADMIN_USER_ID);
@@ -84,5 +91,62 @@ class ChatWorkbenchRealRunTest {
         // 输出契约：news_agent 的 BlockBeats 条目必须存活在最终回答里（标可因联网佐证升级为
         // 合并标）——只剩补充源的标即 summarizer 丢弃专家清单自己重写了，正是要防的回归
         assertThat(answer.toString()).containsAnyOf("[BlockBeats]", chatAgentFactory.mergedTag());
+    }
+
+    /**
+     * 专家把 trader 数据取回来了，summarizer 却答"没有 trader 的最新表现数据"。
+     * <p>
+     * <b>只有真跑验得到</b>：病根在喂进去的上下文形态，而单测的 ChatModel 是 mock、照剧本吐字，
+     * 不会像真模型那样把上一条助手消息当成"我已经答过了"，对形态完全无感。
+     * <p>
+     * trader 链路纯读库不打 Binance，本机可验（行情链路仍要上服务器，见 tutorial 附录 A）。
+     */
+    @Test
+    void trader表现提问真跑不再答没有数据() {
+        UserLlmConfig llmConfig = userLlmConfigService.get(ADMIN_USER_ID);
+        assertThat(llmConfig).as("先用管理员账号在 /api/ai/llm-config 配一份 BYOK 端点再跑").isNotNull();
+        // 期望值取自库里那份真数据，不在测试里另造一份：造了就变成"自己写的自己验"
+        String overview = traderChatService.overview(ADMIN_USER_ID);
+        assertThat(overview).as("这一跑要有一个真 trader 才有意义").contains("\"hasTrader\":true");
+        String equityBefore = equityDigits(overview);
+
+        ChatAgentFactory.Leaves leaves = chatAgentFactory.leavesFor(llmConfig);
+        String sessionId = "wb-1-realrun-" + UUID.randomUUID();
+        List<ChatTurnRunner.ExpertProgress> events = new CopyOnWriteArrayList<>();
+        StringBuilder answer = new StringBuilder();
+
+        chatTurnRunner.run(leaves, ADMIN_USER_ID, sessionId,
+                "我的 AI 交易员最近表现如何？", answer::append, events::add,
+                ChatTurnRunner.TurnYield.NONE);
+
+        for (ChatTurnRunner.ExpertProgress e : events) {
+            log.info("[RealRun] 专家事件 agent={} phase={} text={}", e.agent(), e.phase(),
+                    e.text() == null ? null : e.text().substring(0, Math.min(2000, e.text().length())));
+        }
+        log.info("[RealRun] 最终回答（{}字）：{}", answer.length(), answer);
+
+        // 收尾事件（done/error）分开断言：合成一条 orElseThrow 会把上游取数失败误报成
+        // "路由没派专家"，排查方向带偏
+        ChatTurnRunner.ExpertProgress settled = events.stream()
+                .filter(e -> ChatAgentFactory.TRADER_AGENT.equals(e.agent())
+                        && !ChatTurnRunner.ExpertProgress.START.equals(e.phase()))
+                .findFirst().orElseThrow(() -> new AssertionError("路由没把 trader_agent 派出去"));
+        assertThat(settled.phase())
+                .as("trader_agent 取数失败：%s（上游瞬时故障就重跑）", settled.text())
+                .isEqualTo(ChatTurnRunner.ExpertProgress.DONE);
+        assertThat(settled.text()).isNotBlank();
+        // 库里那个权益数字出现在回答里，才算数据真穿过了汇总这一跳。
+        // 不锚 status：库里存 RUNNING、模型多半写"运行中"，锚它是在考措辞不是考链路。
+        // 前后各读一次取并集：权益随唤醒（5m 一次）落库刷新，单值会偶发红
+        String equityAfter = equityDigits(traderChatService.overview(ADMIN_USER_ID));
+        assertThat(answer.toString().replace(",", ""))
+                .as("汇总否认了专家数据")
+                .containsAnyOf(equityBefore, equityAfter);
+    }
+
+    /** 权益的整数段：模型可能写 10,515.31 也可能写 10515.31，去掉千分位后比整数段最稳 */
+    private static String equityDigits(String overviewJson) {
+        return JSON.parseObject(overviewJson).getBigDecimal("equity")
+                .setScale(0, RoundingMode.DOWN).toPlainString();
     }
 }

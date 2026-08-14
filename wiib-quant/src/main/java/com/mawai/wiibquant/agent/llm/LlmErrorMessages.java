@@ -48,13 +48,23 @@ public final class LlmErrorMessages {
                 || lower.contains("connection refused") || lower.contains("unknownhost")) {
             return "端点无响应，请检查 Base URL 是否正确";
         }
+        // 类名取最深层 cause：最外层几乎总是 CompletionException 之类的包装（实测），拿它查不到病因
+        Throwable root = root(t);
         // 归类不到的形态要能被发现，否则它永远只以兜底文案示人；但不重复打栈——
         // 两个调用方（Controller 的 catch、专家节点的 catch）都已经把整条异常记下来了。
         // 不写 [LLM]：这里也会收到 DB 之类的服务端故障，贴错标签会把真跑验收的观察点搅浑
-        log.warn("[ErrorClassify] 归类不到 {}", t.getClass().getName());
+        log.warn("[ErrorClassify] 归类不到 {}", root.getClass().getName());
         // 兜底不回显上游原文：中转网关的异常里经常带完整请求 URL（?api_key=…）、自定义 header，
         // key 的形态正则永远追不全。上面四个分支返的是固定文案，天然不含 key
-        return "处理失败（" + t.getClass().getSimpleName() + "），请稍后重试";
+        return "处理失败（" + root.getClass().getSimpleName() + "），请稍后重试";
+    }
+
+    private static Throwable root(Throwable t) {
+        Throwable cur = t;
+        for (int i = 0; i < MAX_CAUSE_DEPTH && cur.getCause() != null; i++) {
+            cur = cur.getCause();
+        }
+        return cur;
     }
 
     /**

@@ -23,6 +23,9 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -72,6 +75,10 @@ public class ChatWorkbenchController {
 
     /** 深研判期间 SSE 通道会静默数分钟，nginx 默认 proxy_read_timeout 60s 会掐断——20s 一帧留 3 倍余量 */
     private static final long HEARTBEAT_SECONDS = 20;
+
+    /** 注入用户消息的当前时间。带年份不随仓里 MM-dd 惯例：模型没有时钟，年份是它最容易错的一位 */
+    private static final DateTimeFormatter TIME_FMT =
+            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm").withZone(ZoneId.systemDefault());
 
     @Data
     public static class WorkbenchChatRequest {
@@ -263,9 +270,11 @@ public class ChatWorkbenchController {
             channel.send("session", new JSONObject().fluentPut("sessionId", sessionId));
             chatHistoryService.append(sessionId, userId, "user", message);
 
-            // 跨会话记忆前缀：让 agent 记得用户常看什么、上次聊到哪
+            // 跨会话记忆前缀：让 agent 记得用户常看什么、上次聊到哪。
+            // 时间行锚定"最近/未来1h"这类语义；随每条用户消息注入，历史里各带各的时刻
             String memory = chatMemoryService.recall(userId);
-            String enriched = memory.isEmpty() ? message : memory + "\n用户问题：" + message;
+            String enriched = "【当前时间 " + TIME_FMT.format(Instant.now()) + "】\n"
+                    + memory + "用户问题：" + message;
 
             ChatTurnRunner.TurnResult result = turnRunner.run(leaves, userId, sessionId, enriched,
                     chunk -> {

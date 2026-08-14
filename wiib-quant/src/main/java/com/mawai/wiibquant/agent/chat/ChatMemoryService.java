@@ -66,9 +66,12 @@ public class ChatMemoryService {
     /**
      * 币名要按"独立的词"匹配，裸 contains 有子串假阳性：英文提问里 whether 含 ETH。
      * 判据是两侧不贴英文字母——贴中文/空格/标点都算独立提及（"看看BTC行情"要认得出来）。
+     * 左侧放行一个例外：数字+1~2 个字母的周期单位贴着币名（1hbtc、15mbtc，实测用户就这么打）。
+     * 单位字母再往左是数字，英文单词是纯字母，两种形态分得开。
      */
     private static boolean mentions(String question, String coin) {
-        return Pattern.compile("(?i)(?<![A-Za-z])" + coin + "(?![A-Za-z])").matcher(question).find();
+        return Pattern.compile("(?i)(?:(?<![A-Za-z])|(?<=[0-9][A-Za-z]{1,2}))" + coin + "(?![A-Za-z])")
+                .matcher(question).find();
     }
 
     private static String truncate(String s) {

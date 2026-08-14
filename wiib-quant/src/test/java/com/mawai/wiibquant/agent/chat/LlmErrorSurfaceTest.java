@@ -100,7 +100,7 @@ class LlmErrorSurfaceTest {
         ArgumentCaptor<List<Message>> saved = ArgumentCaptor.captor();
         verify(contextStore).save(eq("wb-1-expert-fail"), anyLong(), saved.capture());
         String fedBackToModel = saved.getValue().stream().map(Message::getText)
-                .filter(text -> text != null && text.contains("market_agent 暂时不可用"))
+                .filter(text -> text != null && text.contains("【market_agent 本轮取数失败】"))
                 .findFirst().orElseThrow();
 
         // 归类过了（认出是 401）+ 原文一个字都没漏出去
