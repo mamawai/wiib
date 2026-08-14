@@ -5,7 +5,7 @@ import {
   type IChartApi, type ISeriesApi, type UTCTimestamp, type MouseEventParams,
   type DeepPartial, type HandleScrollOptions, type IPriceLine, type SeriesMarker,
 } from 'lightweight-charts';
-import { Globe, History, Layers, Magnet, Maximize2, Minimize2, Minus, MousePointer2, Slash, Trash2, Type } from 'lucide-react';
+import { Eye, EyeOff, Globe, History, Layers, Magnet, Maximize2, Minimize2, Minus, MousePointer2, Slash, Trash2, Type } from 'lucide-react';
 import { futuresApi, quantApi, type NewsEventItem } from '../api';
 import { useKlineStream } from '../hooks/useKlineStream';
 import { useIsDark } from '../hooks/useIsDark';
@@ -464,7 +464,7 @@ export function CandleChart({ symbol, interval, limit = 300, visibleBars = 110, 
   const live = useKlineStream(symbol, interval);
   const fs = useFullscreen(rootRef);
   const {
-    attach: attachDrawings, tool, setTool, magnet, setMagnet,
+    attach: attachDrawings, tool, setTool, magnet, setMagnet, hiddenAll, setHiddenAll,
     selected: hasSelection, count: drawCount, trash, textEdit, commitText, cancelText,
   } = useDrawings();
 
@@ -1187,6 +1187,11 @@ export function CandleChart({ symbol, interval, limit = 300, visibleBars = 110, 
           <button type="button" onClick={() => setMagnet(!magnet)} className={iconCls(magnet)}
                   title={magnet ? '磁吸开：端点自动贴住最近的开/高/低/收' : '磁吸关：自由落点'}>
             <Magnet className="w-3.5 h-3.5" />
+          </button>
+          <button type="button" onClick={() => setHiddenAll(!hiddenAll)} disabled={!drawCount}
+                  title={hiddenAll ? '画线已隐藏，点击恢复显示' : '隐藏当前所有画线（不删除）'}
+                  className={`${iconCls(hiddenAll)} disabled:opacity-30 disabled:cursor-default disabled:hover:bg-transparent disabled:hover:text-muted-foreground`}>
+            {hiddenAll ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
           </button>
           <button type="button" onClick={trash} disabled={!hasSelection && !drawCount}
                   title={hasSelection ? '删除选中（Del）' : '清空本币种全部画线'}

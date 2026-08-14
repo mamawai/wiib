@@ -27,6 +27,9 @@ import {
 /** null = 选择模式（可选中/拖拽已有图形，图表照常平移缩放） */
 export type Tool = DrawingKind | null;
 
+/** 触屏设备：画线改走"中心锚点拖动+点击固定"模式（参考币安 App），手指不再直接点图落点 */
+const IS_COARSE = window.matchMedia('(pointer: coarse)').matches;
+
 export interface AttachArgs {
   chart: IChartApi;
   series: ISeriesApi<'Candlestick'>;
@@ -54,20 +57,39 @@ export function useDrawings() {
   const [magnet, setMagnet] = useState(true);
   const [selected, setSelected] = useState(false);
   const [count, setCount] = useState(0);
+  /** 隐藏全部画线（只切可见性不删数据；不持久化，进页面默认显示） */
+  const [hiddenAll, setHiddenAll] = useState(false);
   /** 文字标注输入浮层的位置(相对 host)，null=没在输入 */
   const [textEdit, setTextEdit] = useState<{ x: number; y: number } | null>(null);
 
   const liveRef = useRef<Live | null>(null);
   const toolRef = useRef<Tool>(null);
   const magnetRef = useRef(true);
+  const hiddenRef = useRef(false);
   const dragRef = useRef<Drag | null>(null);
   /** 拖拽期挂在 window 上的那对监听，存下来才摘得掉（add/remove 必须同一个函数对象） */
   const dragHandlersRef = useRef<{ move: (e: PointerEvent) => void; up: () => void } | null>(null);
   /** trend/fib 已落的第一点，等第二点 */
   const firstRef = useRef<Anchor | null>(null);
   const textAnchorRef = useRef<Anchor | null>(null);
+  /** 移动端中心锚点会话：el=锚点 DOM，ptIndex=正在放第几个点，x/y=锚点中心(host 坐标) */
+  const mobileRef = useRef<{ el: HTMLDivElement; ptIndex: 0 | 1; x: number; y: number } | null>(null);
 
   useEffect(() => { magnetRef.current = magnet; }, [magnet]);
+
+  // 眼睛开关：同步图层 + 清选中都在事件回调里做（不进 effect，避免级联渲染）
+  const setHiddenAllSync = useCallback((v: boolean) => {
+    setHiddenAll(v);
+    hiddenRef.current = v;
+    const live = liveRef.current;
+    if (!live) return;
+    live.layer.hidden = v;
+    if (v && live.layer.selectedId) {
+      live.layer.selectedId = null;   // 看不见的线不该保持选中态
+      setSelected(false);
+    }
+    live.layer.update();
+  }, []);
 
   // ---------- 基础换算 ----------
   // 下面这些 helper 一律 useCallback([])：它们只读 ref 和稳定 setter，本就没有响应式依赖。
@@ -75,7 +97,7 @@ export function useDrawings() {
   // 一旦每次渲染换新引用，卸载时就摘不掉旧监听。
 
   /** clientX/Y → pane 局部坐标。inside=false 表示落在副图/价格轴上，不归画线管 */
-  const localPt = useCallback((live: Live, e: PointerEvent) => {
+  const localPt = useCallback((live: Live, clientX: number, clientY: number) => {
     if (!live.paneBox) {
       const el = live.chart.panes()[0]?.getHTMLElement() ?? null;
       // pane 的 DOM 是渲染流程里才建的(同 CandleChart makeLegend 的注释)，所以懒取
@@ -83,7 +105,7 @@ export function useDrawings() {
     }
     const r = live.paneBox?.getBoundingClientRect();
     if (!r) return null;
-    const x = e.clientX - r.left, y = e.clientY - r.top;
+    const x = clientX - r.left, y = clientY - r.top;
     return { x, y, inside: x >= 0 && x <= r.width && y >= 0 && y <= r.height };
   }, []);
 
@@ -137,6 +159,145 @@ export function useDrawings() {
     L.update();
   }, [persist]);
 
+  // ---------- 移动端中心锚点放置（参考币安 App）----------
+  //
+  // 触屏上选中画线工具后：屏幕中心出现一个锚点，用户**只能拖这个锚点**（图表已锁死），
+  // 拖到位后轻点一下即固定当前点；两点工具在固定处再生成第二个锚点重复一次；
+  // 全部固定后页面中央提示"已完成"并退回选择模式。
+
+  /** 锚点元素中心(host 坐标) → 图层锚点（带磁吸）。悬在副图/价格轴上返回 null */
+  const mobileAnchorAt = useCallback((live: Live, hostX: number, hostY: number) => {
+    const hr = live.host.getBoundingClientRect();
+    const pt = localPt(live, hr.left + hostX, hr.top + hostY);
+    if (!pt || !pt.inside) return null;
+    return anchorAt(live, pt.x, pt.y);
+  }, [localPt, anchorAt]);
+
+  const destroyMobileAnchor = useCallback(() => {
+    const m = mobileRef.current;
+    if (!m) return;
+    m.el.remove();
+    mobileRef.current = null;
+  }, []);
+
+  /** 中央"已完成"提示：淡入停留后自删，纯装饰不进 React 树 */
+  const flashDone = useCallback((host: HTMLElement) => {
+    const tip = document.createElement('div');
+    tip.textContent = '已完成';
+    Object.assign(tip.style, {
+      position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%,-50%)',
+      zIndex: '8', padding: '8px 18px', borderRadius: '10px',
+      background: 'rgba(23,24,26,.82)', color: '#fff',
+      font: '700 14px/1 system-ui, sans-serif', letterSpacing: '.05em',
+      opacity: '0', transition: 'opacity .18s ease', pointerEvents: 'none',
+    } as Partial<CSSStyleDeclaration>);
+    host.appendChild(tip);
+    requestAnimationFrame(() => { tip.style.opacity = '1'; });
+    setTimeout(() => {
+      tip.style.opacity = '0';
+      setTimeout(() => tip.remove(), 220);
+    }, 900);
+  }, []);
+
+  // spawn ↔ confirm 互相引用（第二个点由 confirm 再 spawn），走 ref 断环
+  const spawnMobileRef = useRef<(live: Live, ptIndex: 0 | 1, atX?: number, atY?: number) => void>(() => {});
+
+  const spawnMobileAnchor = useCallback((live: Live, ptIndex: 0 | 1, atX?: number, atY?: number) => {
+    destroyMobileAnchor();
+    const host = live.host;
+    const el = document.createElement('div');
+    // 40×40 触区：外圈环 + 中心点 + 四向短十字线，够手指抓也不挡蜡烛
+    Object.assign(el.style, {
+      position: 'absolute', left: '0', top: '0', width: '40px', height: '40px',
+      zIndex: '7', touchAction: 'none', cursor: 'grab',
+    } as Partial<CSSStyleDeclaration>);
+    el.innerHTML =
+      '<div style="position:absolute;inset:4px;border:2px solid #2962ff;border-radius:50%;background:rgba(41,98,255,.10);box-shadow:0 1px 6px rgba(0,0,0,.3)"></div>'
+      + '<div style="position:absolute;left:50%;top:50%;width:5px;height:5px;margin:-2.5px 0 0 -2.5px;border-radius:50%;background:#2962ff"></div>'
+      + '<div style="position:absolute;left:50%;top:-6px;width:2px;height:9px;margin-left:-1px;background:#2962ff"></div>'
+      + '<div style="position:absolute;left:50%;bottom:-6px;width:2px;height:9px;margin-left:-1px;background:#2962ff"></div>'
+      + '<div style="position:absolute;top:50%;left:-6px;height:2px;width:9px;margin-top:-1px;background:#2962ff"></div>'
+      + '<div style="position:absolute;top:50%;right:-6px;height:2px;width:9px;margin-top:-1px;background:#2962ff"></div>';
+    const x0 = atX ?? host.clientWidth / 2;
+    const y0 = atY ?? host.clientHeight / 2;
+    const place = (x: number, y: number) => { el.style.transform = `translate(${x - 20}px, ${y - 20}px)`; };
+    place(x0, y0);
+    host.appendChild(el);
+    const m = { el, ptIndex, x: x0, y: y0 };
+    mobileRef.current = m;
+
+    /** 锚点位置变化 → 磁吸提示 + 第二点预览线实时跟随 */
+    const sync = () => {
+      const r = mobileAnchorAt(live, m.x, m.y);
+      const L = live.layer;
+      L.snap = r?.snapped ? r.a : null;
+      if (r && m.ptIndex === 1 && L.pending) L.pending.pts[1] = r.a;
+      L.update();
+    };
+    sync();
+
+    let dragging = false, moved = false, startCX = 0, startCY = 0, baseX = 0, baseY = 0;
+    el.addEventListener('pointerdown', ev => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      el.setPointerCapture(ev.pointerId);
+      dragging = true;
+      moved = false;
+      startCX = ev.clientX;
+      startCY = ev.clientY;
+      baseX = m.x;
+      baseY = m.y;
+    });
+    el.addEventListener('pointermove', ev => {
+      if (!dragging) return;
+      const dx = ev.clientX - startCX, dy = ev.clientY - startCY;
+      if (Math.hypot(dx, dy) > 6) moved = true;   // 超过抖动阈值才算拖动，避免"点一下"被误判
+      m.x = Math.min(Math.max(baseX + dx, 0), host.clientWidth);
+      m.y = Math.min(Math.max(baseY + dy, 0), host.clientHeight);
+      place(m.x, m.y);
+      sync();
+    });
+    const finishDrag = () => {
+      if (!dragging) return;
+      dragging = false;
+      if (moved) return;                          // 拖动松手：只定位不固定
+      // 轻点 = 固定当前点
+      const r = mobileAnchorAt(live, m.x, m.y);
+      if (!r) return;                             // 悬在价格轴/副图上，点了不算
+      const t = toolRef.current;
+      if (!t) { destroyMobileAnchor(); return; }
+      if (t === 'hline') {
+        commit(live, 'hline', [r.a]);
+        destroyMobileAnchor();
+        flashDone(host);
+        endDraw(live);
+        return;
+      }
+      if (t === 'text') {
+        textAnchorRef.current = r.a;
+        setTextEdit({ x: m.x, y: m.y });
+        destroyMobileAnchor();
+        endDraw(live);
+        return;
+      }
+      if (m.ptIndex === 0) {                      // 第一点固定：原位生成第二锚点接着拖
+        firstRef.current = r.a;
+        live.layer.pending = { id: '_pending', kind: t, pts: [r.a, r.a], color: DRAW_COLOR };
+        live.layer.update();
+        spawnMobileRef.current(live, 1, m.x, m.y);
+      } else {
+        commit(live, t, [firstRef.current!, r.a]);
+        destroyMobileAnchor();
+        flashDone(host);
+        endDraw(live);
+      }
+    };
+    el.addEventListener('pointerup', finishDrag);
+    el.addEventListener('pointercancel', () => { dragging = false; });
+  }, [destroyMobileAnchor, mobileAnchorAt, commit, endDraw, flashDone]);
+
+  useEffect(() => { spawnMobileRef.current = spawnMobileAnchor; }, [spawnMobileAnchor]);
+
   // ---------- 指针事件 ----------
 
   /** 摘掉拖拽期挂在 window 上的三个监听。单独抽出来，省得 onWinUp 自引用 */
@@ -152,7 +313,7 @@ export function useDrawings() {
   const onWinMove = useCallback((e: PointerEvent) => {
     const live = liveRef.current, drag = dragRef.current;
     if (!live || !drag) return;
-    const pt = localPt(live, e);
+    const pt = localPt(live, e.clientX, e.clientY);
     if (!pt) return;
     const L = live.layer;
     const d = L.drawings.find(x => x.id === drag.id);
@@ -190,7 +351,8 @@ export function useDrawings() {
   const onMove = useCallback((e: PointerEvent) => {
     const live = liveRef.current;
     if (!live || (!toolRef.current && !firstRef.current)) return;
-    const pt = localPt(live, e);
+    if (mobileRef.current) return;   // 移动端锚点模式：预览由锚点拖动驱动，host 上的手指移动不管
+    const pt = localPt(live, e.clientX, e.clientY);
     if (!pt) return;
     const L = live.layer;
     if (!pt.inside) { if (L.snap) { L.snap = null; L.update(); } return; }
@@ -204,7 +366,8 @@ export function useDrawings() {
   const onDown = useCallback((e: PointerEvent) => {
     const live = liveRef.current;
     if (!live) return;
-    const pt = localPt(live, e);
+    if (mobileRef.current) return;   // 移动端锚点模式：落点只认锚点的"拖动+点击固定"，不认 host 直点
+    const pt = localPt(live, e.clientX, e.clientY);
     if (!pt || !pt.inside) return;
     const L = live.layer, t = toolRef.current;
 
@@ -278,6 +441,7 @@ export function useDrawings() {
     const layer = new DrawingLayer(a.ctx, { decimals: a.decimals, fmtTime: a.fmtTime });
     layer.drawings = loadDrawings(a.symbol);
     layer.interactive = true;
+    layer.hidden = hiddenRef.current;   // 换 symbol/周期重挂时保持当前眼睛状态
     a.series.attachPrimitive(layer);
     const live: Live = { ...a, layer, paneBox: null };
     liveRef.current = live;
@@ -300,12 +464,13 @@ export function useDrawings() {
       // 卸载时可能正拖着：只摘监听，别走 onWinUp（那会去碰马上要被 remove 的 chart）
       stopDrag();
       dragRef.current = null;
+      destroyMobileAnchor();
       a.host.style.touchAction = '';
       a.host.style.cursor = '';
       a.series.detachPrimitive(layer);
       liveRef.current = null;
     };
-  }, [onDown, onMove, onKey, stopDrag]);
+  }, [onDown, onMove, onKey, stopDrag, destroyMobileAnchor]);
 
   // 工具切换：锁图表、改光标、关掉命中判定（画新线时不该被旧线抢走光标）
   useEffect(() => {
@@ -316,8 +481,11 @@ export function useDrawings() {
     live.host.style.cursor = tool ? 'crosshair' : '';
     lock(live, tool !== null);
     if (!tool) { firstRef.current = null; live.layer.pending = null; live.layer.snap = null; }
+    // 触屏：进入绘制模式即弹中心锚点；退出（含 Esc/完成）即收
+    if (IS_COARSE && tool) spawnMobileAnchor(live, 0);
+    if (!tool) destroyMobileAnchor();
     live.layer.update();
-  }, [tool, lock]);
+  }, [tool, lock, spawnMobileAnchor, destroyMobileAnchor]);
 
   // ---------- 工具条动作 ----------
 
@@ -346,10 +514,17 @@ export function useDrawings() {
     textAnchorRef.current = null;
   }, []);
 
+  /** 工具条入口：选画线工具时若线被藏着，自动把眼睛打开（画完看不见太诡异） */
+  const selectTool = useCallback((t: Tool) => {
+    if (t !== null && hiddenRef.current) setHiddenAllSync(false);
+    setTool(t);
+  }, [setHiddenAllSync]);
+
   return {
     attach,
-    tool, setTool,
+    tool, setTool: selectTool,
     magnet, setMagnet,
+    hiddenAll, setHiddenAll: setHiddenAllSync,
     /** 当前有选中的图形 → 🗑 按钮是"删选中"，否则是"清空全部" */
     selected,
     count,

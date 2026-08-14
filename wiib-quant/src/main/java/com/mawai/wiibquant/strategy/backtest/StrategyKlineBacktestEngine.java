@@ -16,7 +16,9 @@ import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -42,6 +44,11 @@ public final class StrategyKlineBacktestEngine {
     private double fixedMarginUsdt = 0.0; // >0=固定每仓保证金(名义=保证金×命令行杠杆)，绕过风险定量与15%上限；-Dbacktest.fixedMarginUsdt 注入
     private double marginPctOfEquity = 0.0; // >0=每仓保证金=权益×此比例(复利/全仓口径，名义=保证金×杠杆)；-Dbacktest.marginPctOfEquity 注入
 
+    // ---- 事件发射（可视化回测页用；listener=null 时全部 no-op，原行为逐字节一致） ----
+    private BacktestListener listener;
+    private String lastLegFp;      // 腿指纹去重（复刻 StrategyRuntime.lastRecordedLeg 口径：断档后清空，同腿重现再记）
+    private int emittedTrades;     // EXIT 事件 diff 游标：closedTrades 只增不删，按下标续发
+
     public StrategyKlineBacktestEngine(TradingStrategySpi strategy, String symbol, List<KlineBar> base5m,
                                        BigDecimal initialBalance, int leverage, int warmupBars,
                                        Long tradingStartMs, Long tradingEndMs) {
@@ -56,6 +63,11 @@ public final class StrategyKlineBacktestEngine {
     }
 
     public BacktestResult run() {
+        return run(null);
+    }
+
+    public BacktestResult run(BacktestListener listener) {
+        this.listener = listener;
         BacktestTradingTools tools = new BacktestTradingTools(initialBalance, symbol);
         // fill 摩擦压力测试：默认 0(原行为)；>0 时 maker 限价进场需价格穿过挂单价 ε 才成交。
         this.fillEpsilon = BigDecimal.valueOf(
@@ -69,10 +81,12 @@ public final class StrategyKlineBacktestEngine {
         StrategySignal pendingLimit = null;   // 限价单：挂单跨根等价格触及(maker)
         StrategySignal pendingStop = null;    // 触价单：挂单跨根等价格突破(taker)，生命周期与 pendingLimit 同款 reaffirm
 
+        long lastBarOpenTime = 0;   // 循环可能因 tradingEndMs 提前 break，收尾强平事件挂在最后处理的 bar 上
         for (int i = 0; i < base5m.size(); i++) {
             KlineBar bar = base5m.get(i);
             long nowMs = bar.closeTime();
             if (tradingEndMs != null && nowMs >= tradingEndMs) break;
+            lastBarOpenTime = bar.openTime();
 
             tools.setCurrentTime(LocalDateTime.ofInstant(Instant.ofEpochMilli(nowMs), ZoneId.of("UTC")));
             tools.setCurrentBarIndex(i);
@@ -105,11 +119,15 @@ public final class StrategyKlineBacktestEngine {
             }
 
             Optional<StrategySignal> signal = strategy.onBarClosed(symbol, view);
+            // 撤单判定基准：成交消费后仍挂着的单；评估完若没了/换了腿即为撤单（同腿 reaffirm 不算）
+            StrategySignal heldLimit = pendingLimit;
+            StrategySignal heldStop = pendingStop;
             boolean canTrade = inTradingWindow(nowMs, i)
                     && pending == null
                     && tools.getOpenPositions(symbol).isEmpty();
             if (signal.isPresent()) {
                 StrategySignal s = signal.get();
+                emitSignal(s, bar.openTime());
                 if ("LIMIT".equals(s.orderType())) {
                     pendingLimit = canTrade ? s : null;   // reaffirm：腿有效则刷新挂单，否则(有仓/不可交易)清挂单
                     pendingStop = null;                   // 单挂单不变量：新信号换类型时清掉另一侧 stale 挂单
@@ -120,17 +138,82 @@ public final class StrategyKlineBacktestEngine {
                     pending = s;
                 }
             } else {
+                lastLegFp = null;                         // 腿断档：同腿此后重现按新腿再记（同 StrategyRuntime.remove）
                 pendingLimit = null;                      // 无信号=腿失效，撤挂单
                 pendingStop = null;
             }
+            emitCancel(heldLimit, pendingLimit, bar.openTime());
+            emitCancel(heldStop, pendingStop, bar.openTime());
+            emitExits(tools, bar.openTime());
 
             result.recordEquity(tools.getTotalEquity());
+            if (listener != null) listener.onBar(i, base5m.size());
         }
 
         forceCloseAll(tools);
+        emitExits(tools, lastBarOpenTime);
         result.recordEquity(tools.getTotalEquity());
         copyClosedTrades(tools, result);
         return result;
+    }
+
+    // ==================== 事件发射（listener=null 时全部 no-op） ====================
+
+    /** 腿指纹：同 StrategyRuntime 落库去重口径。 */
+    private static String legFp(StrategySignal s) {
+        return s.orderType() + ":" + s.side() + ":" + s.entryRefPrice().stripTrailingZeros().toPlainString();
+    }
+
+    private void emitSignal(StrategySignal s, long barTimeMs) {
+        if (listener == null) return;
+        String fp = legFp(s);
+        if (fp.equals(lastLegFp)) return;   // 同腿每 5m reaffirm，只记首条
+        lastLegFp = fp;
+        listener.onEvent("SIGNAL", barTimeMs, dataMap(
+                "orderType", s.orderType(), "side", s.side(), "entryRef", s.entryRefPrice(),
+                "sl", s.stopLossPrice(), "tp", s.takeProfitPrice(), "reason", s.reason()));
+    }
+
+    private void emitCancel(StrategySignal held, StrategySignal now, long barTimeMs) {
+        if (listener == null || held == null) return;
+        if (now != null && legFp(now).equals(legFp(held))) return;
+        listener.onEvent("ORDER_CANCELLED", barTimeMs, dataMap(
+                "orderType", held.orderType(), "side", held.side(), "entryRef", held.entryRefPrice()));
+    }
+
+    /** 出场事件全部由 ClosedTrade 增量还原，撮合代码零触碰。 */
+    private void emitExits(BacktestTradingTools tools, long barTimeMs) {
+        if (listener == null) return;
+        List<BacktestTradingTools.ClosedTrade> all = tools.getClosedTrades();
+        for (; emittedTrades < all.size(); emittedTrades++) {
+            BacktestTradingTools.ClosedTrade ct = all.get(emittedTrades);
+            listener.onEvent("EXIT", barTimeMs, dataMap(
+                    "reason", ct.exitReason(), "side", ct.side(), "entry", ct.entryPrice(),
+                    "exit", ct.exitPrice(), "pnl", ct.pnl(), "rMultiple", ct.rMultiple(),
+                    "holdBars", ct.closeBarIndex() - ct.openBarIndex()));
+        }
+    }
+
+    private void emitFill(StrategySignal s, BigDecimal price, BigDecimal qty, int lev, long barTimeMs) {
+        if (listener == null) return;
+        listener.onEvent("ENTRY_FILL", barTimeMs, dataMap(
+                "orderType", s.orderType(), "side", s.side(), "price", price, "qty", qty,
+                "leverage", lev, "sl", s.stopLossPrice(), "tp", s.takeProfitPrice()));
+    }
+
+    private void emitReject(StrategySignal s, BigDecimal price, String reason, long barTimeMs) {
+        if (listener == null || s == null) return;
+        listener.onEvent("ENTRY_REJECTED", barTimeMs, dataMap(
+                "reason", reason, "orderType", s.orderType(), "side", s.side(), "price", price));
+    }
+
+    /** 变长键值对 → 有序 map；null 值跳过（tp/rMultiple 可缺，Map.of 不收 null）。 */
+    private static Map<String, Object> dataMap(Object... kv) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        for (int i = 0; i + 1 < kv.length; i += 2) {
+            if (kv[i + 1] != null) m.put((String) kv[i], kv[i + 1]);
+        }
+        return m;
     }
 
     private boolean inTradingWindow(long nowMs, int barIndex) {
@@ -166,12 +249,25 @@ public final class StrategyKlineBacktestEngine {
     /** 成交建仓：市价用下一根开盘价(taker)、限价用挂单价(maker)，由 orderType 区分。 */
     private void openFill(BacktestTradingTools tools, StrategySignal signal, BigDecimal fillPrice,
                           String orderType, int barIndex, WindowedMarketView view) {
-        if (signal == null || fillPrice == null || fillPrice.signum() <= 0) return;
+        long barTimeMs = base5m.get(barIndex).openTime();
+        if (signal == null || fillPrice == null || fillPrice.signum() <= 0) {
+            emitReject(signal, fillPrice, "PRICE_INVALID", barTimeMs);
+            return;
+        }
         // 回测填单模型的保守门：市价单按下一根开盘成交，滑点比实盘秒级延迟严苛。
         // 实盘无法"拒绝"已成交的市价/挂单，此差异有界于秒级滑点，方向上回测更严格。
-        if (!directionalPricesStillValid(signal, fillPrice)) return;
-        if (gappedBeyondStop(signal, fillPrice)) return;
-        if (!rrStillAcceptable(signal, fillPrice)) return;
+        if (!directionalPricesStillValid(signal, fillPrice)) {
+            emitReject(signal, fillPrice, "DIRECTIONAL", barTimeMs);
+            return;
+        }
+        if (gappedBeyondStop(signal, fillPrice)) {
+            emitReject(signal, fillPrice, "GAPPED_BEYOND_STOP", barTimeMs);
+            return;
+        }
+        if (!rrStillAcceptable(signal, fillPrice)) {
+            emitReject(signal, fillPrice, "RR_TOO_LOW", barTimeMs);
+            return;
+        }
 
         StrategyRiskPolicy policy = strategy.riskPolicy() == null
                 ? StrategyRiskPolicy.defaults()
@@ -199,14 +295,21 @@ public final class StrategyKlineBacktestEngine {
         }
         // 自定义仓位口径同样按交易过滤器落地（步长/最小额），回测约束与实盘一致
         quantity = PositionSizer.applyFilter(quantity, fillPrice, TradeFilterDefaults.futures(symbol));
-        if (quantity == null || quantity.signum() <= 0) return;
+        if (quantity == null || quantity.signum() <= 0) {
+            emitReject(signal, fillPrice, "QTY_ZERO", barTimeMs);
+            return;
+        }
 
         tools.setCurrentPrice(fillPrice);
         TradingOperations.OpenResult opened = tools.openPositionWithResult(signal.side(), quantity, effectiveLeverage,
                 orderType, fillPrice, signal.stopLossPrice(), signal.takeProfitPrice(), signal.strategyId());
         if (opened.success()) {
             tools.markOpenBarIndex(barIndex);
+            emitFill(signal, fillPrice, quantity, effectiveLeverage, barTimeMs);
             strategy.onPositionOpened(symbol, signal, opened.positionId(), fillPrice, view, tools);
+        } else {
+            // 三道门都过了还开不了仓 = 余额不足（qty/价格无效已在前面拦截）
+            emitReject(signal, fillPrice, "BALANCE_REJECTED", barTimeMs);
         }
     }
 

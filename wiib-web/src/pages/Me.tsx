@@ -11,7 +11,7 @@ import { NotificationList } from '../components/NotificationList';
 import { ProfilePublicToggle } from '../components/ProfilePublicToggle';
 import { useNotificationPanel } from '../hooks/useNotificationPanel';
 import { userApi } from '../api';
-import { Trophy, Gamepad2, Sun, Moon, LogOut, ChevronRight, User, LineChart, Monitor, RotateCcw, MessageSquare, Bell, Receipt } from 'lucide-react';
+import { Trophy, Gamepad2, Sun, Moon, LogOut, ChevronRight, User, LineChart, Monitor, RotateCcw, MessageSquare, Bell, Receipt, FlaskConical } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 export function Me() {
@@ -63,6 +63,7 @@ export function Me() {
     { icon: Receipt, label: '资金账单', to: '/ledger', color: 'text-primary' },
     // 移动端底栏只有5槽，策略/模拟盘与排行/游戏一样从这里进（桌面走头部导航）
     { icon: LineChart, label: '策略', to: '/strategies', color: 'text-violet-400' },
+    { icon: FlaskConical, label: '回测', to: '/backtest', color: 'text-orange-400' },
     { icon: Monitor, label: '模拟盘', to: '/testnet', color: 'text-sky-400' },
     { icon: Trophy, label: '排行榜', to: '/ranking', color: 'text-amber-400' },
     { icon: Gamepad2, label: '游戏中心', to: '/games', color: 'text-pink-400' },

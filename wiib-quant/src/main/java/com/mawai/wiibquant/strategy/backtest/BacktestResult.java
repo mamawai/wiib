@@ -148,6 +148,11 @@ public class BacktestResult {
         return List.copyOf(trades);
     }
 
+    /** 每 bar 一点的权益序列（首点=初始资金）；可视化回测页配 bar 时间轴出权益曲线用。 */
+    public List<BigDecimal> getEquityCurve() {
+        return List.copyOf(equityCurve);
+    }
+
     // ==================== 报告输出 ====================
 
     @Override

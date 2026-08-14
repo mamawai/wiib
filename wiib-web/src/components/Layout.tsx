@@ -99,8 +99,7 @@ export function Layout({ children }: Props) {
             <HeaderNavItem to="/games" label="游戏" />
             <HeaderNavItem to="/testnet" label="模拟盘" />
             <HeaderNavItem to="/strategies" label="策略" />
-            {/* 回测入口暂摘：后端 /api/ai/backtest/* 随下版本发，先别挂死页 */}
-            {/* <HeaderNavItem to="/backtest" label="回测" /> */}
+            <HeaderNavItem to="/backtest" label="回测" />
             <HeaderNavItem to="/comments" label="留言" />
           </nav>
 

@@ -111,6 +111,7 @@ class PaneRenderer implements IPrimitivePaneRenderer {
     target.useMediaCoordinateSpace(({ context: c, mediaSize }) => {
       const L = this._layer;
       L.width = mediaSize.width;
+      if (L.hidden) return;   // 眼睛开关：只藏不删（选画线工具时 useDrawings 会自动取消隐藏）
       c.save();
       for (const d of L.drawings) this._one(c, d, d.id === L.selectedId, false);
       if (L.pending) this._one(c, L.pending, false, true);
@@ -275,6 +276,8 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
    * 更不该让 LWC 把旧线报成 hover 目标。
    */
   interactive = true;
+  /** 隐藏全部画线（渲染/命中/轴标签一起藏）；数据不动，眼睛开关切回来原样恢复 */
+  hidden = false;
 
   /** 最近一次绘制时的画布宽度，水平线/斐波延伸到右缘要用 */
   width = 0;
@@ -312,6 +315,7 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
    * 想拖端点时手柄区域会盖住线身，先判线身就永远拖不动端点。
    */
   pick(x: number, y: number): Pick | null {
+    if (this.hidden) return null;   // 看不见的线不该点得中
     for (let i = this.drawings.length - 1; i >= 0; i--) {
       const d = this.drawings[i];
 
@@ -367,7 +371,7 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
   /** 水平线常显价格；斐波选中时把七档价一并挂上去，方便读准数 */
   priceAxisViews(): readonly ISeriesPrimitiveAxisView[] {
     const items: { p: number; color: string }[] = [];
-    for (const d of this.drawings) {
+    for (const d of this.hidden ? [] : this.drawings) {
       if (d.kind === 'hline') items.push({ p: d.pts[0].p, color: d.color });
       else if (d.kind === 'fib' && d.id === this.selectedId) {
         const p0 = d.pts[0].p, p1 = d.pts[1].p;
@@ -384,7 +388,7 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
 
   /** 选中的趋势线/斐波，两个端点的时刻挂到时间轴上 */
   timeAxisViews(): readonly ISeriesPrimitiveAxisView[] {
-    const d = this.drawings.find(x => x.id === this.selectedId);
+    const d = this.hidden ? undefined : this.drawings.find(x => x.id === this.selectedId);
     const items = (d && (d.kind === 'trend' || d.kind === 'fib')) ? d.pts : [];
     return this._sync(items.map(a => ({
       key: `${a.t}|${d!.color}`,

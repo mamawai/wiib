@@ -605,24 +605,6 @@ export interface FeedStreamHealth {
 }
 
 // ========== P7 研判工作台 ==========
-/** 深研判（quant_deep_analysis 实体透传） */
-export interface QuantDeepAnalysisView {
-  id: number;
-  symbol: string;
-  closeTime: number;
-  triggerSource: string;
-  narrative: string;
-  /** {bullPct, rangePct, bearPct} 和=100 */
-  scenariosJson: string;
-  noDirection: boolean;
-  invalidation: string;
-  bullArgument: string;
-  bearArgument: string;
-  judgeReasoning: string;
-  newsContext: string | null;
-  createdAt: string;
-}
-
 /** 工作台 SSE 事件（与 ChatWorkbenchController 协议一一对应） */
 export type WorkbenchEvent =
   | { type: 'session'; sessionId: string }
@@ -1021,13 +1003,28 @@ export interface BacktestStrategyMeta {
 
 export interface BacktestTaskStatus {
   taskId: string;
-  state: 'RUNNING' | 'DONE' | 'FAILED';
+  state: 'QUEUED' | 'RUNNING' | 'DONE' | 'FAILED';
   strategyId: string;
   symbol: string;
   barsDone: number;
   totalBars: number;
   warmupBars: number;
   error: string | null;
+  /** 排队第几位；非 QUEUED 恒 0 */
+  queuePos: number;
+}
+
+/** 手动复盘数据源：本地 5m K 线覆盖范围（随机盲测在此区间抽起点） */
+export interface ReplayCoverage {
+  symbol: string;
+  earliestMs: number;
+  latestMs: number;
+}
+
+/** 本地历史 K 线区间拉取：rows = [openTime, open, high, low, close, volume] */
+export interface HistoryKlinesPayload {
+  total: number;
+  rows: number[][];
 }
 
 /** 工作记录事件：seq=任务内游标（=事件表下标），type 见后端 BacktestListener 常量 */
