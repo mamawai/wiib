@@ -15,6 +15,7 @@ import com.mawai.wiibsim.ledger.LedgerCtx;
 import com.mawai.wiibsim.mapper.PredictionBetMapper;
 import com.mawai.wiibsim.mapper.PredictionRoundMapper;
 import com.mawai.wiibcommon.cache.CacheService;
+import com.mawai.wiibcommon.market.PolymarketPriceClient;
 import com.mawai.wiibsim.service.PredictionService;
 import com.mawai.wiibsim.service.UserService;
 import com.mawai.wiibsim.util.RedisLockUtil;
@@ -46,6 +47,7 @@ public class PredictionServiceImpl implements PredictionService {
     private final RedisLockUtil redisLockUtil;
     private final MarketBroadcaster broadcastService;
     private final TransactionTemplate transactionTemplate;
+    private final PolymarketPriceClient priceClient;
 
     private static final BigDecimal FEE_RATE = new BigDecimal("0.25");
     private static final BigDecimal MIN_FEE_RATE = new BigDecimal("0.001");
@@ -53,6 +55,8 @@ public class PredictionServiceImpl implements PredictionService {
     private static final BigDecimal MIN_AMOUNT = BigDecimal.ONE;
     private static final BigDecimal MAX_AMOUNT = new BigDecimal("10000");
     private static final int WINDOW_SECONDS = 300;
+    /** 缺价等这么久还等不到就作废退本金 */
+    private static final long VOID_AFTER_SECONDS = 3600;
 
     /** effectiveRate = 0.25 × (p×(1-p))², clamp [0.1%, 2%] */
     private static BigDecimal calcFeeRate(BigDecimal p) {
@@ -479,86 +483,14 @@ public class PredictionServiceImpl implements PredictionService {
     }
 
     @Override
-    public void settlePreviousRound() {
-        long prevWs = previousWindowStart();
-        BigDecimal endPrice = cacheService.getPolymarketClosePrice(prevWs);
-        if (endPrice == null) {
-            log.debug("closePrice未就绪, windowStart={}", prevWs);
-            return;
-        }
-
-        String settleKey = "prediction:settle:" + prevWs;
+    public void settleRound(long windowStart) {
+        String settleKey = "prediction:settle:" + windowStart;
         String lockVal = redisLockUtil.tryLock(settleKey, 60);
         if (lockVal == null) return;
 
         PredictionRound settled;
         try {
-            // 【事务粒度：整个回合一个事务，不是每个用户一个】
-            // 这里不是"一批互相独立的任务"，而是一件事：回合定盘 + 全部注单改状态 + 全部派彩。
-            // 注单状态是 settleDraw/settleWon/settleLost 三条批量 UPDATE 一次刷完的，
-            // 拆成按用户提交的话，状态先落地、派彩后失败 = 有人标了 WON 却没拿到钱，
-            // 而 casSettleRound 已把回合置 SETTLED、再也不会重跑，这笔钱静默丢掉。
-            //
-            // 【但整批回滚不等于"安全"——这条必须先看完再动手】
-            // 本方法没有任何重试或补偿：驱动它的 PredictionRoundConsumer 用 receiveAutoAck
-            // (等价 XREADGROUP NOACK，消息根本不进 PEL)，onMessage 又把异常 catch 掉只打 ERROR，
-            // 生产端只发一次不补发，也没有任何 @Scheduled 兜这个回合。而 prevWs 是按当前时钟
-            // 现算的，下一次 settle 事件算的已是另一个窗口。
-            // 所以整批回滚 = 这个回合永久停在 LOCKED、没人捞。
-            // 别被"钱一分没动"骗了：用户买入时的 cost + commission 早在上一个事务里扣掉了，
-            // 而 sell 要求回合 OPEN(见本类 sell 内的状态校验)——回合永久 LOCKED 意味着
-            // 这笔本金既卖不掉也退不了，永久冻结。失败是"自洽但需要人工介入"，不是"无害"。
-            settled = transactionTemplate.execute(status -> {
-                PredictionRound round = roundMapper.selectOne(
-                        new LambdaQueryWrapper<PredictionRound>().eq(PredictionRound::getWindowStart, prevWs));
-                if (round == null || !"LOCKED".equals(round.getStatus())) return null;
-
-                String outcome;
-                int cmp = endPrice.compareTo(round.getStartPrice());
-                if (cmp > 0) outcome = "UP";
-                else if (cmp < 0) outcome = "DOWN";
-                else outcome = "DRAW";
-
-                int affected = roundMapper.casSettleRound(round.getId(), endPrice, outcome);
-                if (affected == 0) return null;
-
-                log.info("回合结算: windowStart={}, start={}, end={}, outcome={}",
-                        prevWs, round.getStartPrice(), endPrice, outcome);
-
-                if ("DRAW".equals(outcome)) {
-                    betMapper.settleDraw(round.getId());
-                    List<PredictionBet> drawBets = betMapper.selectList(
-                            new LambdaQueryWrapper<PredictionBet>()
-                                    .eq(PredictionBet::getRoundId, round.getId())
-                                    .eq(PredictionBet::getStatus, "DRAW"));
-                    // mark 必须写在循环体内、每笔之前：它是"消费即清"的一次性标注，
-                    // 提到循环外只有第一个用户拿到 PREDICTION_REFUND，其余全部静默落 UNKNOWN
-                    // （本方法表达不了两种类型，刻意没有方法级 @Ledger 兜底）
-                    for (PredictionBet bet : drawBets) {
-                        LedgerCtx.mark(PREDICTION_REFUND, "PREDICTION_BET", bet.getId());
-                        userService.updateGameBalance(bet.getUserId(), bet.getCost());
-                    }
-                } else {
-                    String losingSide = "UP".equals(outcome) ? "DOWN" : "UP";
-                    betMapper.settleWon(round.getId(), outcome);
-                    betMapper.settleLost(round.getId(), losingSide);
-
-                    List<PredictionBet> wonBets = betMapper.selectList(
-                            new LambdaQueryWrapper<PredictionBet>()
-                                    .eq(PredictionBet::getRoundId, round.getId())
-                                    .eq(PredictionBet::getStatus, "WON"));
-                    // 同上：mark 在循环体内，每笔一次
-                    for (PredictionBet bet : wonBets) {
-                        LedgerCtx.mark(PREDICTION_SETTLE, "PREDICTION_BET", bet.getId());
-                        userService.updateGameBalance(bet.getUserId(), bet.getContracts());
-                    }
-                }
-
-                round.setEndPrice(endPrice);
-                round.setOutcome(outcome);
-                round.setStatus("SETTLED");
-                return round;
-            });
+            settled = doSettle(windowStart);
         } finally {
             redisLockUtil.unlock(settleKey, lockVal);
         }
@@ -568,25 +500,153 @@ public class PredictionServiceImpl implements PredictionService {
         }
     }
 
+    /** 取价 → 定盘 → 派彩。取价刻意放事务外：REST 最多等 8 秒，不能攥着数据库事务等它。 */
+    private PredictionRound doSettle(long windowStart) {
+        PredictionRound round = roundMapper.selectOne(
+                new LambdaQueryWrapper<PredictionRound>().eq(PredictionRound::getWindowStart, windowStart));
+        if (round == null || !"LOCKED".equals(round.getStatus())) return null;
+
+        BigDecimal endPrice = cacheService.getPolymarketClosePrice(windowStart);
+        // startPrice 可能一直是空：建行时 openPrice 还没到，syncOpenPrice 又没赶在锁定前回填
+        BigDecimal startPrice = round.getStartPrice() != null
+                ? round.getStartPrice()
+                : cacheService.getPolymarketOpenPrice(windowStart);
+
+        // 缓存 TTL 只有 20 分钟，补结算时多半已过期；回源 REST，一次响应开收盘价都带，顺手写回缓存
+        if (startPrice == null || endPrice == null) {
+            PolymarketPriceClient.CryptoPrice price = priceClient.fetch(windowStart);
+            if (price != null) {
+                if (startPrice == null && price.openPrice() != null) {
+                    startPrice = price.openPrice();
+                    cacheService.putPolymarketOpenPrice(windowStart, startPrice);
+                }
+                // completed=false 说明这窗口还没收官，closePrice 不作数
+                if (endPrice == null && price.completed() && price.closePrice() != null) {
+                    endPrice = price.closePrice();
+                    cacheService.putPolymarketClosePrice(windowStart, endPrice);
+                }
+            }
+        }
+
+        if (startPrice == null || endPrice == null) {
+            return voidRound(round, windowStart);
+        }
+        return settleWithPrice(round, windowStart, startPrice, endPrice);
+    }
+
+    private PredictionRound settleWithPrice(PredictionRound round, long windowStart,
+                                            BigDecimal startPrice, BigDecimal endPrice) {
+        // 【事务粒度：整个回合一个事务，不是每个用户一个】
+        // 这里不是"一批互相独立的任务"，而是一件事：回合定盘 + 全部注单改状态 + 全部派彩。
+        // 注单状态是 settleDraw/settleWon/settleLost 三条批量 UPDATE 一次刷完的，
+        // 拆成按用户提交的话，状态先落地、派彩后失败 = 有人标了 WON 却没拿到钱，
+        // 而 casSettleRound 已把回合置 SETTLED，这笔钱静默丢掉。
+        // 失败整批回滚回 LOCKED，回合留给 sweepStuckRounds 每 5 分钟重跑；
+        // casSettleRound(WHERE status='LOCKED') 就是重跑的幂等边界，派彩不会来第二遍。
+        return transactionTemplate.execute(status -> {
+            // 锁定后 updateStartPrice(WHERE status='OPEN') 已经够不着这行，另走一条 CAS 补
+            if (round.getStartPrice() == null) {
+                roundMapper.fillStartPrice(round.getId(), startPrice);
+                round.setStartPrice(startPrice);
+            }
+
+            String outcome;
+            int cmp = endPrice.compareTo(startPrice);
+            if (cmp > 0) outcome = "UP";
+            else if (cmp < 0) outcome = "DOWN";
+            else outcome = "DRAW";
+
+            int affected = roundMapper.casSettleRound(round.getId(), endPrice, outcome);
+            if (affected == 0) return null;
+
+            log.info("回合结算: windowStart={}, start={}, end={}, outcome={}",
+                    windowStart, startPrice, endPrice, outcome);
+
+            if ("DRAW".equals(outcome)) {
+                refundActiveBets(round.getId());
+            } else {
+                String losingSide = "UP".equals(outcome) ? "DOWN" : "UP";
+                betMapper.settleWon(round.getId(), outcome);
+                betMapper.settleLost(round.getId(), losingSide);
+
+                List<PredictionBet> wonBets = betMapper.selectList(
+                        new LambdaQueryWrapper<PredictionBet>()
+                                .eq(PredictionBet::getRoundId, round.getId())
+                                .eq(PredictionBet::getStatus, "WON"));
+                // mark 在循环体内、每笔之前，理由见 refundActiveBets
+                for (PredictionBet bet : wonBets) {
+                    LedgerCtx.mark(PREDICTION_SETTLE, "PREDICTION_BET", bet.getId());
+                    userService.updateGameBalance(bet.getUserId(), bet.getContracts());
+                }
+            }
+
+            round.setEndPrice(endPrice);
+            round.setOutcome(outcome);
+            round.setStatus("SETTLED");
+            return round;
+        });
+    }
+
     /**
-     * 卡死巡检。settlePreviousRound 那个事务失败就没人再管这个回合（无重投、无补偿、无兜底调度，
-     * 理由见那边的长注释），而记账切面刚给它加了一个刻意不 catch 的失败源（ledger INSERT 失败必须抛
-     * 才能保证账实一致）。卡住的后果是用户买入时扣的 cost + commission 永久冻结：回合停在 LOCKED，
-     * sell 又要求 OPEN，既卖不掉也退不了。
-     * <p>
-     * 刻意只告警不自动重试：重试得处理"部分派彩已完成"的幂等（回合已 SETTLED、注单已改状态、
-     * 派彩走了一半），那是另一件事。先让问题可见，人工介入。
+     * 价格实在拿不到时的兜底：回合作废、退本金。end_price 留空、outcome='VOID'，
+     * 注单走 DRAW 那条路（payout=cost）——PnL 和排行榜 SQL 已把 DRAW 当已结算、盈亏 0，不用改。
+     */
+    private PredictionRound voidRound(PredictionRound round, long windowStart) {
+        Long activeCount = betMapper.selectCount(new LambdaQueryWrapper<PredictionBet>()
+                .eq(PredictionBet::getRoundId, round.getId())
+                .eq(PredictionBet::getStatus, "ACTIVE"));
+
+        // 有钱压着就先等：Polymarket 晚出数据是常事，急着作废等于把该赢的判成退本金。
+        // 等满一小时还没有就认它没了——本金不能无限期冻着。
+        // 没注单的回合不涉及钱，但也得过了两个窗口再作废：settle 事件路径（刚收官几十秒）
+        // 偶发缓存和 REST 同时缺价，不该把本可正常结算的回合标成作废，留给巡检下一轮就够。
+        long ageSeconds = Instant.now().getEpochSecond() - windowStart;
+        long waitSeconds = activeCount > 0 ? VOID_AFTER_SECONDS : 2L * WINDOW_SECONDS;
+        if (ageSeconds < waitSeconds) {
+            log.warn("[Prediction] 结算缺价，留给下次巡检: windowStart={}, activeBets={}", windowStart, activeCount);
+            return null;
+        }
+
+        return transactionTemplate.execute(status -> {
+            int affected = roundMapper.casVoidRound(round.getId());
+            if (affected == 0) return null;
+
+            log.warn("[Prediction] 回合作废（取不到价）: windowStart={}, activeBets={}", windowStart, activeCount);
+            refundActiveBets(round.getId());
+
+            round.setOutcome("VOID");
+            round.setStatus("SETTLED");
+            return round;
+        });
+    }
+
+    /** 退本金：注单 ACTIVE→DRAW(payout=cost) 后逐笔退钱，平局和作废共用 */
+    private void refundActiveBets(Long roundId) {
+        betMapper.settleDraw(roundId);
+        List<PredictionBet> refundBets = betMapper.selectList(
+                new LambdaQueryWrapper<PredictionBet>()
+                        .eq(PredictionBet::getRoundId, roundId)
+                        .eq(PredictionBet::getStatus, "DRAW"));
+        // mark 必须写在循环体内、每笔之前：它是"消费即清"的一次性标注，
+        // 提到循环外只有第一个用户拿到 PREDICTION_REFUND，其余全部静默落 UNKNOWN
+        // （本方法表达不了两种类型，刻意没有方法级 @Ledger 兜底）
+        for (PredictionBet bet : refundBets) {
+            LedgerCtx.mark(PREDICTION_REFUND, "PREDICTION_BET", bet.getId());
+            userService.updateGameBalance(bet.getUserId(), bet.getCost());
+        }
+    }
+
+    /**
+     * 补结算巡检。结算靠 Stream 事件单次触发，事件没发（feed 抓价全失败）或结算事务失败，
+     * 回合就停在 LOCKED；而 sell 要求回合 OPEN，用户买入时扣的 cost + commission 既卖不掉也退不了。
+     * 这里把这些回合重新跑一遍 settleRound：缺价回源 REST，实在没价的按 VOID 退本金。
      */
     @Override
     public void sweepStuckRounds() {
-        // 阈值取上一窗口的起点：prevWs 那个回合正在被结算，合法地停在 LOCKED，必须排除。
-        // 只报比它更老的——那些已经白等了一整个结算周期，不可能还有人来捞。
-        // 查询只捞还带 ACTIVE 注单的（=真有钱被冻着），理由见 selectStuckLocked 的注释。
+        // 阈值取上一窗口的起点：prevWs 那个回合正被正常结算，合法地停在 LOCKED，必须排除
         long staleBefore = previousWindowStart();
-        List<PredictionRound> stuck = roundMapper.selectStuckLocked(staleBefore);
-        for (PredictionRound round : stuck) {
-            log.warn("[Prediction] 回合卡在 LOCKED 未结算，用户本金被冻着（卖不掉也退不了），需人工介入: "
-                    + "roundId={} windowStart={}", round.getId(), round.getWindowStart());
+        for (PredictionRound round : roundMapper.selectLockedBefore(staleBefore)) {
+            settleRound(round.getWindowStart());
         }
     }
 

@@ -3,6 +3,7 @@ package com.mawai.wiibfeed;
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
+import com.mawai.wiibcommon.market.PolymarketPriceClient;
 import com.mawai.wiibcommon.market.PredictionStreamChannels;
 import com.mawai.wiibcommon.cache.CacheService;
 import com.mawai.wiibcommon.broadcast.MarketBroadcaster;
@@ -115,6 +116,7 @@ public class PolymarketWsClient implements SmartLifecycle {
     private final MarketBroadcaster broadcastService;
     private final CacheService cacheService;
     private final StringRedisTemplate redisTemplate;
+    private final PolymarketPriceClient priceClient;
 
     private HttpClient httpClient;
     private ScheduledExecutorService scheduler;
@@ -275,8 +277,6 @@ public class PolymarketWsClient implements SmartLifecycle {
         }
     }
 
-    private static final String CRYPTO_PRICE_API = "https://polymarket.com/api/crypto/crypto-price";
-
     private void pollMarketAssets(long windowStart) {
         for (int i = 0; i < 10; i++) {
             if (shutdown.get() || windowStart != currentWindowStart()) return;
@@ -424,26 +424,6 @@ public class PolymarketWsClient implements SmartLifecycle {
         return null;
     }
 
-    private JSONObject fetchCryptoPrice(long windowStart) {
-        try {
-            Instant start = Instant.ofEpochSecond(windowStart);
-            Instant end = start.plusSeconds(WINDOW_SECONDS);
-            URI uri = URI.create(CRYPTO_PRICE_API + "?symbol=BTC&variant=fiveminute"
-                    + "&eventStartTime=" + start + "&endDate=" + end);
-            HttpRequest request = HttpRequest.newBuilder()
-                    .uri(uri).timeout(Duration.ofSeconds(8))
-                    .header("User-Agent", "Mozilla/5.0")
-                    .GET().build();
-            HttpResponse<String> resp = httpClient.send(request,
-                    HttpResponse.BodyHandlers.ofString());
-            if (resp.statusCode() != 200) return null;
-            return JSON.parseObject(resp.body());
-        } catch (Exception e) {
-            log.warn("Polymarket API调用失败: windowStart={}, err={}", windowStart, e.getMessage());
-            return null;
-        }
-    }
-
     private void pollOpenPrice(long windowStart) {
         for (int i = 0; i < 12; i++) {
             if (shutdown.get()) return;
@@ -452,9 +432,9 @@ public class PolymarketWsClient implements SmartLifecycle {
                 log.info("openPrice已存在,跳过: windowStart={}", windowStart);
                 return;
             }
-            JSONObject json = fetchCryptoPrice(windowStart);
-            if (json == null) continue;
-            BigDecimal openPrice = json.getBigDecimal("openPrice");
+            PolymarketPriceClient.CryptoPrice price = priceClient.fetch(windowStart);
+            if (price == null) continue;
+            BigDecimal openPrice = price.openPrice();
             if (openPrice != null) {
                 cacheService.putPolymarketOpenPrice(windowStart, openPrice);
                 publishRoundEvent("syncopen", windowStart);
@@ -476,10 +456,9 @@ public class PolymarketWsClient implements SmartLifecycle {
                 log.info("closePrice已存在,跳过: windowStart={}", prevWindowStart);
                 return;
             }
-            JSONObject json = fetchCryptoPrice(prevWindowStart);
-            if (json == null) continue;
-            if (!Boolean.TRUE.equals(json.getBoolean("completed"))) continue;
-            BigDecimal closePrice = json.getBigDecimal("closePrice");
+            PolymarketPriceClient.CryptoPrice price = priceClient.fetch(prevWindowStart);
+            if (price == null || !price.completed()) continue;
+            BigDecimal closePrice = price.closePrice();
             if (closePrice != null) {
                 cacheService.putPolymarketClosePrice(prevWindowStart, closePrice);
                 publishRoundEvent("settle", prevWindowStart);

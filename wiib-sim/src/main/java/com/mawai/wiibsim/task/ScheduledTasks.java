@@ -112,9 +112,9 @@ public class ScheduledTasks {
     }
 
     /**
-     * 预测回合卡死巡检（每5分钟，错开窗口边界30秒）。
-     * 结算靠 Redis Stream 事件单次触发，没有重投也没有补偿：结算事务一失败回合就永久停在 LOCKED，
-     * 用户买入时扣的钱既卖不掉也退不了。这里只负责让它可见，不自动重试（部分派彩的幂等是另一件事）。
+     * 预测回合补结算巡检（每5分钟，错开窗口边界30秒）。
+     * 结算靠 Redis Stream 事件单次触发，事件没发或结算事务失败回合就停在 LOCKED，
+     * 用户买入时扣的钱既卖不掉也退不了。这里把这些回合重跑一遍：缺价回源 REST，实在没价的作废退本金。
      */
     @Scheduled(cron = "30 */5 * * * *")
     public void sweepStuckPredictionRounds() {

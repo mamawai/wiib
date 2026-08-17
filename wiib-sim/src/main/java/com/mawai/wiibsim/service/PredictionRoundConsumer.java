@@ -100,12 +100,12 @@ public class PredictionRoundConsumer {
         String type = v.get("type");
         try {
             switch (type) {
-                // lock 锁定指定旧回合，windowStart 来自事件（不能用消费时刻的当前窗口）
+                // lock/settle 处理的是旧回合，windowStart 必须取事件里的（不能用消费时刻的当前窗口）
                 case "lock" -> predictionService.lockRound(Long.parseLong(v.get("windowStart")));
-                // create/syncopen/settle 内部按当前/上一窗口算，同机消费亚毫秒延迟、仍在原窗口内，语义一致
+                // create/syncopen 内部按当前窗口算，同机消费亚毫秒延迟、仍在原窗口内，语义一致
                 case "create" -> predictionService.createNewRound();
                 case "syncopen" -> predictionService.syncOpenPrice();
-                case "settle" -> predictionService.settlePreviousRound();
+                case "settle" -> predictionService.settleRound(Long.parseLong(v.get("windowStart")));
                 default -> log.warn("[PredictionRound] 未知事件 type={} fields={}", type, v);
             }
         } catch (Exception e) {
