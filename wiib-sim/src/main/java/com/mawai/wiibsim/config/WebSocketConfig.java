@@ -8,7 +8,6 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.server.ServerHttpRequest;
 import org.springframework.http.server.ServerHttpResponse;
-import org.springframework.http.server.ServletServerHttpRequest;
 import org.jspecify.annotations.NonNull;
 import org.springframework.messaging.Message;
 import org.springframework.messaging.MessageChannel;
@@ -28,7 +27,6 @@ import org.springframework.web.socket.server.HandshakeInterceptor;
 import org.springframework.context.event.EventListener;
 
 import java.util.Map;
-import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
@@ -82,20 +80,6 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
                             log.warn("WebSocket连接数已达上限: {}", maxConnections);
                             return false;
                         }
-
-                        String token = null;
-                        if (request instanceof ServletServerHttpRequest servletRequest) {
-                            token = servletRequest.getServletRequest().getParameter("token");
-                        }
-
-                        if (token != null && !token.isEmpty()) {
-                            try {
-                                Object loginId = StpUtil.getLoginIdByToken(token);
-                                if (loginId != null) {
-                                    attributes.put("userId", loginId);
-                                }
-                            } catch (Exception ignored) {}
-                        }
                         return true;
                     }
 
@@ -125,11 +109,17 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
                                 connectionCount.incrementAndGet();
                             }
                             log.info("WebSocket连接: sessionId={}, 连接数={}", sessionId, connectionCount.get());
+                            // token 走 CONNECT 头不走 URL，握手那层看不到，只能在这儿认身份。
                             // Principal 必须是 userId：convertAndSendToUser 靠它把点对点消息投到具体连接。
-                            Object uid = Objects.requireNonNull(accessor.getSessionAttributes()).get("userId");
-                            if (uid != null) {
-                                String principal = String.valueOf(uid);
-                                accessor.setUser(() -> principal);
+                            String token = accessor.getFirstNativeHeader("token");
+                            if (token != null && !token.isEmpty()) {
+                                try {
+                                    Object loginId = StpUtil.getLoginIdByToken(token);
+                                    if (loginId != null) {
+                                        String principal = String.valueOf(loginId);
+                                        accessor.setUser(() -> principal);
+                                    }
+                                } catch (Exception ignored) {} // token 过期/无效就当游客
                             }
                             break;
                         case SUBSCRIBE:

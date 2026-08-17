@@ -37,11 +37,13 @@ function currentToken(): string {
 function getClient(): Client {
   if (client) return client;
   client = new Client({
-    // 每次建连（含自动重连）都会重新执行，所以总是拿到当下最新的 token；
+    webSocketFactory: () => new SockJS('/ws/quotes'),
+    // token 走 CONNECT 头不塞 URL，不然会漏进 nginx 日志和浏览器历史。
+    // 每次建连（含自动重连）前都会跑，所以总是拿到当下最新的 token；
     // 游客没 token 就匿名连，后端不会拒，照样收行情广播
-    webSocketFactory: () => {
+    beforeConnect: (c) => {
       const token = currentToken();
-      return new SockJS(`/ws/quotes${token ? `?token=${encodeURIComponent(token)}` : ''}`);
+      c.connectHeaders = token ? { token } : {};
     },
     reconnectDelay: 5000,
     onConnect: () => {
