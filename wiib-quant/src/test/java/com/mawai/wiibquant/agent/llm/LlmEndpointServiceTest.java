@@ -26,7 +26,7 @@ import static org.mockito.Mockito.when;
 
 /**
  * 端点库的三条不变量：首条自动默认；删默认时最早的一条顶上、绑定连带删；
- * 对话轻模型绑到主模型同一条等于没绑。校验口径与旧 UserLlmConfigService 一致（协议/档位脏值抹平）。
+ * 对话轻模型绑到主模型同一条等于没绑。校验口径：协议/档位脏值抹平，档位不限白名单只挡列宽。
  */
 class LlmEndpointServiceTest {
 
@@ -79,6 +79,18 @@ class LlmEndpointServiceTest {
     }
 
     @Test
+    void 自定义档位原样存下不被白名单拦() {
+        when(endpointMapper.selectList(any())).thenReturn(List.of());
+        when(crypto.encrypt(any())).thenReturn("enc");
+
+        assertThat(service.create(1L, req("openai", "XHigh", "sk-x"))).isNull();
+
+        ArgumentCaptor<UserLlmEndpoint> cap = ArgumentCaptor.forClass(UserLlmEndpoint.class);
+        verify(endpointMapper).insert(cap.capture());
+        assertThat(cap.getValue().getReasoningEffort()).isEqualTo("xhigh");
+    }
+
+    @Test
     void 已有端点时新增不抢默认() {
         when(endpointMapper.selectList(any())).thenReturn(List.of(ep(1, true)));
         when(crypto.encrypt(any())).thenReturn("enc");
@@ -91,11 +103,11 @@ class LlmEndpointServiceTest {
     }
 
     @Test
-    void 校验挡住内网地址与非法档位与缺key() {
+    void 校验挡住内网地址与超长档位与缺key() {
         when(endpointMapper.selectList(any())).thenReturn(List.of());
         assertThat(service.create(1L, new LlmEndpointService.SaveReq("x", "openai", "http://127.0.0.1:8080", "m", "", "sk")))
                 .contains("内网");
-        assertThat(service.create(1L, req("openai", "ultra", "sk"))).contains("思考档位");
+        assertThat(service.create(1L, req("openai", "seventeen-chars-x", "sk"))).contains("思考档位");   // 17 字符，超列宽
         assertThat(service.create(1L, req("openai", "", ""))).isEqualTo("apiKey不能为空");
         assertThat(service.create(1L, new LlmEndpointService.SaveReq(" ", "openai", "https://8.8.8.8", "m", "", "sk")))
                 .contains("名称");

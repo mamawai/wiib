@@ -17,6 +17,14 @@ const FUNCTION_LABELS: Record<string, string> = {
   'news-tagging': '新闻打标',
 };
 const MODEL_ASSIGNMENT_FUNCTIONS = new Set(Object.keys(FUNCTION_LABELS));
+/** 思考档位的快捷填充；空串=不传 */
+const EFFORT_PRESETS: { value: string; label: string }[] = [
+  { value: '', label: '默认' },
+  { value: 'none', label: 'none' },
+  { value: 'low', label: 'low' },
+  { value: 'medium', label: 'medium' },
+  { value: 'high', label: 'high' },
+];
 
 export function Admin() {
   const { user } = useUserStore();
@@ -389,17 +397,27 @@ export function Admin() {
                     <option value="openai">协议：OpenAI Chat Completions（/v1/chat/completions，DeepSeek 等通用）</option>
                     <option value="responses">协议：OpenAI Responses（/v1/responses，CPA/OpenAI官方/xAI）</option>
                   </select>
-                  <select
-                    className="w-full h-9 rounded-md border bg-background px-3 text-sm"
-                    value={editingKey.reasoningEffort || ''}
-                    onChange={e => setEditingKey(prev => prev ? { ...prev, reasoningEffort: e.target.value } : prev)}
-                  >
-                    <option value="">思考档位：模型默认（不传）</option>
-                    <option value="none">none（关思考，最省 token，仅部分模型支持）</option>
-                    <option value="low">low</option>
-                    <option value="medium">medium</option>
-                    <option value="high">high</option>
-                  </select>
+                  {/* 档位不写死选项：各家名字自己定（xhigh/minimal…）。输入框是真值，芯片只管往里填 */}
+                  <div className="space-y-1.5">
+                    <Input
+                      value={editingKey.reasoningEffort || ''}
+                      onChange={e => setEditingKey(prev => prev ? { ...prev, reasoningEffort: e.target.value } : prev)}
+                      placeholder="思考档位，留空=模型默认（不传）"
+                      maxLength={16}
+                    />
+                    <div className="flex flex-wrap gap-1.5">
+                      {EFFORT_PRESETS.map(o => (
+                        <Button key={o.value} size="sm"
+                                variant={(editingKey.reasoningEffort || '') === o.value ? 'secondary' : 'outline'}
+                                onClick={() => setEditingKey(prev => prev ? { ...prev, reasoningEffort: o.value } : prev)}>
+                          {o.label}
+                        </Button>
+                      ))}
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      none=关思考最省 token（仅部分模型支持）；也可填模型认的其他档位如 xhigh。认不认查不到，存完自己试。
+                    </div>
+                  </div>
                   <div className="flex gap-2">
                     <Button size="sm" onClick={() => void handleSaveKey()} disabled={actionLoading === 'saveKey'}>
                       <Save className="w-3.5 h-3.5 mr-1" /> 保存

@@ -28,8 +28,8 @@ export interface LlmEndpointFormProps {
   onTest: () => Promise<void>;
 }
 
-/** 空串=不传，与后端 normalizeEffort 的"留空一律 null"对齐 */
-const EFFORT_OPTIONS: { value: string; label: string }[] = [
+/** 常见档位的快捷填充；空串=不传，与后端 normalizeEffort 的"留空一律 null"对齐 */
+const EFFORT_PRESETS: { value: string; label: string }[] = [
   { value: '', label: '默认' },
   { value: 'none', label: 'none' },
   { value: 'low', label: 'low' },
@@ -143,12 +143,16 @@ export function LlmEndpointForm({ value, onChange, exists, keyTail, onDetect, on
 
       <div className="space-y-1 text-xs">
         <span className="text-muted-foreground font-bold">思考档位</span>
-        <div className="flex gap-1.5">
-          {EFFORT_OPTIONS.map(o => (
+        {/* 输入框是唯一真值，下面的芯片只管往里填：各家档位名字自己定，写死五选一会挡住 xhigh 这类 */}
+        <input value={value.reasoningEffort} onChange={e => onChange({ reasoningEffort: e.target.value })}
+               placeholder="留空=不传；可填 none / low / medium / high / xhigh…" maxLength={16}
+               className="w-full h-9 rounded-lg border border-border bg-card-2 px-3 text-xs num" />
+        <div className="flex flex-wrap gap-1.5">
+          {EFFORT_PRESETS.map(o => (
             <button key={o.value} type="button" onClick={() => onChange({ reasoningEffort: o.value })}
-                    className={cn('flex-1 h-9 rounded-lg border text-xs font-bold',
+                    className={cn('px-2 h-7 rounded-md border text-[11px] num',
                       (value.reasoningEffort ?? '') === o.value
-                        ? 'border-primary/60 bg-card-2 text-primary'
+                        ? 'border-primary/60 bg-card-2 text-primary font-bold'
                         : 'border-border text-muted-foreground hover:text-foreground')}>
               {o.label}
             </button>
@@ -157,8 +161,8 @@ export function LlmEndpointForm({ value, onChange, exists, keyTail, onDetect, on
         {/* 模型支不支持这个参数查不到：协议的 /v1/models 只回 id/object/created/owned_by。
             传给不支持的模型各家表现不一致（有的忽略，OpenAI 官方直接 400），所以只能让用户自己试 */}
         <span className="text-[10px] text-muted-foreground/70 block">
-          「默认」＝不传这个参数，用模型自己的默认行为。不是所有模型都认这个参数——
-          认不认没法提前查出来，填完点「测试连通性」试一下最稳。
+          留空＝不传这个参数，用模型自己的默认行为；也可以填模型认的其他档位（如 xhigh、minimal）。
+          不是所有模型都认这个参数——认不认没法提前查出来，填完点「测试连通性」试一下最稳。
         </span>
       </div>
 

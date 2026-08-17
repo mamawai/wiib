@@ -558,7 +558,7 @@ export interface AiKeyConfig {
   apiKey: string;
   baseUrl: string;
   model?: string;
-  /** 思考档位 none/low/medium/high；空=不传走模型默认 */
+  /** 思考档位，任意上游认的值（none/low/medium/high/xhigh…）；空=不传走模型默认 */
   reasoningEffort?: string;
   /** 上游协议 openai=/v1/chat/completions，responses=/v1/responses；空=openai */
   apiProtocol?: string;
@@ -667,7 +667,7 @@ export interface LlmEndpointView {
   apiProtocol: string;
   baseUrl: string;
   model: string;
-  /** none/low/medium/high，null=不传给上游走模型默认 */
+  /** 任意上游认的档位值（none/low/medium/high/xhigh…），null=不传给上游走模型默认 */
   reasoningEffort: string | null;
   apiKeyTail: string;
   /** 默认端点：没按用途绑定的地方都用它 */

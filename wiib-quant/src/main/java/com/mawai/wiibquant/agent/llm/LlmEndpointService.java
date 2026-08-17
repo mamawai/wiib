@@ -41,7 +41,9 @@ public class LlmEndpointService {
     /** 一人上限：够挂几家平台各几个模型；再多多半是没删干净 */
     static final int MAX_PER_USER = 20;
 
-    private static final Set<String> REASONING_EFFORTS = Set.of("none", "low", "medium", "high");
+    /** 档位列宽 VARCHAR(16)，超了留给 SQL 报错不如这里说人话 */
+    private static final int MAX_EFFORT_LEN = 16;
+
     private static final Set<String> PURPOSES = Set.of(UserLlmBinding.CHAT_MAIN, UserLlmBinding.CHAT_LIGHT, UserLlmBinding.TRADER);
 
     /** apiKey 传空=沿用已存的 key（只在 update/探测已有端点时合法） */
@@ -361,9 +363,10 @@ public class LlmEndpointService {
         if (!AiProtocols.isValid(normalizeProtocol(req.apiProtocol()))) {
             return "协议仅支持 openai / responses";
         }
+        // 不限白名单：各家档位名字自己定（xhigh/minimal…），认不认只有上游知道。只挡列宽（VARCHAR(16)）免得存的时候炸 SQL
         String effort = normalizeEffort(req.reasoningEffort());
-        if (effort != null && !REASONING_EFFORTS.contains(effort)) {
-            return "思考档位仅支持 none / low / medium / high，留空=不传";
+        if (effort != null && effort.length() > MAX_EFFORT_LEN) {
+            return "思考档位最长 " + MAX_EFFORT_LEN + " 字符，留空=不传";
         }
         if (requireKey && (req.apiKey() == null || req.apiKey().isBlank())) {
             return "apiKey不能为空";

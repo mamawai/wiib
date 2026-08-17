@@ -549,7 +549,7 @@ COMMENT ON COLUMN ai_runtime_config.config_name IS '配置名称，如 OpenAI、
 COMMENT ON COLUMN ai_runtime_config.api_key IS 'API Key';
 COMMENT ON COLUMN ai_runtime_config.base_url IS 'OpenAI Compatible Base URL（不含/v1后缀，quant/sim 均自拼 /v1/chat/completions）';
 COMMENT ON COLUMN ai_runtime_config.model IS '该LLM的模型名（功能位切到此配置即用此模型）';
-COMMENT ON COLUMN ai_runtime_config.reasoning_effort IS '思考档位 none/low/medium/high，NULL=不传走模型默认；同模型要深浅两档就建两条配置分给不同功能位';
+COMMENT ON COLUMN ai_runtime_config.reasoning_effort IS '思考档位，任意上游认的值（none/low/medium/high/xhigh…），NULL=不传走模型默认；同模型要深浅两档就建两条配置分给不同功能位';
 COMMENT ON COLUMN ai_runtime_config.api_protocol IS '上游协议：openai=/v1/chat/completions（DeepSeek等通用），responses=/v1/responses（CPA/OpenAI官方/xAI，思考模型优先）';
 COMMENT ON COLUMN ai_runtime_config.enabled IS '是否启用';
 
@@ -983,7 +983,7 @@ CREATE TABLE IF NOT EXISTS user_llm_endpoint (
 );
 CREATE INDEX IF NOT EXISTS idx_user_llm_endpoint_user ON user_llm_endpoint(user_id);
 COMMENT ON TABLE  user_llm_endpoint IS '用户 BYOK 端点库：一条=协议+URL+key+模型(+思考档位)，一人多条；对话/交易员/复盘教练从中选';
-COMMENT ON COLUMN user_llm_endpoint.reasoning_effort IS '思考档位 none/low/medium/high，NULL=不传走模型默认；模型支不支持查不到，由用户自选';
+COMMENT ON COLUMN user_llm_endpoint.reasoning_effort IS '思考档位，任意上游认的值（none/low/medium/high/xhigh…），NULL=不传走模型默认；模型支不支持查不到，由用户自选';
 COMMENT ON COLUMN user_llm_endpoint.api_key_enc IS 'AES-256-GCM 密文，密钥来自 WIIB_TRADER_KEY_SECRET';
 COMMENT ON COLUMN user_llm_endpoint.is_default IS '默认端点：没按用途绑定的地方都用它；一人恰一条（首条自动、删默认时最早的顶上）';
 
