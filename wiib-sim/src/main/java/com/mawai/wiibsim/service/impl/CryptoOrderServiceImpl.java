@@ -183,16 +183,19 @@ public class CryptoOrderServiceImpl extends ServiceImpl<CryptoOrderMapper, Crypt
         String lockValue = redisLockUtil.tryLock(lockKey, 30);
         if (lockValue == null) throw new BizException(ErrorCode.ORDER_PROCESSING);
         try {
-            return SpringUtils.getAopProxy(this).doCancelOrder(userId, orderId);
+            CryptoOrder order = SpringUtils.getAopProxy(this).doCancelOrder(userId, orderId);
+            // 索引跟着DB走：事务提交后才摘索引。搁事务里解冻一失败回滚，单子退回PENDING而索引已没了=悬空
+            removeFromLimitZSet(order);
+            return buildResponse(order);
         } finally {
             redisLockUtil.unlock(lockKey, lockValue);
         }
     }
 
-    // 标这一层：protected 且经 getAopProxy 走代理调进来，AOP 拦得到（cancel() 只负责抢锁）
+    // 标这一层：protected 且经 getAopProxy 走代理调进来，AOP 拦得到（cancel() 只负责抢锁和摘索引）
     @Transactional(rollbackFor = Exception.class)
     @Ledger(SPOT_LIMIT_UNFREEZE)
-    protected CryptoOrderResponse doCancelOrder(Long userId, Long orderId) {
+    protected CryptoOrder doCancelOrder(Long userId, Long orderId) {
         getAndValidateUser(userId);
         CryptoOrder order = baseMapper.selectById(orderId);
         if (order == null || !order.getUserId().equals(userId)) throw new BizException(ErrorCode.ORDER_NOT_FOUND);
@@ -201,8 +204,6 @@ public class CryptoOrderServiceImpl extends ServiceImpl<CryptoOrderMapper, Crypt
         int affected = baseMapper.casUpdateStatus(orderId, OrderStatus.PENDING.getCode(), OrderStatus.CANCELLED.getCode());
         if (affected == 0) throw new BizException(ErrorCode.ORDER_CANNOT_CANCEL);
 
-        removeFromLimitZSet(order);
-
         if (OrderSide.BUY.getCode().equals(order.getOrderSide())) {
             userService.unfreezeBalance(userId, order.getFrozenAmount());
         } else {
@@ -210,7 +211,7 @@ public class CryptoOrderServiceImpl extends ServiceImpl<CryptoOrderMapper, Crypt
         }
 
         order.setStatus(OrderStatus.CANCELLED.getCode());
-        return buildResponse(order);
+        return order;
     }
 
     // ==================== 查询 ====================
@@ -420,27 +421,24 @@ public class CryptoOrderServiceImpl extends ServiceImpl<CryptoOrderMapper, Crypt
         // 卖单：limitPrice <= currentPrice → 触发
         Set<String> sellHits = stringRedisTemplate.opsForZSet().rangeByScore(sellKey, 0, price.doubleValue());
 
-        boolean noBuy = buyHits == null || buyHits.isEmpty();
-        boolean noSell = sellHits == null || sellHits.isEmpty();
-        if (noBuy && noSell) return;
-
-        if (!noBuy) {
-            stringRedisTemplate.opsForZSet().remove(buyKey, buyHits.toArray());
-            for (String id : buyHits) triggerAndExecuteOrder(Long.parseLong(id), price);
+        // 只查不预删：DB是事实、索引跟着事实走。抢不到锁或CAS抛错时索引原地留着，下个tick照样捞得到
+        if (buyHits != null) {
+            for (String id : buyHits) triggerAndExecuteOrder(buyKey, Long.parseLong(id), price);
         }
-        if (!noSell) {
-            stringRedisTemplate.opsForZSet().remove(sellKey, sellHits.toArray());
-            for (String id : sellHits) triggerAndExecuteOrder(Long.parseLong(id), price);
+        if (sellHits != null) {
+            for (String id : sellHits) triggerAndExecuteOrder(sellKey, Long.parseLong(id), price);
         }
     }
 
-    private void triggerAndExecuteOrder(Long orderId, BigDecimal triggerPrice) {
+    private void triggerAndExecuteOrder(String zsetKey, Long orderId, BigDecimal triggerPrice) {
         String lockKey = "crypto:order:execute:" + orderId;
         String lockValue = redisLockUtil.tryLock(lockKey, 30);
-        if (lockValue == null) return;
+        if (lockValue == null) return;   // 有人正在处理这单，索引不动，下个tick再来
         try {
             var proxy = SpringUtils.getAopProxy(this);
             proxy.markOrderTriggered(orderId, triggerPrice);
+            // CAS正常返回才摘索引：没改到说明这单早不是PENDING，索引是过期项，一样该清
+            stringRedisTemplate.opsForZSet().remove(zsetKey, orderId.toString());
             CryptoOrder order = baseMapper.selectById(orderId);
             if (order != null && OrderStatus.TRIGGERED.getCode().equals(order.getStatus())) {
                 proxy.processTriggeredOrder(order);
@@ -464,27 +462,18 @@ public class CryptoOrderServiceImpl extends ServiceImpl<CryptoOrderMapper, Crypt
         Set<ZSetOperations.TypedTuple<String>> sellHits = stringRedisTemplate.opsForZSet()
                 .rangeByScoreWithScores(sellKey, 0, periodHigh.doubleValue());
 
-        boolean noBuy = buyHits == null || buyHits.isEmpty();
-        boolean noSell = sellHits == null || sellHits.isEmpty();
-        if (noBuy && noSell) return;
-
-        int count = 0;
-        count = getCount(buyKey, buyHits, noBuy, count);
-        count = getCount(sellKey, sellHits, noSell, count);
+        int count = triggerHits(buyKey, buyHits) + triggerHits(sellKey, sellHits);
         if (count > 0) log.info("crypto恢复触发限价单 symbol={} low={} high={} 共{}个", symbol, periodLow, periodHigh, count);
     }
 
-    private int getCount(String buyKey, Set<ZSetOperations.TypedTuple<String>> buyOrSellHits, boolean noBuyOrSell, int count) {
-        if (!noBuyOrSell) {
-            stringRedisTemplate.opsForZSet().remove(buyKey, buyOrSellHits.stream()
-                    .map(stringTypedTuple -> stringTypedTuple.getValue()).toArray());
-            for (var tuple : buyOrSellHits) {
-                triggerAndExecuteOrder(Long.parseLong(Objects.requireNonNull(tuple.getValue())),
-                        BigDecimal.valueOf(Objects.requireNonNull(tuple.getScore())));
-                count++;
-            }
+    // 断连期间价格已穿过，按挂单价成交；摘索引同样交给 triggerAndExecuteOrder（CAS落定后才摘）
+    private int triggerHits(String key, Set<ZSetOperations.TypedTuple<String>> hits) {
+        if (hits == null || hits.isEmpty()) return 0;
+        for (var tuple : hits) {
+            triggerAndExecuteOrder(key, Long.parseLong(Objects.requireNonNull(tuple.getValue())),
+                    BigDecimal.valueOf(Objects.requireNonNull(tuple.getScore())));
         }
-        return count;
+        return hits.size();
     }
 
     // ==================== ZSet索引管理 ====================
@@ -503,10 +492,28 @@ public class CryptoOrderServiceImpl extends ServiceImpl<CryptoOrderMapper, Crypt
         stringRedisTemplate.opsForZSet().remove(key, order.getId().toString());
     }
 
-    private void rebuildLimitOrderZSets() {
-        List<CryptoOrder> pendingOrders = baseMapper.selectList(new LambdaQueryWrapper<CryptoOrder>()
+    /**
+     * 周期对账：把DB里所有PENDING挂单补回索引。纯追加不删——ZADD同member只覆盖score，
+     * 重复跑无害；Redis丢键、或触发/撤单路径中途出岔子掉出索引的挂单，靠这个捞回来接着盯价。
+     */
+    @Override
+    public void reconcileLimitOrderIndex() {
+        List<CryptoOrder> pendingOrders = pendingLimitOrders();
+        if (pendingOrders.isEmpty()) return;
+        for (CryptoOrder order : pendingOrders) {
+            addToLimitZSet(order);
+        }
+        log.info("crypto限价单索引对账 挂单{}个", pendingOrders.size());
+    }
+
+    private List<CryptoOrder> pendingLimitOrders() {
+        return baseMapper.selectList(new LambdaQueryWrapper<CryptoOrder>()
                 .eq(CryptoOrder::getStatus, OrderStatus.PENDING.getCode())
                 .eq(CryptoOrder::getOrderType, OrderType.LIMIT.getCode()));
+    }
+
+    private void rebuildLimitOrderZSets() {
+        List<CryptoOrder> pendingOrders = pendingLimitOrders();
         if (pendingOrders.isEmpty()) return;
 
         Set<String> symbols = pendingOrders.stream().map(CryptoOrder::getSymbol).collect(Collectors.toSet());

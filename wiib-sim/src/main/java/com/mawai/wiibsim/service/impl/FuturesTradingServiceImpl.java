@@ -540,9 +540,17 @@ public class FuturesTradingServiceImpl implements FuturesTradingService {
     // ==================== 取消限价单 ====================
 
     @Override
+    public FuturesOrderResponse cancelOrder(Long userId, Long orderId) {
+        FuturesOrder order = SpringUtils.getAopProxy(this).doCancelOrder(userId, orderId);
+        // 索引跟着DB走：事务提交后才摘索引。搁事务里解冻一失败回滚，单子退回PENDING而索引已没了=悬空
+        removeFromLimitZSet(order, cacheService);
+        return buildOrderResponse(order);
+    }
+
+    // 标这一层：protected 且经 getAopProxy 走代理调进来，AOP 拦得到（cancelOrder() 只负责摘索引）
     @Transactional(rollbackFor = Exception.class)
     @Ledger(FUTURES_LIMIT_UNFREEZE)
-    public FuturesOrderResponse cancelOrder(Long userId, Long orderId) {
+    protected FuturesOrder doCancelOrder(Long userId, Long orderId) {
         FuturesOrder order = orderMapper.selectById(orderId);
         if (order == null || !order.getUserId().equals(userId)) {
             throw new BizException(ErrorCode.ORDER_NOT_FOUND);
@@ -555,8 +563,6 @@ public class FuturesTradingServiceImpl implements FuturesTradingService {
         int affected = orderMapper.casUpdateStatus(orderId, "PENDING", "CANCELLED");
         if (affected == 0) throw new BizException(ErrorCode.ORDER_CANNOT_CANCEL);
 
-        removeFromLimitZSet(order, cacheService);
-
         // 逐仓开/加仓单解冻资金；全仓单没冻结过钱，状态一改挂单占用自动消失
         if (!order.getOrderSide().startsWith("CLOSE") && !FuturesPosition.CROSS.equals(order.getMarginMode())) {
             userMapper.atomicUnfreezeBalance(userId, order.getFrozenAmount());
@@ -564,7 +570,7 @@ public class FuturesTradingServiceImpl implements FuturesTradingService {
 
         order.setStatus("CANCELLED");
         log.info("futures取消限价单 userId={} orderId={}", userId, orderId);
-        return buildOrderResponse(order);
+        return order;
     }
 
     // ==================== 追加保证金 ====================

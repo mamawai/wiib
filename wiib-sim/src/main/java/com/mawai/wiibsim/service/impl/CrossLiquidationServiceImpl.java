@@ -189,7 +189,7 @@ public class CrossLiquidationServiceImpl implements CrossLiquidationService {
         for (FuturesOrder order : pendings) {
             // 逐单CAS不批量UPDATE：TRIGGERED单可能正被doProcessTriggeredOrder抢去转PROCESSING，抢输了就别动
             if (orderMapper.casUpdateStatus(order.getId(), order.getStatus(), "CANCELLED") == 0) continue;
-            // TRIGGERED单在扫描时已被zRangeByScoreAndRemove摘走，这里ZREM返0无害；PENDING单靠这句摘干净
+            // TRIGGERED单的索引在触发时(CAS落定后)已摘掉，这里ZREM返0无害；PENDING单靠这句摘干净
             removeFromLimitZSet(order, cacheService);
             cancelled++;
         }

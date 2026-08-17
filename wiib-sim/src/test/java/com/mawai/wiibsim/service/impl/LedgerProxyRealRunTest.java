@@ -1,5 +1,6 @@
 package com.mawai.wiibsim.service.impl;
 
+import com.mawai.wiibcommon.dto.CryptoOrderRequest;
 import com.mawai.wiibcommon.dto.FuturesAddMarginRequest;
 import com.mawai.wiibcommon.entity.CryptoOrder;
 import com.mawai.wiibcommon.entity.FuturesPosition;
@@ -231,10 +232,11 @@ class LedgerProxyRealRunTest {
             MarginAccountServiceImpl.class, BuffServiceImpl.class);
 
     /**
-     * 现存 13 个「protected + @Transactional + @Ledger」入口。只作"清单别悄悄缩水"的下限，不是精确台账。
-     * （原为 14，现货卖出取消 5min 延迟后 CryptoOrderServiceImpl.doSettle 随整套延迟结算一并删除。）
+     * 现存 14 个「protected + @Transactional + @Ledger」入口。只作"清单别悄悄缩水"的下限，不是精确台账。
+     * （14 → 13：现货卖出取消 5min 延迟后 CryptoOrderServiceImpl.doSettle 随整套延迟结算一并删除；
+     * 13 → 14：限价单索引改成"事务提交后再摘"，FuturesTradingServiceImpl.cancelOrder 拆出 doCancelOrder。）
      */
-    private static final int MIN_PROTECTED_TX_LEDGER = 13;
+    private static final int MIN_PROTECTED_TX_LEDGER = 14;
 
     /**
      * 本次 28 处标注里有 14 处是 {@code protected @Transactional @Ledger doXxx}，全靠 getAopProxy 调进来。
@@ -291,10 +293,12 @@ class LedgerProxyRealRunTest {
                 .isEmpty();
 
         // 公共方法当对照：它必须拿得到，否则说明是本用例问错了对象而不是 protected 的问题
+        // （原来打 FuturesTradingServiceImpl.cancelOrder，它已拆成"公共壳 + protected doCancelOrder"——
+        // 事务边界跟着挪进了 doCancelOrder，公共壳只剩摘 Redis 索引，不再适合当 public 对照）
         TransactionAttribute publicAttr = transactionAttributeSource.getTransactionAttribute(
-                FuturesTradingServiceImpl.class.getDeclaredMethod("cancelOrder", Long.class, Long.class),
-                FuturesTradingServiceImpl.class);
-        assertThat(publicAttr).as("对照组：public 的 cancelOrder 必须拿得到事务属性").isNotNull();
+                CryptoOrderServiceImpl.class.getDeclaredMethod("buy", Long.class, CryptoOrderRequest.class),
+                CryptoOrderServiceImpl.class);
+        assertThat(publicAttr).as("对照组：public 的 buy 必须拿得到事务属性").isNotNull();
     }
 
     /**
