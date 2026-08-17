@@ -6,8 +6,8 @@
 
 **如果当初买了会怎样**
 
-代币化美股 · 加密现货 / 永续 · 大宗商品 · BTC 预测 · AI 量化研判
-一个用虚拟资金跑真实行情的交易实验平台
+代币化美股 · 加密现货 / 永续 · 大宗商品 · BTC 预测 · AI 量化研判<br/>
+<sub>一个用虚拟资金跑真实行情的交易实验平台</sub>
 
 <br/>
 
@@ -43,9 +43,13 @@
 
 | 进程 | 端口 | 职责 | 对外 |
 |---|:---:|---|:---:|
-| **wiib-feed** | `8081` | 统一接入 Binance（现货 + 永续 WS/REST）与 Polymarket，写入 Redis（Stream / KV / Pub-Sub），crypto 永续 5m K 线落库 | ✗ 上游进程 |
-| **wiib-sim** | `8080` | 真人模拟交易 + 游戏 + BTC 预测，账本 = 自研模拟盘 DB，提供 REST / WebSocket | ✓ 前端连它 |
-| **wiib-quant** | `8082` | agent harness（AI Trader 竞技场 / 复盘 / 研判工作台）+ FIBO / LIQFADE / SQZMOM / TURTLE 四策略，都由 5m K 线收盘驱动；下单一律走 sim 的独立子账户，不碰真人账本 | ✗ 内部 |
+| **wiib-feed** | `8081` | 行情接入：Binance / Polymarket → Redis，K 线落库 | 否，上游进程 |
+| **wiib-sim** | `8080` | 真人模拟交易 + 游戏 + BTC 预测，REST / WebSocket | 是，前端连它 |
+| **wiib-quant** | `8082` | agent harness + 四策略，下单走 sim 子账户 | 否，内部 |
+
+- **wiib-feed**：统一接入 Binance（现货 + 永续 WS/REST）与 Polymarket，写入 Redis（Stream / KV / Pub-Sub），crypto 永续 5m K 线落库。
+- **wiib-sim**：账本是自研模拟盘 DB，前端只连它。
+- **wiib-quant**：AI Trader 竞技场 / 复盘 / 研判工作台 + FIBO / LIQFADE / SQZMOM / TURTLE 四策略，都由 5m K 线收盘驱动；下单一律走 sim 的独立子账户，不碰真人账本。
 
 > 策略执行目标二选一（`strategy.execution.target=sim｜testnet`）：本平台模拟盘的独立量化账户 `quant-<策略ID>`，或 Binance USDT-M Testnet。
 
@@ -54,7 +58,7 @@
 | 品类 | 标的 |
 |---|---|
 | 加密现货 / 永续 | `BTC` `ETH` `DOGE` `SOL` `XRP` `BNB` |
-| bStock 代币化美股（10） | NVDA · TSLA · MU · SNDK · CRCL · MSTR · AMD · SPCX · QQQ · SOXL（Binance 现货，如 `NVDABUSDT`） |
+| bStock 代币化美股 | 10 只：NVDA · TSLA · MU · SNDK · CRCL · MSTR · AMD · SPCX · QQQ · SOXL（Binance 现货，如 `NVDABUSDT`） |
 | 大宗商品 | 黄金 `XAUUSDT` · 原油 `CLUSDT`（TradFi 永续，无现货） |
 | TradFi 合约 | 闪迪 `SNDK` · `SOXL` · SK海力士 `SKHYNIX` · 美光 `MU` · `KORU` · SpaceX `SPCX`（美股/ETF 永续，无现货，盈亏归股票桶） |
 | 策略实盘篮子 | FIBO: `BTC/ETH` · LIQFADE: `BTC/ETH/DOGE` · SQZMOM: `SOL/DOGE/XRP` · TURTLE: `SOL/ETH/DOGE/BNB` |
