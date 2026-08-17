@@ -153,8 +153,6 @@ class ChatWorkbenchHitlTest {
 
     /** 叶子改由 chat() 取好传进 run()，这条测试直接调 run()，所以工厂和配置服务都用不上了 */
     private ChatWorkbenchController controller() {
-        ChatMemoryService memory = mock(ChatMemoryService.class);
-        when(memory.recall(anyLong())).thenReturn(""); // 空前缀：记忆拼接不是这里要验的
         WorkbenchChatContextMapper contextMapper = mock(WorkbenchChatContextMapper.class);
         when(contextMapper.selectState(anyString())).thenAnswer(inv -> {
             byte[] row = contextRows.get(inv.getArgument(0));   // 无行=空表，跟 MyBatis selectList 一个语义
@@ -170,9 +168,9 @@ class ChatWorkbenchHitlTest {
         ChatConcurrencyGate gate = new ChatConcurrencyGate(10);
         WorkbenchRunRegistry runRegistry = mock(WorkbenchRunRegistry.class);
         ChatHistoryService history = mock(ChatHistoryService.class);
-        yieldCoordinator = new ChatYieldCoordinator(gate, runRegistry, turnRunner, history, memory);
+        yieldCoordinator = new ChatYieldCoordinator(gate, runRegistry, turnRunner, history);
         return new ChatWorkbenchController(mock(ChatAgentFactory.class), mock(LlmEndpointService.class),
-                registry, memory, history, contextStore, turnRunner,
+                registry, history, contextStore, turnRunner,
                 runRegistry, gate, yieldCoordinator);
     }
 

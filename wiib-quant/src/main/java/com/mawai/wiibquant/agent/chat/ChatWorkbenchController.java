@@ -57,7 +57,6 @@ public class ChatWorkbenchController {
     private final ChatAgentFactory chatAgentFactory;
     private final LlmEndpointService endpointService;
     private final ApprovalRegistry approvalRegistry;
-    private final ChatMemoryService chatMemoryService;
     private final ChatHistoryService chatHistoryService;
     private final ChatContextStore contextStore;
     private final ChatTurnRunner turnRunner;
@@ -271,11 +270,9 @@ public class ChatWorkbenchController {
             channel.send("session", new JSONObject().fluentPut("sessionId", sessionId));
             chatHistoryService.append(sessionId, userId, "user", message);
 
-            // 跨会话记忆前缀：让 agent 记得用户常看什么、上次聊到哪。
             // 时间行锚定"最近/未来1h"这类语义；随每条用户消息注入，历史里各带各的时刻
-            String memory = chatMemoryService.recall(userId);
             String enriched = "【当前时间 " + TIME_FMT.format(Instant.now()) + "】\n"
-                    + memory + "用户问题：" + message;
+                    + "用户问题：" + message;
 
             ChatTurnRunner.TurnResult result = turnRunner.run(leaves, userId, sessionId, enriched,
                     chunk -> {
@@ -292,7 +289,7 @@ public class ChatWorkbenchController {
                     event -> onExpertProgress(channel, expertLog, event), turn);
 
             if (result.yielded()) {
-                // 让位收尾：答案欠着（记账给协调器补答），本轮不落 assistant 历史也不记记忆——
+                // 让位收尾：答案欠着（记账给协调器补答），本轮不落 assistant 历史——
                 // 补答轮会补齐。registerDeferred 必须在本轮结束（runRegistry.finish）之前：
                 // status 口径是 isRunning || hasPending，先摘运行标记再记账会闪出空窗，轮询端误判已结束。
                 // done 带 deferred 标记：前端据此转入轮询等补答，answer 只是过渡话术不进历史
@@ -323,10 +320,9 @@ public class ChatWorkbenchController {
 
             // 极端场景（调用上限截停等）summarizer 没产出汇总，退专家结论，答案不至于丢
             String finalAnswer = !answer.isEmpty() ? answer.toString() : expertLog.toString();
-            // 历史/记忆不看连接死活：切页断连后这一轮照跑完，答案必须落库（前端回来靠 status+历史补）。
+            // 历史不看连接死活：切页断连后这一轮照跑完，答案必须落库（前端回来靠 status+历史补）。
             // 且必须在 finally 摘运行标记之前写完——轮询端不能出现"已结束但查不到答案"的空窗
             chatHistoryService.append(sessionId, userId, "assistant", finalAnswer);
-            chatMemoryService.remember(userId, message, finalAnswer);
             if (!channel.isClosed()) {
                 channel.send("done", new JSONObject()
                         .fluentPut("sessionId", sessionId)

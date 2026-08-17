@@ -48,7 +48,6 @@ public class ChatYieldCoordinator {
     private final WorkbenchRunRegistry runRegistry;
     private final ChatTurnRunner turnRunner;
     private final ChatHistoryService chatHistoryService;
-    private final ChatMemoryService chatMemoryService;
 
     /** 补答跑在虚拟线程上：全程阻塞在 LLM 上游 IO */
     private final ExecutorService deferredExecutor = Executors.newVirtualThreadPerTaskExecutor();
@@ -177,7 +176,7 @@ public class ChatYieldCoordinator {
         }
     }
 
-    /** 一单补答：summarizer 收尾 → 落展示历史（带补答标头）→ 记记忆。 */
+    /** 一单补答：summarizer 收尾 → 落展示历史（带补答标头）。 */
     private void runDeferred(DeferredWork work, Queue<DeferredWork> queue) {
         try {
             // 先登记运行中再出队：status = isRunning || hasPending，顺序反了会闪出两者皆 false 的空窗，
@@ -188,7 +187,6 @@ public class ChatYieldCoordinator {
                     work.question(), work.experts().join());
             chatHistoryService.append(work.sessionId(), work.userId(), "assistant",
                     deferredHeader(work.question()) + answer);
-            chatMemoryService.remember(work.userId(), work.question(), answer);
             log.info("[Yield] 补答完成 session={} chars={}", work.sessionId(), answer.length());
         } catch (Exception e) {
             log.warn("[Yield] 补答失败 session={}", work.sessionId(), e);

@@ -121,8 +121,6 @@ class LlmErrorSurfaceTest {
                 });
             }
         };
-        ChatMemoryService memory = mock(ChatMemoryService.class);
-        when(memory.recall(anyLong())).thenReturn("");
         ChatTurnRunner turnRunner = mock(ChatTurnRunner.class);
         doThrow(new RuntimeException(RAW)).when(turnRunner)
                 .run(any(), anyLong(), any(), any(), any(), any(), any());
@@ -130,9 +128,9 @@ class LlmErrorSurfaceTest {
         WorkbenchRunRegistry runRegistry = mock(WorkbenchRunRegistry.class);
         ChatHistoryService history = mock(ChatHistoryService.class);
         ChatYieldCoordinator coordinator =
-                new ChatYieldCoordinator(gate, runRegistry, turnRunner, history, memory);
+                new ChatYieldCoordinator(gate, runRegistry, turnRunner, history);
         ChatWorkbenchController controller = new ChatWorkbenchController(mock(ChatAgentFactory.class),
-                mock(LlmEndpointService.class), new ApprovalRegistry(), memory,
+                mock(LlmEndpointService.class), new ApprovalRegistry(),
                 history, mock(ChatContextStore.class), turnRunner,
                 runRegistry, gate, coordinator);
 

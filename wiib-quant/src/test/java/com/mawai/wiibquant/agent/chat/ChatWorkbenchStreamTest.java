@@ -47,8 +47,6 @@ class ChatWorkbenchStreamTest {
     @Test
     void 断连后答案照样攒起来落进历史但不再发帧() {
         ChatHistoryService historyService = mock(ChatHistoryService.class);
-        ChatMemoryService memory = mock(ChatMemoryService.class);
-        when(memory.recall(anyLong())).thenReturn("");
         ChatTurnRunner turnRunner = mock(ChatTurnRunner.class);
         // runner 分两帧把答案交出来，controller 的 sink 得把它们攒全
         doAnswer((Answer<ChatTurnRunner.TurnResult>) inv -> {
@@ -60,9 +58,9 @@ class ChatWorkbenchStreamTest {
         ChatConcurrencyGate gate = new ChatConcurrencyGate(10);
         WorkbenchRunRegistry runRegistry = mock(WorkbenchRunRegistry.class);
         ChatYieldCoordinator coordinator =
-                new ChatYieldCoordinator(gate, runRegistry, turnRunner, historyService, memory);
+                new ChatYieldCoordinator(gate, runRegistry, turnRunner, historyService);
         ChatWorkbenchController controller = new ChatWorkbenchController(mock(ChatAgentFactory.class),
-                mock(LlmEndpointService.class), new ApprovalRegistry(), memory,
+                mock(LlmEndpointService.class), new ApprovalRegistry(),
                 historyService, mock(ChatContextStore.class), turnRunner,
                 runRegistry, gate, coordinator);
 
@@ -72,9 +70,8 @@ class ChatWorkbenchStreamTest {
 
         controller.run(channel, 1L, SESSION, "看看行情", null, coordinator.openTurn(1L));
 
-        // 答案完整进历史（也进记忆）——这是断连用户唯一还拿得到东西的途径
+        // 答案完整进历史——这是断连用户唯一还拿得到东西的途径
         verify(historyService).append(eq(SESSION), eq(1L), eq("assistant"), eq("前半段后半段"));
-        verify(memory).remember(1L, "看看行情", "前半段后半段");
         // 但一帧都没往断掉的通道里写
         assertThat(emitter.raw).isEmpty();
     }
