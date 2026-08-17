@@ -434,6 +434,53 @@ public class FuturesTradingServiceImpl implements FuturesTradingService {
         return new CloseAllResult(closed, failures);
     }
 
+    /**
+     * 反手：市价全平 → 立刻反向开等量新仓。
+     * <p>
+     * 不加 @Transactional/@Ledger：平仓与开仓各自复用 closePosition/openPosition 的独立锁+独立事务+
+     * 独立记账（同 closeAllPositions 的组合方式），这层再套一层只会嵌套事务、重复记账。
+     * 锁是<b>顺序</b>不是嵌套——平仓返回时 pos 锁已释放，开仓才去拿 sym 锁，不引入新的锁序。
+     * <p>
+     * 双向持仓下必须先平再开：同向下单会并入现有仓位，只开反向仓等于多空对冲同时挂着，不是反手。
+     * 该币反方向本来就有仓的话，新开这笔按既定语义并入那个仓，不特殊处理。
+     */
+    @Override
+    public ReverseResult reversePosition(Long userId, Long positionId) {
+        FuturesPosition position = getUserPosition(userId, positionId);
+        // 平完这个仓位就查不到了，反向开仓要用的参数必须先抄进局部变量
+        String symbol = position.getSymbol();
+        String side = position.getSide();
+        int leverage = position.getLeverage();
+        String marginMode = position.getMarginMode();
+
+        FuturesCloseRequest closeReq = new FuturesCloseRequest();
+        closeReq.setPositionId(positionId);
+        closeReq.setOrderType("MARKET");   // quantity 不设=锁内取实时持仓量全平
+        // 这步失败正常抛：什么都还没发生
+        FuturesOrderResponse closed = closePosition(userId, closeReq);
+
+        FuturesOpenRequest openReq = new FuturesOpenRequest();
+        openReq.setSymbol(symbol);
+        openReq.setSide("LONG".equals(side) ? "SHORT" : "LONG");
+        openReq.setMarginMode(marginMode);
+        // 等量按"真平掉多少"来（平仓是锁内取实时量），不能用上面那份可能已被 SL/TP 吃掉一部分的快照量
+        openReq.setQuantity(closed.getQuantity());
+        openReq.setLeverage(leverage);
+        openReq.setOrderType("MARKET");
+
+        try {
+            FuturesOrderResponse opened = openPosition(userId, openReq);
+            log.info("futures反手 userId={} posId={} symbol={} {}→{} qty={} pnl={}",
+                    userId, positionId, symbol, side, openReq.getSide(), closed.getQuantity(), closed.getRealizedPnl());
+            return new ReverseResult(closed, opened, null);
+        } catch (Exception e) {
+            // 不回滚也不外抛：仓位是真平了、盈亏是真结算了，硬"回滚"等于凭空造一个仓位出来。
+            // 抛出去前端只看到一句失败，用户不知道自己其实已经空仓——带着已平信息返回让前端说清楚
+            log.warn("反手的反向开仓失败 userId={} posId={} symbol={} qty={}", userId, positionId, symbol, closed.getQuantity(), e);
+            return new ReverseResult(closed, null, e.getMessage());
+        }
+    }
+
     private FuturesOrderResponse executeMarketClose(Long userId, FuturesPosition position, BigDecimal closeQty) {
         BigDecimal currentPrice = getPrice(position.getSymbol());
         BigDecimal pnl = calculatePnl(position.getSide(), position.getEntryPrice(), currentPrice, closeQty);

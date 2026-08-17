@@ -426,6 +426,13 @@ export interface FuturesOrder {
   isAiTrader?: boolean;
 }
 
+/** 反手结果：closed=平掉那笔（带已实现盈亏），opened=反向开的那笔；反向开仓失败时 opened 为 null、openError 带原因（此时已空仓） */
+export interface FuturesReverseResult {
+  closed: FuturesOrder;
+  opened: FuturesOrder | null;
+  openError: string | null;
+}
+
 // ========== BTC 5min 涨跌预测 ==========
 
 export interface PredictionRound {

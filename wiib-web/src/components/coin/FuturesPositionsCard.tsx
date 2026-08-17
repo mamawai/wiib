@@ -208,6 +208,15 @@ function PositionItem({ pos, brackets, wide, onMutated }: {
   const [newLeverage, setNewLeverage] = useState<number | null>(null);
   const [slRows, setSlRows] = useState<SLTPRow[]>([]);
   const [tpRows, setTpRows] = useState<SLTPRow[]>([]);
+  const [reversing, setReversing] = useState(false);
+  const [confirmReverse, setConfirmReverse] = useState(false);
+
+  // 反手两段确认，3s 未二次点击自动还原。确认态在每张卡里各自一份，不是全局共享
+  useEffect(() => {
+    if (!confirmReverse) return;
+    const t = window.setTimeout(() => setConfirmReverse(false), 3000);
+    return () => window.clearTimeout(t);
+  }, [confirmReverse]);
 
   const isPnlUp = unrealizedPnl >= 0;
   const isLong = pos.side === 'LONG';
@@ -258,6 +267,36 @@ function PositionItem({ pos, brackets, wide, onMutated }: {
       positionId: pos.id, quantity: qty, orderType: closeOrderType,
       ...(closeOrderType === 'LIMIT' ? { limitPrice: parseFloat(closeLimitPrice) } : {}),
     }), '平仓成功', true);
+  };
+
+  /**
+   * 反手：市价全平 + 立刻反向开等量新仓。不走 submit——两步的结果要分别报，
+   * 尤其是"平了但没开成"这种半成功：那会儿原仓已经没了，不明说用户会以为什么都没发生。
+   */
+  const handleReverse = async () => {
+    setConfirmReverse(false);
+    setReversing(true);
+    try {
+      const res = await futuresApi.reverse(pos.id);
+      const pnl = res.closed.realizedPnl ?? 0;
+      const pnlText = `${pnl >= 0 ? '+' : ''}${fmtNum(pnl)} USDT`;
+      const closedText = `${isLong ? '多' : '空'}单 ${res.closed.quantity} ${cfg.name}（已实现盈亏 ${pnlText}）`;
+      if (res.opened) {
+        toast(`已反手为${isLong ? '空' : '多'}单`, 'success', {
+          description: `平掉${closedText}，反向开 ${res.opened.quantity} ${cfg.name} ${pos.leverage}x。新仓没有止损止盈，需要的话重新设`,
+        });
+      } else {
+        toast('反手只完成了一半：仓位已平，反向开仓失败', 'error', {
+          duration: 8000,
+          description: `已平掉${closedText}，反向${isLong ? '空' : '多'}单没开成：${res.openError ?? '未知原因'}。原仓已不在，要开反向仓请手动下单`,
+        });
+      }
+      onMutated(true);
+    } catch (e: unknown) {
+      toast((e as Error).message || '反手失败', 'error');
+    } finally {
+      setReversing(false);
+    }
   };
 
   const handleAddMargin = () => {
@@ -368,6 +407,20 @@ function PositionItem({ pos, brackets, wide, onMutated }: {
       <div className="flex flex-wrap gap-1.5 pt-1">
         {/* 加仓无独立入口（对齐Binance）：同方向再下一单即自动并入仓位，走开仓面板 */}
         <Button size="sm" variant={action === 'close' ? 'default' : 'outline'} className="h-9 sm:h-7 text-[11px] flex-1 min-w-15" onClick={() => toggleAction('close')}>平仓</Button>
+        {/* 反手紧挨平仓：两个都是"处理掉当前仓位"，换行时优先留在同一排。问号连着按钮走，不单独占格。
+            确认态 basis-full 独占一行：等分格子塞不下"确认反手？"会被裁字，顺带也让这步更醒目 */}
+        <div className={`${confirmReverse ? 'basis-full' : 'flex-1'} min-w-15 flex items-center gap-1`}>
+          <Button
+            size="sm"
+            variant={confirmReverse ? 'destructive' : 'outline'}
+            className="h-9 sm:h-7 text-[11px] flex-1"
+            disabled={reversing}
+            onClick={() => confirmReverse ? void handleReverse() : setConfirmReverse(true)}
+          >
+            {reversing ? <Loader2 className="w-3 h-3 animate-spin" /> : confirmReverse ? '确认反手？' : '反手'}
+          </Button>
+          <HelpTip text={'反手 = 市价全平当前仓位，立刻反向开等量新仓，同杠杆、同保证金模式。\n做多一步变做空，不用自己先平再开。\n原仓的止损止盈不会带到新仓，要的话重新设。'} />
+        </div>
         {/* 全仓保证金按账户统一算，单仓加减保证金没意义，后端也会拒（1761），直接不给入口 */}
         {!isCrossPos && <Button size="sm" variant={action === 'margin' ? 'default' : 'outline'} className="h-9 sm:h-7 text-[11px] flex-1 min-w-15" onClick={() => toggleAction('margin')}>+保证金</Button>}
         {!isCrossPos && <Button size="sm" variant={action === 'reduceMargin' ? 'default' : 'outline'} className="h-9 sm:h-7 text-[11px] flex-1 min-w-15" onClick={() => toggleAction('reduceMargin')}>-保证金</Button>}

@@ -53,6 +53,12 @@ public class FuturesController {
         return Result.ok(futuresTradingService.closeAllPositions(userId));
     }
 
+    /** 反手：市价全平该仓位并立刻反向开等量新仓；反向开仓失败不抛，结果里带 openError（此时已空仓） */
+    @PostMapping("/reverse/{positionId}")
+    public Result<FuturesTradingService.ReverseResult> reverse(@CurrentUserId Long userId, @PathVariable Long positionId) {
+        return Result.ok(futuresTradingService.reversePosition(userId, positionId));
+    }
+
     /** 取消限价单 */
     @PostMapping("/cancel/{orderId}")
     public Result<FuturesOrderResponse> cancel(@CurrentUserId Long userId, @PathVariable Long orderId) {
