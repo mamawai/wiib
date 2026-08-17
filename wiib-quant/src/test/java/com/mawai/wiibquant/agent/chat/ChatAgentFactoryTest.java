@@ -1,6 +1,6 @@
 package com.mawai.wiibquant.agent.chat;
 
-import com.mawai.wiibcommon.entity.UserLlmConfig;
+import com.mawai.wiibquant.agent.llm.ChatEndpoints;
 import com.mawai.wiibquant.agent.analysis.DeepAnalysisService;
 import com.mawai.wiibquant.agent.toolkit.MarketToolkit;
 import com.mawai.wiibquant.agent.toolkit.NewsToolkit;
@@ -51,16 +51,8 @@ class ChatAgentFactoryTest {
                 new ApprovalRegistry(), serializer, 12, 32000, 6, "X");
     }
 
-    private static UserLlmConfig config(String model) {
-        UserLlmConfig c = new UserLlmConfig();
-        c.setUserId(1L);
-        c.setApiProtocol("openai");
-        c.setBaseUrl("https://api.example.com");
-        c.setModel(model);
-        // 固定密文而不是真加密：ApiKeyCrypto 是 AES-GCM 随机 IV，真加密的话同一份配置
-        // 两次调用会算出不同指纹，下面那条 isSameAs 必挂
-        c.setApiKeyEnc("enc-fixed");
-        return c;
+    private static ChatEndpoints config(String model) {
+        return ChatTestEndpoints.eps(1L, model);
     }
 
     @Test

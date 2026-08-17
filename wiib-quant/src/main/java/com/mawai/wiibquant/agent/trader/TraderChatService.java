@@ -11,6 +11,7 @@ import com.mawai.wiibcommon.entity.AiTraderDecision;
 import com.mawai.wiibcommon.entity.AiTraderPlan;
 import com.mawai.wiibcommon.entity.FuturesStopLoss;
 import com.mawai.wiibcommon.entity.FuturesTakeProfit;
+import com.mawai.wiibcommon.entity.UserLlmEndpoint;
 import com.mawai.wiibquant.agent.learning.ReviewRunner;
 import com.mawai.wiibquant.external.sim.SimTradeClient;
 import com.mawai.wiibquant.mapper.AiTraderDecisionMapper;
@@ -50,6 +51,7 @@ public class TraderChatService {
     static final int MAX_NOTE_CHARS = 500;
 
     private final TraderService traderService;
+    private final TraderModelFactory modelFactory;
     private final TraderPlanStore planStore;
     private final TraderScheduler scheduler;
     private final ReviewRunner reviewRunner;
@@ -65,6 +67,7 @@ public class TraderChatService {
         if (t == null) {
             return noTrader();
         }
+        UserLlmEndpoint endpoint = modelFactory.endpointFor(t);   // 模型名从端点库现解析，ai_trader 已没有 model 列
         return new JSONObject()
                 .fluentPut("hasTrader", true)
                 .fluentPut("name", t.getName())
@@ -75,7 +78,7 @@ public class TraderChatService {
                 .fluentPut("initialBalance", TraderService.INITIAL_BALANCE)
                 .fluentPut("symbols", t.getSymbols())
                 .fluentPut("intervalCode", t.getIntervalCode())
-                .fluentPut("model", t.getModel())
+                .fluentPut("model", endpoint == null ? null : endpoint.getModel())
                 .fluentPut("consecutiveFailures", t.getConsecutiveFailures())
                 .fluentPut("reviewEnabled", t.getReviewEnabled())
                 .fluentPut("learningEnabled", t.getLearningEnabled())

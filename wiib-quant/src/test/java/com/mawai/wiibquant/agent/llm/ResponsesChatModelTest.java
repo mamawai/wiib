@@ -5,10 +5,6 @@ import com.alibaba.fastjson2.JSONObject;
 import org.bsc.langgraph4j.spring.ai.agent.ReactAgent;
 import org.bsc.langgraph4j.spring.ai.agent.ReactAgentBuilder;
 import org.junit.jupiter.api.Test;
-import org.springframework.ai.chat.messages.AssistantMessage;
-import org.springframework.ai.chat.messages.Message;
-import org.springframework.ai.chat.messages.ToolResponseMessage;
-import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.model.tool.ToolCallingChatOptions;
 import org.springframework.ai.model.tool.ToolCallingManager;
 import org.springframework.ai.retry.NonTransientAiException;
@@ -55,8 +51,9 @@ class ResponsesChatModelTest {
 
         ToolCallingChatOptions options = (ToolCallingChatOptions) service.chatOptions().orElseThrow();
         assertThat(options.getToolCallbacks()).hasSize(1);
-        assertThat(options.getToolContext())
-                .containsEntry(ResilientChatService.FORCE_FIRST_TOOL_CHOICE, "required");
+        // 强制信号是逐次调用时才捎的（ToolChoice.apply），底稿里没有；本模型读的就是这个键
+        assertThat(ToolChoice.of(ToolChoice.apply(options, ToolChoice.REQUIRED))).isEqualTo("required");
+        assertThat(ToolChoice.of(options)).isEqualTo(ToolChoice.AUTO);
     }
 
     /**
@@ -88,21 +85,4 @@ class ResponsesChatModelTest {
                 .isEqualTo("【本轮结论】HOLD，等待突破确认。");
     }
 
-    @Test
-    void 首轮判定只看最后一条用户消息之后() {
-        Message user = new UserMessage("BTC 怎么样");
-        Message assistant = new AssistantMessage("看涨");
-        Message toolResponse = ToolResponseMessage.builder()
-                .responses(List.of(new ToolResponseMessage.ToolResponse("c1", "market_snapshot", "{}")))
-                .build();
-
-        // 干净首轮：只有提问
-        assertThat(ResponsesChatModel.isFirstTurn(List.of(user))).isTrue();
-        // 本轮已拿过工具结果：不再是首轮（ReactAgent 循环收尾必须放开）
-        assertThat(ResponsesChatModel.isFirstTurn(List.of(user, assistant, toolResponse))).isFalse();
-        // 上一轮的 TRM 在新提问之前（summarizer 深研判留痕）：新一轮仍是首轮
-        assertThat(ResponsesChatModel.isFirstTurn(List.of(toolResponse, assistant, user))).isTrue();
-        // 新提问之后只有专家的普通回复（并行回环第二轮派发）：对没跑过的专家仍是首轮
-        assertThat(ResponsesChatModel.isFirstTurn(List.of(user, assistant))).isTrue();
-    }
 }

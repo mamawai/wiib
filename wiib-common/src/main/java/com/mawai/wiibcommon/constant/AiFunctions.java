@@ -6,7 +6,7 @@ package com.mawai.wiibcommon.constant;
  */
 public final class AiFunctions {
 
-    /** 行为分析（对话轨已全量 BYOK，见 user_llm_config，平台不再为对话建模型） */
+    /** 行为分析（对话轨已全量 BYOK，见 user_llm_endpoint，平台不再为对话建模型） */
     public static final String BEHAVIOR = "behavior";
 
     /** 快讯打标：NewsEventCollector 后台批量打标用的轻模型，内部调用不走用户 key */

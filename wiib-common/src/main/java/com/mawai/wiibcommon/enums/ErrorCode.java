@@ -128,7 +128,8 @@ public enum ErrorCode {
     LLM_CONFIG_MISSING(2201, "尚未配置 LLM 端点"),
     LLM_CONFIG_INVALID(2202, "LLM 配置无法建立连接"),
     CHAT_ALREADY_RUNNING(2203, "你已有一轮对话进行中"),
-    CHAT_CAPACITY_FULL(2204, "当前对话人数已满，请稍后再试");
+    CHAT_CAPACITY_FULL(2204, "当前对话人数已满，请稍后再试"),
+    REPLAY_AI_BUSY(2205, "上一次 AI 分析还在进行中");
 
     private final int code;
     private final String msg;

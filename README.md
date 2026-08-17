@@ -124,7 +124,7 @@
 ### 前端体验
 
 - **精密终端**仪器风自研设计系统（`.pt-card` / `.num` / `.microlabel` / `.page-shell`），亮 / 暗双主题，无 UI 框架依赖。
-- **专业 K 线**（lightweight-charts 自绘）：全屏模式（内嵌周期切换）；趋势线 / 水平线 / 斐波那契 / 文字标注画线工具（磁吸落点，按币种持久化）；MA / EMA / BOLL 主图叠加与 MACD / RSI 副图各自可开关；最新价 + 收盘倒计时合体轴标签；仓位参考线（入场 / 止盈 / 止损 / 强平价，多空色系区分、单仓位显隐）；历史成交 B/S 角标（同根 K 线聚合成 B³S² 上标，点击看逐笔成交价）。
+- **专业 K 线**（lightweight-charts 自绘）：全屏模式（内嵌周期切换）；画线工具（趋势线 / 射线 / 水平线 / 垂直线 / 平行通道 / 矩形 / 斐波那契 / 多空仓位区间 / 价格区间 / 文字；磁吸落点，按币种持久化；触屏走十字虚线拖动+轻点固定）；MA / EMA / BOLL 主图叠加与 MACD / RSI 副图各自可开关；最新价 + 收盘倒计时合体轴标签；仓位参考线（入场 / 止盈 / 止损 / 强平价，多空色系区分、单仓位显隐）；历史成交 B/S 角标（同根 K 线聚合成 B³S² 上标，点击看逐笔成交价）。
 - **首页驾驶舱**：总资产曲线（30 天快照 + 实时值）、今日盈亏、月度盈亏网格（点单日下钻五分类盈亏拆解与当日已平仓位）。
 - **冷启动开屏动画**：网格溶解，PC / 移动分头编排，内联在 `index.html`（首屏零 JS 依赖）。
 - **PWA**：manifest + Service Worker，standalone 观感与导航适配，不锁竖屏（横屏看 K 线）。
@@ -322,7 +322,7 @@ flowchart LR
 
 ```text
 POST /api/ai/workbench/chat
-  ├─ 取 user_llm_config          没配 → 2201，前端顶出配置弹窗
+  ├─ 解析端点（LlmEndpointService.chatEndpoints：CHAT_MAIN 绑定→默认端点） 一条都没有 → 2201，前端顶出配置弹窗
   ├─ 按指纹取/建专家叶子（LRU 32） 建不出 → 2202，同上
   ├─ 并发闸门 tryAcquire          该用户已有一轮 → 2203 ／ 全局 10 满 → 2204
   └─ 这之后才 new SseEmitter
@@ -525,7 +525,7 @@ cp .env.example .env.local    # 填 PG_USER / PG_PASSWORD（必填），其余�
 - **共享库 / 总线**：三进程指向同一 PostgreSQL `wiib` + 同一 Redis，读同一份 `.env.local`；`INTERNAL_API_TOKEN` 天然一致（进程间 `/internal/**` 鉴权），不填走统一默认值。
 - **LLM 配置不在 yml**，而且分两处，看是谁在烧钱：
   - **平台位**（现只剩 `behavior` 一个）：DB 的 `ai_runtime_config` + `ai_model_assignment`，管理员进 Admin 页填 API Key + Base URL + 模型名（不含 `/v1`）并分配功能位，即时生效、无需重启。
-  - **用户 BYOK**：`ai_trader`（交易）与 `user_llm_config`（对话）两张表各存一份，用户在自己的页面上填。key 一律 AES-GCM 加密入库，密钥来自 `WIIB_TRADER_KEY_SECRET`（base64 的 32 字节）——**没配这个变量用户一保存就响亮失败**，绝不静默存明文。baseUrl 过 SSRF 校验（含 `100.64.0.0/10` 这类云厂商内网段）。
+  - **用户 BYOK**：`user_llm_endpoint` 端点库（一人多条：协议+URL+key+模型+档位）+ `user_llm_binding` 用途绑定（对话主/轻、交易员；没绑的用途落到默认端点），全在 AI 页「模型配置」维护，交易员/复盘教练页只从下拉里选。key 一律 AES-GCM 加密入库，密钥来自 `WIIB_TRADER_KEY_SECRET`（base64 的 32 字节）——**没配这个变量用户一保存就响亮失败**，绝不静默存明文。baseUrl 过 SSRF 校验（含 `100.64.0.0/10` 这类云厂商内网段）。
 - **quant 必须关掉 Spring AI 的 OpenAI 自动装配**（6 类全关，否则缺 api-key 拒绝启动）：
 
   ```yaml

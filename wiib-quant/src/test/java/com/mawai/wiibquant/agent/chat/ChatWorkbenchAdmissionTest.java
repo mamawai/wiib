@@ -1,6 +1,7 @@
 package com.mawai.wiibquant.agent.chat;
 
-import com.mawai.wiibcommon.entity.UserLlmConfig;
+import com.mawai.wiibquant.agent.llm.ChatEndpoints;
+import com.mawai.wiibquant.agent.llm.LlmEndpointService;
 import com.mawai.wiibcommon.exception.BizException;
 import jakarta.servlet.http.HttpServletResponse;
 import org.assertj.core.api.ThrowableAssert;
@@ -30,7 +31,7 @@ import static org.mockito.Mockito.when;
 class ChatWorkbenchAdmissionTest {
 
     private final ChatAgentFactory factory = mock(ChatAgentFactory.class);
-    private final UserLlmConfigService llmConfigService = mock(UserLlmConfigService.class);
+    private final LlmEndpointService llmConfigService = mock(LlmEndpointService.class);
     private final ChatTurnRunner turnRunner = mock(ChatTurnRunner.class);
 
     private ChatWorkbenchController controller(ChatConcurrencyGate gate) {
@@ -67,7 +68,7 @@ class ChatWorkbenchAdmissionTest {
      */
     @Test
     void 没配置端点时拒绝并给出配置缺失码() {
-        when(llmConfigService.get(1L)).thenReturn(null);
+        when(llmConfigService.chatEndpoints(1L)).thenReturn(null);
         ChatConcurrencyGate gate = new ChatConcurrencyGate(1);
 
         assertRejectedWithCode(2201, () -> chat(controller(gate), 1L));
@@ -78,7 +79,7 @@ class ChatWorkbenchAdmissionTest {
     /** 配置能过保存校验但仍可能建不出模型（协议对不上等），这类错误必须在建流前暴露 */
     @Test
     void 建不出模型时拒绝并给出配置无效码() {
-        when(llmConfigService.get(1L)).thenReturn(new UserLlmConfig());
+        when(llmConfigService.chatEndpoints(1L)).thenReturn(ChatTestEndpoints.eps(1L, "gpt-5"));
         when(factory.leavesFor(any())).thenThrow(new IllegalStateException("对话叶子构建失败"));
         ChatConcurrencyGate gate = new ChatConcurrencyGate(1);
 
@@ -90,7 +91,7 @@ class ChatWorkbenchAdmissionTest {
     /** 拒因要分得清：这条给的是"你已有一轮在跑"，不是下面那条"人满了" */
     @Test
     void 本人已有一轮在跑时拒绝() {
-        when(llmConfigService.get(1L)).thenReturn(new UserLlmConfig());
+        when(llmConfigService.chatEndpoints(1L)).thenReturn(ChatTestEndpoints.eps(1L, "gpt-5"));
         ChatConcurrencyGate gate = new ChatConcurrencyGate(10);
         gate.tryAcquire(1L); // 这个用户自己的上一轮还占着名额
 
@@ -99,7 +100,7 @@ class ChatWorkbenchAdmissionTest {
 
     @Test
     void 全局名额满时拒绝() {
-        when(llmConfigService.get(1L)).thenReturn(new UserLlmConfig());
+        when(llmConfigService.chatEndpoints(1L)).thenReturn(ChatTestEndpoints.eps(1L, "gpt-5"));
         ChatConcurrencyGate gate = new ChatConcurrencyGate(1);
         gate.tryAcquire(2L); // 唯一的名额被别人占着
 
@@ -112,7 +113,7 @@ class ChatWorkbenchAdmissionTest {
      */
     @Test
     void 任务提交失败时当场还回名额() {
-        when(llmConfigService.get(1L)).thenReturn(new UserLlmConfig());
+        when(llmConfigService.chatEndpoints(1L)).thenReturn(ChatTestEndpoints.eps(1L, "gpt-5"));
         when(factory.leavesFor(any())).thenReturn(null); // 跑不到用它的那一步
         ChatConcurrencyGate gate = new ChatConcurrencyGate(1);
         ChatWorkbenchController controller = controller(gate);
@@ -126,7 +127,7 @@ class ChatWorkbenchAdmissionTest {
     /** 一轮正常跑完也要还，否则同一个人第二句话就再也发不出去了 */
     @Test
     void 一轮跑完把名额还回去() throws Exception {
-        when(llmConfigService.get(1L)).thenReturn(new UserLlmConfig());
+        when(llmConfigService.chatEndpoints(1L)).thenReturn(ChatTestEndpoints.eps(1L, "gpt-5"));
         when(factory.leavesFor(any())).thenReturn(null);   // runner 是 mock，一帧不吐就返回
         CountDownLatch released = new CountDownLatch(1);
         ChatConcurrencyGate gate = new ChatConcurrencyGate(1) {

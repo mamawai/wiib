@@ -17,9 +17,7 @@ import reactor.util.retry.Retry;
 
 import java.time.Duration;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -58,6 +56,8 @@ public class ResilientChatService implements ReactAgent.ChatService {
     private final long initialDelayMs;
     private final long maxDelayMs;
     private final ChatOptions chatOptions;
+    /** 可空。非空=首轮强制用工具（"required" 或具体工具名），逐次调用时经 {@link #optionsFor} 落地 */
+    private final String forceFirstToolChoice;
     private final SystemMessage systemMessage;
 
     private ResilientChatService(Builder builder, ReactAgentBuilder<?, ?> agentBuilder) {
@@ -66,45 +66,33 @@ public class ResilientChatService implements ReactAgent.ChatService {
         this.maxAttempts = builder.maxAttempts;
         this.initialDelayMs = builder.initialDelayMs;
         this.maxDelayMs = builder.maxDelayMs;
-        // 工具挂进 options（与框架 DefaultChatService 同构）：没工具的 agent 保持 null 走模型默认
+        this.forceFirstToolChoice = builder.forceFirstToolChoice;
+        // 工具挂进 options（与框架 DefaultChatService 同构）：没工具的 agent 保持 null 走模型默认。
+        // 从模型自己的 options 派生而非泛型 builder：具体类型必须跟着模型走，理由见 ToolChoice 类头
         this.chatOptions = agentBuilder.tools().isEmpty()
-                || !(primaryModel.getOptions() instanceof ToolCallingChatOptions toolOptions)
+                || !(primaryModel.getOptions() instanceof ToolCallingChatOptions)
                 ? null
-                : optionsWithTools(toolOptions, agentBuilder, builder.forceFirstToolChoice);
+                : ToolChoice.withTools(primaryModel, agentBuilder.tools());
         this.systemMessage = SystemMessage.builder()
                 .text(agentBuilder.systemMessage().orElse("You are a helpful AI Assistant answering questions."))
                 .build();
     }
 
-    /**
-     * 强制首轮工具调用的信号键，经 toolContext 捎给 {@link ResponsesChatModel}。
-     * 走 options 而不是模型构造参数：同一个 ChatModel 实例被多个 agent 共用，
-     * 只有"这个 agent 必须先拿真实数据"是 agent 自己的属性。
-     */
-    public static final String FORCE_FIRST_TOOL_CHOICE = "wiib_force_first_tool_choice";
-
-    /**
-     * 每次调用都强制用工具的信号键，给"单次结构化调用"用（如路由节点：要的就是一个 tool_call）。
-     * 与 {@link #FORCE_FIRST_TOOL_CHOICE} 的区别：后者只管首轮，因为 ReactAgent 是循环，
-     * 拿到工具结果后必须放开否则收不了尾；单次调用没有这个顾虑，且不能被"历史里有工具消息"误判成非首轮。
-     */
-    public static final String FORCE_TOOL_CHOICE = "wiib_force_tool_choice";
-
     public static Builder builder() {
         return new Builder();
     }
 
-    private static ChatOptions optionsWithTools(ToolCallingChatOptions source,
-                                                ReactAgentBuilder<?, ?> agentBuilder, String forceFirstToolChoice) {
-        var options = source.mutate().toolCallbacks(agentBuilder.tools());
-        if (forceFirstToolChoice != null) {
-            // 没设过工具上下文时 getToolContext() 给的是 null，不是空 Map
-            Map<String, Object> context = source.getToolContext() == null
-                    ? new HashMap<>() : new HashMap<>(source.getToolContext());
-            context.put(FORCE_FIRST_TOOL_CHOICE, forceFirstToolChoice);
-            options.toolContext(context);
+    /**
+     * 本次调用的 options：首轮强制用工具的话，把 tool_choice 按协议落进去（{@link ToolChoice#apply}）。
+     * 逐次算而不是建服务时算死：ReactAgent 是循环，只有"最后一条用户消息之后还没有工具回执"那一次才强制，
+     * 拿到工具结果后必须放开否则收不了尾。同一个 ChatModel 实例被多个 agent 共用，
+     * "这个 agent 必须先拿真实数据"是 agent 自己的属性，所以落在 options 上而不是模型构造参数里。
+     */
+    private ChatOptions optionsFor(List<Message> messages) {
+        if (forceFirstToolChoice == null || chatOptions == null || !ToolChoice.isFirstTurn(messages)) {
+            return chatOptions;
         }
-        return options.build();
+        return ToolChoice.apply(chatOptions, forceFirstToolChoice);
     }
 
     @Override
@@ -121,7 +109,7 @@ public class ResilientChatService implements ReactAgent.ChatService {
     public Flux<ChatResponse> streamingExecute(List<Message> messages) {
         List<Message> withSystem = withSystem(messages);
         AtomicBoolean emitted = new AtomicBoolean(false);
-        return primaryModel.stream(promptOf(withSystem, chatOptions))
+        return primaryModel.stream(promptOf(primaryModel, withSystem, optionsFor(withSystem)))
                 .doOnNext(r -> emitted.set(true))
                 .retryWhen(Retry.backoff(maxAttempts - 1, Duration.ofMillis(initialDelayMs))
                         .maxBackoff(Duration.ofMillis(maxDelayMs))
@@ -135,7 +123,7 @@ public class ResilientChatService implements ReactAgent.ChatService {
                         return Flux.error(e);
                     }
                     log.warn("主模型流式调用失败（已重试），切换兜底模型: {}", e.toString());
-                    return fallbackModel.stream(promptOf(withSystem, fallbackOptions()));
+                    return fallbackModel.stream(promptOf(fallbackModel, withSystem, fallbackOptions(withSystem)));
                 });
     }
 
@@ -154,17 +142,18 @@ public class ResilientChatService implements ReactAgent.ChatService {
                 throw e;
             }
             log.warn("主模型调用失败（模型层已重试过），切换兜底模型: {}", e.toString());
-            return fallbackModel.call(promptOf(withSystem, fallbackOptions()));
+            return fallbackModel.call(promptOf(fallbackModel, withSystem, fallbackOptions(withSystem)));
         }
     }
 
     /** SDK 重试盲区的单次补救：读响应失败（类头注释的唯一豁免）再试一次，其余异常原样抛。 */
     private ChatResponse callPrimary(List<Message> withSystem) {
+        Prompt prompt = promptOf(primaryModel, withSystem, optionsFor(withSystem));
         try {
-            return primaryModel.call(promptOf(withSystem, chatOptions));
+            return primaryModel.call(prompt);
         } catch (OpenAIInvalidDataException e) {
             log.warn("响应读取中断（SDK 不重试此类失败），单次重试: {}", e.toString());
-            return primaryModel.call(promptOf(withSystem, chatOptions));
+            return primaryModel.call(prompt);
         }
     }
 
@@ -175,24 +164,25 @@ public class ResilientChatService implements ReactAgent.ChatService {
         return withSystem;
     }
 
-    private Prompt promptOf(List<Message> messages, ChatOptions options) {
+    /** options 为空（无工具的 agent）时走该模型自己的默认——主/兜底各归各的，别把主模型的 options 打到兜底端点上 */
+    private static Prompt promptOf(ChatModel model, List<Message> messages, ChatOptions options) {
         return Prompt.builder().messages(messages)
-                .chatOptions(options != null ? options : primaryModel.getOptions())
+                .chatOptions(options != null ? options : model.getOptions())
                 .build();
     }
 
     /**
-     * 兜底调用的 options：只保留工具语义——model/temperature 等生成参数必须归兜底模型自己的默认，
-     * 原样透传会把主模型的 model 名打到兜底端点上。
+     * 兜底调用的 options：从兜底模型自己的 options 派生、只搬工具语义——model/temperature 等生成参数
+     * 必须归兜底模型自己的默认，原样透传会把主模型的 model 名打到兜底端点上；首轮强制照旧。
      */
-    private ChatOptions fallbackOptions() {
-        if (!(chatOptions instanceof ToolCallingChatOptions source)) {
+    private ChatOptions fallbackOptions(List<Message> messages) {
+        if (!(chatOptions instanceof ToolCallingChatOptions source)
+                || !(fallbackModel.getOptions() instanceof ToolCallingChatOptions)) {
             return null;
         }
-        return ToolCallingChatOptions.builder()
-                .toolCallbacks(source.getToolCallbacks())
-                .toolContext(source.getToolContext())
-                .build();
+        ChatOptions options = ToolChoice.withTools(fallbackModel, source.getToolCallbacks());
+        return forceFirstToolChoice != null && ToolChoice.isFirstTurn(messages)
+                ? ToolChoice.apply(options, forceFirstToolChoice) : options;
     }
 
     public static class Builder {

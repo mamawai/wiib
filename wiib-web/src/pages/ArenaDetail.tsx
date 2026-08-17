@@ -285,7 +285,7 @@ export function ArenaDetail() {
         {t && st && (
           <>
             <span className={cn('text-[10px] font-bold px-1.5 py-0.5 rounded', st.tone)}>{st.label}</span>
-            <span className="text-[11px] text-muted-foreground break-all">{t.model} · {t.intervalCode} · R{t.roundNo}</span>
+            <span className="text-[11px] text-muted-foreground break-all">{t.model ?? "未配置模型"} · {t.intervalCode} · R{t.roundNo}</span>
             <span className={cn('num font-black', t.pnlPct >= 0 ? 'text-gain' : 'text-loss')}>
               {t.pnlPct >= 0 ? '+' : ''}{t.pnlPct.toFixed(2)}%
             </span>

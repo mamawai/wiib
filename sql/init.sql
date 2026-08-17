@@ -722,15 +722,6 @@ CREATE INDEX IF NOT EXISTS idx_comment_root ON comment(created_at DESC) WHERE ro
 -- ============================================
 -- 28. 通知（评论赞/回复 + 交易事件）
 -- ============================================
--- 表原名 comment_notification，加交易通知后语义不再局限于评论，改名 notification。
--- 先改名再建表：老库走 RENAME（索引跟着表走，不用重建），新库走下面的 CREATE。
-DO $$ BEGIN
-    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'comment_notification')
-       AND NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'notification') THEN
-        ALTER TABLE comment_notification RENAME TO notification;
-    END IF;
-END $$;
-
 CREATE TABLE IF NOT EXISTS notification (
     id BIGSERIAL PRIMARY KEY,
     user_id BIGINT NOT NULL,
@@ -827,10 +818,6 @@ CREATE TABLE IF NOT EXISTS ai_trader (
     memory          TEXT,
     learning_notes  TEXT,
     owner_note      TEXT,
-    api_protocol    VARCHAR(16) NOT NULL DEFAULT 'openai',
-    base_url        VARCHAR(255) NOT NULL,
-    model           VARCHAR(128) NOT NULL,
-    api_key_enc     VARCHAR(1024) NOT NULL,
     sim_user_id     BIGINT,
     round_no        INT NOT NULL DEFAULT 1,
     consecutive_failures INT NOT NULL DEFAULT 0,
@@ -865,7 +852,6 @@ COMMENT ON COLUMN ai_trader.use_default_prompt IS '是否使用平台系统提�
 COMMENT ON COLUMN ai_trader.memory IS '复盘笔记：reviewer每日复盘整理写入（限长文本，≤2000字覆盖写），每次唤醒注入提示词——trader侧只读只注入，本列即记忆学习的接口';
 COMMENT ON COLUMN ai_trader.learning_notes IS '学习笔记：learning agent向同侪学习后整理写入（≤2000字覆盖写），每次唤醒与复盘笔记并列注入；与memory分开存——来源分开模型才分得清"自己的教训"与"从别人学的"';
 COMMENT ON COLUMN ai_trader.owner_note IS '主人留言：对话轨leave_note_to_trader写入，下次唤醒随提示词注入并立刻清空（读后即焚，注入与清空在TraderPromptAssembler同一处）。与memory的分工：memory是复盘沉淀的长期笔记，本列是主人临时说的一句话，说完就没';
-COMMENT ON COLUMN ai_trader.api_key_enc IS 'AES-GCM密文base64(iv+cipher)，密钥走环境变量WIIB_TRADER_KEY_SECRET';
 COMMENT ON COLUMN ai_trader.sim_user_id IS '当前局sim子账户userId，每局独立，重置开新账户';
 COMMENT ON COLUMN ai_trader.round_no IS '局数：爆仓/手动重置+1开新局，历史留档';
 COMMENT ON COLUMN ai_trader.leverage_min IS '杠杆区间下界：模型必须从[min,max]里选，越界护栏拒（不截断——悄悄改值会让模型的止损计算失真）';
@@ -974,21 +960,34 @@ COMMENT ON COLUMN ai_trader_request.executed_result IS '批准后的执行结果
 COMMENT ON COLUMN ai_trader_request.notified IS '处理结果是否已回注给模型：主人批/拒之后的下一次唤醒注入一次并置true——反馈闭环的最后一环，不注模型只能从仓位变化倒猜';
 COMMENT ON COLUMN ai_trader_request.wake_time IS '发起时所在唤醒边界(ms)，用于回注提示词时说明"这是第几轮提的"';
 
--- ============ user_llm_config：研判工作台对话的用户自带 LLM 端点（BYOK，2026-08） ============
--- 与 ai_trader 的 BYOK 分开存：trader 一天跑几十上百轮要便宜稳，对话是按需深研判要强模型，
--- 绑一起会逼用户在两个诉求里二选一。
-CREATE TABLE IF NOT EXISTS user_llm_config (
-    user_id          BIGINT        PRIMARY KEY,
+-- ============ user_llm_endpoint / user_llm_binding：用户 BYOK 端点库（2026-08 重构） ============
+-- 全站 BYOK 总配置：一人多条端点（协议+URL+key+模型+思考档位），对话/交易员/复盘教练只做选择；
+-- 用途绑定表按 purpose 指到某条端点，没绑的用途落到 is_default 那条（一人恰一条默认，只配一条时它就是全局配置）。
+-- 取代原 user_llm_config（对话一人一行）与 ai_trader 里的四列 BYOK——两处各填一套表单的时代结束。
+CREATE TABLE IF NOT EXISTS user_llm_endpoint (
+    id               BIGSERIAL     PRIMARY KEY,
+    user_id          BIGINT        NOT NULL,
+    name             VARCHAR(32)   NOT NULL,
     api_protocol     VARCHAR(16)   NOT NULL DEFAULT 'openai',
     base_url         VARCHAR(255)  NOT NULL,
     model            VARCHAR(128)  NOT NULL,
-    light_model      VARCHAR(128),
     reasoning_effort VARCHAR(16),
     api_key_enc      VARCHAR(1024) NOT NULL,
+    is_default       BOOLEAN       NOT NULL DEFAULT FALSE,
     created_at       TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at       TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
-COMMENT ON TABLE  user_llm_config IS '用户自带 LLM 端点配置（BYOK，研判工作台对话用）';
-COMMENT ON COLUMN user_llm_config.light_model IS '轻模型，可空；空则 router/专家/历史压缩复用 model';
-COMMENT ON COLUMN user_llm_config.reasoning_effort IS '思考档位 none/low/medium/high，NULL=不传走模型默认；只作用于 model（轻模型跑简单活，高档纯烧钱）。模型支不支持这个参数查不到，所以由用户自己选';
-COMMENT ON COLUMN user_llm_config.api_key_enc IS 'AES-256-GCM 密文，密钥来自 WIIB_TRADER_KEY_SECRET';
+CREATE INDEX IF NOT EXISTS idx_user_llm_endpoint_user ON user_llm_endpoint(user_id);
+COMMENT ON TABLE  user_llm_endpoint IS '用户 BYOK 端点库：一条=协议+URL+key+模型(+思考档位)，一人多条；对话/交易员/复盘教练从中选';
+COMMENT ON COLUMN user_llm_endpoint.reasoning_effort IS '思考档位 none/low/medium/high，NULL=不传走模型默认；模型支不支持查不到，由用户自选';
+COMMENT ON COLUMN user_llm_endpoint.api_key_enc IS 'AES-256-GCM 密文，密钥来自 WIIB_TRADER_KEY_SECRET';
+COMMENT ON COLUMN user_llm_endpoint.is_default IS '默认端点：没按用途绑定的地方都用它；一人恰一条（首条自动、删默认时最早的顶上）';
+
+CREATE TABLE IF NOT EXISTS user_llm_binding (
+    id          BIGSERIAL   PRIMARY KEY,
+    user_id     BIGINT      NOT NULL,
+    purpose     VARCHAR(16) NOT NULL,
+    endpoint_id BIGINT      NOT NULL,
+    UNIQUE (user_id, purpose)
+);
+COMMENT ON TABLE  user_llm_binding IS '用途→端点绑定：CHAT_MAIN 对话主模型 / CHAT_LIGHT 对话轻模型 / TRADER 交易员；无行=跟随默认端点。端点删除时其绑定连带删';

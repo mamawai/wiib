@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Bot, Check, ChevronLeft, GraduationCap, Loader2, Pause, Play, RotateCcw, Save, X } from 'lucide-react';
-import { traderApi } from '../api';
+import { llmEndpointApi, traderApi } from '../api';
 import { GuidedTour, type TourStep } from '../components/GuidedTour';
-import { LlmEndpointForm } from '../components/LlmEndpointForm';
+import { LlmEndpointSelect } from '../components/LlmEndpointSelect';
 import { useCryptoStream } from '../hooks/useCryptoStream';
 import { useToast } from '../components/ui/use-toast';
 import { cn, fmtNum, fmtRelative } from '../lib/utils';
-import type { TraderOwnerView, TraderRequestView, TraderSpec, TraderUpsertRequest } from '../types';
+import type { LlmEndpointView, TraderOwnerView, TraderRequestView, TraderSpec, TraderUpsertRequest } from '../types';
 
 const TOUR_SEEN_KEY = 'wiib-trader-tour-seen';
 
@@ -64,8 +64,8 @@ const TOUR_STEPS: TourStep[] = [
   {
     target: 'byok',
     title: '你的模型，你的账单',
-    body: '平台不提供模型。填你自己的 API 端点和 key——OpenAI 兼容或 Responses 协议都行。\n\n'
-      + 'key 加密存库、只回显尾 4 位，改配置时留空表示不换。点「检测」可以拉出该端点支持的模型清单。\n\n'
+    body: '平台不提供模型。模型端点（协议 / Base URL / key / 模型名）统一在 AI 页「模型配置」里维护，这里只从里面选一条；'
+      + '不选就跟随你的默认端点。\n\n'
       + '每次唤醒都在花你的 token，唤醒频率越高账单越厚。',
   },
   {
@@ -98,12 +98,12 @@ const DEFAULT_SPEC: TraderSpec = {
 // 默认 15m 起步：5m 高频唤醒对"LLM+双边taker手续费"是绞肉机，保留仅为短期测试观察
 const EMPTY_FORM: TraderUpsertRequest = {
   name: '', symbols: 'BTCUSDT', intervalCode: '15m', customPrompt: '',
-  apiProtocol: 'openai', baseUrl: '', model: '', apiKey: '', useDefaultPrompt: true,
+  llmEndpointId: null, useDefaultPrompt: true,
   spec: DEFAULT_SPEC, alertEnabled: true, alertThresholdMult: 1, reviewEnabled: true, learningEnabled: true,
 };
 
 /**
- * 我的 Trader：创建/配置（BYOK key 只写不读，回显尾4位）+ 启停/重置。
+ * 我的 Trader：创建/配置（模型从 AI 页「模型配置」的端点库里选，不在这里填 key）+ 启停/重置。
  * 提示词存库即热生效——改完下一根K线自然按新提示词决策。
  */
 export function MyTrader() {
@@ -115,6 +115,9 @@ export function MyTrader() {
   const [template, setTemplate] = useState('');
   const [requests, setRequests] = useState<TraderRequestView[]>([]);
   const [tour, setTour] = useState(false);
+  /** 端点库（下拉选项）；进页面拉一次，改动在 AI 页做 */
+  const [endpoints, setEndpoints] = useState<LlmEndpointView[]>([]);
+  useEffect(() => { llmEndpointApi.list().then(setEndpoints).catch(() => setEndpoints([])); }, []);
 
   const loadRequests = useCallback(() => {
     traderApi.requests().then(setRequests).catch(() => setRequests([]));
@@ -126,8 +129,7 @@ export function MyTrader() {
       if (v) {
         setForm({
           name: v.pub.name, symbols: v.pub.symbols, intervalCode: v.pub.intervalCode,
-          customPrompt: v.customPrompt ?? '', apiProtocol: v.apiProtocol,
-          baseUrl: v.baseUrl, model: v.pub.model, apiKey: '', useDefaultPrompt: v.useDefaultPrompt,
+          customPrompt: v.customPrompt ?? '', llmEndpointId: v.llmEndpointId, useDefaultPrompt: v.useDefaultPrompt,
           spec: v.spec,
           alertEnabled: v.alertEnabled, alertThresholdMult: v.alertThresholdMult,
           reviewEnabled: v.reviewEnabled, learningEnabled: v.learningEnabled,
@@ -443,16 +445,17 @@ export function MyTrader() {
           </div>
         </div>
 
-        <div data-tour="byok">
-          <LlmEndpointForm
-            value={form}
-            onChange={set}
-            exists={exists}
-            keyTail={mine?.apiKeyTail}
-            onDetect={() => traderApi.listModels({
-              apiProtocol: form.apiProtocol, baseUrl: form.baseUrl, apiKey: form.apiKey,
-            })}
-          />
+        {/* 模型：从端点库选一条（协议/URL/key/模型都在 AI 页配），不选=跟随默认端点 */}
+        <div data-tour="byok" className="space-y-1.5 text-xs">
+          <div className="flex items-baseline justify-between gap-2 flex-wrap">
+            <span className="text-muted-foreground font-bold">模型端点</span>
+            <Link to="/ai?tab=config" className="text-[10px] text-primary font-bold hover:underline">管理端点（AI 页 · 模型配置）</Link>
+          </div>
+          <LlmEndpointSelect endpoints={endpoints} value={form.llmEndpointId}
+            onChange={id => set({ llmEndpointId: id })} className="w-full sm:w-auto sm:min-w-[320px]" />
+          <span className="text-[10px] text-muted-foreground/70 block">
+            每次唤醒、每日复盘、同侪学习都烧这条端点的 key；保存时会先测一次连通性
+          </span>
         </div>
 
         {/* 平台系统提示词：默认勾选使用；取消后自定义成为唯一指令来源（TradeGuard 护栏仍硬校验） */}

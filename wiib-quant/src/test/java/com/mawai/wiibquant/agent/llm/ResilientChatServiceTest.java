@@ -3,14 +3,18 @@ package com.mawai.wiibquant.agent.llm;
 import org.bsc.langgraph4j.spring.ai.agent.ReactAgent;
 import org.bsc.langgraph4j.spring.ai.agent.ReactAgentBuilder;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
+import org.springframework.ai.chat.messages.ToolResponseMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
+import org.springframework.ai.chat.prompt.ChatOptions;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.model.tool.ToolCallingChatOptions;
+import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.ai.retry.TransientAiException;
 import org.springframework.ai.tool.ToolCallback;
 
@@ -29,6 +33,7 @@ import static org.mockito.Mockito.when;
 /**
  * 韧性分层的契约：阻塞路径的重试归模型层（ResponsesChatModel 自带 / OpenAI SDK），
  * 本服务只负责兜底切换——两层都重试会叠乘成 3×3=9 次，白白放大尾延迟。
+ * 另钉两条 options 契约：首轮强制逐次落地、options 类型跟着模型走（openai 协议硬转 OpenAiChatOptions）。
  */
 class ResilientChatServiceTest {
 
@@ -72,20 +77,65 @@ class ResilientChatServiceTest {
         verify(primary, times(1)).call(any(Prompt.class));
     }
 
-    @Test
-    void 专家可要求首轮强制用工具() {
+    private ReactAgentBuilder<?, ?> agentWithOneTool() {
         ReactAgentBuilder<?, ?> agentBuilder = mock(ReactAgentBuilder.class);
         when(agentBuilder.tools()).thenReturn(List.of(mock(ToolCallback.class)));
         when(agentBuilder.systemMessage()).thenReturn(Optional.of("你是助手"));
-        when(primary.getOptions()).thenReturn(ToolCallingChatOptions.builder().build());
+        return agentBuilder;
+    }
 
+    /** 主模型收到的 Prompt 的 options（逐次调用现算，chatOptions() 那份是不带强制的底稿） */
+    private ChatOptions optionsSentTo(ChatModel model) {
+        ArgumentCaptor<Prompt> prompt = ArgumentCaptor.forClass(Prompt.class);
+        verify(model).call(prompt.capture());
+        return prompt.getValue().getOptions();
+    }
+
+    /**
+     * 首轮强制是<b>逐次</b>落地的：只有"最后一条用户消息之后还没有工具回执"那一次调用带 required，
+     * 拿到工具结果后必须放开否则 ReactAgent 收不了尾。responses 协议经 toolContext 捎信号。
+     */
+    @Test
+    void 专家可要求首轮强制用工具_只在首轮() {
+        when(primary.getOptions()).thenReturn(ToolCallingChatOptions.builder().build());
+        when(primary.call(any(Prompt.class))).thenReturn(responseOf("ok"));
         ReactAgent.ChatService service = ResilientChatService.builder()
                 .model(primary).forceFirstToolChoice("required")
-                .asFactory().apply(agentBuilder);
+                .asFactory().apply(agentWithOneTool());
 
-        ToolCallingChatOptions options = (ToolCallingChatOptions) service.chatOptions().orElseThrow();
-        assertThat(options.getToolContext())
-                .containsEntry(ResilientChatService.FORCE_FIRST_TOOL_CHOICE, "required");
+        service.execute(ASK);
+        assertThat(ToolChoice.of(optionsSentTo(primary))).isEqualTo(ToolChoice.REQUIRED);
+
+        // 同一 agent 第二次调用：本轮已有工具回执 → 放开
+        org.mockito.Mockito.clearInvocations(primary);
+        Message toolResponse = ToolResponseMessage.builder()
+                .responses(List.of(new ToolResponseMessage.ToolResponse("c1", "market_snapshot", "{}")))
+                .build();
+        service.execute(List.of(ASK.getFirst(), new AssistantMessage(""), toolResponse));
+        assertThat(ToolChoice.of(optionsSentTo(primary))).isEqualTo(ToolChoice.AUTO);
+    }
+
+    /**
+     * options 的具体类型必须跟着模型走：Spring AI 2.0 的 OpenAiChatModel 把 prompt 的 options 硬转
+     * OpenAiChatOptions（不再合并运行时 options），泛型 builder 造的会当场 ClassCastException。
+     * 首轮强制在这条协议上落的是 toolChoice 字段，不是 toolContext 信号。
+     */
+    @Test
+    void openai协议下options保持OpenAiChatOptions且强制落在toolChoice() {
+        when(primary.getOptions()).thenReturn(OpenAiChatOptions.builder().model("deepseek-chat").build());
+        when(primary.call(any(Prompt.class))).thenReturn(responseOf("ok"));
+        ReactAgent.ChatService service = ResilientChatService.builder()
+                .model(primary).forceFirstToolChoice("required")
+                .asFactory().apply(agentWithOneTool());
+
+        service.execute(ASK);
+
+        ChatOptions sent = optionsSentTo(primary);
+        assertThat(sent).isInstanceOf(OpenAiChatOptions.class);
+        OpenAiChatOptions openAi = (OpenAiChatOptions) sent;
+        assertThat(openAi.getToolChoice()).isEqualTo("required");
+        assertThat(openAi.getToolCallbacks()).hasSize(1);
+        assertThat(openAi.getModel()).isEqualTo("deepseek-chat");   // 生成参数沿用模型自己的
     }
 
     @Test

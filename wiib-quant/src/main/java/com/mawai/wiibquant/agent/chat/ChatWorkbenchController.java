@@ -2,11 +2,13 @@ package com.mawai.wiibquant.agent.chat;
 
 import com.alibaba.fastjson2.JSONObject;
 import com.mawai.wiibcommon.annotation.CurrentUserId;
-import com.mawai.wiibcommon.entity.UserLlmConfig;
 import com.mawai.wiibcommon.enums.ErrorCode;
 import com.mawai.wiibcommon.exception.BizException;
 import com.mawai.wiibcommon.util.Result;
+import com.mawai.wiibquant.agent.llm.ChatEndpoints;
+import com.mawai.wiibquant.agent.llm.LlmEndpointService;
 import com.mawai.wiibquant.agent.llm.LlmErrorMessages;
+import com.mawai.wiibquant.agent.llm.SseChannel;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletResponse;
@@ -36,7 +38,6 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * 研判工作台对话入口（P4）：SSE 流式暴露多 agent 调度全过程。
@@ -54,7 +55,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public class ChatWorkbenchController {
 
     private final ChatAgentFactory chatAgentFactory;
-    private final UserLlmConfigService userLlmConfigService;
+    private final LlmEndpointService endpointService;
     private final ApprovalRegistry approvalRegistry;
     private final ChatMemoryService chatMemoryService;
     private final ChatHistoryService chatHistoryService;
@@ -104,15 +105,15 @@ public class ChatWorkbenchController {
         }
         // 三道准入都在把 emitter 交出去之前：一旦 return 给 MVC，响应就成了 event-stream，
         // 之后再出错只能推 error 事件，前端拿不到结构化错误码、没法自动引导用户去配置页
-        UserLlmConfig llmConfig = userLlmConfigService.get(userId);
-        if (llmConfig == null) {
+        ChatEndpoints eps = endpointService.chatEndpoints(userId);
+        if (eps == null) {
             throw new BizException(ErrorCode.LLM_CONFIG_MISSING);
         }
         ChatAgentFactory.Leaves leaves;
         try {
             // 建叶子放准入期：配置能过保存校验但仍可能建不出模型（协议对不上等），这类错误必须在建流前暴露。
             // 建叶子不发网络请求，慢端点不会拖垮这里
-            leaves = chatAgentFactory.leavesFor(llmConfig);
+            leaves = chatAgentFactory.leavesFor(eps);
         } catch (Exception e) {
             log.warn("[Workbench] 建模失败 userId={}", userId, e);
             throw new BizException(ErrorCode.LLM_CONFIG_INVALID);
@@ -372,62 +373,5 @@ public class ChatWorkbenchController {
                     .fluentPut("text", event.agent() + " 执行失败：" + event.text()));
             default -> log.warn("[Workbench] 未知专家进度阶段 {}", event.phase());
         }
-    }
-
-    /**
-     * SSE 通道：emitter + 关闭标志 + 写锁收在一起。
-     * 锁是必须的——SseEmitter.send 非线程安全，心跳线程与主流线程并发写会让帧交错损坏。
-     * 锁在实例上而非 Controller 上，各会话互不阻塞。
-     */
-    static final class SseChannel {
-        private final SseEmitter emitter;
-        private final AtomicBoolean closed = new AtomicBoolean(false);
-        private final Object writeLock = new Object();
-
-        SseChannel(SseEmitter emitter) {
-            this.emitter = emitter;
-        }
-
-        boolean isClosed() {
-            return closed.get();
-        }
-
-        void markClosed() {
-            closed.set(true);
-        }
-
-        void send(String event, JSONObject data) {
-            write(SseEmitter.event().name(event).data(data.toJSONString()));
-        }
-
-        /** 心跳：SSE 注释帧，前端 dispatch 取不到 data 直接忽略，纯粹喂饱中间层的空闲计时器。 */
-        void heartbeat() {
-            write(SseEmitter.event().comment("hb"));
-        }
-
-        private void write(SseEmitter.SseEventBuilder builder) {
-            if (closed.get()) {
-                return;
-            }
-            synchronized (writeLock) {
-                if (closed.get()) {
-                    return;
-                }
-                try {
-                    emitter.send(builder);
-                } catch (Exception e) {
-                    closed.set(true);
-                }
-            }
-        }
-
-        /** complete 与写共用锁：避免心跳正在写时通道被关，Tomcat 抛 IllegalStateException */
-        void complete() {
-            synchronized (writeLock) {
-                closed.set(true);
-                emitter.complete();
-            }
-        }
-
     }
 }

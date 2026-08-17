@@ -3,30 +3,29 @@ import { KeyRound, Loader2, PlugZap, ScanSearch } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useToast } from './ui/use-toast';
 
+/** 一条端点的表单值（与后端 LlmEndpointSaveRequest 同形） */
 export interface LlmEndpointValue {
+  /** 用户给的名字，下拉框里认它 */
+  name: string;
   apiProtocol: string;
   baseUrl: string;
   model: string;
-  /** 只有对话侧用；trader 不传 withLightModel 就不渲染 */
-  lightModel?: string;
-  /** 思考档位，空串=不传给上游走模型默认；只有对话侧用（ai_trader 表没这列） */
-  reasoningEffort?: string;
+  /** 思考档位，空串=不传给上游走模型默认 */
+  reasoningEffort: string;
   apiKey: string;
 }
 
 export interface LlmEndpointFormProps {
   value: LlmEndpointValue;
   onChange: (patch: Partial<LlmEndpointValue>) => void;
-  /** 已存在配置：决定 key 是否必填、是否显示"留空=不换"。独立于 keyTail，见组件注释 */
+  /** 编辑已有端点：决定 key 是否必填、是否显示"留空=不换"。独立于 keyTail，见组件注释 */
   exists?: boolean;
-  /** 已存在配置时显示的 key 尾号（纯展示） */
+  /** 已存在时显示的 key 尾号（纯展示） */
   keyTail?: string;
-  /** 拉模型清单。组件不关心走哪个接口，由调用方决定（trader 与对话是两个端点） */
+  /** 拉模型清单 */
   onDetect: () => Promise<string[]>;
-  /** 连通性探测。不传=不渲染该按钮（trader 侧没有这个端点） */
-  onTest?: () => Promise<void>;
-  withLightModel?: boolean;
-  withReasoningEffort?: boolean;
+  /** 连通性探测 */
+  onTest: () => Promise<void>;
 }
 
 /** 空串=不传，与后端 normalizeEffort 的"留空一律 null"对齐 */
@@ -39,17 +38,14 @@ const EFFORT_OPTIONS: { value: string; label: string }[] = [
 ];
 
 /**
- * LLM 端点配置表单（BYOK）。trader 与对话工作台共用。
- * 抽出来不只是为了少写一遍——detectModels 那段有个踩过的坑（见下），
- * 复制粘贴的时候最容易丢。
+ * LLM 端点表单（BYOK 端点库里的一条：名称 + 协议 + Base URL + 模型 + 思考档位 + key）。
+ * detectModels 那段有个踩过的坑（见下）。
  *
  * exists 是独立 prop 而不是从 keyTail 推导：调用方常写
  * keyTail={exists ? mine?.apiKeyTail : undefined}，一旦 apiKeyTail 恰好是 undefined，
  * 推导出的 exists 就翻成 false，key 突然变必填、"留空=不换"提示消失。
  */
-export function LlmEndpointForm({
-  value, onChange, exists, keyTail, onDetect, onTest, withLightModel, withReasoningEffort,
-}: LlmEndpointFormProps) {
+export function LlmEndpointForm({ value, onChange, exists, keyTail, onDetect, onTest }: LlmEndpointFormProps) {
   const { toast } = useToast();
   const [models, setModels] = useState<string[]>([]);
   const [detecting, setDetecting] = useState(false);
@@ -76,7 +72,7 @@ export function LlmEndpointForm({
   const test = async () => {
     setTesting(true);
     try {
-      await onTest!();
+      await onTest();
       toast('连接正常', 'success');
     } catch (e) {
       toast((e as Error).message || '连接失败', 'error');
@@ -88,6 +84,12 @@ export function LlmEndpointForm({
   return (
     <div className="space-y-3">
       <div className="grid sm:grid-cols-3 gap-3">
+        <label className="space-y-1 text-xs">
+          <span className="text-muted-foreground font-bold">名称</span>
+          <input value={value.name} onChange={e => onChange({ name: e.target.value })}
+                 placeholder="例：DeepSeek 主力 / Grok 轻量" maxLength={32}
+                 className="w-full h-9 rounded-lg border border-border bg-card-2 px-3 text-xs" />
+        </label>
         <label className="space-y-1 text-xs">
           <span className="text-muted-foreground font-bold">协议</span>
           <div className="flex gap-1.5">
@@ -102,7 +104,7 @@ export function LlmEndpointForm({
             ))}
           </div>
         </label>
-        <label className="space-y-1 text-xs sm:col-span-2">
+        <label className="space-y-1 text-xs">
           <span className="text-muted-foreground font-bold">Base URL（不含 /v1 后缀）</span>
           <input value={value.baseUrl} onChange={e => onChange({ baseUrl: e.target.value })}
                  placeholder="https://api.deepseek.com"
@@ -139,52 +141,36 @@ export function LlmEndpointForm({
         </label>
       </div>
 
-      {withLightModel && (
-        <label className="space-y-1 text-xs block">
-          <span className="text-muted-foreground font-bold">轻模型（选填）</span>
-          <input value={value.lightModel ?? ''} onChange={e => onChange({ lightModel: e.target.value })}
-                 placeholder="留空=与主模型相同"
-                 className="w-full h-9 rounded-lg border border-border bg-card-2 px-3 text-xs num" />
-          <span className="text-[10px] text-muted-foreground/70 block">
-            调度、专家取数、历史压缩走它；主模型只用来写最终回答。填个便宜的能省不少
-          </span>
-        </label>
-      )}
-
-      {withReasoningEffort && (
-        <div className="space-y-1 text-xs">
-          <span className="text-muted-foreground font-bold">思考档位（只作用于主模型）</span>
-          <div className="flex gap-1.5">
-            {EFFORT_OPTIONS.map(o => (
-              <button key={o.value} type="button" onClick={() => onChange({ reasoningEffort: o.value })}
-                      className={cn('flex-1 h-9 rounded-lg border text-xs font-bold',
-                        (value.reasoningEffort ?? '') === o.value
-                          ? 'border-primary/60 bg-card-2 text-primary'
-                          : 'border-border text-muted-foreground hover:text-foreground')}>
-                {o.label}
-              </button>
-            ))}
-          </div>
-          {/* 模型支不支持这个参数查不到：协议的 /v1/models 只回 id/object/created/owned_by。
-              传给不支持的模型各家表现不一致（有的忽略，OpenAI 官方直接 400），所以只能让用户自己试 */}
-          <span className="text-[10px] text-muted-foreground/70 block">
-            「默认」＝不传这个参数，用模型自己的默认行为。不是所有模型都认这个参数——
-            认不认没法提前查出来，填完点「测试连通性」试一下最稳。
-          </span>
+      <div className="space-y-1 text-xs">
+        <span className="text-muted-foreground font-bold">思考档位</span>
+        <div className="flex gap-1.5">
+          {EFFORT_OPTIONS.map(o => (
+            <button key={o.value} type="button" onClick={() => onChange({ reasoningEffort: o.value })}
+                    className={cn('flex-1 h-9 rounded-lg border text-xs font-bold',
+                      (value.reasoningEffort ?? '') === o.value
+                        ? 'border-primary/60 bg-card-2 text-primary'
+                        : 'border-border text-muted-foreground hover:text-foreground')}>
+              {o.label}
+            </button>
+          ))}
         </div>
-      )}
+        {/* 模型支不支持这个参数查不到：协议的 /v1/models 只回 id/object/created/owned_by。
+            传给不支持的模型各家表现不一致（有的忽略，OpenAI 官方直接 400），所以只能让用户自己试 */}
+        <span className="text-[10px] text-muted-foreground/70 block">
+          「默认」＝不传这个参数，用模型自己的默认行为。不是所有模型都认这个参数——
+          认不认没法提前查出来，填完点「测试连通性」试一下最稳。
+        </span>
+      </div>
 
-      {onTest && (
-        <button type="button" onClick={() => void test()}
-                disabled={testing || !value.baseUrl.trim() || !value.model.trim()
-                          || (!exists && !value.apiKey.trim())}
-                title="用当前填的配置真发一次请求，确认端点和模型可用"
-                className="border border-border hover:bg-surface-hover rounded-lg px-2.5 h-9 text-xs font-bold text-primary flex items-center gap-1 disabled:opacity-50">
-          {testing ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                   : <PlugZap className="w-3.5 h-3.5" />}
-          测试连通性
-        </button>
-      )}
+      <button type="button" onClick={() => void test()}
+              disabled={testing || !value.baseUrl.trim() || !value.model.trim()
+                        || (!exists && !value.apiKey.trim())}
+              title="用当前填的配置真发一次请求，确认端点和模型可用"
+              className="border border-border hover:bg-surface-hover rounded-lg px-2.5 h-9 text-xs font-bold text-primary flex items-center gap-1 disabled:opacity-50">
+        {testing ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                 : <PlugZap className="w-3.5 h-3.5" />}
+        测试连通性
+      </button>
 
       {/* 检测到的模型清单：模型名输入即过滤，点击填入；网关不支持 /models 时照常手输 */}
       {models.length > 0 && (() => {

@@ -1,6 +1,6 @@
 package com.mawai.wiibquant.agent.chat;
 
-import com.mawai.wiibcommon.entity.UserLlmConfig;
+import com.mawai.wiibquant.agent.llm.ChatEndpoints;
 import com.mawai.wiibquant.agent.analysis.DeepAnalysisService;
 import com.mawai.wiibquant.agent.llm.ConversationSummarizer;
 import com.mawai.wiibquant.agent.llm.MessagesSchema;
@@ -153,15 +153,15 @@ public class ChatAgentFactory {
      * <b>先查后建，不用 computeIfAbsent</b>：它会在整个 mapping 函数执行期间攥着互斥锁，
      * 于是任何一个用户首次建叶子期间，<b>其余所有用户的 /chat 请求全堵在这把锁上</b>。
      */
-    public Leaves leavesFor(UserLlmConfig llmConfig) {
-        String fp = ChatModelFactory.fingerprint(llmConfig);
+    public Leaves leavesFor(ChatEndpoints eps) {
+        String fp = ChatModelFactory.fingerprint(eps);
         Leaves hit = cache.get(fp);
         if (hit != null) {
             return hit;
         }
         Leaves built;
         try {
-            built = build(llmConfig);               // 锁外建，慢也只慢自己
+            built = build(eps);                     // 锁外建，慢也只慢自己
         } catch (Exception e) {
             // build 抛检查异常；包成运行时，让上层当"这份配置建不出模型"处理
             throw new IllegalStateException("对话叶子构建失败", e);
@@ -171,13 +171,13 @@ public class ChatAgentFactory {
         if (prev != null) {
             return prev;
         }
-        log.info("对话工作台叶子已构建 model={} 缓存数={}", llmConfig.getModel(), cache.size());
+        log.info("对话工作台叶子已构建 model={} 缓存数={}", eps.deep().getModel(), cache.size());
         return built;
     }
 
-    // 形参叫 llmConfig 不叫 config：这个包里 config 一律指 RunnableConfig，重名读起来会误导
-    private Leaves build(UserLlmConfig llmConfig) throws Exception {
-        ChatModelFactory.Models models = chatModelFactory.modelsFor(llmConfig);
+    // 形参不叫 config：这个包里 config 一律指 RunnableConfig，重名读起来会误导
+    private Leaves build(ChatEndpoints eps) throws Exception {
+        ChatModelFactory.Models models = chatModelFactory.modelsFor(eps);
         ChatModel deep = models.deep();
         ChatModel light = models.light();
 
@@ -203,14 +203,14 @@ public class ChatAgentFactory {
         // trader 专家只读这个用户自己的 trader：userId 在这里烤进工具实例，不做成模型可填的参数
         //（做成参数就等于让模型自己说要看谁的档案）。无预取——四个工具各答一类问题，取哪个得看问题
         experts.put(TRADER_AGENT, new Expert(expertGraph(light,
-                new TraderQueryToolkit(traderChatService, llmConfig.getUserId()), "required", """
+                new TraderQueryToolkit(traderChatService, eps.userId()), "required", """
                 你是用户那个 AI 交易员的档案员。用工具读取真实数据回答，所有结论只能引用工具返回的内容；
                 工具返回 hasTrader=false 就直接说"你还没有创建 AI Trader"，绝不编造持仓、决策或复盘内容。
                 被问"为什么做那笔交易"时，把对应决策的 reasoning 原文摘出来说，不要自己另编一套理由。
                 只回答这个 trader 自身的状态/持仓/决策/计划/复盘笔记，大盘行情与新闻有别的专家负责。
                 回答精炼中文。"""), null));
 
-        return new Leaves(light, experts, summarizerLeaf(deep, light, llmConfig.getUserId()));
+        return new Leaves(light, experts, summarizerLeaf(deep, light, eps.userId()));
     }
 
     /**

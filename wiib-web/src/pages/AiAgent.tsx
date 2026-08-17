@@ -64,12 +64,12 @@ function pnl(v: number): { text: string; tone: 'gain' | 'loss' } {
 
 export function AiAgent() {
   const { toast } = useToast();
-  // Tab 落 URL（?tab=config 供对话气泡的"去配置"直达）；非法值（含已下线的 market）当默认 behavior
+  // Tab 落 URL；默认落在模型配置（BYOK 总配置在这儿，进来先看到它）；?tab=behavior 看行为分析。非法值（含已下线的 market）当默认
   const [searchParams, setSearchParams] = useSearchParams();
   const rawTab = searchParams.get('tab') as Tab | null;
-  const tab: Tab = rawTab && TABS.includes(rawTab) ? rawTab : 'behavior';
+  const tab: Tab = rawTab && TABS.includes(rawTab) ? rawTab : 'config';
   const setTab = useCallback((t: Tab) => {
-    setSearchParams(t === 'behavior' ? {} : { tab: t }, { replace: true });
+    setSearchParams(t === 'config' ? {} : { tab: t }, { replace: true });
   }, [setSearchParams]);
   const [behaviorLoading, setBehaviorLoading] = useState(false);
   const [behaviorReport, setBehaviorReport] = useState<BehaviorAnalysisReport | null>(null);
@@ -100,8 +100,8 @@ export function AiAgent() {
           市场研判 tab 已下线（研判只在对话里触发时看，全站共享旧数据的展示没有价值） */}
       <div className="border border-border bg-card-2 rounded-lg p-1 flex">
         {([
-          { key: 'behavior', icon: User, label: '行为分析' },
           { key: 'config', icon: KeyRound, label: '模型配置' },
+          { key: 'behavior', icon: User, label: '行为分析' },
         ] as { key: Tab; icon: LucideIcon; label: string }[]).map(({ key, icon: Icon, label }) => (
           <button
             key={key}

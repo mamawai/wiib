@@ -1,7 +1,7 @@
 package com.mawai.wiibquant.agent.chat;
 
 import com.mawai.wiibcommon.entity.QuantDeepAnalysis;
-import com.mawai.wiibcommon.entity.UserLlmConfig;
+import com.mawai.wiibquant.agent.llm.ChatEndpoints;
 import com.mawai.wiibquant.agent.analysis.DeepAnalysisService;
 import com.mawai.wiibquant.agent.toolkit.MarketToolkit;
 import com.mawai.wiibquant.agent.toolkit.NewsToolkit;
@@ -85,8 +85,7 @@ class SummarizerLeafTest {
         when(chatModelFactory.modelsFor(any())).thenReturn(new ChatModelFactory.Models(deep, light));
         // run_deep_analysis 必须是能执行的真工具（要真走到工具边）——
         // 工厂内部自己 new DeepAnalysisToolkit，天然就是真的，这里只喂它的依赖
-        UserLlmConfig llmConfig = new UserLlmConfig();
-        llmConfig.setUserId(1L);   // 叶子指纹含 userId（trader 工具按它认人）
+        ChatEndpoints llmConfig = ChatTestEndpoints.eps(1L, "gpt-5");   // 叶子指纹含 userId（trader 工具按它认人）
         return new ChatAgentFactory(chatModelFactory, mock(MarketToolkit.class), mock(NewsToolkit.class),
                 deepAnalysisService, mock(TraderChatService.class), mock(WorkbenchRunRegistry.class),
                 registry, new SpringAIJacksonStateSerializer<>(MessagesState::new),

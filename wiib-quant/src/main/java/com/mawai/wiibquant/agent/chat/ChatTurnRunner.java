@@ -5,7 +5,7 @@ import com.alibaba.fastjson2.JSONArray;
 import com.mawai.wiibquant.agent.llm.ConversationSummarizer;
 import com.mawai.wiibquant.agent.llm.LlmErrorMessages;
 import com.mawai.wiibquant.agent.llm.ModelCallLimiter;
-import com.mawai.wiibquant.agent.llm.ResilientChatService;
+import com.mawai.wiibquant.agent.llm.ToolChoice;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.bsc.langgraph4j.NodeOutput;
@@ -18,8 +18,8 @@ import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.ai.chat.prompt.ChatOptions;
 import org.springframework.ai.chat.prompt.Prompt;
-import org.springframework.ai.model.tool.ToolCallingChatOptions;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
@@ -435,19 +435,24 @@ public class ChatTurnRunner {
         return text.replaceFirst("^【[^】]*】\n", "");
     }
 
-    /** 问模型"下一步给谁"。强制走 route 工具，模型没法用自由文本糊弄过去。 */
+    /**
+     * 问模型"下一步给谁"。强制走 route 工具，模型没法用自由文本糊弄过去。
+     * 单次调用，无条件 required（不走 ResilientChatService 的"首轮强制"——历史里只要有过
+     * ToolResponseMessage 就会被首轮判据误判成非首轮）。options 从模型自己的派生、tool_choice 按协议落地，
+     * 都归 {@link ToolChoice}：openai 协议下泛型 builder 造的 options 会被 OpenAiChatModel 硬转失败（真跑实证）
+     */
     private static List<String> askRouter(ChatModel model, List<Message> history) {
         List<Message> messages = new ArrayList<>(history.size() + 1);
         messages.add(new SystemMessage(ROUTER_INSTRUCTION));
         messages.addAll(history);
+        long startedAt = System.currentTimeMillis();
         try {
-            ChatResponse response = model.call(new Prompt(messages, ToolCallingChatOptions.builder()
-                    .toolCallbacks(ROUTER_TOOLS)
-                    // 用"每次都强制"而非"首轮强制"：路由是单次调用，
-                    // 而历史里只要有过 ToolResponseMessage 就会被"首轮"那套判据误判成非首轮
-                    .toolContext(Map.of(ResilientChatService.FORCE_TOOL_CHOICE, "required"))
-                    .build()));
-            return parseRouteCall(Objects.requireNonNull(response.getResult()).getOutput());
+            ChatOptions options = ToolChoice.apply(ToolChoice.withTools(model, ROUTER_TOOLS), ToolChoice.REQUIRED);
+            ChatResponse response = model.call(new Prompt(messages, options));
+            List<String> next = parseRouteCall(Objects.requireNonNull(response.getResult()).getOutput());
+            // openai 协议路没有 [Responses] 那样的请求日志，路由慢在模型还是慢在别处只能靠这行分辨
+            log.info("[Workbench] 路由回答 next={} 耗时={}ms", next, System.currentTimeMillis() - startedAt);
+            return next;
         } catch (Exception e) {
             // 路由失败不该把整轮对话拖死：退化成"不派发直接作答"，用户至少拿得到回复
             log.warn("[Workbench] 路由调用失败，转汇总", e);

@@ -1,11 +1,15 @@
 package com.mawai.wiibquant.agent.trader;
 
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.mawai.wiibcommon.config.BinanceProperties;
 import com.mawai.wiibcommon.entity.AiTrader;
 import com.mawai.wiibcommon.entity.AiTraderDecision;
 import com.mawai.wiibcommon.entity.AiTraderRequest;
+import com.mawai.wiibcommon.entity.UserLlmBinding;
+import com.mawai.wiibcommon.entity.UserLlmEndpoint;
+import com.mawai.wiibquant.agent.llm.LlmEndpointService;
 import com.mawai.wiibquant.external.sim.SimTradeClient;
 import com.mawai.wiibquant.mapper.AiTraderDecisionMapper;
 import com.mawai.wiibquant.mapper.AiTraderMapper;
@@ -19,12 +23,14 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-/** listModels：拉取端点可用模型清单（key 传空=用已存 key，与改配置语义一致）。 */
+/** trader 创建/改配置的校验与端点选择，以及重置开新局的归档/清理。 */
 class TraderServiceTest {
 
     @BeforeAll
@@ -36,7 +42,7 @@ class TraderServiceTest {
 
     private final AiTraderMapper traderMapper = mock(AiTraderMapper.class);
     private final TraderModelFactory modelFactory = mock(TraderModelFactory.class);
-    private final ApiKeyCrypto apiKeyCrypto = mock(ApiKeyCrypto.class);
+    private final LlmEndpointService endpointService = mock(LlmEndpointService.class);
     private final BinanceProperties binanceProperties = mock(BinanceProperties.class);
 
     private final SimTradeClient simTradeClient = mock(SimTradeClient.class);
@@ -45,93 +51,37 @@ class TraderServiceTest {
     private final AiTraderDecisionMapper decisionMapper = mock(AiTraderDecisionMapper.class);
 
     private final TraderService service = new TraderService(
-            traderMapper, decisionMapper, modelFactory, apiKeyCrypto,
-            simTradeClient, binanceProperties, new BaseUrlGuard(""), planStore, requestMapper);
+            traderMapper, decisionMapper, modelFactory, endpointService,
+            simTradeClient, binanceProperties, planStore, requestMapper);
 
-    /** SSRF 防线必须接进 listModels 入口 */
-    @Test
-    void privateBaseUrlRejectedBySsrfGuard() {
-        when(apiKeyCrypto.encrypt(any())).thenReturn("enc");
-        when(modelFactory.listModels(any())).thenReturn(List.of());
-
-        TraderService.ListModelsResult r = service.listModels(1L,
-                new TraderService.ListModelsReq("openai", "http://127.0.0.1:8080", "sk-x"));
-
-        assertThat(r.error()).contains("内网");
+    /** 端点库里的一条 */
+    private static UserLlmEndpoint endpoint(long id, String model) {
+        UserLlmEndpoint e = new UserLlmEndpoint();
+        e.setId(id);
+        e.setUserId(1L);
+        e.setModel(model);
+        e.setApiProtocol("openai");
+        e.setBaseUrl("https://8.8.8.8");
+        e.setApiKeyEnc("enc");
+        return e;
     }
 
-    @Test
-    void returnsAlphabeticallySortedModels() {
-        when(apiKeyCrypto.encrypt("sk-new")).thenReturn("enc-new");
-        when(modelFactory.listModels(any())).thenReturn(List.of("deepseek-reasoner", "deepseek-chat"));
-
-        TraderService.ListModelsResult r = service.listModels(1L,
-                new TraderService.ListModelsReq("openai", "https://8.8.8.8", "sk-new"));
-
-        assertThat(r.error()).isNull();
-        assertThat(r.models()).containsExactly("deepseek-chat", "deepseek-reasoner");
+    /** 只填校验相关字段的创建请求；llmEndpointId=null 跟随默认端点 */
+    private static TraderService.UpsertReq req(String customPrompt, Boolean useDefaultPrompt,
+                                               Integer levMin, Integer levMax,
+                                               Boolean multi, Boolean hedge,
+                                               Boolean alertEnabled, java.math.BigDecimal alertMult) {
+        return new TraderService.UpsertReq("小虎", "BTCUSDT", "5m", customPrompt, null, useDefaultPrompt,
+                levMin, levMax, null, null, multi, hedge, null, null, alertEnabled, alertMult, null, null);
     }
 
-    @Test
-    void probeNormalizedBeforeFactoryCall() {
-        when(apiKeyCrypto.encrypt("sk-new")).thenReturn("enc-new");
-        when(modelFactory.listModels(any())).thenReturn(List.of());
-
-        // 协议留空默认 openai；baseUrl 去尾斜杠；新 key 加密进探针
-        service.listModels(1L, new TraderService.ListModelsReq(null, "https://8.8.8.8/", " sk-new "));
-
-        ArgumentCaptor<AiTrader> probe = ArgumentCaptor.forClass(AiTrader.class);
-        verify(modelFactory).listModels(probe.capture());
-        assertThat(probe.getValue().getApiProtocol()).isEqualTo("openai");
-        assertThat(probe.getValue().getBaseUrl()).isEqualTo("https://8.8.8.8");
-        assertThat(probe.getValue().getApiKeyEnc()).isEqualTo("enc-new");
-    }
-
-    @Test
-    void blankKeyFallsBackToStoredKey() {
-        AiTrader mine = new AiTrader();
-        mine.setApiKeyEnc("enc-stored");
-        when(traderMapper.selectOne(any())).thenReturn(mine);
-        when(modelFactory.listModels(any())).thenReturn(List.of());
-
-        TraderService.ListModelsResult r = service.listModels(1L,
-                new TraderService.ListModelsReq("openai", "https://8.8.8.8", ""));
-
-        assertThat(r.error()).isNull();
-        ArgumentCaptor<AiTrader> probe = ArgumentCaptor.forClass(AiTrader.class);
-        verify(modelFactory).listModels(probe.capture());
-        assertThat(probe.getValue().getApiKeyEnc()).isEqualTo("enc-stored");
-    }
-
-    @Test
-    void blankKeyWithoutTraderRejected() {
-        when(traderMapper.selectOne(any())).thenReturn(null);
-
-        TraderService.ListModelsResult r = service.listModels(1L,
-                new TraderService.ListModelsReq("openai", "https://8.8.8.8", null));
-
-        assertThat(r.error()).contains("apiKey");
-        verify(modelFactory, never()).listModels(any());
-    }
-
-    @Test
-    void blankBaseUrlRejected() {
-        TraderService.ListModelsResult r = service.listModels(1L,
-                new TraderService.ListModelsReq("openai", " ", "sk-x"));
-
-        assertThat(r.error()).contains("baseUrl");
-        verify(modelFactory, never()).listModels(any());
-    }
-
-    /** 退出平台提示词后模型将无任何指令来源，必须强制填自定义 */
+    /** 退出平台模板后自定义就是唯一指令来源，空着=模型裸奔 */
     @Test
     void optOutDefaultPromptRequiresCustomPrompt() {
         when(binanceProperties.getSymbols()).thenReturn(List.of("BTCUSDT"));
         when(traderMapper.selectOne(any())).thenReturn(null);
 
-        String err = service.create(1L, new TraderService.UpsertReq("小虎", "BTCUSDT", "5m", " ",
-                "openai", "https://8.8.8.8", "deepseek-chat", "sk-x", false,
-                null, null, null, null, null, null, null, null, null, null, null, null));
+        String err = service.create(1L, req(" ", false, null, null, null, null, null, null));
 
         assertThat(err).contains("自定义提示词");
     }
@@ -142,10 +92,7 @@ class TraderServiceTest {
         when(binanceProperties.getSymbols()).thenReturn(List.of("BTCUSDT"));
         when(traderMapper.selectOne(any())).thenReturn(null);
 
-        String err = service.create(1L, new TraderService.UpsertReq("小虎", "BTCUSDT", "5m", null,
-                "openai", "https://8.8.8.8", "deepseek-chat", "sk-x", true,
-                null, null, null, null, null, null, null, null,
-                true, new java.math.BigDecimal("0.5"), null, null));
+        String err = service.create(1L, req(null, true, null, null, null, null, true, new java.math.BigDecimal("0.5")));
 
         assertThat(err).contains("不能低于 1.0");
     }
@@ -153,12 +100,10 @@ class TraderServiceTest {
     /** 杠杆上界卡在 125：再往上 sim 的分档表也接不住 */
     @Test
     void leverageBeyondHardMaxRejected() {
-        when(binanceProperties.getSymbols()).thenReturn(java.util.List.of("BTCUSDT"));
+        when(binanceProperties.getSymbols()).thenReturn(List.of("BTCUSDT"));
         when(traderMapper.selectOne(any())).thenReturn(null);
 
-        String err = service.create(1L, new TraderService.UpsertReq("小虎", "BTCUSDT", "5m", null,
-                "openai", "https://8.8.8.8", "deepseek-chat", "sk-x", true,
-                50, 200, null, null, null, null, null, null, null, null, null, null));
+        String err = service.create(1L, req(null, true, 50, 200, null, null, null, null));
 
         assertThat(err).contains("杠杆区间");
     }
@@ -166,14 +111,72 @@ class TraderServiceTest {
     /** 区间下界大于上界＝空集，模型永远开不出仓 */
     @Test
     void invertedLeverageRangeRejected() {
-        when(binanceProperties.getSymbols()).thenReturn(java.util.List.of("BTCUSDT"));
+        when(binanceProperties.getSymbols()).thenReturn(List.of("BTCUSDT"));
         when(traderMapper.selectOne(any())).thenReturn(null);
 
-        String err = service.create(1L, new TraderService.UpsertReq("小虎", "BTCUSDT", "5m", null,
-                "openai", "https://8.8.8.8", "deepseek-chat", "sk-x", true,
-                100, 50, null, null, null, null, null, null, null, null, null, null));
+        String err = service.create(1L, req(null, true, 100, 50, null, null, null, null));
 
         assertThat(err).contains("下界不能大于上界");
+    }
+
+    /** 单仓 + 双开是自相矛盾的组合（双开本身要两个仓位），入口就拦掉 */
+    @Test
+    void hedgeWithSinglePositionRejected() {
+        when(binanceProperties.getSymbols()).thenReturn(List.of("BTCUSDT"));
+        when(traderMapper.selectOne(any())).thenReturn(null);
+
+        String err = service.create(1L, req(null, true, null, null, false, true, null, null));
+
+        assertThat(err).contains("多空双开");
+    }
+
+    /** 端点库空着不能创建：模型是从库里选的，没得选就得先去配 */
+    @Test
+    void createWithoutAnyEndpointRejected() {
+        when(binanceProperties.getSymbols()).thenReturn(List.of("BTCUSDT"));
+        when(traderMapper.selectOne(any())).thenReturn(null);
+        when(endpointService.defaultOf(1L)).thenReturn(null);
+
+        String err = service.create(1L, req(null, true, null, null, null, null, null, null));
+
+        assertThat(err).contains("模型端点");
+        verify(modelFactory, never()).testConnection(any());
+        verify(traderMapper, never()).insert(any(AiTrader.class));
+    }
+
+    /** 创建：显式选的端点要连通性测试；通过后入库并把 TRADER 用途绑到它 */
+    @Test
+    void createTestsChosenEndpointAndBinds() {
+        when(binanceProperties.getSymbols()).thenReturn(List.of("BTCUSDT"));
+        when(traderMapper.selectOne(any())).thenReturn(null);
+        UserLlmEndpoint chosen = endpoint(5, "deepseek-chat");
+        when(endpointService.get(1L, 5L)).thenReturn(chosen);
+        when(modelFactory.testConnection(chosen)).thenReturn(null);
+        when(simTradeClient.ensureAccount(any(), any())).thenReturn(99L);
+
+        String err = service.create(1L, new TraderService.UpsertReq("小虎", "BTCUSDT", "5m", null, 5L, true,
+                null, null, null, null, null, null, null, null, null, null, null, null));
+
+        assertThat(err).isNull();
+        verify(modelFactory).testConnection(chosen);
+        verify(traderMapper).insert(any(AiTrader.class));
+        verify(endpointService).bind(1L, UserLlmBinding.TRADER, 5L);
+    }
+
+    /** 连通性测试不过：不入库、不绑定 */
+    @Test
+    void createRejectedWhenEndpointUnreachable() {
+        when(binanceProperties.getSymbols()).thenReturn(List.of("BTCUSDT"));
+        when(traderMapper.selectOne(any())).thenReturn(null);
+        UserLlmEndpoint chosen = endpoint(5, "deepseek-chat");
+        when(endpointService.defaultOf(1L)).thenReturn(chosen);
+        when(modelFactory.testConnection(chosen)).thenReturn("401");
+
+        String err = service.create(1L, req(null, true, null, null, null, null, null, null));
+
+        assertThat(err).contains("连通性测试失败");
+        verify(traderMapper, never()).insert(any(AiTrader.class));
+        verify(endpointService, never()).bind(any(Long.class), any(), any());
     }
 
     /**
@@ -191,8 +194,7 @@ class TraderServiceTest {
 
         assertThat(service.reset(1L)).isNull();
 
-        verify(planStore).archiveRound(org.mockito.ArgumentMatchers.eq(7L),
-                org.mockito.ArgumentMatchers.eq(3), org.mockito.ArgumentMatchers.anyLong());
+        verify(planStore).archiveRound(eq(7L), eq(3), org.mockito.ArgumentMatchers.anyLong());
         verify(requestMapper).update(any(), any());     // 待确认请求一并作废
         // 窗口内（R4 ≤ 10 局）不触发过期清理
         verify(planStore, never()).purgeRounds(org.mockito.ArgumentMatchers.anyLong(),
@@ -235,23 +237,11 @@ class TraderServiceTest {
         verify(planStore).purgeRounds(7L, 1);   // quant 三表照删
     }
 
-    /** 单仓 + 双开是自相矛盾的组合（双开本身要两个仓位），入口就拦掉 */
-    @Test
-    void hedgeWithSinglePositionRejected() {
-        when(binanceProperties.getSymbols()).thenReturn(java.util.List.of("BTCUSDT"));
-        when(traderMapper.selectOne(any())).thenReturn(null);
-
-        String err = service.create(1L, new TraderService.UpsertReq("小虎", "BTCUSDT", "5m", null,
-                "openai", "https://8.8.8.8", "deepseek-chat", "sk-x", true,
-                null, null, null, null, false, true, null, null, null, null, null, null));
-
-        assertThat(err).contains("多空双开");
-    }
-
     /**
      * 改配置必须列级更新且不碰运行态列：整行 updateById 会把唤醒回路并发写的
      * status/consecutive_failures 盖回读取时的旧值（连通性测试要出网数秒，窗口不小）——
      * 与 runner 侧"状态回写列级更新"是同一条铁律的两半。
+     * 端点没换（当前用的就是默认那条）→ 不触发连通性测试。
      */
     @Test
     void updateConfigWritesConfigColumnsOnly() {
@@ -259,37 +249,45 @@ class TraderServiceTest {
         t.setId(7L);
         t.setUserId(1L);
         t.setStatus(AiTrader.STATUS_RUNNING);
-        t.setApiProtocol("openai");
-        t.setBaseUrl("https://8.8.8.8");
-        t.setModel("deepseek-chat");
-        t.setApiKeyEnc("enc-stored");
         when(traderMapper.selectOne(any())).thenReturn(t);
         when(binanceProperties.getSymbols()).thenReturn(List.of("BTCUSDT"));
+        UserLlmEndpoint current = endpoint(5, "deepseek-chat");
+        when(endpointService.defaultOf(1L)).thenReturn(current);
+        when(modelFactory.endpointFor(t)).thenReturn(current);
 
-        // 模型三件套与 key 都没变 → 不触发连通性测试
-        String err = service.updateConfig(1L, new TraderService.UpsertReq("小虎", "BTCUSDT", "5m", "稳一点",
-                "openai", "https://8.8.8.8", "deepseek-chat", null, true,
+        String err = service.updateConfig(1L, req("稳一点", true, null, null, null, null, null, null));
+
+        assertThat(err).isNull();
+        verify(modelFactory, never()).testConnection(any());
+        verify(traderMapper, never()).updateById(any(AiTrader.class));
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<LambdaUpdateWrapper<AiTrader>> cap = ArgumentCaptor.forClass(LambdaUpdateWrapper.class);
+        verify(traderMapper).update(isNull(), cap.capture());
+        String sqlSet = cap.getValue().getSqlSet();
+        assertThat(sqlSet).contains("custom_prompt");
+        assertThat(sqlSet).doesNotContain("status").doesNotContain("consecutive_failures").doesNotContain("api_key");
+        verify(endpointService).bind(1L, UserLlmBinding.TRADER, null);   // 跟随默认 = 解绑
+    }
+
+    /** 换到另一条端点：先测连通，通过后绑定并逐出模型缓存 */
+    @Test
+    void updateConfigWithNewEndpointTestsAndEvicts() {
+        AiTrader t = new AiTrader();
+        t.setId(7L);
+        t.setUserId(1L);
+        when(traderMapper.selectOne(any())).thenReturn(t);
+        when(binanceProperties.getSymbols()).thenReturn(List.of("BTCUSDT"));
+        when(modelFactory.endpointFor(t)).thenReturn(endpoint(5, "deepseek-chat"));
+        UserLlmEndpoint next = endpoint(6, "deepseek-reasoner");
+        when(endpointService.get(1L, 6L)).thenReturn(next);
+        when(modelFactory.testConnection(next)).thenReturn(null);
+
+        String err = service.updateConfig(1L, new TraderService.UpsertReq("小虎", "BTCUSDT", "5m", null, 6L, true,
                 null, null, null, null, null, null, null, null, null, null, null, null));
 
         assertThat(err).isNull();
-        verify(traderMapper, never()).updateById(any(AiTrader.class));
-        ArgumentCaptor<com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<AiTrader>> cap =
-                ArgumentCaptor.forClass(com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper.class);
-        verify(traderMapper).update(org.mockito.ArgumentMatchers.isNull(), cap.capture());
-        String sqlSet = cap.getValue().getSqlSet();
-        assertThat(sqlSet).contains("custom_prompt").contains("api_key_enc");
-        assertThat(sqlSet).doesNotContain("status").doesNotContain("consecutive_failures");
-    }
-
-    @Test
-    void upstreamErrorTruncatedTo300() {
-        when(apiKeyCrypto.encrypt(any())).thenReturn("enc");
-        when(modelFactory.listModels(any())).thenThrow(new RuntimeException("x".repeat(400)));
-
-        TraderService.ListModelsResult r = service.listModels(1L,
-                new TraderService.ListModelsReq("openai", "https://8.8.8.8", "sk-x"));
-
-        assertThat(r.models()).isNull();
-        assertThat(r.error()).hasSize(300);
+        verify(modelFactory).testConnection(next);
+        verify(endpointService).bind(1L, UserLlmBinding.TRADER, 6L);
+        verify(modelFactory).evict(7L);
     }
 }

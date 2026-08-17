@@ -3,11 +3,13 @@ package com.mawai.wiibquant.agent.trader;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.mawai.wiibcommon.config.BinanceProperties;
-import com.mawai.wiibcommon.constant.AiProtocols;
 import com.mawai.wiibcommon.entity.AiTrader;
 import com.mawai.wiibcommon.entity.AiTraderDecision;
 import com.mawai.wiibcommon.entity.AiTraderPlan;
 import com.mawai.wiibcommon.entity.AiTraderRequest;
+import com.mawai.wiibcommon.entity.UserLlmBinding;
+import com.mawai.wiibcommon.entity.UserLlmEndpoint;
+import com.mawai.wiibquant.agent.llm.LlmEndpointService;
 import com.mawai.wiibquant.external.sim.SimTradeClient;
 import com.mawai.wiibquant.mapper.AiTraderDecisionMapper;
 import com.mawai.wiibquant.mapper.AiTraderMapper;
@@ -24,8 +26,11 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * trader 生命周期：创建（连通性校验→key加密→开sim子账户注资）→ 启停 → 重置开新局。
+ * trader 生命周期：创建（选端点→连通性校验→开sim子账户注资）→ 启停 → 重置开新局。
  * 每用户 1 个；每局一个独立 sim 子账户（账号名 ai_trader_{userId}_r{round}），历史局留档。
+ * <p>
+ * 模型端点不再存在 ai_trader 行里：从用户端点库（AI 页「模型配置」）里选一条绑到 TRADER 用途，
+ * 不选就跟随用户默认端点；唤醒时 {@link TraderModelFactory} 现解析。
  */
 @Slf4j
 @Service
@@ -41,15 +46,15 @@ public class TraderService {
     private final AiTraderMapper traderMapper;
     private final AiTraderDecisionMapper decisionMapper;
     private final TraderModelFactory modelFactory;
-    private final ApiKeyCrypto apiKeyCrypto;
+    private final LlmEndpointService endpointService;
     private final SimTradeClient simTradeClient;
     private final BinanceProperties binanceProperties;
-    private final BaseUrlGuard baseUrlGuard;
     private final TraderPlanStore planStore;
     private final AiTraderRequestMapper requestMapper;
 
+    /** llmEndpointId：端点库里的一条；空=跟随用户默认端点 */
     public record UpsertReq(String name, String symbols, String intervalCode, String customPrompt,
-                            String apiProtocol, String baseUrl, String model, String apiKey,
+                            Long llmEndpointId,
                             Boolean useDefaultPrompt,
                             Integer leverageMin, Integer leverageMax,
                             BigDecimal marginPctMin, BigDecimal marginPctMax,
@@ -57,48 +62,6 @@ public class TraderService {
                             Boolean allowSelfAdd, Boolean allowSelfReduce,
                             Boolean alertEnabled, BigDecimal alertThresholdMult,
                             Boolean reviewEnabled, Boolean learningEnabled) {
-    }
-
-    public record ListModelsReq(String apiProtocol, String baseUrl, String apiKey) {
-    }
-
-    public record ListModelsResult(String error, List<String> models) {
-    }
-
-    /** 拉取端点可用模型清单：key 传空=用已存 key（与改配置语义一致）。 */
-    public ListModelsResult listModels(long userId, ListModelsReq req) {
-        if (req.baseUrl() == null || req.baseUrl().isBlank()) {
-            return new ListModelsResult("baseUrl不能为空", null);
-        }
-        String ssrf = baseUrlGuard.check(req.baseUrl());
-        if (ssrf != null) {
-            return new ListModelsResult(ssrf, null);
-        }
-        String protocol = req.apiProtocol() == null || req.apiProtocol().isBlank()
-                ? AiProtocols.OPENAI : req.apiProtocol().trim().toLowerCase();
-        if (!AiProtocols.isValid(protocol)) {
-            return new ListModelsResult("协议仅支持 openai / responses", null);
-        }
-        String keyEnc;
-        if (req.apiKey() != null && !req.apiKey().isBlank()) {
-            keyEnc = apiKeyCrypto.encrypt(req.apiKey().trim());
-        } else {
-            AiTrader t = mine(userId);
-            if (t == null) {
-                return new ListModelsResult("尚未创建 Trader，请先填写 apiKey", null);
-            }
-            keyEnc = t.getApiKeyEnc();
-        }
-        AiTrader probe = new AiTrader();
-        probe.setApiProtocol(protocol);
-        probe.setBaseUrl(stripTrailingSlash(req.baseUrl().trim()));
-        probe.setApiKeyEnc(keyEnc);
-        try {
-            return new ListModelsResult(null, modelFactory.listModels(probe).stream().sorted().toList());
-        } catch (Exception e) {
-            String msg = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
-            return new ListModelsResult(msg.length() > 300 ? msg.substring(0, 300) : msg, null);
-        }
     }
 
     public AiTrader mine(long userId) {
@@ -113,56 +76,60 @@ public class TraderService {
         return traderMapper.selectList(new LambdaQueryWrapper<AiTrader>().orderByAsc(AiTrader::getId));
     }
 
-    /** 创建：校验→连通性测试→加密→开子账户→PAUSED 入库。返回错误信息或 null。 */
+    /** 创建：校验→选端点→连通性测试→开子账户→PAUSED 入库→绑定用途。返回错误信息或 null。 */
     public String create(long userId, UpsertReq req) {
         if (mine(userId) != null) {
             return "每个用户只能创建一个 AI Trader";
         }
-        String err = validate(req, true);
+        String err = validate(req);
         if (err != null) {
             return err;
+        }
+        UserLlmEndpoint endpoint = pickEndpoint(userId, req.llmEndpointId());
+        if (endpoint == null) {
+            return NO_ENDPOINT;
+        }
+        String connErr = modelFactory.testConnection(endpoint);
+        if (connErr != null) {
+            return "模型连通性测试失败：" + connErr;
         }
         AiTrader t = new AiTrader();
         t.setUserId(userId);
         applyConfig(t, req);
-        t.setApiKeyEnc(apiKeyCrypto.encrypt(req.apiKey().trim()));
-        String connErr = modelFactory.testConnection(t);
-        if (connErr != null) {
-            return "模型连通性测试失败：" + connErr;
-        }
         t.setStatus(AiTrader.STATUS_PAUSED);
         t.setRoundNo(1);
         t.setConsecutiveFailures(0);
         t.setSimUserId(simTradeClient.ensureAccount(accountName(userId, 1), INITIAL_BALANCE));
         traderMapper.insert(t);
-        log.info("[Trader] 创建 traderId={} userId={} model={}", t.getId(), userId, t.getModel());
+        endpointService.bind(userId, UserLlmBinding.TRADER, req.llmEndpointId());
+        log.info("[Trader] 创建 traderId={} userId={} model={}", t.getId(), userId, endpoint.getModel());
         return null;
     }
 
-    /** 改配置：apiKey 传空=不换 key；模型三件套或 key 变更时重测连通并逐出模型缓存。 */
+    /** 改配置：换了端点（含"跟随默认"与显式之间切换到不同端点）就重测连通并逐出模型缓存。 */
     public String updateConfig(long userId, UpsertReq req) {
         AiTrader t = mine(userId);
         if (t == null) {
             return "尚未创建 AI Trader";
         }
-        boolean keyChanged = req.apiKey() != null && !req.apiKey().isBlank();
-        String err = validate(req, keyChanged);
+        String err = validate(req);
         if (err != null) {
             return err;
         }
-        AiTrader probe = new AiTrader();
-        applyConfig(probe, req);
-        probe.setApiKeyEnc(keyChanged ? apiKeyCrypto.encrypt(req.apiKey().trim()) : t.getApiKeyEnc());
-        boolean modelChanged = keyChanged
-                || !probe.getBaseUrl().equals(t.getBaseUrl())
-                || !probe.getModel().equals(t.getModel())
-                || !probe.getApiProtocol().equals(t.getApiProtocol());
+        UserLlmEndpoint endpoint = pickEndpoint(userId, req.llmEndpointId());
+        if (endpoint == null) {
+            return NO_ENDPOINT;
+        }
+        UserLlmEndpoint current = modelFactory.endpointFor(t);
+        boolean modelChanged = current == null || !current.getId().equals(endpoint.getId());
         if (modelChanged) {
-            String connErr = modelFactory.testConnection(probe);
+            String connErr = modelFactory.testConnection(endpoint);
             if (connErr != null) {
                 return "模型连通性测试失败：" + connErr;
             }
         }
+        AiTrader probe = new AiTrader();
+        applyConfig(probe, req);
         // 列级更新只写配置字段：整行 updateById 会把唤醒回路并发写的 status/连败计数盖回快照旧值
         // （连通性测试要出网数秒，窗口不小）——与 runner 侧"状态回写列级更新"是同一条铁律的两半
         traderMapper.update(null, new LambdaUpdateWrapper<AiTrader>()
@@ -172,10 +139,6 @@ public class TraderService {
                 .set(AiTrader::getIntervalCode, probe.getIntervalCode())
                 .set(AiTrader::getCustomPrompt, probe.getCustomPrompt())
                 .set(AiTrader::getUseDefaultPrompt, probe.getUseDefaultPrompt())
-                .set(AiTrader::getApiProtocol, probe.getApiProtocol())
-                .set(AiTrader::getBaseUrl, probe.getBaseUrl())
-                .set(AiTrader::getModel, probe.getModel())
-                .set(AiTrader::getApiKeyEnc, probe.getApiKeyEnc())
                 .set(AiTrader::getLeverageMin, probe.getLeverageMin())
                 .set(AiTrader::getLeverageMax, probe.getLeverageMax())
                 .set(AiTrader::getMarginPctMin, probe.getMarginPctMin())
@@ -189,10 +152,21 @@ public class TraderService {
                 .set(AiTrader::getReviewEnabled, probe.getReviewEnabled())
                 .set(AiTrader::getLearningEnabled, probe.getLearningEnabled())
                 .set(AiTrader::getUpdatedAt, LocalDateTime.now()));
+        endpointService.bind(userId, UserLlmBinding.TRADER, req.llmEndpointId());
         if (modelChanged) {
             modelFactory.evict(t.getId());
         }
         return null;
+    }
+
+    private static final String NO_ENDPOINT = "还没有可用的模型端点，请先到 AI 页「模型配置」里添加";
+
+    /** 显式选的端点必须是自己的；不选（null）= 跟随默认。两头都拿不到端点 → null */
+    private UserLlmEndpoint pickEndpoint(long userId, Long endpointId) {
+        if (endpointId != null) {
+            return endpointService.get(userId, endpointId);
+        }
+        return endpointService.defaultOf(userId);
     }
 
     public String start(long userId) {
@@ -326,17 +300,7 @@ public class TraderService {
                 .orderByAsc(AiTraderDecision::getWakeTime));
     }
 
-    /** mine 页回显的 key 尾 4 位。 */
-    public String keyTail(AiTrader t) {
-        try {
-            String plain = apiKeyCrypto.decrypt(t.getApiKeyEnc());
-            return plain.length() > 4 ? plain.substring(plain.length() - 4) : "****";
-        } catch (Exception e) {
-            return "????";
-        }
-    }
-
-    private String validate(UpsertReq req, boolean requireKey) {
+    private String validate(UpsertReq req) {
         if (req.name() == null || req.name().isBlank() || req.name().length() > 32) {
             return "名字必填且不超过32字符";
         }
@@ -354,24 +318,6 @@ public class TraderService {
         }
         if (whitelist == null || !whitelist.containsAll(symbols)) {
             return "币种超出可交易范围: " + whitelist;
-        }
-        if (req.baseUrl() == null || req.baseUrl().isBlank()) {
-            return "baseUrl不能为空";
-        }
-        String ssrf = baseUrlGuard.check(req.baseUrl());
-        if (ssrf != null) {
-            return ssrf;
-        }
-        if (req.model() == null || req.model().isBlank()) {
-            return "model不能为空";
-        }
-        String protocol = req.apiProtocol() == null || req.apiProtocol().isBlank()
-                ? AiProtocols.OPENAI : req.apiProtocol();
-        if (!AiProtocols.isValid(protocol)) {
-            return "协议仅支持 openai / responses";
-        }
-        if (requireKey && (req.apiKey() == null || req.apiKey().isBlank())) {
-            return "apiKey不能为空";
         }
         if (req.customPrompt() != null && req.customPrompt().length() > 4000) {
             return "自定义提示词不超过4000字符";
@@ -423,10 +369,6 @@ public class TraderService {
         t.setSymbols(String.join(",", parseSymbols(req.symbols())));
         t.setIntervalCode(req.intervalCode());
         t.setCustomPrompt(req.customPrompt());
-        t.setApiProtocol(req.apiProtocol() == null || req.apiProtocol().isBlank()
-                ? AiProtocols.OPENAI : req.apiProtocol().trim().toLowerCase());
-        t.setBaseUrl(stripTrailingSlash(req.baseUrl().trim()));
-        t.setModel(req.model().trim());
         t.setUseDefaultPrompt(req.useDefaultPrompt() == null || req.useDefaultPrompt());
         t.setLeverageMin(req.leverageMin() == null ? TraderRiskConfig.DEF_LEV_MIN : req.leverageMin());
         t.setLeverageMax(req.leverageMax() == null ? TraderRiskConfig.DEF_LEV_MAX : req.leverageMax());
@@ -441,10 +383,6 @@ public class TraderService {
         t.setAlertThresholdMult(req.alertThresholdMult() == null ? BigDecimal.ONE : req.alertThresholdMult());
         t.setReviewEnabled(!Boolean.FALSE.equals(req.reviewEnabled()));
         t.setLearningEnabled(!Boolean.FALSE.equals(req.learningEnabled()));
-    }
-
-    private static String stripTrailingSlash(String baseUrl) {
-        return baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
     }
 
     private static Set<String> parseSymbols(String symbols) {

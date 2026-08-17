@@ -79,15 +79,8 @@ public class AiTrader {
     /** 警报灵敏度系数 ≥1.0 只能调高：生效阈值 = 每币基准 × 本系数 */
     private BigDecimal alertThresholdMult;
 
-    /** 上游协议：openai=/v1/chat/completions，responses=/v1/responses */
-    private String apiProtocol;
-
-    private String baseUrl;
-
-    private String model;
-
-    /** AES-GCM 密文 base64(iv+cipher) */
-    private String apiKeyEnc;
+    // BYOK 四件套（协议/URL/模型/key）已迁到 user_llm_endpoint：trader 按 UserLlmBinding.TRADER 绑定选端点，
+    // 没绑定就用该用户的默认端点，见 LlmEndpointService.resolve
 
     /** 当前局 sim 子账户 userId（每局一个独立子账户，重置开新局） */
     private Long simUserId;
