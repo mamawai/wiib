@@ -23,7 +23,9 @@ import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.util.UUID;
 import java.util.function.Function;
+import java.util.function.Supplier;
 
 /**
  * 交易工具（非 Spring bean）：每次唤醒 new 一个，绑定该 trader 的 sim 子账户与白名单。
@@ -33,9 +35,13 @@ import java.util.function.Function;
 @Slf4j
 public class TradeTools {
 
-    /** 唤醒上下文：计划落库与风险护栏所需的 trader 侧信息 */
-    public record WakeCtx(long traderId, int roundNo, long boundaryTime, TraderRiskConfig risk) {
+    /** 唤醒上下文：计划落库与风险护栏所需的 trader 侧信息；deadlineMs＝本轮预算耗尽的墙钟时刻 */
+    public record WakeCtx(long traderId, int roundNo, long boundaryTime, long deadlineMs, TraderRiskConfig risk) {
     }
+
+    /** 结果未知时同键重发的次数与间隔：sim 读超时 5s，再问两次足够覆盖抢锁+事务那点慢 */
+    private static final int SEND_RETRIES = 2;
+    private static final long RETRY_INTERVAL_MS = 2000;
 
     /** 本类自带富记录（结果/拒因）的工具名——轨迹合并时用富记录替换 hook 的轻量占位 */
     public static final Set<String> RECORDED_TOOLS = Set.of(
@@ -142,6 +148,9 @@ public class TradeTools {
                 takeProfitPrice == null ? null : BigDecimal.valueOf(takeProfitPrice),
                 playType, signalsUsed, invalidationCondition);
         JSONObject argSummary = openArgs(req);
+        if (roundExpired()) {
+            return expired("open_position", argSummary);
+        }
         // 白名单挡在行情查询之前：模型重试时会丢参数（真实发生过），空 symbol 打到上游
         // 会拉回全市场 premiumIndex 数组炸掉解析，模型收到的就不是可修正的拒因了
         if (symbol == null || !symbolWhitelist.contains(symbol)) {
@@ -188,6 +197,8 @@ public class TradeTools {
             openReq.setLeverage(req.leverage());
             openReq.setLimitPrice("LIMIT".equals(req.orderType()) ? req.limitPrice() : null);
             openReq.setMemo("ai_trader:" + req.playType());
+            // 幂等键：超时重发认这个键，sim 那边只会成交一次
+            openReq.setClientRequestId(UUID.randomUUID().toString());
             FuturesOpenRequest.StopLoss sl = new FuturesOpenRequest.StopLoss();
             sl.setPrice(req.stopLossPrice());
             sl.setQuantity(req.quantity());
@@ -198,9 +209,11 @@ public class TradeTools {
                 tp.setQuantity(req.quantity());
                 openReq.setTakeProfits(List.of(tp));
             }
-            FuturesOrderResponse resp = simTradeClient.openPosition(simUserId, openReq);
+            FuturesOrderResponse resp = send(() -> simTradeClient.openPosition(simUserId, openReq));
             persistPlan(req, mark, sameSide != null);
             return ok("open_position", argSummary, JSON.toJSONString(resp));
+        } catch (UnknownOutcome e) {
+            return unknown("open_position", argSummary, e);
         } catch (Exception e) {
             return fail("open_position", argSummary, e);
         }
@@ -238,6 +251,9 @@ public class TradeTools {
                 .fluentPut("positionId", positionId)
                 .fluentPut("quantity", quantity)
                 .fluentPut("reason", reason);
+        if (roundExpired()) {
+            return expired("close_position", args);
+        }
         try {
             // 减仓需主人确认：转请求即返回。止损止盈单不走这条路，仍自动执行，风险有保护
             if (!ctx.risk().allowSelfReduce()) {
@@ -262,8 +278,11 @@ public class TradeTools {
             req.setPositionId(positionId);
             req.setQuantity(BigDecimal.valueOf(quantity));
             req.setOrderType("MARKET");
-            FuturesOrderResponse resp = simTradeClient.closePosition(simUserId, req);
+            req.setClientRequestId(UUID.randomUUID().toString());
+            FuturesOrderResponse resp = send(() -> simTradeClient.closePosition(simUserId, req));
             return ok("close_position", args, JSON.toJSONString(resp));
+        } catch (UnknownOutcome e) {
+            return unknown("close_position", args, e);
         } catch (Exception e) {
             return fail("close_position", args, e);
         }
@@ -285,6 +304,9 @@ public class TradeTools {
                 .fluentPut("positionId", positionId)
                 .fluentPut("stopLossPrice", stopLossPrice)
                 .fluentPut("reason", reason);
+        if (roundExpired()) {
+            return expired("set_stop_loss", args);
+        }
         try {
             FuturesPositionDTO pos = findPosition(positionId);
             if (pos == null) {
@@ -347,6 +369,9 @@ public class TradeTools {
                 .fluentPut("positionId", positionId)
                 .fluentPut("takeProfitPrice", takeProfitPrice)
                 .fluentPut("reason", reason);
+        if (roundExpired()) {
+            return expired("set_take_profit", args);
+        }
         try {
             FuturesPositionDTO pos = findPosition(positionId);
             if (pos == null) {
@@ -504,6 +529,64 @@ public class TradeTools {
         }
     }
 
+    /** 本轮预算已耗尽：唤醒回路那边正在超时作废，这时候再下单就是给下一轮留没人认领的仓位。 */
+    private boolean roundExpired() {
+        return System.currentTimeMillis() > ctx.deadlineMs();
+    }
+
+    private String expired(String tool, JSONObject args) {
+        return rejected(tool, args, "本轮已超时（预算耗尽），不再执行任何交易动作，本次调用未发出");
+    }
+
+    /** 重发确认后仍问不到结果：这笔单可能已经在 sim 成交了。 */
+    private static class UnknownOutcome extends RuntimeException {
+        UnknownOutcome(Throwable cause) {
+            super(cause);
+        }
+    }
+
+    /**
+     * 下单发送：读超时和 sim 回的"处理中"都只说明结果未知（sim 很可能已经成交），
+     * 这时拿同一个 clientRequestId 重发就是去问结果——sim 侧幂等，重发不会多成交。
+     * 明确的业务失败（余额不足等）不重发，原样抛出去回给模型。
+     * 重发不看本轮截止时间：确认一笔已发出的单，比守着预算更重要。
+     */
+    private <T> T send(Supplier<T> call) {
+        RuntimeException last = null;
+        for (int i = 0; i <= SEND_RETRIES; i++) {
+            if (i > 0) {
+                try {
+                    Thread.sleep(RETRY_INTERVAL_MS);
+                } catch (InterruptedException ie) {
+                    // 唤醒超时会 cancel(true) 打断这里：结果照样未知，别把中断吞成成功
+                    Thread.currentThread().interrupt();
+                    throw new UnknownOutcome(last);
+                }
+            }
+            try {
+                return call.get();
+            } catch (RuntimeException e) {
+                if (!SimTradeClient.isTransportFailure(e) && !SimTradeClient.isProcessing(e)) {
+                    throw e;
+                }
+                last = e;
+            }
+        }
+        throw new UnknownOutcome(last);
+    }
+
+    /** 结果未知：绝不能当普通失败回——模型看见 ERROR 会重下一单，那就是双仓。 */
+    private String unknown(String tool, JSONObject args, UnknownOutcome e) {
+        String cause = e.getCause() == null ? "无响应" : String.valueOf(e.getCause().getMessage());
+        if (cause.length() > 200) {
+            cause = cause.substring(0, 200) + "…";
+        }
+        action(tool, args).fluentPut("status", "unknown").fluentPut("error", cause);
+        log.warn("[TradeTools] {} 结果未知 simUserId={} msg={}", tool, simUserId, cause);
+        return "UNKNOWN: 下单结果未知，sim 未在重试内确认，这笔单可能已经成交。"
+                + "请先调用 get_account 核对持仓/挂单，切勿直接重复下单。原因: " + cause;
+    }
+
     /** 护栏拒绝：与 open_position 的 REJECTED 同一语义，进动作轨迹，模型可修正重试。 */
     private String rejected(String tool, JSONObject args, String reason) {
         action(tool, args).fluentPut("rejected", reason);
@@ -522,6 +605,9 @@ public class TradeTools {
     @Tool(name = "cancel_order", description = "Cancel a pending limit order by orderId (from get_account pendingOrders).")
     public String cancelOrder(@ToolParam(description = "Order id from get_account pendingOrders") long orderId) {
         JSONObject args = new JSONObject().fluentPut("orderId", orderId);
+        if (roundExpired()) {
+            return expired("cancel_order", args);
+        }
         try {
             FuturesOrderResponse resp = simTradeClient.cancelOrder(simUserId, orderId);
             return ok("cancel_order", args, JSON.toJSONString(resp));
