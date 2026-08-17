@@ -419,7 +419,7 @@ function PositionItem({ pos, brackets, wide, onMutated }: {
           >
             {reversing ? <Loader2 className="w-3 h-3 animate-spin" /> : confirmReverse ? '确认反手？' : '反手'}
           </Button>
-          <HelpTip text={'反手 = 市价全平当前仓位，立刻反向开等量新仓，同杠杆、同保证金模式。\n做多一步变做空，不用自己先平再开。\n原仓的止损止盈不会带到新仓，要的话重新设。'} />
+          <HelpTip text={'反手 = 市价全平当前仓位，立刻反向开等量新仓，同杠杆、同保证金模式。\n做多一步变做空，不用自己先平再开。\n原仓的止损止盈不会带到新仓，要的话重新设。\n余额不够开反向仓时只完成平仓（亏着反手多半会这样：亏掉的那部分正是新仓保证金的缺口）。'} />
         </div>
         {/* 全仓保证金按账户统一算，单仓加减保证金没意义，后端也会拒（1761），直接不给入口 */}
         {!isCrossPos && <Button size="sm" variant={action === 'margin' ? 'default' : 'outline'} className="h-9 sm:h-7 text-[11px] flex-1 min-w-15" onClick={() => toggleAction('margin')}>+保证金</Button>}
