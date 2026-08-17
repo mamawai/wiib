@@ -75,10 +75,11 @@ class MarketSeriesStoreParseTest {
         long from = MarketSeriesStore.toMs(LocalDateTime.of(2026, 1, 2, 0, 0));
         long to = MarketSeriesStore.toMs(LocalDateTime.of(2026, 1, 3, 0, 0));
 
+        // 查询下界 = from - 1天可用滞后 - 5天窗口前回捞
         when(mapper.selectRange(
                 MarketSeriesStore.GLOBAL,
                 SeriesCode.FEAR_GREED.factorName(),
-                LocalDateTime.of(2026, 1, 1, 0, 0),
+                LocalDateTime.of(2025, 12, 27, 0, 0),
                 LocalDateTime.of(2026, 1, 3, 0, 0)))
                 .thenReturn(List.of(
                         row(LocalDateTime.of(2026, 1, 1, 0, 0), "70"),
@@ -102,7 +103,7 @@ class MarketSeriesStoreParseTest {
         when(mapper.selectRange(
                 "BTCUSDT",
                 SeriesCode.ETF_FLOW.factorName(),
-                LocalDateTime.of(2026, 6, 8, 0, 0),
+                LocalDateTime.of(2026, 6, 3, 0, 0),
                 LocalDateTime.of(2026, 6, 11, 0, 0)))
                 .thenReturn(List.of(
                         row(LocalDateTime.of(2026, 6, 9, 0, 0), "0.0"),
@@ -127,7 +128,7 @@ class MarketSeriesStoreParseTest {
         when(mapper.selectRange(
                 "BTCUSDT",
                 SeriesCode.FUNDING.factorName(),
-                LocalDateTime.of(2026, 1, 2, 0, 0),
+                LocalDateTime.of(2026, 1, 1, 0, 0),
                 LocalDateTime.of(2026, 1, 3, 0, 0)))
                 .thenReturn(List.of(row(fundingTime, "0.0001")));
 
@@ -136,6 +137,31 @@ class MarketSeriesStoreParseTest {
         assertThat(pts).hasSize(1);
         assertThat(pts.get(0).ts()).isEqualTo(MarketSeriesStore.toMs(fundingTime));
         assertThat(pts.get(0).value()).isEqualByComparingTo("0.0001");
+    }
+
+    @Test
+    void loadCarriesLastPointBeforeWindowAsHead() {
+        FactorHistoryMapper mapper = mock(FactorHistoryMapper.class);
+        MarketSeriesStore store = new MarketSeriesStore(null, mapper);
+        long from = MarketSeriesStore.toMs(LocalDateTime.of(2026, 1, 2, 0, 0));
+        long to = MarketSeriesStore.toMs(LocalDateTime.of(2026, 1, 4, 0, 0));
+
+        // 12/30、12/31 两点可用时间都在窗口前，只留最新的 12/31（可用 1/1）当起始值；1/1 的点正常落窗口内
+        when(mapper.selectRange(any(), eq(SeriesCode.FEAR_GREED.factorName()), any(), any()))
+                .thenReturn(List.of(
+                        row(LocalDateTime.of(2025, 12, 30, 0, 0), "20"),
+                        row(LocalDateTime.of(2025, 12, 31, 0, 0), "40"),
+                        row(LocalDateTime.of(2026, 1, 1, 0, 0), "70")));
+
+        List<MarketSeriesPoint> pts = store.load(MarketSeriesStore.GLOBAL, SeriesCode.FEAR_GREED, from, to);
+
+        assertThat(pts).hasSize(2);
+        assertThat(pts.get(0).ts()).isEqualTo(MarketSeriesStore.toMs(LocalDateTime.of(2026, 1, 1, 0, 0)));
+        assertThat(pts.get(0).value()).isEqualByComparingTo("40");
+        assertThat(pts.get(1).ts()).isEqualTo(from);
+        assertThat(pts.get(1).value()).isEqualByComparingTo("70");
+        // 窗口头的 as-of 拿到的是起始值而不是中性默认
+        assertThat(SeriesAligner.asOf(pts, from - 1, BigDecimal.ZERO)).isEqualByComparingTo("40");
     }
 
     @Test

@@ -105,28 +105,43 @@ public class MarketSeriesStore {
     }
 
     /**
-     * 加载 [fromMs, toMs) 的某序列，按 ts 升序。
+     * 加载 [fromMs, toMs) 的某序列，按 ts 升序；额外把窗口前最后一个可用点放在首位（ts < fromMs），
+     * 给 as-of 当起始值——不带它，窗口头一天/头 8 小时全落中性默认。
      * factor_history.observed_at 仍存数据自身日期；research 返回的 ts 是"策略可用时间"。
      * 日级慢因子保守 T+1；ETF flow 按美东下一自然日 00:00 可用，避免 UTC 00:00 提前偷看美股当天占位行。
      */
     public List<MarketSeriesPoint> load(String symbol, SeriesCode code, long fromMs, long toMs) {
-        long queryLookbackMs = queryLookbackMs(code);
+        long queryLookbackMs = queryLookbackMs(code) + carryLookbackMs(code);
         List<FactorHistory> rows = factorHistoryMapper.selectRange(symbol, code.factorName(), toLdt(fromMs - queryLookbackMs), toLdt(toMs));
         List<MarketSeriesPoint> out = new ArrayList<>(rows.size());
+        MarketSeriesPoint carry = null;   // 行按 observed_at 升序，最后一个 < fromMs 的就是窗口前最新
         for (FactorHistory r : rows) {
             if (r.getObservedAt() == null || r.getFactorValue() == null) {
                 continue;
             }
             long availableAt = availableAtMs(code, r.getObservedAt());
-            if (availableAt >= fromMs && availableAt < toMs) {
+            if (availableAt < fromMs) {
+                carry = new MarketSeriesPoint(availableAt, r.getFactorValue());
+            } else if (availableAt < toMs) {
                 out.add(new MarketSeriesPoint(availableAt, r.getFactorValue()));
             }
+        }
+        if (carry != null) {
+            out.addFirst(carry);
         }
         return out;
     }
 
     private static long queryLookbackMs(SeriesCode code) {
         return code == SeriesCode.ETF_FLOW ? ETF_FLOW_QUERY_LOOKBACK_MS : availabilityLagMs(code);
+    }
+
+    /** 窗口前多查多久才稳能捞到上一个点：funding 8h 一点一天够；日级因子跨周末/假日给 5 天 */
+    private static long carryLookbackMs(SeriesCode code) {
+        return switch (code) {
+            case FUNDING -> Duration.ofDays(1).toMillis();
+            case FEAR_GREED, ETF_FLOW, STABLECOIN_DELTA -> Duration.ofDays(5).toMillis();
+        };
     }
 
     private static long availableAtMs(SeriesCode code, LocalDateTime observedAt) {
