@@ -657,25 +657,37 @@ export interface WorkbenchChatMessage {
 }
 
 /** 我的对话端点配置（BYOK）。key 只回尾 4 位，明文不出服务端 */
-export interface LlmConfigView {
+/**
+ * 用户 BYOK 端点（AI 页「模型配置」维护的一条）：协议+URL+key+模型(+思考档位)。
+ * 全站唯一的 BYOK 总配置；对话/交易员/复盘教练从中选。key 只回尾 4 位。
+ */
+export interface LlmEndpointView {
+  id: number;
+  name: string;
   apiProtocol: string;
   baseUrl: string;
   model: string;
-  lightModel: string | null;
   /** none/low/medium/high，null=不传给上游走模型默认 */
   reasoningEffort: string | null;
   apiKeyTail: string;
+  /** 默认端点：没按用途绑定的地方都用它 */
+  isDefault: boolean;
 }
 
-/** 保存/检测/探测三个端点共用这个体；apiKey 传空=沿用已存的 */
-export interface LlmConfigSaveRequest {
+/** 新增/更新/检测/探测共用；更新时 apiKey 传空=沿用已存的 */
+export interface LlmEndpointSaveRequest {
+  name: string;
   apiProtocol: string;
   baseUrl: string;
   model: string;
-  lightModel?: string;
-  reasoningEffort?: string;
+  reasoningEffort: string;
   apiKey: string;
 }
+
+/** 用途 → 端点 id；缺的用途 = 跟随默认端点 */
+export type LlmPurpose = 'CHAT_MAIN' | 'CHAT_LIGHT' | 'TRADER';
+export type LlmBindings = Partial<Record<LlmPurpose, number>>;
+
 
 /** 策略×币种实时信号状态快照（/ai/strategies/signals）：一句话状态 + 有序指标表 */
 export interface StrategySignalState {
@@ -691,7 +703,8 @@ export interface StrategySignalState {
 export interface TraderPublicView {
   id: number;
   name: string;
-  model: string;
+  /** 它当前用的端点的模型名（现解析）；主人把端点删光了为 null */
+  model: string | null;
   status: 'PAUSED' | 'RUNNING' | 'LIQUIDATED';
   pausedReason: string | null;
   symbols: string;
@@ -705,10 +718,9 @@ export interface TraderPublicView {
 /** 主人视图：公开视图 + 配置回显（key 只回尾4位） */
 export interface TraderOwnerView {
   pub: TraderPublicView;
-  apiProtocol: string;
-  baseUrl: string;
+  /** 显式绑定的端点 id，null=跟随默认端点 */
+  llmEndpointId: number | null;
   customPrompt: string | null;
-  apiKeyTail: string;
   useDefaultPrompt: boolean;
   spec: TraderSpec;
   /** 波动哨兵警报开关（仅 1h/4h 档生效） */
@@ -831,10 +843,8 @@ export interface TraderUpsertRequest {
   symbols: string;
   intervalCode: string;
   customPrompt: string | null;
-  apiProtocol: string;
-  baseUrl: string;
-  model: string;
-  apiKey: string;
+  /** 端点库里的一条（AI 页模型配置维护），null=跟随用户默认端点 */
+  llmEndpointId: number | null;
   useDefaultPrompt: boolean;
   spec: TraderSpec;
   alertEnabled: boolean;
@@ -1026,6 +1036,40 @@ export interface HistoryKlinesPayload {
   total: number;
   rows: number[][];
 }
+
+/**
+ * 复盘 AI 教练请求（对应后端 ReplayCoachRequest）。时间一律是格式化好的标签：
+ * 盲测局只给 "D2 14:30" 相对标签，真实日期不能经这条通道泄露给模型。
+ */
+export interface ReplayCoachRequest {
+  mode: 'HINT' | 'REVIEW';
+  /** 用哪条 BYOK 端点（复盘配置台从端点库下拉选），缺省=用户默认端点 */
+  endpointId?: number;
+  symbol: string;
+  intervalMin: number;
+  blind: boolean;
+  /** 复盘段首根的时间标签（更早的 K 线是开局上下文） */
+  startAt?: string;
+  bars: { t: string; o: number; h: number; l: number; c: number; v: number }[];
+  /** 当前权益（HINT）：浮盈亏占权益多少才说得清仓位风险 */
+  equity?: number;
+  /** leverage=有效杠杆（加仓换档会成小数） */
+  positions?: { side: 'LONG' | 'SHORT'; qty: number; entryPrice: number; leverage: number; unrealizedPnl: number }[];
+  trades?: {
+    side: 'LONG' | 'SHORT'; qty: number; leverage: number; entryPrice: number; exitPrice: number; pnl: number;
+    openAt: string; closeAt: string; reason: string; partial: boolean;
+  }[];
+  stats?: {
+    totalTrades: number; wins: number; losses: number; netProfit: number; returnPct: number;
+    maxDrawdownPct: number; totalFees: number; initialBalance: number; finalEquity: number;
+  };
+}
+
+/** 复盘 AI 教练 SSE 事件（工作台协议的子集） */
+export type ReplayCoachEvent =
+  | { type: 'token'; text: string }
+  | { type: 'done'; answer: string }
+  | { type: 'error'; message: string };
 
 /** 工作记录事件：seq=任务内游标（=事件表下标），type 见后端 BacktestListener 常量 */
 export interface BacktestEvent {

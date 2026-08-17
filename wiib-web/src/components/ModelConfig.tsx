@@ -1,207 +1,311 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Bot, Loader2, MessagesSquare, Rocket } from 'lucide-react';
-import { llmConfigApi, traderApi } from '../api';
+import { Bot, KeyRound, Loader2, MessagesSquare, Pencil, Plus, Rocket, Sparkles, Star, Trash2, X } from 'lucide-react';
+import { llmEndpointApi, traderApi } from '../api';
 import { LlmEndpointForm, type LlmEndpointValue } from './LlmEndpointForm';
+import { LlmEndpointSelect } from './LlmEndpointSelect';
 import { Button } from './ui/button';
 import { useToast } from './ui/use-toast';
 import { cn } from '../lib/utils';
-import type { LlmConfigView, TraderOwnerView, TraderUpsertRequest } from '../types';
+import type { LlmBindings, LlmEndpointView, LlmPurpose, TraderOwnerView } from '../types';
 
-const EMPTY: LlmEndpointValue = {
-  apiProtocol: 'openai', baseUrl: '', model: '', lightModel: '', reasoningEffort: '', apiKey: '',
-};
+const EMPTY: LlmEndpointValue = { name: '', apiProtocol: 'openai', baseUrl: '', model: '', reasoningEffort: '', apiKey: '' };
 
-/** 配置状态徽标：已配置亮尾号，未配置挂警示灯 */
-function StatusChip({ keyTail }: { keyTail?: string }) {
-  return keyTail ? (
-    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-primary/10 text-primary num">
-      已配置 · 尾号 {keyTail}
-    </span>
-  ) : (
-    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-warning/10 text-warning flex items-center gap-1.5">
-      <span className="led led-warn" /> 未配置
-    </span>
-  );
+/** 一条端点被谁用着：主标签 + 是否经"默认"落到它头上 */
+interface Usage { label: string; viaDefault: boolean; }
+
+/**
+ * 计算每条端点的用途标签。绑定优先，没绑的用途落到默认端点；
+ * 复盘教练不落库（复盘配置台每局现选），默认端点上标一条"复盘教练"提示它是缺省项。
+ */
+function usagesOf(e: LlmEndpointView, bindings: LlmBindings, hasTrader: boolean): Usage[] {
+  const out: Usage[] = [];
+  const hit = (purpose: LlmPurpose, label: string, fallbackToDefault: boolean) => {
+    const bound = bindings[purpose];
+    if (bound === e.id) out.push({ label, viaDefault: false });
+    else if (bound == null && fallbackToDefault && e.isDefault) out.push({ label, viaDefault: true });
+  };
+  hit('CHAT_MAIN', '对话·主模型', true);
+  hit('CHAT_LIGHT', '对话·轻模型', false);   // 轻模型不绑=复用主模型，不算落到默认
+  if (hasTrader) hit('TRADER', '交易员', true);
+  if (e.isDefault) out.push({ label: '复盘教练', viaDefault: true });
+  return out;
 }
 
 /**
- * 模型配置（BYOK）：对话 agent 与交易员 agent 两份端点各一张卡。
+ * 模型配置（BYOK 总配置）：端点库 + 用途绑定。
+ * 全站要选模型的地方（对话 / 交易员 / 复盘教练）都从这里配的端点里选；只配一条时它就是默认，谁都用它。
  * 行为分析不在这里——它走平台管理员配的模型，不烧用户的 key。
  */
 export function ModelConfig() {
   const { toast } = useToast();
-
-  // ===== 对话 agent =====
-  const [chatCfg, setChatCfg] = useState<LlmConfigView | null>(null);
-  const [chatLoaded, setChatLoaded] = useState(false);
-  const [chatForm, setChatForm] = useState<LlmEndpointValue>(EMPTY);
-  const [chatSaving, setChatSaving] = useState(false);
-
-  const loadChat = useCallback(() => {
-    llmConfigApi.mine()
-      .then(c => {
-        setChatCfg(c);
-        setChatForm({
-          apiProtocol: c?.apiProtocol ?? 'openai',
-          baseUrl: c?.baseUrl ?? '',
-          model: c?.model ?? '',
-          lightModel: c?.lightModel ?? '',
-          reasoningEffort: c?.reasoningEffort ?? '',
-          apiKey: '',   // 明文 key 不出服务端，改 key 才填
-        });
-      })
-      .catch(() => setChatCfg(null))
-      .finally(() => setChatLoaded(true));
-  }, []);
-
-  // ===== 交易员 agent =====
+  const [endpoints, setEndpoints] = useState<LlmEndpointView[]>([]);
+  const [bindings, setBindings] = useState<LlmBindings>({});
   const [trader, setTrader] = useState<TraderOwnerView | null>(null);
-  const [traderLoaded, setTraderLoaded] = useState(false);
-  const [traderForm, setTraderForm] = useState<LlmEndpointValue>(EMPTY);
-  const [traderSaving, setTraderSaving] = useState(false);
+  const [loaded, setLoaded] = useState(false);
 
-  const loadTrader = useCallback(() => {
-    traderApi.mine()
-      .then(t => {
-        setTrader(t);
-        if (t) {
-          setTraderForm({
-            apiProtocol: t.apiProtocol, baseUrl: t.baseUrl, model: t.pub.model, apiKey: '',
-          });
-        }
-      })
-      .catch(() => setTrader(null))
-      .finally(() => setTraderLoaded(true));
+  // 表单：null=收起；{ id: null }=新增；{ id: n }=编辑
+  const [editing, setEditing] = useState<{ id: number | null; keyTail?: string } | null>(null);
+  const [form, setForm] = useState<LlmEndpointValue>(EMPTY);
+  const [saving, setSaving] = useState(false);
+  const [busyId, setBusyId] = useState<number | null>(null);
+
+  const load = useCallback(() => {
+    Promise.all([
+      llmEndpointApi.list().catch(() => [] as LlmEndpointView[]),
+      llmEndpointApi.bindings().catch(() => ({} as LlmBindings)),
+      traderApi.mine().catch(() => null),
+    ]).then(([eps, b, t]) => {
+      setEndpoints(eps);
+      setBindings(b);
+      setTrader(t);
+    }).finally(() => setLoaded(true));
   }, []);
 
-  useEffect(() => { loadChat(); loadTrader(); }, [loadChat, loadTrader]);
+  useEffect(() => { load(); }, [load]);
 
-  const saveChat = async () => {
-    setChatSaving(true);
+  const startCreate = () => { setForm(EMPTY); setEditing({ id: null }); };
+  const startEdit = (e: LlmEndpointView) => {
+    setForm({
+      name: e.name, apiProtocol: e.apiProtocol, baseUrl: e.baseUrl, model: e.model,
+      reasoningEffort: e.reasoningEffort ?? '', apiKey: '',   // 明文 key 不出服务端，改 key 才填
+    });
+    setEditing({ id: e.id, keyTail: e.apiKeyTail });
+  };
+
+  const save = async () => {
+    setSaving(true);
     try {
-      await llmConfigApi.save(chatForm);
-      toast('对话模型配置已保存', 'success');
-      loadChat();
+      if (editing?.id != null) await llmEndpointApi.update(editing.id, form);
+      else await llmEndpointApi.create(form);
+      toast(editing?.id != null ? '端点已更新' : '端点已添加', 'success');
+      setEditing(null);
+      load();
     } catch (e) {
       toast((e as Error).message || '保存失败', 'error');
     } finally {
-      setChatSaving(false);
+      setSaving(false);
     }
   };
 
-  /** trader 没有独立的 LLM 保存接口：现拉一份最新全量配置，只换端点四项后整体 PUT，
-      避免用进页面时的旧快照冲掉用户刚在「我的交易员」里改的其他字段 */
-  const saveTrader = async () => {
-    setTraderSaving(true);
+  const run = async (id: number, action: () => Promise<unknown>, okMsg: string) => {
+    setBusyId(id);
     try {
-      const t = await traderApi.mine();
-      if (!t) throw new Error('交易员不存在，请先创建');
-      const req: TraderUpsertRequest = {
-        name: t.pub.name, symbols: t.pub.symbols, intervalCode: t.pub.intervalCode,
-        customPrompt: t.customPrompt ?? '', useDefaultPrompt: t.useDefaultPrompt, spec: t.spec,
-        alertEnabled: t.alertEnabled, alertThresholdMult: t.alertThresholdMult,
-        reviewEnabled: t.reviewEnabled, learningEnabled: t.learningEnabled,
-        apiProtocol: traderForm.apiProtocol, baseUrl: traderForm.baseUrl,
-        model: traderForm.model, apiKey: traderForm.apiKey,
-      };
-      await traderApi.updateConfig(req);
-      toast('交易员模型配置已保存', 'success');
-      loadTrader();
+      await action();
+      toast(okMsg, 'success');
+      load();
     } catch (e) {
-      toast((e as Error).message || '保存失败', 'error');
+      toast((e as Error).message || '操作失败', 'error');
     } finally {
-      setTraderSaving(false);
+      setBusyId(null);
     }
   };
 
-  const chatExists = chatCfg != null;
+  const remove = (e: LlmEndpointView) => {
+    const used = usagesOf(e, bindings, trader != null).map(u => u.label);
+    const warn = used.length ? `\n正在被 ${used.join(' / ')} 使用，删除后这些用途回落到默认端点。` : '';
+    if (!window.confirm(`删除端点「${e.name}」（${e.model}）？${warn}`)) return;
+    void run(e.id, () => llmEndpointApi.remove(e.id), '端点已删除');
+  };
+
+  const bind = async (purpose: LlmPurpose, id: number | null) => {
+    try {
+      await llmEndpointApi.bind(purpose, id);
+      setBindings(b => {
+        const next = { ...b };
+        if (id == null) delete next[purpose]; else next[purpose] = id;
+        return next;
+      });
+    } catch (e) {
+      toast((e as Error).message || '绑定失败', 'error');
+    }
+  };
+
+  const dft = endpoints.find(e => e.isDefault);
+  const traderEndpoint = trader
+    ? (bindings.TRADER != null ? endpoints.find(e => e.id === bindings.TRADER) : dft)
+    : null;
+  /** 对话主模型实际用的那条（显式绑定或默认），轻模型下拉的"同主模型"要说清同的是谁 */
+  const chatMain = bindings.CHAT_MAIN != null ? endpoints.find(e => e.id === bindings.CHAT_MAIN) : dft;
+
+  if (!loaded) {
+    return (
+      <div className="flex items-center gap-2 py-8 justify-center text-xs text-muted-foreground">
+        <Loader2 className="w-4 h-4 animate-spin" /> 加载配置...
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
-      {/* 对话 agent */}
+      {/* ===== 端点库 ===== */}
       <div className="rounded-lg pt-card p-4 sm:p-5 space-y-3">
         <div className="flex items-center gap-2 flex-wrap">
-          <MessagesSquare className="w-4 h-4 text-primary" />
-          <span className="text-sm font-black">对话 agent</span>
-          {chatLoaded && <StatusChip keyTail={chatCfg?.apiKeyTail} />}
+          <KeyRound className="w-4 h-4 text-primary" />
+          <span className="text-sm font-black">模型端点（BYOK）</span>
+          <span className="text-[10px] text-muted-foreground">{endpoints.length} 条 · 费用记在你自己的账上，平台不经手</span>
+          <Button size="sm" className="ml-auto" onClick={startCreate} disabled={editing != null && editing.id == null}>
+            <Plus className="w-3.5 h-3.5 mr-1" /> 新增端点
+          </Button>
         </div>
         <p className="text-[11px] text-muted-foreground">
-          研判对话与对话里触发的深研判走这份配置，费用记在你自己的账上，平台不经手。
+          一条端点 = 协议 + Base URL + API Key + 模型（+ 思考档位）。对话、交易员、复盘教练都从这里选；
+          没按用途指定的地方用「默认」那条——只配一条时它就是全局配置。同一个 key 想给不同地方用不同模型，就多建几条。
         </p>
-        {!chatLoaded ? (
-          <div className="flex items-center gap-2 py-8 justify-center text-xs text-muted-foreground">
-            <Loader2 className="w-4 h-4 animate-spin" /> 加载配置...
+
+        {endpoints.length === 0 && editing == null && (
+          <div className="rounded-lg border border-dashed border-border bg-card-2/50 py-8 px-4 flex flex-col items-center gap-2.5 text-center">
+            <Bot className="w-8 h-8 text-muted-foreground/50" />
+            <p className="text-xs text-muted-foreground">还没有端点——先加一条，对话 / 交易员 / 复盘教练就都能用了</p>
+            <Button size="sm" onClick={startCreate}><Plus className="w-3.5 h-3.5 mr-1" /> 新增端点</Button>
           </div>
-        ) : (
-          <>
+        )}
+
+        <div className="space-y-2">
+          {endpoints.map(e => {
+            const usages = usagesOf(e, bindings, trader != null);
+            const isEditing = editing?.id === e.id;
+            return (
+              <div key={e.id} className={cn('rounded-lg border bg-card-2/50 p-3 space-y-2',
+                isEditing ? 'border-primary/60' : 'border-border')}>
+                <div className="flex items-start gap-2 flex-wrap">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-xs font-black truncate">{e.name}</span>
+                      <span className="text-[11px] num text-primary font-bold truncate">{e.model}</span>
+                      {e.isDefault && (
+                        <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-primary/10 text-primary flex items-center gap-1">
+                          <Star className="w-3 h-3" /> 默认
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-[10px] text-muted-foreground num truncate mt-0.5">
+                      {e.apiProtocol} · {e.baseUrl} · 档位 {e.reasoningEffort || '默认'} · key 尾号 {e.apiKeyTail}
+                    </div>
+                    {/* 用途：谁在用这条端点。经默认落上来的标"默认"，提醒改默认会连带影响 */}
+                    <div className="flex items-center gap-1.5 flex-wrap mt-1.5">
+                      {usages.length === 0
+                        ? <span className="text-[10px] text-muted-foreground/70">未被任何用途使用</span>
+                        : usages.map(u => (
+                          <span key={u.label} className={cn('text-[10px] font-bold px-1.5 py-0.5 rounded',
+                            u.viaDefault ? 'bg-muted text-muted-foreground' : 'bg-primary/10 text-primary')}>
+                            {u.label}{u.viaDefault ? '（默认）' : ''}
+                          </span>
+                        ))}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    {!e.isDefault && (
+                      <button type="button" disabled={busyId === e.id}
+                        onClick={() => void run(e.id, () => llmEndpointApi.setDefault(e.id), `「${e.name}」已设为默认`)}
+                        title="设为默认：没按用途指定的地方都用它"
+                        className="h-8 px-2 rounded-md border border-border text-[11px] font-bold text-muted-foreground hover:text-foreground hover:bg-surface-hover flex items-center gap-1 disabled:opacity-50">
+                        <Star className="w-3.5 h-3.5" /> 设为默认
+                      </button>
+                    )}
+                    <button type="button" onClick={() => (isEditing ? setEditing(null) : startEdit(e))} title="编辑"
+                      className="w-8 h-8 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-surface-hover flex items-center justify-center">
+                      {isEditing ? <X className="w-3.5 h-3.5" /> : <Pencil className="w-3.5 h-3.5" />}
+                    </button>
+                    <button type="button" onClick={() => remove(e)} disabled={busyId === e.id} title="删除"
+                      className="w-8 h-8 rounded-md border border-border text-muted-foreground hover:text-loss hover:bg-surface-hover flex items-center justify-center disabled:opacity-50">
+                      {busyId === e.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                    </button>
+                  </div>
+                </div>
+
+                {isEditing && (
+                  <div className="pt-2 border-t border-border/60 space-y-3">
+                    <LlmEndpointForm
+                      value={form}
+                      onChange={patch => setForm(f => ({ ...f, ...patch }))}
+                      exists
+                      keyTail={editing?.keyTail}
+                      onDetect={() => llmEndpointApi.listModels(form, e.id)}
+                      onTest={() => llmEndpointApi.test(form, e.id)}
+                    />
+                    <div className="flex justify-end gap-2">
+                      <Button size="sm" variant="outline" onClick={() => setEditing(null)}>取消</Button>
+                      <Button size="sm" disabled={saving} onClick={() => void save()}>
+                        {saving && <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" />} 保存
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* 新增表单 */}
+        {editing != null && editing.id == null && (
+          <div className="rounded-lg border border-primary/60 bg-card-2/50 p-3 space-y-3">
+            <div className="flex items-center gap-2">
+              <Plus className="w-3.5 h-3.5 text-primary" />
+              <span className="text-xs font-black">新增端点</span>
+              {endpoints.length === 0 && <span className="text-[10px] text-muted-foreground">第一条会自动成为默认</span>}
+            </div>
             <LlmEndpointForm
-              value={chatForm}
-              onChange={patch => setChatForm(f => ({ ...f, ...patch }))}
-              exists={chatExists}
-              keyTail={chatCfg?.apiKeyTail}
-              withLightModel
-              withReasoningEffort
-              onDetect={() => llmConfigApi.listModels(chatForm)}
-              onTest={() => llmConfigApi.test(chatForm)}
+              value={form}
+              onChange={patch => setForm(f => ({ ...f, ...patch }))}
+              onDetect={() => llmEndpointApi.listModels(form)}
+              onTest={() => llmEndpointApi.test(form)}
             />
-            <div className="flex justify-end">
-              <Button size="sm" disabled={chatSaving} onClick={() => void saveChat()}>
-                {chatSaving && <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" />}
-                保存
+            <div className="flex justify-end gap-2">
+              <Button size="sm" variant="outline" onClick={() => setEditing(null)}>取消</Button>
+              <Button size="sm" disabled={saving} onClick={() => void save()}>
+                {saving && <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" />} 保存
               </Button>
             </div>
-          </>
+          </div>
         )}
       </div>
 
-      {/* 交易员 agent */}
+      {/* ===== 用途绑定 ===== */}
       <div className="rounded-lg pt-card p-4 sm:p-5 space-y-3">
-        <div className="flex items-center gap-2 flex-wrap">
-          <Rocket className="w-4 h-4 text-primary" />
-          <span className="text-sm font-black">交易员 agent</span>
-          {traderLoaded && trader && <StatusChip keyTail={trader.apiKeyTail} />}
+        <div className="flex items-center gap-2">
+          <MessagesSquare className="w-4 h-4 text-primary" />
+          <span className="text-sm font-black">谁用哪条</span>
         </div>
-        {!traderLoaded ? (
-          <div className="flex items-center gap-2 py-8 justify-center text-xs text-muted-foreground">
-            <Loader2 className="w-4 h-4 animate-spin" /> 加载配置...
+        <div className="grid sm:grid-cols-2 gap-3">
+          <label className="space-y-1 text-xs">
+            <span className="text-muted-foreground font-bold flex items-center gap-1"><MessagesSquare className="w-3 h-3" /> 对话 · 主模型</span>
+            <LlmEndpointSelect endpoints={endpoints} value={bindings.CHAT_MAIN ?? null}
+              onChange={id => void bind('CHAT_MAIN', id)} className="w-full" />
+            <span className="text-[10px] text-muted-foreground/70 block">研判对话的最终回答与对话里触发的深研判走它</span>
+          </label>
+          <label className="space-y-1 text-xs">
+            <span className="text-muted-foreground font-bold flex items-center gap-1"><MessagesSquare className="w-3 h-3" /> 对话 · 轻模型</span>
+            <LlmEndpointSelect endpoints={endpoints} value={bindings.CHAT_LIGHT ?? null}
+              onChange={id => void bind('CHAT_LIGHT', id)} className="w-full"
+              followLabel={chatMain ? `同主模型（${chatMain.name} · ${chatMain.model}）` : '同主模型'} />
+            <span className="text-[10px] text-muted-foreground/70 block">调度、专家取数、历史压缩走它；挑条便宜的能省不少</span>
+          </label>
+          <div className="space-y-1 text-xs">
+            <span className="text-muted-foreground font-bold flex items-center gap-1"><Rocket className="w-3 h-3" /> 交易员</span>
+            {trader ? (
+              <div className="h-9 rounded-lg border border-border bg-card-2 px-2.5 flex items-center gap-2 text-xs">
+                <span className="font-bold truncate">
+                  {traderEndpoint ? `${traderEndpoint.name} · ${traderEndpoint.model}` : '（无可用端点）'}
+                  {bindings.TRADER == null && traderEndpoint ? '（默认）' : ''}
+                </span>
+                <Link to="/my-trader" className="ml-auto text-primary font-bold hover:underline shrink-0">在我的交易员里改</Link>
+              </div>
+            ) : (
+              <div className="h-9 rounded-lg border border-border bg-card-2 px-2.5 flex items-center text-xs text-muted-foreground">
+                还没有 AI 交易员，<Link to="/my-trader" className="text-primary font-bold hover:underline mx-1">去创建</Link>时再选
+              </div>
+            )}
+            <span className="text-[10px] text-muted-foreground/70 block">「{trader?.pub.name ?? '交易员'}」每次唤醒、每日复盘、同侪学习都烧这条</span>
           </div>
-        ) : trader ? (
-          <>
-            <p className="text-[11px] text-muted-foreground">
-              「{trader.pub.name}」每次唤醒和每日复盘烧这份 key。唤醒频率、币种、仓位规格等在
-              <Link to="/my-trader" className="text-primary font-bold hover:underline mx-0.5">我的交易员</Link>
-              里改。
-            </p>
-            <LlmEndpointForm
-              value={traderForm}
-              onChange={patch => setTraderForm(f => ({ ...f, ...patch }))}
-              exists
-              keyTail={trader.apiKeyTail}
-              onDetect={() => traderApi.listModels({
-                apiProtocol: traderForm.apiProtocol, baseUrl: traderForm.baseUrl, apiKey: traderForm.apiKey,
-              })}
-            />
-            <div className="flex justify-end">
-              <Button size="sm" disabled={traderSaving} onClick={() => void saveTrader()}>
-                {traderSaving && <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" />}
-                保存
-              </Button>
+          <div className="space-y-1 text-xs">
+            <span className="text-muted-foreground font-bold flex items-center gap-1"><Sparkles className="w-3 h-3" /> 复盘教练</span>
+            <div className="h-9 rounded-lg border border-border bg-card-2 px-2.5 flex items-center text-xs text-muted-foreground">
+              每局开始前在回测页配置台现选，缺省用默认端点
             </div>
-          </>
-        ) : (
-          <div className={cn('rounded-lg border border-border bg-card-2 py-8 px-4',
-            'flex flex-col items-center gap-2.5 text-center')}>
-            <Bot className="w-8 h-8 text-muted-foreground/50" />
-            <p className="text-xs text-muted-foreground">还没有 AI 交易员——创建时一并配置它的模型端点</p>
-            <Link
-              to="/my-trader"
-              className="border border-border rounded-lg px-4 py-2 text-xs font-bold text-primary hover:bg-surface-hover"
-            >
-              去创建交易员
-            </Link>
+            <span className="text-[10px] text-muted-foreground/70 block">手动复盘里的 AI 盘面提示与结算后评估</span>
           </div>
-        )}
+        </div>
       </div>
 
       <p className="text-[10px] text-muted-foreground/70 px-1">

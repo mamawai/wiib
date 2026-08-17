@@ -12,12 +12,25 @@ import type { ISeriesApi, ITimeScaleApi, Logical, Time } from 'lightweight-chart
 
 // ========== 数据模型 ==========
 
-export type DrawingKind = 'trend' | 'hline' | 'fib' | 'text';
+/**
+ * 图形种类（对齐 TradingView 常用集）：
+ * trend 趋势线 / ray 射线 / hline 水平线 / vline 垂直线 / channel 平行通道 /
+ * rect 矩形 / fib 斐波回撤 / long·short 多头·空头仓位（入场+止损+止盈区间）/
+ * range 价格区间（量幅度·根数·时长）/ text 文字
+ */
+export type DrawingKind =
+  | 'trend' | 'ray' | 'hline' | 'vline' | 'channel'
+  | 'rect' | 'fib' | 'long' | 'short' | 'range' | 'text';
 
 /** 锚点：t=bar 开盘时刻(秒，已含 CandleChart 的 UTC+8 偏移口径)，p=价格 */
 export interface Anchor { t: number; p: number; }
 
-/** trend/fib 两点，hline/text 一点（hline 只用 p，text 只用锚点定位） */
+/**
+ * pts 约定：
+ * - hline 只用 p，vline 只用 t，text 只用锚点定位；
+ * - trend/ray/rect/fib/range 两点；channel 三点（基线两端 + 平行线过的点）；
+ * - long/short 三点 = [入场, 止损, 止盈]，止损点的 t 同时是区间右缘，止盈点 t 恒等于止损点 t。
+ */
 export interface Drawing {
   id: string;
   kind: DrawingKind;
@@ -26,8 +39,40 @@ export interface Drawing {
   text?: string;
 }
 
+/** 每种图形要用户亲手落几个点（long/short 落入场+止损两点，止盈派生，见 finalizePoints） */
+export const PLACE_POINTS: Record<DrawingKind, 1 | 2 | 3> = {
+  trend: 2, ray: 2, hline: 1, vline: 1, channel: 3, rect: 2, fib: 2, long: 2, short: 2, range: 2, text: 1,
+};
+
+/** 仓位工具默认盈亏比：定完止损后止盈按 2:1 派生，之后可拖止盈手柄改 */
+export const POSITION_RR = 2;
+
+/**
+ * 落点收齐后补齐派生锚点。仓位工具：止盈 = 入场 + (入场-止损)×RR，
+ * 多头止损在下则止盈在上、空头反之——同一条公式靠符号自洽，不分支。
+ */
+export function finalizePoints(kind: DrawingKind, pts: Anchor[]): Anchor[] {
+  if ((kind === 'long' || kind === 'short') && pts.length >= 2) {
+    const [entry, stop] = pts;
+    return [entry, stop, { t: stop.t, p: entry.p + (entry.p - stop.p) * POSITION_RR }];
+  }
+  return pts;
+}
+
 /** 默认线色：TradingView 同款蓝，亮暗主题下都压得住红绿蜡烛 */
 export const DRAW_COLOR = '#2962ff';
+/** 仓位工具的盈/亏区、量能红绿：与蜡烛同色系 */
+export const GAIN_COLOR = '#089981';
+export const LOSS_COLOR = '#f23645';
+
+/** 秒数 → 紧凑时长文案（价格区间工具用）：3d 4h / 2h 15m / 45m */
+export function fmtDuration(sec: number): string {
+  const s = Math.abs(Math.round(sec));
+  const d = Math.floor(s / 86_400), h = Math.floor((s % 86_400) / 3600), m = Math.floor((s % 3600) / 60);
+  if (d > 0) return h > 0 ? `${d}d ${h}h` : `${d}d`;
+  if (h > 0) return m > 0 ? `${h}h ${m}m` : `${h}h`;
+  return `${m}m`;
+}
 
 /** 斐波那契档位与配色（对齐 TradingView 惯例：0/1 端点灰，中间档暖→冷渐变） */
 export const FIB_LEVELS = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1] as const;
@@ -187,7 +232,31 @@ export function magnetPrice(t: number, y: number, ctx: ChartCtx): { p: number; s
   return bestP === null ? fallback : { p: bestP, snapped: true };
 }
 
-// ========== 几何命中 ==========
+// ========== 几何 ==========
+
+/**
+ * 射线终点：从 p0 经 p1 方向一直延到画布边缘(w×h)。
+ * 取 x/y 两轴各自到边的参数 t，小的那个先出界；方向为 0 的轴给 Infinity 不参与。
+ */
+export function rayEnd(p0: { x: number; y: number }, p1: { x: number; y: number },
+                       w: number, h: number): { x: number; y: number } {
+  const dx = p1.x - p0.x, dy = p1.y - p0.y;
+  if (dx === 0 && dy === 0) return p1;
+  const tx = dx > 0 ? (w - p0.x) / dx : dx < 0 ? -p0.x / dx : Infinity;
+  const ty = dy > 0 ? (h - p0.y) / dy : dy < 0 ? -p0.y / dy : Infinity;
+  const t = Math.max(0, Math.min(tx, ty));
+  return { x: p0.x + dx * t, y: p0.y + dy * t };
+}
+
+/** 点是否在多边形内（射线法）；通道/仓位区间的"点内部拖整体"用 */
+export function pointInPoly(px: number, py: number, poly: { x: number; y: number }[]): boolean {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const a = poly[i], b = poly[j];
+    if ((a.y > py) !== (b.y > py) && px < (b.x - a.x) * (py - a.y) / (b.y - a.y) + a.x) inside = !inside;
+  }
+  return inside;
+}
 
 /** 点到线段的像素距离。线身命中判定用，比"点到直线"多一步端点夹紧 */
 export function distToSegment(px: number, py: number, x1: number, y1: number, x2: number, y2: number): number {

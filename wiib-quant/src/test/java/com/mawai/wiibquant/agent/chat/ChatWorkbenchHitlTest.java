@@ -1,8 +1,10 @@
 package com.mawai.wiibquant.agent.chat;
 
+import com.mawai.wiibquant.agent.llm.SseChannel;
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONObject;
-import com.mawai.wiibcommon.entity.UserLlmConfig;
+import com.mawai.wiibquant.agent.llm.ChatEndpoints;
+import com.mawai.wiibquant.agent.llm.LlmEndpointService;
 import com.mawai.wiibcommon.util.Result;
 import com.mawai.wiibquant.agent.analysis.DeepAnalysisService;
 import com.mawai.wiibquant.agent.toolkit.MarketToolkit;
@@ -141,8 +143,7 @@ class ChatWorkbenchHitlTest {
                             : new AssistantMessage("这是第 " + seq.incrementAndGet() + " 段回答")));
         });
 
-        UserLlmConfig llmConfig = new UserLlmConfig();
-        llmConfig.setUserId(1L);   // 叶子指纹含 userId（trader 工具按它认人）
+        ChatEndpoints llmConfig = ChatTestEndpoints.eps(1L, "gpt-5");   // 叶子指纹含 userId（trader 工具按它认人）
         return new ChatAgentFactory(chatModelFactory, mock(MarketToolkit.class), mock(NewsToolkit.class),
                 deepAnalysisService, mock(TraderChatService.class), mock(WorkbenchRunRegistry.class),
                 registry, new SpringAIJacksonStateSerializer<>(MessagesState::new),
@@ -170,7 +171,7 @@ class ChatWorkbenchHitlTest {
         WorkbenchRunRegistry runRegistry = mock(WorkbenchRunRegistry.class);
         ChatHistoryService history = mock(ChatHistoryService.class);
         yieldCoordinator = new ChatYieldCoordinator(gate, runRegistry, turnRunner, history, memory);
-        return new ChatWorkbenchController(mock(ChatAgentFactory.class), mock(UserLlmConfigService.class),
+        return new ChatWorkbenchController(mock(ChatAgentFactory.class), mock(LlmEndpointService.class),
                 registry, memory, history, contextStore, turnRunner,
                 runRegistry, gate, yieldCoordinator);
     }
@@ -180,7 +181,7 @@ class ChatWorkbenchHitlTest {
                                   ChatAgentFactory.Leaves leaves, String message) {
         deepCallsThisTurn.set(0);
         RecordingEmitter emitter = new RecordingEmitter();
-        controller.run(new ChatWorkbenchController.SseChannel(emitter), 1L, SESSION, message, leaves,
+        controller.run(new SseChannel(emitter), 1L, SESSION, message, leaves,
                 yieldCoordinator.openTurn(1L));
         return emitter;
     }

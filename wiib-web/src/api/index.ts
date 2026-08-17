@@ -1,8 +1,8 @@
 import axios from 'axios';
 import type { TnOverview, TnTrade, TnDailyCell, TnEquityPoint, TnFillStats, TnManualOrderReq, TnOrderResult, TnAck } from '../types/testnet';
-import type { BacktestStrategyMeta, BacktestTaskStatus, BacktestEventsPage, BacktestKlinesPage, BacktestResultPayload, ReplayCoverage, HistoryKlinesPayload } from '../types';
+import type { BacktestStrategyMeta, BacktestTaskStatus, BacktestEventsPage, BacktestKlinesPage, BacktestResultPayload, ReplayCoverage, HistoryKlinesPayload, ReplayCoachRequest, ReplayCoachEvent } from '../types';
 import type { LedgerEntry, LedgerBizTypeOption, PublicTrade, UserProfile, PositionHistoryItem, RankingSort } from '../types';
-import type { LlmConfigView, LlmConfigSaveRequest } from '../types';
+import type { LlmEndpointView, LlmEndpointSaveRequest, LlmBindings, LlmPurpose } from '../types';
 import type { User, PageResult, RankingItem, CommentItem, NotificationItem, BuffStatus, UserBuff, BlackjackStatus, GameState, ConvertResult, MinesStatus, MinesGameState, VideoPokerStatus, VideoPokerGameState, CryptoPrice, CryptoOrderRequest, CryptoOrder, CryptoPosition, BStock, FuturesOpenRequest, FuturesCloseRequest, FuturesAddMarginRequest, FuturesReduceMarginRequest, FuturesStopLossRequest, FuturesTakeProfitRequest, FuturesAdjustLeverageRequest, FuturesCrossAccount, WalletTransferPreview, FuturesPosition, FuturesOrder, FuturesBracket, TradeFilterMap, PredictionRound, PredictionBet, PredictionBuyRequest, PredictionBetLive, PredictionPnl, AssetSnapshot, CategoryAverages, BehaviorAnalysisReport, ForceOrder, AiKeyConfig, AiModelAssignment, InviteCode, WorkbenchEvent, StrategyAccountView, TraderPublicView, TraderOwnerView, TraderDetailView, AiTraderDecisionView, TraderEquityPoint, TraderUpsertRequest, TraderSpec, TraderRequestView, StrategySignalState, FeedStreamHealth, WorkbenchSessionSummary, WorkbenchChatMessage, NewsFlashItem } from '../types';
 
 const api = axios.create({
@@ -372,10 +372,10 @@ export const aiAgentApi = {
 };
 
 // ========== P7 研判工作台 ==========
-/** 工作台 SSE：POST /ai/workbench/chat，named events 逐个回调（session/agent_start/token/hitl_request/done/error） */
-const streamWorkbenchEvents = async (
+/** SSE 事件流解析：named events 逐个回调（心跳注释帧无 data，忽略）。工作台对话与复盘 AI 教练共用 */
+const streamSseEvents = async <E,>(
   response: Response,
-  onEvent: (e: WorkbenchEvent) => void,
+  onEvent: (e: E) => void,
 ) => {
   if (!response.body) throw new Error('响应流不可用');
   const reader = response.body.getReader();
@@ -387,7 +387,7 @@ const streamWorkbenchEvents = async (
     if (!data) return;
     try {
       const payload = JSON.parse(data);
-      onEvent({ type: event, ...payload } as WorkbenchEvent);
+      onEvent({ type: event, ...payload } as E);
     } catch {
       // 非 JSON 数据块（心跳等）忽略
     }
@@ -410,32 +410,35 @@ const streamWorkbenchEvents = async (
   }
 };
 
+/**
+ * POST 一个 JSON 请求、以 SSE 收流。准入失败时后端返回的是普通 JSON（Result），
+ * 抛 ApiError 带 code 让调用方分流（2201/2202 引导去配置）；正常返回 event-stream 就逐事件回调。
+ */
+const postSse = async <E,>(url: string, body: unknown, onEvent: (e: E) => void, signal?: AbortSignal) => {
+  const token = getToken();
+  const response = await fetch(url, {
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { satoken: token } : {}),
+    },
+    body: JSON.stringify(body),
+    signal,
+  });
+  const contentType = response.headers.get('content-type') || '';
+  if (contentType.includes('application/json')) {
+    const payload = await response.json() as { code?: number; msg?: string };
+    throw new ApiError(payload.msg || '请求失败', payload.code ?? -1);
+  }
+  if (!response.ok) throw new Error(`请求失败: ${response.status}`);
+  await streamSseEvents<E>(response, onEvent);
+};
+
 export const workbenchApi = {
-  chat: async (
-    sessionId: string | null,
-    message: string,
-    onEvent: (e: WorkbenchEvent) => void,
-    signal?: AbortSignal,
-  ) => {
-    const token = getToken();
-    const response = await fetch('/api/ai/workbench/chat', {
-      method: 'POST',
-      credentials: 'include',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(token ? { satoken: token } : {}),
-      },
-      body: JSON.stringify({ sessionId, message }),
-      signal,
-    });
-    const contentType = response.headers.get('content-type') || '';
-    if (contentType.includes('application/json')) {
-      const payload = await response.json() as { code?: number; msg?: string };
-      throw new ApiError(payload.msg || '请求失败', payload.code ?? -1);
-    }
-    if (!response.ok) throw new Error(`请求失败: ${response.status}`);
-    await streamWorkbenchEvents(response, onEvent);
-  },
+  /** 工作台 SSE：POST /ai/workbench/chat，事件 session/agent_start/token/hitl_request/done/error */
+  chat: (sessionId: string | null, message: string, onEvent: (e: WorkbenchEvent) => void, signal?: AbortSignal) =>
+    postSse<WorkbenchEvent>('/api/ai/workbench/chat', { sessionId, message }, onEvent, signal),
   /** requestId 从 hitl_request 事件原样回传：卡片被新请求覆盖后点它，服务端会拒掉 */
   approve: (sessionId: string, approved: boolean, requestId: string) =>
     api.post<unknown, void>('/ai/workbench/approve', { sessionId, approved, requestId }),
@@ -452,14 +455,24 @@ export const workbenchApi = {
     api.delete<unknown, void>(`/ai/workbench/sessions/${sessionId}`),
 };
 
-// ========== 用户 BYOK 端点配置（工作台对话用） ==========
-export const llmConfigApi = {
-  mine: () => api.get<unknown, LlmConfigView | null>('/ai/llm-config/mine'),
-  save: (req: LlmConfigSaveRequest) => api.post<unknown, void>('/ai/llm-config', req),
-  listModels: (req: LlmConfigSaveRequest) =>
-    api.post<unknown, string[]>('/ai/llm-config/models', req),
+// ========== 用户 BYOK 端点库（AI 页「模型配置」；对话/交易员/复盘教练从中选） ==========
+export const llmEndpointApi = {
+  list: () => api.get<unknown, LlmEndpointView[]>('/ai/llm-endpoints'),
+  create: (req: LlmEndpointSaveRequest) => api.post<unknown, void>('/ai/llm-endpoints', req),
+  /** apiKey 传空=沿用已存的 */
+  update: (id: number, req: LlmEndpointSaveRequest) => api.put<unknown, void>(`/ai/llm-endpoints/${id}`, req),
+  remove: (id: number) => api.delete<unknown, void>(`/ai/llm-endpoints/${id}`),
+  setDefault: (id: number) => api.post<unknown, void>(`/ai/llm-endpoints/${id}/default`),
+  bindings: () => api.get<unknown, LlmBindings>('/ai/llm-endpoints/bindings'),
+  /** endpointId 传 null=解绑（跟随默认） */
+  bind: (purpose: LlmPurpose, endpointId: number | null) =>
+    api.post<unknown, void>('/ai/llm-endpoints/bindings', { purpose, endpointId }),
+  /** 拉模型清单：编辑已有端点时带 id，apiKey 留空=用它已存的 key */
+  listModels: (req: LlmEndpointSaveRequest, id?: number) =>
+    api.post<unknown, string[]>('/ai/llm-endpoints/models', req, { params: id != null ? { id } : {} }),
   /** 连通性探测：与保存分离，对应表单里的"测试连通性"按钮 */
-  test: (req: LlmConfigSaveRequest) => api.post<unknown, void>('/ai/llm-config/test', req),
+  test: (req: LlmEndpointSaveRequest, id?: number) =>
+    api.post<unknown, void>('/ai/llm-endpoints/test', req, { params: id != null ? { id } : {} }),
 };
 
 /** 打标快讯（news_event 存档行，K 线新闻图标数据源） */
@@ -485,9 +498,6 @@ export const quantApi = {
 // ========== AI Trader 竞技场 ==========
 export const traderApi = {
   mine: () => api.get<unknown, TraderOwnerView | null>('/ai/trader/mine'),
-  /** 拉取端点可用模型清单（apiKey 传空=用已存 key） */
-  listModels: (req: { apiProtocol: string; baseUrl: string; apiKey: string }) =>
-    api.post<unknown, string[]>('/ai/trader/models', req),
   /** 平台系统提示词预览（与唤醒组装同一份文本）：规格项多，走 POST 带 body */
   promptTemplate: (intervalCode: string, symbols: string, spec: TraderSpec) =>
     api.post<unknown, string>('/ai/trader/prompt-template', { intervalCode, symbols, spec }),
@@ -559,5 +569,8 @@ export const backtestApi = {
     api.get<unknown, ReplayCoverage[]>('/ai/backtest/history/coverage'),
   historyKlines: (symbol: string, fromMs: number, toMs: number) =>
     api.get<unknown, HistoryKlinesPayload>('/ai/backtest/history/klines', { params: { symbol, fromMs, toMs } }),
+  /** 复盘 AI 教练（SSE：token/done/error）：HINT 局中盘面提示 / REVIEW 结算后评估看法。走用户 BYOK 对话配置 */
+  replayCoach: (req: ReplayCoachRequest, onEvent: (e: ReplayCoachEvent) => void, signal?: AbortSignal) =>
+    postSse<ReplayCoachEvent>('/api/ai/backtest/replay/coach', req, onEvent, signal),
 };
 

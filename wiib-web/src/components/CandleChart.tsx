@@ -1,11 +1,11 @@
 import { cn, fmtNum, fmtDateTime } from '../lib/utils';
-import { useEffect, useRef, useState, useCallback, type ReactNode } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import {
   createChart, createSeriesMarkers, CrosshairMode, CandlestickSeries, HistogramSeries, LineSeries, LineStyle,
   type IChartApi, type ISeriesApi, type UTCTimestamp, type MouseEventParams,
   type DeepPartial, type HandleScrollOptions, type IPriceLine, type SeriesMarker,
 } from 'lightweight-charts';
-import { Eye, EyeOff, Globe, History, Layers, Magnet, Maximize2, Minimize2, Minus, MousePointer2, Slash, Trash2, Type } from 'lucide-react';
+import { Eye, EyeOff, Globe, History, Layers, Magnet, Maximize2, Minimize2, Trash2 } from 'lucide-react';
 import { futuresApi, quantApi, type NewsEventItem } from '../api';
 import { useKlineStream } from '../hooks/useKlineStream';
 import { useIsDark } from '../hooks/useIsDark';
@@ -13,7 +13,8 @@ import { useFullscreen } from '../hooks/useFullscreen';
 import { getCoinPriceDecimals } from '../lib/coinConfig';
 import { bollSeries, emaSeries, macdSeries, maSeries, rsiSeries } from '../lib/indicators';
 import type { ChartCtx } from '../lib/chartDrawings';
-import { useDrawings, type Tool } from './chart/useDrawings';
+import { useDrawings } from './chart/useDrawings';
+import { DrawToolPicker } from './chart/DrawToolPicker';
 import { NewsMarkersLayer } from './chart/NewsMarkersLayer';
 
 /** 一根 K：series 只用 OHLC，量/额留给气泡和成交量柱。 */
@@ -384,15 +385,6 @@ const SCROLL_OPTS: DeepPartial<HandleScrollOptions> =
 
 /** 触屏设备判定：竖屏全屏的"转横屏"提示只该出现在真能转的设备上（桌面竖屏显示器转不了） */
 const IS_TOUCH = window.matchMedia('(pointer: coarse)').matches;
-
-/** 画线工具条按钮。null=选择模式（可选中/拖拽已有图形，图表照常平移缩放） */
-const TOOL_BTNS: { k: Tool; icon: ReactNode; title: string }[] = [
-  { k: null, icon: <MousePointer2 className="w-3.5 h-3.5" />, title: '选择/拖拽（Esc 取消选中，Del 删除）' },
-  { k: 'trend', icon: <Slash className="w-3.5 h-3.5" />, title: '趋势线：点两下定两端' },
-  { k: 'hline', icon: <Minus className="w-3.5 h-3.5" />, title: '水平线：点一下即成' },
-  { k: 'fib', icon: <span className="text-[10px] font-extrabold leading-none tracking-tight">FIB</span>, title: '斐波那契回撤：点两下定 0/1 两端' },
-  { k: 'text', icon: <Type className="w-3.5 h-3.5" />, title: '文字标注：点一下再输入' },
-];
 
 /** symbol → 新闻标签：BTCUSDT 映射 BTC，美股/商品代码在词表内的直接同名；词表外无标签=不挂新闻轨 */
 export function newsTagForSymbol(symbol: string): string | undefined {
@@ -1116,14 +1108,7 @@ export function CandleChart({ symbol, interval, limit = 300, visibleBars = 110, 
           </div>
         )}
 
-        <div className={group}>
-          {TOOL_BTNS.map(b => (
-            <button key={b.k ?? 'pick'} type="button" title={b.title}
-                    onClick={() => setTool(b.k)} className={iconCls(tool === b.k)}>
-              {b.icon}
-            </button>
-          ))}
-        </div>
+        <DrawToolPicker tool={tool} onSelect={setTool} />
 
         {/* 历史成交标记开关：只有页面传了成交数据才出现 */}
         {tradeMarks != null && (

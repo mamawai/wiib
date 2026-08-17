@@ -57,7 +57,9 @@ class TraderChatServiceTest {
     private final AiTraderDecisionMapper decisionMapper = mock(AiTraderDecisionMapper.class);
     private final SimTradeClient simTradeClient = mock(SimTradeClient.class);
 
-    private final TraderChatService service = new TraderChatService(traderService, planStore,
+    private final TraderModelFactory modelFactory = mock(TraderModelFactory.class);
+
+    private final TraderChatService service = new TraderChatService(traderService, modelFactory, planStore,
             scheduler, reviewRunner, traderMapper, decisionMapper, simTradeClient);
 
     private AiTrader running() {

@@ -1,6 +1,8 @@
 package com.mawai.wiibquant.agent.chat;
 
-import com.mawai.wiibcommon.entity.UserLlmConfig;
+import com.mawai.wiibquant.agent.llm.SseChannel;
+import com.mawai.wiibquant.agent.llm.ChatEndpoints;
+import com.mawai.wiibquant.agent.llm.LlmEndpointService;
 import com.mawai.wiibquant.agent.analysis.DeepAnalysisService;
 import com.mawai.wiibquant.agent.toolkit.MarketToolkit;
 import com.mawai.wiibquant.agent.toolkit.NewsToolkit;
@@ -76,8 +78,7 @@ class LlmErrorSurfaceTest {
         when(deep.stream(any(Prompt.class)))
                 .thenReturn(Flux.just(responseOf(new AssistantMessage("汇总一下"))));
 
-        UserLlmConfig llmConfig = new UserLlmConfig();
-        llmConfig.setUserId(1L);   // 叶子指纹含 userId（trader 工具按它认人）
+        ChatEndpoints llmConfig = ChatTestEndpoints.eps(1L, "gpt-5");   // 叶子指纹含 userId（trader 工具按它认人）
         ChatAgentFactory.Leaves leaves = new ChatAgentFactory(chatModelFactory,
                 mock(MarketToolkit.class), mock(NewsToolkit.class),
                 mock(DeepAnalysisService.class), mock(TraderChatService.class),
@@ -131,11 +132,11 @@ class LlmErrorSurfaceTest {
         ChatYieldCoordinator coordinator =
                 new ChatYieldCoordinator(gate, runRegistry, turnRunner, history, memory);
         ChatWorkbenchController controller = new ChatWorkbenchController(mock(ChatAgentFactory.class),
-                mock(UserLlmConfigService.class), new ApprovalRegistry(), memory,
+                mock(LlmEndpointService.class), new ApprovalRegistry(), memory,
                 history, mock(ChatContextStore.class), turnRunner,
                 runRegistry, gate, coordinator);
 
-        controller.run(new ChatWorkbenchController.SseChannel(emitter), 1L, "wb-1-boom", "看看行情", null,
+        controller.run(new SseChannel(emitter), 1L, "wb-1-boom", "看看行情", null,
                 coordinator.openTurn(1L));
 
         String errorEvent = sent.stream().filter(text -> text.startsWith("{") && text.contains("message"))

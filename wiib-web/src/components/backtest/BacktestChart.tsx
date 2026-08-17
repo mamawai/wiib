@@ -1,12 +1,13 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  createChart, createSeriesMarkers, CrosshairMode, CandlestickSeries,
+  createChart, createSeriesMarkers, CrosshairMode, CandlestickSeries, HistogramSeries,
   type DeepPartial, type HandleScrollOptions, type IChartApi, type ISeriesApi,
   type ISeriesMarkersPluginApi, type SeriesMarker, type Time, type UTCTimestamp,
 } from 'lightweight-charts';
-import { Eye, EyeOff, Magnet, Minus, MousePointer2, Slash, Trash2, Type } from 'lucide-react';
+import { Eye, EyeOff, Magnet, Trash2 } from 'lucide-react';
 import { useIsDark } from '../../hooks/useIsDark';
-import { useDrawings, type Tool } from '../chart/useDrawings';
+import { useDrawings } from '../chart/useDrawings';
+import { DrawToolPicker } from '../chart/DrawToolPicker';
 import type { ChartCtx, OhlcBar } from '../../lib/chartDrawings';
 import { fmtDateTime } from '../../lib/utils';
 
@@ -17,16 +18,20 @@ const toBarTime = (ms: number) => (Math.floor(ms / 1000) - TZ) as UTCTimestamp;
 const SCROLL_OPTS: DeepPartial<HandleScrollOptions> =
   { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false };
 
-/** 通用成交标记：模式1传回测 trades，模式2传复盘成交（未平仓时 close* 缺省只画开仓箭头） */
+/**
+ * 通用成交标记：一次成交一条。entry 画方向箭头（多下箭头向上、空上箭头向下），
+ * exit 画圆点按 pnl 着色。模式1把每笔 trade 拆成进/出两条，模式2按每次成交（开/加/平/减）各一条。
+ */
 export interface ChartTradeMark {
-  openBarIndex: number;
-  openTime: number;          // ms
+  /** 在 bars 里的下标；游标没走到就不显示 */
+  barIndex: number;
+  time: number;              // ms，贴在哪根蜡烛上
   side: 'LONG' | 'SHORT';
-  closeBarIndex?: number;
-  closeTime?: number;
+  kind: 'entry' | 'exit';
+  /** exit：按盈亏着色（缺省视为 ≥0） */
   pnl?: number;
-  /** 出场标记文字（模式1=出场原因，模式2=平仓/爆仓） */
-  exitLabel?: string;
+  /** 标记文字；entry 缺省 多/空 */
+  label?: string;
 }
 
 interface Props {
@@ -46,18 +51,17 @@ interface Props {
   bucketSec?: number;
 }
 
-/** 画线工具条按钮（与 CandleChart 同套图标语义） */
-const TOOL_BTNS: { k: Tool; icon: ReactNode; title: string }[] = [
-  { k: null, icon: <MousePointer2 className="w-3.5 h-3.5" />, title: '选择/拖拽（Esc 取消选中，Del 删除）' },
-  { k: 'trend', icon: <Slash className="w-3.5 h-3.5" />, title: '趋势线：点两下定两端' },
-  { k: 'hline', icon: <Minus className="w-3.5 h-3.5" />, title: '水平线：点一下即成' },
-  { k: 'fib', icon: <span className="text-[10px] font-extrabold leading-none tracking-tight">FIB</span>, title: '斐波那契回撤：点两下定 0/1 两端' },
-  { k: 'text', icon: <Type className="w-3.5 h-3.5" />, title: '文字标注：点一下再输入' },
-];
+/** 量柱配色与 CandleChart 同款：半透明红绿，压在蜡烛下层不抢戏 */
+const VOL_UP = 'rgba(8,153,129,.5)', VOL_DOWN = 'rgba(242,54,69,.5)';
 
 /** 行 → LWC 蜡烛点 */
 function toCandle(row: number[]) {
   return { time: toBarTime(row[0]), open: row[1], high: row[2], low: row[3], close: row[4] };
+}
+
+/** 行 → 量柱点（涨绿跌红看收盘对开盘） */
+function toVol(row: number[]) {
+  return { time: toBarTime(row[0]), value: row[5] ?? 0, color: row[4] >= row[1] ? VOL_UP : VOL_DOWN };
 }
 
 /** 行 → 画线层 OhlcBar（time 为图表口径的秒） */
@@ -75,13 +79,14 @@ function blindLabel(shiftedSec: number, baseShiftedSec: number): string {
 }
 
 /**
- * 回测/复盘通用蜡烛图：进出场 markers + 前端回放游标 + 画线工具（全站 DrawingLayer 复用）。
+ * 回测/复盘通用蜡烛图：蜡烛+底部量柱、进出场 markers、前端回放游标、画线工具（全站 DrawingLayer 复用）。
  * 游标小步前进走 update() 增量追加，跳变/回退走 setData() 重切——两条路径都不重建图表。
  */
 export function BacktestChart({ bars, marks, cursor, symbol, decimals = 2, height, blindBaseMs, bucketSec = 300 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
+  const volRef = useRef<ISeriesApi<'Histogram'> | null>(null);
   const markersRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
   const drawnRef = useRef(0);           // 已画到的 bar 数
   const lastBarsRef = useRef<number[][] | null>(null);   // bars 换引用（新任务/新分段）必须走全量重切
@@ -110,32 +115,25 @@ export function BacktestChart({ bars, marks, cursor, symbol, decimals = 2, heigh
     return fmtDateTime((sec + TZ) * 1000);
   };
 
-  // markers 预排序：进场按开仓 bar、出场按平仓 bar，游标推进时按可见数量切片
+  // markers 预排序：按所在 bar 升序，游标推进时按可见数量切片
   const allMarkers = useMemo(() => {
     const gain = isDark ? '#0abf95' : '#089981';
     const loss = isDark ? '#ff5a68' : '#f23645';
-    const out: { atBar: number; marker: SeriesMarker<Time> }[] = [];
-    for (const t of marks) {
-      const isLong = t.side === 'LONG';
-      out.push({
-        atBar: t.openBarIndex,
-        marker: {
-          time: toBarTime(t.openTime), position: isLong ? 'belowBar' : 'aboveBar',
+    const out: { atBar: number; marker: SeriesMarker<Time> }[] = marks.map(m => {
+      const isLong = m.side === 'LONG';
+      const marker: SeriesMarker<Time> = m.kind === 'entry'
+        ? {
+          time: toBarTime(m.time), position: isLong ? 'belowBar' : 'aboveBar',
           shape: isLong ? 'arrowUp' : 'arrowDown', color: isLong ? gain : loss,
-          text: isLong ? '多' : '空',
-        },
-      });
-      if (t.closeBarIndex != null && t.closeTime != null) {
-        out.push({
-          atBar: t.closeBarIndex,
-          marker: {
-            time: toBarTime(t.closeTime), position: isLong ? 'aboveBar' : 'belowBar',
-            shape: 'circle', color: (t.pnl ?? 0) >= 0 ? gain : loss,
-            text: t.exitLabel,
-          },
-        });
-      }
-    }
+          text: m.label ?? (isLong ? '多' : '空'),
+        }
+        : {
+          time: toBarTime(m.time), position: isLong ? 'aboveBar' : 'belowBar',
+          shape: 'circle', color: (m.pnl ?? 0) >= 0 ? gain : loss,
+          text: m.label,
+        };
+      return { atBar: m.barIndex, marker };
+    });
     return out.sort((a, b) => a.atBar - b.atBar);
   }, [marks, isDark]);
 
@@ -158,7 +156,8 @@ export function BacktestChart({ bars, marks, cursor, symbol, decimals = 2, heigh
       },
       crosshair: { mode: CrosshairMode.Normal },
       handleScroll: SCROLL_OPTS,
-      rightPriceScale: { borderVisible: false },
+      // 底部 22% 让给量柱（量柱自己的 scale 压在 82%~100%），蜡烛不与量柱重叠
+      rightPriceScale: { borderVisible: false, scaleMargins: { top: 0.08, bottom: 0.22 } },
       timeScale: {
         borderVisible: false, timeVisible: true, secondsVisible: false,
         // 盲测时间脱敏在 tick 一层做：真实日期不上轴
@@ -179,8 +178,14 @@ export function BacktestChart({ bars, marks, cursor, symbol, decimals = 2, heigh
       wickDownColor: isDark ? '#ff5a68' : '#f23645',
       priceFormat: { type: 'price', precision: decimals, minMove: 1 / 10 ** decimals },
     });
+    // 成交量：独立隐藏价格轴（priceScaleId ''）叠在主图底部，不占用蜡烛的价格刻度
+    const vol = chart.addSeries(HistogramSeries, {
+      priceScaleId: '', priceFormat: { type: 'volume' }, lastValueVisible: false, priceLineVisible: false,
+    });
+    vol.priceScale().applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
     chartRef.current = chart;
     seriesRef.current = series;
+    volRef.current = vol;
     markersRef.current = createSeriesMarkers(series, []);
     drawnRef.current = 0;
     markerCountRef.current = -1;
@@ -208,6 +213,7 @@ export function BacktestChart({ bars, marks, cursor, symbol, decimals = 2, heigh
       chart.remove();
       chartRef.current = null;
       seriesRef.current = null;
+      volRef.current = null;
       markersRef.current = null;
     };
     // fmtShifted/attachDrawings 稳定（ref/useCallback），不进依赖；bucketSec 变化（切周期）需重建图重挂画线层
@@ -217,8 +223,9 @@ export function BacktestChart({ bars, marks, cursor, symbol, decimals = 2, heigh
   // 游标应用：小步前进 update 追加；回退/跳变 setData 重切。画线层的 bars/idx 同步维护
   useEffect(() => {
     const series = seriesRef.current;
+    const vol = volRef.current;
     const chart = chartRef.current;
-    if (!series || !chart) return;
+    if (!series || !vol || !chart) return;
     const target = Math.min(Math.max(cursor, 0), bars.length);
     const drawn = drawnRef.current;
     const sameBars = lastBarsRef.current === bars;
@@ -228,12 +235,15 @@ export function BacktestChart({ bars, marks, cursor, symbol, decimals = 2, heigh
     } else if (sameBars && target > drawn && target - drawn <= 600 && drawn > 0) {
       for (let i = drawn; i < target; i++) {
         series.update(toCandle(bars[i]));
+        vol.update(toVol(bars[i]));
         const o = toOhlc(bars[i]);
         idxRef.current.set(o.time, ohlcRef.current.length);
         ohlcRef.current.push(o);
       }
     } else {
-      series.setData(bars.slice(0, target).map(toCandle));
+      const shown = bars.slice(0, target);
+      series.setData(shown.map(toCandle));
+      vol.setData(shown.map(toVol));
       const ohlc: OhlcBar[] = new Array(target);
       const idx = new Map<number, number>();
       for (let i = 0; i < target; i++) {
@@ -269,14 +279,7 @@ export function BacktestChart({ bars, marks, cursor, symbol, decimals = 2, heigh
     <div className="space-y-1.5">
       {/* 画线工具行 */}
       <div className="flex items-center gap-2 flex-wrap">
-        <div className="flex rounded-md border border-border overflow-hidden divide-x divide-border">
-          {TOOL_BTNS.map(b => (
-            <button key={b.k ?? 'pick'} type="button" title={b.title}
-              onClick={() => setTool(b.k)} className={iconCls(tool === b.k)}>
-              {b.icon}
-            </button>
-          ))}
-        </div>
+        <DrawToolPicker tool={tool} onSelect={setTool} />
         <div className="flex rounded-md border border-border overflow-hidden divide-x divide-border">
           <button type="button" onClick={() => setMagnet(!magnet)} className={iconCls(magnet)}
             title={magnet ? '磁吸开：端点自动贴住最近的开/高/低/收' : '磁吸关：自由落点'}>

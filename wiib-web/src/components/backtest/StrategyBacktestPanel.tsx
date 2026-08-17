@@ -366,12 +366,14 @@ export function StrategyBacktestPanel() {
     return result.equity.map(([time, eq]) => ({ time, cumPnl: eq - base }));
   }, [result]);
 
-  // ---- 图表通用标记（进出场箭头/圆点） ----
-  const marks = useMemo<ChartTradeMark[]>(() => (result?.trades ?? []).map(t => ({
-    openBarIndex: t.openBarIndex, openTime: t.openTime, side: t.side,
-    closeBarIndex: t.closeBarIndex, closeTime: t.closeTime, pnl: t.pnl,
-    exitLabel: EXIT_LABEL[t.exitReason] ?? t.exitReason,
-  })), [result]);
+  // ---- 图表通用标记：每笔 trade 拆成进场箭头 + 出场圆点 ----
+  const marks = useMemo<ChartTradeMark[]>(() => (result?.trades ?? []).flatMap(t => [
+    { barIndex: t.openBarIndex, time: t.openTime, side: t.side, kind: 'entry' as const },
+    {
+      barIndex: t.closeBarIndex, time: t.closeTime, side: t.side, kind: 'exit' as const,
+      pnl: t.pnl, label: EXIT_LABEL[t.exitReason] ?? t.exitReason,
+    },
+  ]), [result]);
 
   // ---- 显示周期聚合：撮合/回放游标仍在 5m 空间，仅图表按所选周期展示 ----
   // 5m 时 aggregateBars 原样返回同引用，图表增量更新路径不受影响
@@ -381,14 +383,8 @@ export function StrategyBacktestPanel() {
   const aggMarks = useMemo<ChartTradeMark[]>(() => {
     if (ivMin === 5 || aggBars.length === 0) return marks;
     return marks.map(m => {
-      const oi = barIndexAt(aggBars, m.openTime);
-      const mapped: ChartTradeMark = { ...m, openBarIndex: oi, openTime: aggBars[oi][0] };
-      if (m.closeBarIndex != null && m.closeTime != null) {
-        const ci = barIndexAt(aggBars, m.closeTime);
-        mapped.closeBarIndex = ci;
-        mapped.closeTime = aggBars[ci][0];
-      }
-      return mapped;
+      const i = barIndexAt(aggBars, m.time);
+      return { ...m, barIndex: i, time: aggBars[i][0] };
     });
   }, [marks, aggBars, ivMin]);
 

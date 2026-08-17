@@ -1,6 +1,6 @@
 package com.mawai.wiibquant.agent.chat;
 
-import com.mawai.wiibcommon.entity.UserLlmConfig;
+import com.mawai.wiibquant.agent.llm.ChatEndpoints;
 import com.mawai.wiibquant.agent.analysis.DeepAnalysisService;
 import com.mawai.wiibquant.agent.llm.ModelCallLimiter;
 import com.mawai.wiibquant.agent.llm.ResilientChatService;
@@ -152,9 +152,7 @@ class ApprovalGateOrderTest {
     }
 
     /** 叶子指纹含 userId（trader 工具按它认人），配置里不能缺 */
-    private static UserLlmConfig llmConfig() {
-        UserLlmConfig c = new UserLlmConfig();
-        c.setUserId(1L);
-        return c;
+    private static ChatEndpoints llmConfig() {
+        return ChatTestEndpoints.eps(1L, "gpt-5");
     }
 }

@@ -31,7 +31,7 @@ export function Backtest() {
           <p className="text-[11px] text-muted-foreground truncate">
             {mode === 'strategy'
               ? '本地 5m K线 · 与实盘同一撮合口径 · 右侧工作记录还原策略每一步'
-              : '逐根揭示历史行情 · 按收盘价开多开空 · 练自己的盘感'}
+              : '逐根揭示历史行情 · 按收盘价开多开空、加减仓 · 练自己的盘感'}
           </p>
         </div>
         <div className="ml-auto flex rounded-lg border border-border overflow-hidden">

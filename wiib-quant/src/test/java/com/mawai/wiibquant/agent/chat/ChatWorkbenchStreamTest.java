@@ -1,5 +1,7 @@
 package com.mawai.wiibquant.agent.chat;
 
+import com.mawai.wiibquant.agent.llm.LlmEndpointService;
+import com.mawai.wiibquant.agent.llm.SseChannel;
 import org.junit.jupiter.api.Test;
 import org.mockito.stubbing.Answer;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
@@ -60,12 +62,12 @@ class ChatWorkbenchStreamTest {
         ChatYieldCoordinator coordinator =
                 new ChatYieldCoordinator(gate, runRegistry, turnRunner, historyService, memory);
         ChatWorkbenchController controller = new ChatWorkbenchController(mock(ChatAgentFactory.class),
-                mock(UserLlmConfigService.class), new ApprovalRegistry(), memory,
+                mock(LlmEndpointService.class), new ApprovalRegistry(), memory,
                 historyService, mock(ChatContextStore.class), turnRunner,
                 runRegistry, gate, coordinator);
 
         RecordingEmitter emitter = new RecordingEmitter();
-        ChatWorkbenchController.SseChannel channel = new ChatWorkbenchController.SseChannel(emitter);
+        SseChannel channel = new SseChannel(emitter);
         channel.markClosed();   // 用户切页：连接已经断了，这一轮才刚开始
 
         controller.run(channel, 1L, SESSION, "看看行情", null, coordinator.openTurn(1L));

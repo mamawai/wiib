@@ -3,7 +3,8 @@ package com.mawai.wiibquant.agent.chat;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
-import com.mawai.wiibcommon.entity.UserLlmConfig;
+import com.mawai.wiibquant.agent.llm.ChatEndpoints;
+import com.mawai.wiibquant.agent.llm.LlmEndpointService;
 import com.mawai.wiibquant.agent.llm.ConversationSummarizer;
 import com.mawai.wiibquant.agent.llm.ResilientChatService;
 import org.junit.jupiter.api.AfterEach;
@@ -165,7 +166,7 @@ class ConversationSummarizerRealRunTest {
 
     /** 真跑就得烧真配置：这一跑的全部价值就在于走用户自己那份 BYOK，绝不在这里造一份假的 */
     @Autowired
-    private UserLlmConfigService userLlmConfigService;
+    private LlmEndpointService endpointService;
 
     private final ListAppender<ILoggingEvent> summarizeLogs = new ListAppender<>();
     /**
@@ -189,8 +190,8 @@ class ConversationSummarizerRealRunTest {
         resilienceLogs.start();
         ((Logger) LoggerFactory.getLogger(ResilientChatService.class)).addAppender(resilienceLogs);
 
-        UserLlmConfig llmConfig = userLlmConfigService.get(ADMIN_USER_ID);
-        assertThat(llmConfig).as("先用管理员账号在 /api/ai/llm-config 配一份 BYOK 端点再跑").isNotNull();
+        ChatEndpoints llmConfig = endpointService.chatEndpoints(ADMIN_USER_ID);
+        assertThat(llmConfig).as("先用管理员账号在 AI 页「模型配置」加一条 BYOK 端点再跑").isNotNull();
 
         ChatAgentFactory.Leaves leaves = chatAgentFactory.leavesFor(llmConfig);
         // sessionId 跨轮不变：历史靠 ChatContextStore 累积，这才是生产形态

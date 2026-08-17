@@ -1,7 +1,8 @@
 package com.mawai.wiibquant.agent.chat;
 
 import com.alibaba.fastjson2.JSON;
-import com.mawai.wiibcommon.entity.UserLlmConfig;
+import com.mawai.wiibquant.agent.llm.ChatEndpoints;
+import com.mawai.wiibquant.agent.llm.LlmEndpointService;
 import com.mawai.wiibquant.agent.trader.TraderChatService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
@@ -53,7 +54,7 @@ class ChatWorkbenchRealRunTest {
 
     /** 真跑就得烧真配置：这一跑的全部价值就在于走用户自己那份 BYOK，绝不在这里造一份假的 */
     @Autowired
-    private UserLlmConfigService userLlmConfigService;
+    private LlmEndpointService endpointService;
 
     /** 断言的期望值从这儿取：库里那份真 trader 数据，不在测试里另造 */
     @Autowired
@@ -61,8 +62,8 @@ class ChatWorkbenchRealRunTest {
 
     @Test
     void 一轮新闻加行情提问全链路真跑() {
-        UserLlmConfig llmConfig = userLlmConfigService.get(ADMIN_USER_ID);
-        assertThat(llmConfig).as("先用管理员账号在 /api/ai/llm-config 配一份 BYOK 端点再跑").isNotNull();
+        ChatEndpoints llmConfig = endpointService.chatEndpoints(ADMIN_USER_ID);
+        assertThat(llmConfig).as("先用管理员账号在 AI 页「模型配置」加一条 BYOK 端点再跑").isNotNull();
 
         ChatAgentFactory.Leaves leaves = chatAgentFactory.leavesFor(llmConfig);
         String sessionId = "wb-1-realrun-" + UUID.randomUUID();
@@ -103,8 +104,8 @@ class ChatWorkbenchRealRunTest {
      */
     @Test
     void trader表现提问真跑不再答没有数据() {
-        UserLlmConfig llmConfig = userLlmConfigService.get(ADMIN_USER_ID);
-        assertThat(llmConfig).as("先用管理员账号在 /api/ai/llm-config 配一份 BYOK 端点再跑").isNotNull();
+        ChatEndpoints llmConfig = endpointService.chatEndpoints(ADMIN_USER_ID);
+        assertThat(llmConfig).as("先用管理员账号在 AI 页「模型配置」加一条 BYOK 端点再跑").isNotNull();
         // 期望值取自库里那份真数据，不在测试里另造一份：造了就变成"自己写的自己验"
         String overview = traderChatService.overview(ADMIN_USER_ID);
         assertThat(overview).as("这一跑要有一个真 trader 才有意义").contains("\"hasTrader\":true");

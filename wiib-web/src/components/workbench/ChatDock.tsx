@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Bot, KeyRound, Loader2, X } from 'lucide-react';
-import { llmConfigApi } from '../../api';
+import { llmEndpointApi } from '../../api';
 import { cn } from '../../lib/utils';
 import { chatStore } from './chatStore';
 import { ChatPanel } from './ChatPanel';
@@ -57,7 +57,7 @@ export function ChatDock() {
     const next = !openRef.current;
     if (next) {
       setUnread(false);
-      llmConfigApi.mine().then(c => setHasConfig(c != null)).catch(() => setHasConfig(false));
+      llmEndpointApi.list().then(list => setHasConfig(list.length > 0)).catch(() => setHasConfig(false));
     }
     setOpenBoth(next);
   }, [setOpenBoth]);

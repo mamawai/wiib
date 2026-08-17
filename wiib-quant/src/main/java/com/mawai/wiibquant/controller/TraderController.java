@@ -7,7 +7,10 @@ import com.mawai.wiibcommon.dto.FuturesPositionDTO;
 import com.mawai.wiibcommon.entity.AiTrader;
 import com.mawai.wiibcommon.entity.AiTraderDecision;
 import com.mawai.wiibcommon.entity.AiTraderPlan;
+import com.mawai.wiibcommon.entity.UserLlmBinding;
+import com.mawai.wiibcommon.entity.UserLlmEndpoint;
 import com.mawai.wiibcommon.util.Result;
+import com.mawai.wiibquant.agent.llm.LlmEndpointService;
 import com.mawai.wiibquant.external.sim.SimTradeClient;
 import com.mawai.wiibquant.agent.trader.TraderPromptAssembler;
 import com.mawai.wiibquant.agent.trader.TraderRequestService;
@@ -22,6 +25,7 @@ import org.springframework.web.bind.annotation.*;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.List;
+import java.util.Map;
 
 /**
  * AI Trader：我的 trader 管理（创建/配置/启停/重置）+ 公开竞技场（排行/详情/决策时间线/净值曲线）。
@@ -38,18 +42,19 @@ public class TraderController {
     private final SimTradeClient simTradeClient;
     private final TraderPromptAssembler promptAssembler;
     private final TraderRequestService requestService;
+    private final LlmEndpointService endpointService;
 
     // ========== 我的 trader ==========
 
-    /** 公开视图：任何登录用户可见的字段。key/baseUrl/自定义提示词绝不进公开视图。 */
+    /** 公开视图：任何登录用户可见的字段（model 是它当前用的端点的模型名，现解析）。key/baseUrl/自定义提示词绝不进公开视图。 */
     public record TraderPublicView(long id, String name, String model, String status, String pausedReason,
                                    String symbols, String intervalCode, int roundNo,
                                    BigDecimal equity, BigDecimal pnlPct, boolean mine) {
     }
 
-    /** 主人视图：公开视图 + 配置回显（key 只回尾4位）。 */
-    public record TraderOwnerView(TraderPublicView pub, String apiProtocol, String baseUrl,
-                                  String customPrompt, String apiKeyTail, boolean useDefaultPrompt,
+    /** 主人视图：公开视图 + 配置回显。llmEndpointId=显式绑定的端点，null=跟随默认端点 */
+    public record TraderOwnerView(TraderPublicView pub, Long llmEndpointId,
+                                  String customPrompt, boolean useDefaultPrompt,
                                   TraderSpec spec, boolean alertEnabled, BigDecimal alertThresholdMult,
                                   boolean reviewEnabled, boolean learningEnabled) {
     }
@@ -78,8 +83,9 @@ public class TraderController {
         if (t == null) {
             return Result.ok(null);
         }
-        return Result.ok(new TraderOwnerView(publicView(t, userId),
-                t.getApiProtocol(), t.getBaseUrl(), t.getCustomPrompt(), traderService.keyTail(t),
+        return Result.ok(new TraderOwnerView(publicView(t, userId, modelName(t)),
+                endpointService.bindings(userId).get(UserLlmBinding.TRADER),
+                t.getCustomPrompt(),
                 !Boolean.FALSE.equals(t.getUseDefaultPrompt()), TraderSpec.of(t),
                 !Boolean.FALSE.equals(t.getAlertEnabled()),
                 t.getAlertThresholdMult() == null ? BigDecimal.ONE : t.getAlertThresholdMult(),
@@ -102,32 +108,22 @@ public class TraderController {
         return Result.ok(promptAssembler.platformTemplate(interval, symbols, cfg));
     }
 
+    /** llmEndpointId：端点库里的一条，空=跟随用户默认端点 */
     public record UpsertRequest(String name, String symbols, String intervalCode, String customPrompt,
-                                String apiProtocol, String baseUrl, String model, String apiKey,
+                                Long llmEndpointId,
                                 Boolean useDefaultPrompt, TraderSpec spec,
                                 Boolean alertEnabled, BigDecimal alertThresholdMult,
                                 Boolean reviewEnabled, Boolean learningEnabled) {
         TraderService.UpsertReq toReq() {
             TraderSpec s = spec;
             return new TraderService.UpsertReq(name, symbols, intervalCode, customPrompt,
-                    apiProtocol, baseUrl, model, apiKey, useDefaultPrompt,
+                    llmEndpointId, useDefaultPrompt,
                     s == null ? null : s.leverageMin(), s == null ? null : s.leverageMax(),
                     s == null ? null : s.marginPctMin(), s == null ? null : s.marginPctMax(),
                     s == null ? null : s.allowMultiPosition(), s == null ? null : s.allowHedge(),
                     s == null ? null : s.allowSelfAdd(), s == null ? null : s.allowSelfReduce(),
                     alertEnabled, alertThresholdMult, reviewEnabled, learningEnabled);
         }
-    }
-
-    public record ListModelsRequest(String apiProtocol, String baseUrl, String apiKey) {
-    }
-
-    @PostMapping("/models")
-    @Operation(summary = "拉取端点可用模型清单（apiKey传空=用已存key）")
-    public Result<List<String>> listModels(@CurrentUserId long userId, @RequestBody ListModelsRequest req) {
-        TraderService.ListModelsResult r = traderService.listModels(userId,
-                new TraderService.ListModelsReq(req.apiProtocol(), req.baseUrl(), req.apiKey()));
-        return r.error() == null ? Result.ok(r.models()) : Result.fail(r.error());
     }
 
     @PostMapping
@@ -202,8 +198,12 @@ public class TraderController {
     @Operation(summary = "竞技场列表（全部trader按收益率排序）")
     public Result<List<TraderPublicView>> arena() {
         long viewer = StpUtil.getLoginIdAsLong();
-        return Result.ok(traderService.all().stream()
-                .map(t -> publicView(t, viewer))
+        List<AiTrader> all = traderService.all();
+        // 模型名按人批量解析（两条查询），不在循环里逐个查
+        Map<Long, UserLlmEndpoint> endpoints = endpointService.resolveForUsers(
+                all.stream().map(AiTrader::getUserId).toList(), UserLlmBinding.TRADER);
+        return Result.ok(all.stream()
+                .map(t -> publicView(t, viewer, endpoints.containsKey(t.getUserId()) ? endpoints.get(t.getUserId()).getModel() : null))
                 .sorted((a, b) -> b.pnlPct().compareTo(a.pnlPct()))
                 .toList());
     }
@@ -230,7 +230,7 @@ public class TraderController {
         } catch (Exception e) {
             log.warn("[Trader] 详情持仓查询失败 traderId={} msg={}", id, e.getMessage());
         }
-        return Result.ok(new TraderDetailView(publicView(t, viewer), positions, pending,
+        return Result.ok(new TraderDetailView(publicView(t, viewer, modelName(t)), positions, pending,
                 traderService.plans(t)));
     }
 
@@ -261,12 +261,18 @@ public class TraderController {
                 .toList());
     }
 
-    private TraderPublicView publicView(AiTrader t, long viewerUserId) {
+    /** 单个 trader 当前端点的模型名；用户把端点删光了给 null（前端显示"未配置"） */
+    private String modelName(AiTrader t) {
+        UserLlmEndpoint e = endpointService.resolve(t.getUserId(), UserLlmBinding.TRADER);
+        return e == null ? null : e.getModel();
+    }
+
+    private TraderPublicView publicView(AiTrader t, long viewerUserId, String model) {
         BigDecimal equity = traderService.latestEquity(t);
         BigDecimal pnlPct = equity.subtract(TraderService.INITIAL_BALANCE)
                 .divide(TraderService.INITIAL_BALANCE, 4, RoundingMode.HALF_UP)
                 .multiply(new BigDecimal("100"));
-        return new TraderPublicView(t.getId(), t.getName(), t.getModel(), t.getStatus(), t.getPausedReason(),
+        return new TraderPublicView(t.getId(), t.getName(), model, t.getStatus(), t.getPausedReason(),
                 t.getSymbols(), t.getIntervalCode(), t.getRoundNo(),
                 equity.setScale(2, RoundingMode.HALF_UP), pnlPct.setScale(2, RoundingMode.HALF_UP),
                 t.getUserId() == viewerUserId);
