@@ -17,6 +17,7 @@ import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.model.tool.ToolCallingChatOptions;
+import org.springframework.ai.openai.OpenAiChatOptions;
 import reactor.core.publisher.Flux;
 
 import java.util.Arrays;
@@ -469,6 +470,33 @@ class ChatTurnRunnerTest {
 
         assertThat(summarizerInput()).doesNotContain(ChatTurnRunner.EXPERT_HANDOFF);
         assertThat(summarizerLastInput().getText()).isEqualTo("你好呀");
+    }
+
+    /**
+     * 路由那一次调用的 options 必须从浅模型自己的派生并强制 required：openai 协议下 Spring AI 2.0 的
+     * OpenAiChatModel 把 prompt 的 options 硬转 OpenAiChatOptions，泛型 builder 造的当场 ClassCastException，
+     * 被兜成 FINISH → 整轮零派发 → 用户只看到"没有可用数据"（真跑实证的病，钉在这）。
+     */
+    @Test
+    void 路由options跟着浅模型的协议走并强制required() {
+        lightAnswers(() -> route("FINISH"), () -> responseOf(new AssistantMessage("市场结论")),
+                () -> responseOf(new AssistantMessage("新闻结论")));
+        summarizerAnswers("这是答案");
+        ChatAgentFactory.Leaves leaves = leaves();
+        // 改桩成 openai 协议的 options（leaves() 里默认桩的是泛型那种）
+        when(light.getOptions()).thenReturn(OpenAiChatOptions.builder().model("deepseek-chat").build());
+
+        new ChatTurnRunner(contextStore, registry)
+                .run(leaves, 1L, SESSION, "BTC 怎么样", answer::append, progress::add,
+                        ChatTurnRunner.TurnYield.NONE);
+
+        ArgumentCaptor<Prompt> prompt = ArgumentCaptor.forClass(Prompt.class);
+        verify(light).call(prompt.capture());
+        assertThat(prompt.getValue().getOptions()).isInstanceOf(OpenAiChatOptions.class);
+        OpenAiChatOptions options = (OpenAiChatOptions) prompt.getValue().getOptions();
+        assertThat(options.getToolChoice()).isEqualTo("required");
+        assertThat(options.getToolCallbacks()).extracting(t -> t.getToolDefinition().name()).containsExactly("route");
+        assertThat(options.getModel()).isEqualTo("deepseek-chat");
     }
 
     /** 专家一个字都没返回时不许冒充数据：上下文里要说清楚，进度事件里要留痕 */
