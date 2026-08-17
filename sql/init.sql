@@ -657,21 +657,6 @@ CREATE TABLE IF NOT EXISTS workbench_chat_context (
 COMMENT ON TABLE workbench_chat_context IS '工作台会话模型侧上下文:完整消息历史(含专家结论/压缩摘要/工具配对),每轮结束整体替换;删会话随展示表一并清';
 COMMENT ON COLUMN workbench_chat_context.state IS 'StateSerializer(Jackson)序列化的{"messages":[...]}:与叶子agent同一序列化器,保Spring AI Message多态与tool_call配对往返无损';
 
--- ============ workbench_memory：工作台跨会话长期记忆（规则化写入，不烧 LLM） ============
--- 每用户最多 WATCH_SYMBOLS 条，召回只按 user_id 走主键前缀，量小不另建索引
-CREATE TABLE IF NOT EXISTS workbench_memory (
-    user_id             BIGINT      NOT NULL,
-    symbol              VARCHAR(32) NOT NULL,
-    hit_count           BIGINT      NOT NULL DEFAULT 1,
-    last_question       TEXT,
-    last_answer_summary TEXT,
-    updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
-    PRIMARY KEY (user_id, symbol)
-);
-COMMENT ON TABLE workbench_memory IS '工作台跨会话记忆:用户关注过哪些symbol及次数,召回后拼进对话prompt前缀';
-COMMENT ON COLUMN workbench_memory.hit_count IS '关注次数,由 ON CONFLICT DO UPDATE 原子自增,避免先读后写丢计数';
-COMMENT ON COLUMN workbench_memory.last_answer_summary IS '只进库不出库:留作排查用,召回时不查此列';
-
 -- ============ news_event：快讯打标存档（K线新闻图标 + 事件研究数据积累） ============
 -- 采集轨独立于 NewsCache 懒加载：定时经缓存拉 BlockBeats（共享额度窗），新条目轻模型打标后落库。
 -- BlockBeats 免费额度一次性不回血，采集节奏见 application.yml 的 news.collect
