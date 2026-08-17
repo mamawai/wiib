@@ -1,6 +1,5 @@
 package com.mawai.wiibsim.util;
 
-import com.mawai.wiibcommon.cache.CacheService;
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -73,7 +72,7 @@ class GameLockExecutorTest {
             }
         });
 
-        return new GameLockExecutor(new RedisLockUtil(redisTemplate), transactionTemplate, mock(CacheService.class));
+        return new GameLockExecutor(new RedisLockUtil(redisTemplate), transactionTemplate);
     }
 
     @Test

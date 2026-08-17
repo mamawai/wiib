@@ -2,16 +2,14 @@ package com.mawai.wiibsim.util;
 
 import com.mawai.wiibcommon.enums.ErrorCode;
 import com.mawai.wiibcommon.exception.BizException;
-import com.mawai.wiibcommon.cache.CacheService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.support.TransactionTemplate;
 
-import java.time.Duration;
 import java.util.function.Supplier;
 
 /**
- * 游戏通用：分布式锁 + 编程式事务 + Redis Session 管理
+ * 游戏通用：分布式锁 + 编程式事务
  * <p>
  * 执行顺序：加锁 → 开事务 → 业务 → 提交事务 → 释放锁（顺序由 GameLockExecutorTest 守）
  * <p>
@@ -24,7 +22,6 @@ public class GameLockExecutor {
 
     private final RedisLockUtil redisLockUtil;
     private final TransactionTemplate transactionTemplate;
-    private final CacheService cacheService;
 
     private static final long LOCK_TIMEOUT_SECONDS = 20;
     private static final long LOCK_WAIT_MILLIS = 3_000;
@@ -53,25 +50,5 @@ public class GameLockExecutor {
         } catch (LockAcquisitionException ex) {
             throw new BizException(ErrorCode.CONCURRENT_UPDATE_FAILED);
         }
-    }
-
-    // ==================== Session CRUD ====================
-
-    public <T> T getSession(String prefix, Long userId) {
-        return cacheService.getObject(prefix + userId);
-    }
-
-    public <T> T requireSession(String prefix, Long userId, ErrorCode notFoundError) {
-        T session = getSession(prefix, userId);
-        if (session == null) throw new BizException(notFoundError);
-        return session;
-    }
-
-    public void saveSession(String prefix, Long userId, Object session, long ttlHours) {
-        cacheService.setObject(prefix + userId, session, Duration.ofHours(ttlHours));
-    }
-
-    public void deleteSession(String prefix, Long userId) {
-        cacheService.delete(prefix + userId);
     }
 }

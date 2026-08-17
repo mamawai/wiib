@@ -41,6 +41,13 @@ public class BlackjackAccount {
     /** 历史单局最大净赢积分。 */
     private Long biggestWin;
 
+    /**
+     * 进行中那一局的完整快照（BlackjackSession 的 JSON），NULL=当前没有牌局。
+     * updateStrategy=ALWAYS：默认策略跳过 null 字段，结算时置 null 就写不进去，这一局会永远"在进行中"。
+     */
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
+    private String sessionJson;
+
     /** 创建时间（插入时自动填充）。 */
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdAt;

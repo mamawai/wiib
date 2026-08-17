@@ -118,6 +118,7 @@ CREATE TABLE IF NOT EXISTS blackjack_account (
     total_won BIGINT NOT NULL DEFAULT 0,
     total_lost BIGINT NOT NULL DEFAULT 0,
     biggest_win BIGINT NOT NULL DEFAULT 0,
+    session_json TEXT,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -133,6 +134,7 @@ COMMENT ON COLUMN blackjack_account.total_hands IS '总局数';
 COMMENT ON COLUMN blackjack_account.total_won IS '总赢额';
 COMMENT ON COLUMN blackjack_account.total_lost IS '总输额';
 COMMENT ON COLUMN blackjack_account.biggest_win IS '单局最大赢额';
+COMMENT ON COLUMN blackjack_account.session_json IS '进行中那一局的完整快照(牌靴/各手牌/庄家牌/保险)，NULL=无牌局；与筹码同行同一笔update，钱和牌不会分叉';
 COMMENT ON COLUMN blackjack_account.created_at IS '创建时间';
 COMMENT ON COLUMN blackjack_account.updated_at IS '更新时间';
 
@@ -358,6 +360,7 @@ CREATE TABLE IF NOT EXISTS video_poker_game (
     user_id BIGINT NOT NULL,
     bet_amount DECIMAL(18,2) NOT NULL,
     initial_cards VARCHAR(64) NOT NULL,
+    deck TEXT,
     held_positions VARCHAR(16) NOT NULL DEFAULT '',
     final_cards VARCHAR(64) NOT NULL DEFAULT '',
     hand_rank VARCHAR(32) NOT NULL DEFAULT '',
@@ -372,6 +375,7 @@ COMMENT ON TABLE video_poker_game IS '视频扑克游戏记录';
 COMMENT ON COLUMN video_poker_game.user_id IS '用户ID';
 COMMENT ON COLUMN video_poker_game.bet_amount IS '下注金额';
 COMMENT ON COLUMN video_poker_game.initial_cards IS '初始5张牌(逗号分隔)';
+COMMENT ON COLUMN video_poker_game.deck IS '本局洗好的整副52张(逗号分隔)，前5张即initial_cards，draw从第6张起补牌';
 COMMENT ON COLUMN video_poker_game.held_positions IS 'HOLD的位置(逗号分隔,0-4)';
 COMMENT ON COLUMN video_poker_game.final_cards IS '最终5张牌(逗号分隔)';
 COMMENT ON COLUMN video_poker_game.hand_rank IS '牌型名称';
@@ -991,3 +995,17 @@ CREATE TABLE IF NOT EXISTS user_llm_binding (
     UNIQUE (user_id, purpose)
 );
 COMMENT ON TABLE  user_llm_binding IS '用途→端点绑定：CHAT_MAIN 对话主模型 / CHAT_LIGHT 对话轻模型 / TRADER 交易员；无行=跟随默认端点。端点删除时其绑定连带删';
+
+-- ============ 三个游戏"进行中的那一局"从 Redis 搬进库表（2026-08） ============
+-- 原本牌局存 Redis 且带 TTL：TTL 一到，已扣的本金不退、局也接不上；事务提交失败还会和库表分叉。
+-- 现在事实源只剩库表——mines_game 的 PLAYING 行、video_poker_game 的 DEALING 行、
+-- blackjack_account.session_json。Redis 那边只留每日积分池计数器 bj:pool:*。
+ALTER TABLE blackjack_account ADD COLUMN IF NOT EXISTS session_json TEXT;
+COMMENT ON COLUMN blackjack_account.session_json IS '进行中那一局的完整快照(牌靴/各手牌/庄家牌/保险)，NULL=无牌局；与筹码同行同一笔update，钱和牌不会分叉';
+
+ALTER TABLE video_poker_game ADD COLUMN IF NOT EXISTS deck TEXT;
+COMMENT ON COLUMN video_poker_game.deck IS '本局洗好的整副52张(逗号分隔)，前5张即initial_cards，draw从第6张起补牌';
+
+-- 切库前留下的 DEALING 行没有牌堆，补不了牌，恢复不了；它们的 Redis session 也早随 TTL 没了。
+-- 不判死这些行会永久占着"有局在进行"，那个用户从此开不了新局。切库后的行 deck 必非空，重复执行无害
+UPDATE video_poker_game SET status = 'SETTLED' WHERE status = 'DEALING' AND deck IS NULL;

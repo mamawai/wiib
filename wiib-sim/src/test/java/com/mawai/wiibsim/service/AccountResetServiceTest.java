@@ -94,17 +94,6 @@ class AccountResetServiceTest {
     }
 
     @Test
-    void clearsInFlightGameSessions() {
-        // 三个游戏"进行中的那一局"只存 Redis。库表行被 purge 删了、游戏钱包也归零了，
-        // 这一局要是留着，用户回去接着提现就能从一局本该抹掉的游戏里拿到派彩
-        service.reset(7L);
-
-        verify(redis).delete("bj:session:7");
-        verify(redis).delete("mines:session:7");
-        verify(redis).delete("vp:session:7");
-    }
-
-    @Test
     void clearsTodayBuffStatusCache() {
         // user_buff 行删了但缓存(TTL 1h)还写着"今天已抽"，不清的话重置完最长一小时抽不了新 buff
         service.reset(7L);

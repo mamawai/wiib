@@ -10,7 +10,6 @@ import com.mawai.wiibsim.mapper.VideoPokerGameMapper;
 import com.mawai.wiibsim.service.UserService;
 import com.mawai.wiibsim.service.VideoPokerService;
 import com.mawai.wiibsim.util.GameLockExecutor;
-import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -25,6 +24,11 @@ import java.util.stream.Collectors;
 import static com.mawai.wiibcommon.enums.LedgerBizType.POKER_BET;
 import static com.mawai.wiibcommon.enums.LedgerBizType.POKER_PAYOUT;
 
+/**
+ * 视频扑克。<b>进行中的那一局就是 video_poker_game 里 status=DEALING 的那行</b>：
+ * 洗好的整副牌落在 deck 列，draw 从第 6 张起补牌——牌堆进了库，这局就不会因为缓存没了
+ * 变成"本金扣了、牌也发了、却永远换不了牌"。
+ */
 @Slf4j
 @Service
 @RequiredArgsConstructor
@@ -37,10 +41,9 @@ public class VideoPokerServiceImpl implements VideoPokerService {
     private static final BigDecimal MIN_BET = new BigDecimal("10");
     private static final BigDecimal MAX_BET = new BigDecimal("5000");
 
-    private static final String SK = "vp:session:";
     private static final String LK = "videopoker:user:";
-    private static final long SESSION_TTL = 2;
 
+    /** 同时是 video_poker_game.status 的两个取值与前端 phase 的两个取值 */
     private static final String PHASE_DEALING = "DEALING";
     private static final String PHASE_SETTLED = "SETTLED";
 
@@ -68,15 +71,6 @@ public class VideoPokerServiceImpl implements VideoPokerService {
         PAYOUTS.put("Jacks or Better", new BigDecimal("1"));
     }
 
-    @Data
-    public static class VPSession implements java.io.Serializable {
-        private long gameId;
-        private BigDecimal betAmount;
-        private List<String> deck;
-        private List<String> cards;
-        private String phase;
-    }
-
     // ==================== 公开接口 ====================
 
     @Override
@@ -84,9 +78,9 @@ public class VideoPokerServiceImpl implements VideoPokerService {
         return gameLock.executeInLock(LK, userId, () -> {
             VideoPokerStatusDTO dto = new VideoPokerStatusDTO();
             dto.setBalance(userService.getGameBalance(userId));
-            VPSession session = gameLock.getSession(SK, userId);
-            if (session != null) {
-                dto.setActiveGame(buildDealingState(session, dto.getBalance()));
+            VideoPokerGame game = videoPokerGameMapper.selectDealing(userId);
+            if (game != null) {
+                dto.setActiveGame(buildDealingState(game, dto.getBalance()));
             }
             return dto;
         });
@@ -99,7 +93,7 @@ public class VideoPokerServiceImpl implements VideoPokerService {
             if (amount == null || amount.compareTo(MIN_BET) < 0 || amount.compareTo(MAX_BET) > 0) {
                 throw new BizException(ErrorCode.VP_INVALID_BET);
             }
-            if (gameLock.getSession(SK, userId) != null) {
+            if (videoPokerGameMapper.selectDealing(userId) != null) {
                 throw new BizException(ErrorCode.VP_GAME_IN_PROGRESS);
             }
             BigDecimal balance = userService.getGameBalance(userId);
@@ -111,12 +105,12 @@ public class VideoPokerServiceImpl implements VideoPokerService {
 
             List<String> deck = buildDeck();
             Collections.shuffle(deck, RANDOM);
-            List<String> cards = new ArrayList<>(deck.subList(0, 5));
 
             VideoPokerGame game = new VideoPokerGame();
             game.setUserId(userId);
             game.setBetAmount(amount);
-            game.setInitialCards(String.join(",", cards));
+            game.setInitialCards(String.join(",", deck.subList(0, 5)));
+            game.setDeck(String.join(",", deck));   // 整副都存，draw 要拿第 6 张往后补牌
             game.setHeldPositions("");
             game.setFinalCards("");
             game.setHandRank("");
@@ -127,16 +121,8 @@ public class VideoPokerServiceImpl implements VideoPokerService {
             game.setUpdatedAt(LocalDateTime.now());
             videoPokerGameMapper.insert(game);
 
-            VPSession session = new VPSession();
-            session.setGameId(game.getId());
-            session.setBetAmount(amount);
-            session.setDeck(deck);
-            session.setCards(cards);
-            session.setPhase(PHASE_DEALING);
-            gameLock.saveSession(SK, userId, session, SESSION_TTL);
-
             BigDecimal newBalance = userService.getGameBalance(userId);
-            return buildDealingState(session, newBalance);
+            return buildDealingState(game, newBalance);
         });
     }
 
@@ -145,8 +131,8 @@ public class VideoPokerServiceImpl implements VideoPokerService {
     public VideoPokerGameStateDTO draw(Long userId, List<Integer> held) {
         List<Integer> heldList = held != null ? held : Collections.emptyList();
         return gameLock.executeInLockTx(LK, userId, () -> {
-            VPSession session = gameLock.requireSession(SK, userId, ErrorCode.VP_NO_ACTIVE_GAME);
-            if (!PHASE_DEALING.equals(session.getPhase())) {
+            VideoPokerGame game = videoPokerGameMapper.selectDealing(userId);
+            if (game == null) {
                 throw new BizException(ErrorCode.VP_NO_ACTIVE_GAME);
             }
 
@@ -160,23 +146,23 @@ public class VideoPokerServiceImpl implements VideoPokerService {
                 }
             }
 
-            List<String> finalCards = new ArrayList<>(session.getCards());
+            List<String> deck = splitCards(game.getDeck());
+            List<String> finalCards = splitCards(game.getInitialCards());
             int nextIdx = 5;
             for (int i = 0; i < 5; i++) {
                 if (!heldSet.contains(i)) {
-                    finalCards.set(i, session.getDeck().get(nextIdx++));
+                    finalCards.set(i, deck.get(nextIdx++));
                 }
             }
 
             String handRank = evaluateHand(finalCards);
             BigDecimal multiplier = PAYOUTS.getOrDefault(handRank, BigDecimal.ZERO);
-            BigDecimal payout = session.getBetAmount().multiply(multiplier).setScale(2, RoundingMode.HALF_UP);
+            BigDecimal payout = game.getBetAmount().multiply(multiplier).setScale(2, RoundingMode.HALF_UP);
 
             if (payout.compareTo(BigDecimal.ZERO) > 0) {
                 userService.updateGameBalance(userId, payout);
             }
 
-            VideoPokerGame game = videoPokerGameMapper.selectById(session.getGameId());
             game.setHeldPositions(heldSet.stream().sorted().map(String::valueOf).collect(Collectors.joining(",")));
             game.setFinalCards(String.join(",", finalCards));
             game.setHandRank(handRank);
@@ -186,13 +172,11 @@ public class VideoPokerServiceImpl implements VideoPokerService {
             game.setUpdatedAt(LocalDateTime.now());
             videoPokerGameMapper.updateById(game);
 
-            gameLock.deleteSession(SK, userId);
-
             BigDecimal balance = userService.getGameBalance(userId);
 
             VideoPokerGameStateDTO dto = new VideoPokerGameStateDTO();
-            dto.setGameId(session.getGameId());
-            dto.setBetAmount(session.getBetAmount());
+            dto.setGameId(game.getId());
+            dto.setBetAmount(game.getBetAmount());
             dto.setCards(finalCards);
             dto.setHeldPositions(new ArrayList<>(heldSet));
             dto.setHandRank(handRank);
@@ -287,11 +271,16 @@ public class VideoPokerServiceImpl implements VideoPokerService {
         return deck;
     }
 
-    private VideoPokerGameStateDTO buildDealingState(VPSession session, BigDecimal balance) {
+    /** 逗号串 → 牌面表。返回可变表，draw 要就地换牌 */
+    private static List<String> splitCards(String csv) {
+        return new ArrayList<>(Arrays.asList(csv.split(",")));
+    }
+
+    private VideoPokerGameStateDTO buildDealingState(VideoPokerGame game, BigDecimal balance) {
         VideoPokerGameStateDTO dto = new VideoPokerGameStateDTO();
-        dto.setGameId(session.getGameId());
-        dto.setBetAmount(session.getBetAmount());
-        dto.setCards(new ArrayList<>(session.getCards()));
+        dto.setGameId(game.getId());
+        dto.setBetAmount(game.getBetAmount());
+        dto.setCards(splitCards(game.getInitialCards()));
         dto.setHeldPositions(Collections.emptyList());
         dto.setHandRank("");
         dto.setMultiplier(BigDecimal.ZERO);

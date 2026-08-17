@@ -16,6 +16,8 @@ public class VideoPokerGame {
     private Long userId;
     private BigDecimal betAmount;
     private String initialCards;
+    /** 本局洗好的整副 52 张（逗号分隔）：前 5 张就是 initialCards，draw 从第 6 张起补牌 */
+    private String deck;
     private String heldPositions;
     private String finalCards;
     private String handRank;
