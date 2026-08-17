@@ -2,6 +2,7 @@ package com.mawai.wiibsim.service;
 
 import com.mawai.wiibcommon.config.BinanceProperties;
 import com.mawai.wiibcommon.market.BinanceRestClient;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.redis.connection.Message;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -24,6 +25,14 @@ class MatchPriceConsumerTest {
     private final FuturesSettlementService settlementService = mock(FuturesSettlementService.class);
     private final CrossLiquidationService crossLiquidationService = mock(CrossLiquidationService.class);
     private final StringRedisTemplate redisTemplate = mock(StringRedisTemplate.class);
+    @SuppressWarnings("unchecked")
+    private final ValueOperations<String, String> valueOps = mock(ValueOperations.class);
+
+    @BeforeEach
+    void stubRedis() {
+        // dispatch 收尾会写 last-tick 键，KV 得有
+        when(redisTemplate.opsForValue()).thenReturn(valueOps);
+    }
 
     private MatchPriceConsumer consumer() {
         return new MatchPriceConsumer(
@@ -52,10 +61,7 @@ class MatchPriceConsumerTest {
     }
 
     @Test
-    @SuppressWarnings("unchecked")
     void dispatchesMarkPriceToLiquidationWithCurrentPriceFromKv() {
-        ValueOperations<String, String> valueOps = mock(ValueOperations.class);
-        when(redisTemplate.opsForValue()).thenReturn(valueOps);
         when(valueOps.get("market:futures-price:BTCUSDT")).thenReturn("49950");
 
         consumer().onMessage(msg("{\"symbol\":\"BTCUSDT\",\"type\":\"markprice\",\"price\":\"50000\"}"), null);

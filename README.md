@@ -110,7 +110,7 @@
 
 - **Binance WS**：现货 miniTicker、永续 markPrice、永续 miniTicker、forceOrder（订全市场流白名单过滤）、aggTrade、depth20、K 线流（crypto 永续 5m 驱动策略 / 预测并落库；15m / 1h、大宗商品与 bStock 现货 5m 仅广播）。
 - **Binance REST**：K 线、ticker、funding、OI、多空比、大户持仓、taker 买卖比、盘口。
-- **断线处理**：WS 断开自动切 REST 轮询保价不中断，重连后按离线区间高低价补触发错过的限价单 / 强平；K 线缺口 REST 回补；流健康注册表 + 管理端手动重试。
+- **断线处理**：WS 断开自动切 REST 轮询保价不中断，按离线区间高低价补触发错过的限价单 / 强平——feed 重连拉固定短窗（断线期间有 REST 轮询兜底），sim 重启则按 Redis 里记的停机时长回看 1m K 线（上限 1000 分钟）；K 线缺口 REST 回补；流健康注册表 + 管理端手动重试。
 - **Deribit**：DVOL 与期权 book summary（供 quant 做 IV / vol 上下文，非用户交易）。
 - **宏观 / 资金面**：farside ETF 资金流、稳定币流通量、IV / OI 分位、Fear & Greed 指数（供 quant 快照上下文）。
 - **Polymarket**：BTC 预测 live-data、UP/DOWN CLOB 盘口。
