@@ -45,18 +45,31 @@ public class AccountPurgeTx {
      */
     @Transactional(rollbackFor = Exception.class)
     public void purge(long userId) {
+        lockUserRow(userId);
         clearUserData(userId);
         userMapper.resetToInitial(userId, initialBalance);
         // 账本刚清空、resetToInitial 又是整体覆写（切面抓不到），补一条初始资金让不变量重新成立。
-        // 这儿不需要 selectByIdForUpdate 读旧值：旧账本整张删了，新账本从这一笔起算
+        // 开头那次 FOR UPDATE 只为取锁不读旧值：旧账本整张删了，新账本从这一笔起算
         userService.recordInitialGrant(userId, initialBalance);
     }
 
     /** 量化子账户销户：同一套清表后直接删 user 行（不复位不入金），AI Trader 过期轮次清理用。 */
     @Transactional(rollbackFor = Exception.class)
     public void deleteAccount(long userId) {
+        lockUserRow(userId);
         clearUserData(userId);
         userMapper.deleteById(userId);
+    }
+
+    /**
+     * 清表前先锁 user 行，这是重置与并发交易之间唯一的互斥点（那个 7 天键只是限频）。
+     * 所有动钱的 UPDATE...RETURNING 都打这一行，并发中的下单/成交/派彩会排到本事务提交后再动，
+     * 动的已是复位后的余额，语义等于"重置后发生的交易"。不锁的话：READ COMMITTED 下 DELETE 之后、
+     * COMMIT 之前插进来的订单/仓位行会活下来，随后 resetToInitial 整体覆写余额，
+     * 等于白送一个仓位或 frozen 对不上。
+     */
+    private void lockUserRow(long userId) {
+        userMapper.selectByIdForUpdate(userId);
     }
 
     private void clearUserData(long userId) {
