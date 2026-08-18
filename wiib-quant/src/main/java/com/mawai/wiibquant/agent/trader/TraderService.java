@@ -223,6 +223,12 @@ public class TraderService {
                 .set(AiTrader::getStatus, AiTrader.STATUS_PAUSED)
                 .set(AiTrader::getPausedReason, null)
                 .set(AiTrader::getConsecutiveFailures, 0)
+                // 未读留言同请求一起作废：那是对上一局那个 trader 说的话（"这周别碰 SOL"），
+                // 新账户新计划新战绩，唯独叮嘱跟过来最没道理；留言最多能挂 24 轮，
+                // 不清就会污染新局开头的一整天——而新局恰恰最需要干净的上下文。
+                // memory/learning_notes 不清是另一回事：那是跨局的认知积累，不是本局的未决事项
+                .set(AiTrader::getOwnerNote, null)
+                .set(AiTrader::getOwnerNoteRounds, 0)
                 .set(AiTrader::getUpdatedAt, LocalDateTime.now()));
         purgeExpiredRounds(t.getId(), userId, newRound);
         log.info("[Trader] 重置开新局 traderId={} round={}", t.getId(), newRound);

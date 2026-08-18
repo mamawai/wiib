@@ -807,6 +807,7 @@ CREATE TABLE IF NOT EXISTS ai_trader (
     memory          TEXT,
     learning_notes  TEXT,
     owner_note      TEXT,
+    owner_note_rounds INT NOT NULL DEFAULT 0,
     sim_user_id     BIGINT,
     round_no        INT NOT NULL DEFAULT 1,
     consecutive_failures INT NOT NULL DEFAULT 0,
@@ -829,6 +830,9 @@ CREATE TABLE IF NOT EXISTS ai_trader (
 ALTER TABLE ai_trader ADD COLUMN IF NOT EXISTS owner_note TEXT;
 ALTER TABLE ai_trader ADD COLUMN IF NOT EXISTS learning_notes TEXT;
 ALTER TABLE ai_trader ADD COLUMN IF NOT EXISTS learning_enabled BOOLEAN NOT NULL DEFAULT TRUE;
+ALTER TABLE ai_trader ADD COLUMN IF NOT EXISTS owner_note_rounds INT NOT NULL DEFAULT 0;
+-- 存量未读留言按原语义补成 1 轮（读后即焚=多轮的特例）。幂等：补过的行 rounds 已非 0，整文件重跑不会重复加轮
+UPDATE ai_trader SET owner_note_rounds = 1 WHERE owner_note IS NOT NULL AND owner_note_rounds = 0;
 COMMENT ON TABLE ai_trader IS 'AI Trader：用户BYOK自主交易代理（每用户1个，独立sim子账户，公开竞技场）';
 COMMENT ON COLUMN ai_trader.status IS 'PAUSED/RUNNING/LIQUIDATED';
 COMMENT ON COLUMN ai_trader.symbols IS '交易币种白名单子集，逗号分隔（须在binance.symbols范围内）';
@@ -840,7 +844,8 @@ COMMENT ON COLUMN ai_trader.alert_threshold_mult IS '警报灵敏度系数≥1.0
 COMMENT ON COLUMN ai_trader.use_default_prompt IS '是否使用平台系统提示词（默认true）；false=自定义提示词成为唯一指令来源（护栏仍硬校验）';
 COMMENT ON COLUMN ai_trader.memory IS '复盘笔记：reviewer每日复盘整理写入（限长文本，≤2000字覆盖写），每次唤醒注入提示词——trader侧只读只注入，本列即记忆学习的接口';
 COMMENT ON COLUMN ai_trader.learning_notes IS '学习笔记：learning agent向同侪学习后整理写入（≤2000字覆盖写），每次唤醒与复盘笔记并列注入；与memory分开存——来源分开模型才分得清"自己的教训"与"从别人学的"';
-COMMENT ON COLUMN ai_trader.owner_note IS '主人留言：对话轨leave_note_to_trader写入，下次唤醒随提示词注入并立刻清空（读后即焚，注入与清空在TraderPromptAssembler同一处）。与memory的分工：memory是复盘沉淀的长期笔记，本列是主人临时说的一句话，说完就没';
+COMMENT ON COLUMN ai_trader.owner_note IS '主人留言：trader动作面板写入，随提示词注入，每注入一次owner_note_rounds减1，减到0连同本列一起清空（注入与递减在TraderPromptAssembler同一处）。与memory的分工：memory是复盘沉淀的长期笔记，本列是主人阶段性交代的一句话';
+COMMENT ON COLUMN ai_trader.owner_note_rounds IS '留言剩余注入轮次，0=无待读留言。1即"念一次就清"，上限24（15m档≈6小时）。递减走条件SQL(正文匹配作前置+原子递减)：唤醒读的是调度时刻的快照，以正文匹配保证只递减自己注入的那条';
 COMMENT ON COLUMN ai_trader.sim_user_id IS '当前局sim子账户userId，每局独立，重置开新账户';
 COMMENT ON COLUMN ai_trader.round_no IS '局数：爆仓/手动重置+1开新局，历史留档';
 COMMENT ON COLUMN ai_trader.leverage_min IS '杠杆区间下界：模型必须从[min,max]里选，越界护栏拒（不截断——悄悄改值会让模型的止损计算失真）';

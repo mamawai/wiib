@@ -1,29 +1,39 @@
 package com.mawai.wiibquant.agent.chat;
 
+import com.alibaba.fastjson2.JSONObject;
 import org.springframework.stereotype.Component;
 
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.function.Consumer;
+import java.util.function.BiConsumer;
 
 /**
- * 工作台运行注册表：sessionId → 运行中标记 + 进度监听。
+ * 工作台运行注册表：sessionId → 运行中标记 + SSE 事件出口。
  * <ul>
  *   <li>运行状态：切页/刷新回来后前端查 status 得知"AI 还在后台跑"（图不随 SSE 断连中止）</li>
- *   <li>进度总线：深研判等长耗时工具在图内同步阻塞跑，经此把阶段进度推给 SSE 通道，
- *       解决"几分钟零输出不知道卡在哪"</li>
+ *   <li>事件总线：深研判等长耗时工具在图内同步阻塞跑，经此把阶段进度推给 SSE 通道，
+ *       解决"几分钟零输出不知道卡在哪"；trader 动作类工具经此推表单卡，把执行权交回用户点击</li>
  * </ul>
  * 进程内存级即可：单实例部署，重启即无运行中会话，无需持久化。
  */
 @Component
 public class WorkbenchRunRegistry {
 
-    /** value=进度监听（没有进度可推时也占位，key 存在即"运行中"） */
-    private final Map<String, Consumer<String>> runs = new ConcurrentHashMap<>();
+    /**
+     * 无通道占位：补答轮只要"运行中"这个标记，它没有 SSE 可推。
+     * <p>
+     * 用具名常量而不是各处随手写的 {@code (e, d) -> {}}：{@link #publish} 要靠身份认出
+     * "这一轮压根推不出去"并如实返回 false。表单卡最怕的就是回模型一句"已弹出"，
+     * 而用户那边什么都没有。
+     */
+    public static final BiConsumer<String, JSONObject> NO_EMITTER = (event, data) -> { };
 
-    /** 一轮对话开跑：登记运行中 + 挂进度监听。 */
-    public void start(String sessionId, Consumer<String> progressListener) {
-        runs.put(sessionId, progressListener);
+    /** value=SSE 事件出口（事件名+data；没有通道可推时放 {@link #NO_EMITTER} 占位，key 存在即"运行中"） */
+    private final Map<String, BiConsumer<String, JSONObject>> runs = new ConcurrentHashMap<>();
+
+    /** 一轮对话开跑：登记运行中 + 挂事件出口。 */
+    public void start(String sessionId, BiConsumer<String, JSONObject> emitter) {
+        runs.put(sessionId, emitter);
     }
 
     /** 一轮对话结束（含异常路径）。 */
@@ -35,11 +45,35 @@ public class WorkbenchRunRegistry {
         return runs.containsKey(sessionId);
     }
 
-    /** 工具侧：推一条阶段进度（无监听=会话已结束或断连，静默丢弃）。 */
+    /** 工具侧：推一条阶段进度。data 字段名 {@code text} 是既有前端契约，别改。 */
     public void publishProgress(String sessionId, String text) {
-        Consumer<String> listener = runs.get(sessionId);
-        if (listener != null) {
-            listener.accept(text);
+        publish(sessionId, "progress", new JSONObject().fluentPut("text", text));
+    }
+
+    /**
+     * 工具侧：请前端弹一张表单卡（模型只出预填，执行权归用户点击）。
+     * <p>
+     * 返回值不能省：断连、会话已结束、补答轮这几种情况下卡根本推不出去，
+     * 调用方必须据此如实告诉模型"没弹出来"，否则模型会宣称已弹卡，用户却永远等不到。
+     *
+     * @param formType note / wake / review
+     * @param prefill  预填字段，可为 null（不放这个字段，前端按空表单渲染）
+     */
+    public boolean publishForm(String sessionId, String formType, JSONObject prefill) {
+        JSONObject data = new JSONObject().fluentPut("form", formType);
+        if (prefill != null) {
+            data.fluentPut("prefill", prefill);
         }
+        return publish(sessionId, "form_request", data);
+    }
+
+    /** 统一出口：无监听（会话已结束/断连）或无通道（补答轮）都静默丢弃，返回 false。 */
+    private boolean publish(String sessionId, String event, JSONObject data) {
+        BiConsumer<String, JSONObject> listener = runs.get(sessionId);
+        if (listener == null || listener == NO_EMITTER) {
+            return false;
+        }
+        listener.accept(event, data);
+        return true;
     }
 }

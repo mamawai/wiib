@@ -26,8 +26,9 @@ export function Backtest() {
         <div className="w-11 h-11 rounded-lg pt-card flex items-center justify-center bg-primary/10">
           <FlaskConical className="w-5.5 h-5.5 text-primary" />
         </div>
-        {/* flex-1 把 basis 归零：副标题的 max-content 有 330px，不归零它会独自撑破窄屏行宽、
-            把标题挤成单独一行（truncate 只管渲染，不参与 flex 的换行判定） */}
+        {/* flex-1 把 basis 归零、只按剩余空间伸缩：副标题的 max-content 有 330px，
+            带着这个宽度参与换行判定就会独占窄屏一行、把标题挤下去
+            （truncate 只管渲染，不参与 flex 的换行判定） */}
         <div className="min-w-0 flex-1">
           <h1 className="text-xl font-black tracking-tight">回测</h1>
           <p className="text-[11px] text-muted-foreground truncate">
@@ -36,7 +37,8 @@ export function Backtest() {
               : '逐根揭示历史行情 · 按收盘价开多开空、加减仓 · 练自己的盘感'}
           </p>
         </div>
-        {/* 窄屏主动换到第二行并撑满平分，别跟图标+标题挤一行把副标题压没；sm 起恢复右对齐 */}
+        {/* 切换器窄屏独占第二行、两颗平分（w-full + flex-1），标题行整行留给图标与副标题；
+            sm 起收回自然宽度靠右 */}
         <div className="w-full sm:w-auto sm:ml-auto flex rounded-lg border border-border overflow-hidden">
           <button type="button" onClick={() => switchMode('strategy')}
             className={cn('flex-1 sm:flex-none px-3.5 h-10 text-xs font-black flex items-center gap-1.5 transition-colors',

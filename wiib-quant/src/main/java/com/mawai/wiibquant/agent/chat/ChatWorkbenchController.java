@@ -42,8 +42,8 @@ import java.util.concurrent.TimeoutException;
 /**
  * 研判工作台对话入口（P4）：SSE 流式暴露多 agent 调度全过程。
  * 事件协议：session(会话号) / agent_start(调度切换) / token(LLM流，带 agent+role 区分专家过程/答案)
- * / progress(长工具阶段进度) / done(完整回答；deferred=true 是让位收尾，真答案由补答轮落库、
- * 前端轮询补显) / error。
+ * / progress(长工具阶段进度) / form_request(模型请求弹一张表单卡，执行权归用户点击)
+ * / done(完整回答；deferred=true 是让位收尾，真答案由补答轮落库、前端轮询补显) / error。
  * 续聊上下文按 sessionId 存在自建的 {@link ChatContextStore} 表里，带同一 sessionId 再发即续聊；
  * 断连不中止本轮：{@link ChatTurnRunner} 跑完照样落历史，前端靠 status 接口+历史回放补答案。
  */
@@ -264,9 +264,9 @@ public class ChatWorkbenchController {
         ScheduledFuture<?> heartbeat = heartbeatScheduler.scheduleWithFixedDelay(
                 channel::heartbeat, HEARTBEAT_SECONDS, HEARTBEAT_SECONDS, TimeUnit.SECONDS);
         try {
-            // 运行登记：status 接口靠它回答"是否还在跑"；进度监听把长工具的阶段进度转成 SSE 事件
-            runRegistry.start(sessionId, text ->
-                    channel.send("progress", new JSONObject().fluentPut("text", text)));
+            // 运行登记：status 接口靠它回答"是否还在跑"；事件出口把工具侧的进度/表单卡转成 SSE 帧。
+            // SseChannel.send(String, JSONObject) 无重载、返回 void，签名恰好就是出口要的形状，直接方法引用
+            runRegistry.start(sessionId, channel::send);
             channel.send("session", new JSONObject().fluentPut("sessionId", sessionId));
             chatHistoryService.append(sessionId, userId, "user", message);
 

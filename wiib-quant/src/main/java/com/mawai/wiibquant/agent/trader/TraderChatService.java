@@ -3,7 +3,6 @@ package com.mawai.wiibquant.agent.trader;
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
-import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.mawai.wiibcommon.dto.FuturesPositionDTO;
 import com.mawai.wiibcommon.entity.AiTrader;
 import com.mawai.wiibcommon.entity.AiTraderDecision;
@@ -11,29 +10,24 @@ import com.mawai.wiibcommon.entity.AiTraderPlan;
 import com.mawai.wiibcommon.entity.FuturesStopLoss;
 import com.mawai.wiibcommon.entity.FuturesTakeProfit;
 import com.mawai.wiibcommon.entity.UserLlmEndpoint;
-import com.mawai.wiibquant.agent.learning.ReviewRunner;
 import com.mawai.wiibquant.external.sim.SimTradeClient;
-import com.mawai.wiibquant.mapper.AiTraderMapper;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
-import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 
 /**
- * 对话轨访问 trader 的唯一入口：查询读库，动作进程内调 runner。
+ * 对话轨读 trader 的唯一入口：只查询、不动手，动作归 {@link TraderActionService}。
  * <p>
- * <b>两个 agent 的解耦纪律在这里落地</b>：chat 与 trader 从不互相对话——查询只读 trader 写下的表，
- * 动作只是"扣一次扳机"（唤醒/复盘/留言），扣完就走，不等 trader 回话、也没有任何回调。
- * trader 依旧是那个"醒来读库→决策→写库→睡去"的无状态回路，它根本不知道有人在跟它聊天。
+ * <b>两个 agent 的解耦纪律在这里落地</b>：chat 与 trader 从不互相对话，查询只读 trader
+ * 自己写下的表。trader 依旧是那个"醒来读库→决策→写库→睡去"的无状态回路，
+ * 它根本不知道有人在跟它聊天。
  * <p>
  * 所有方法按 userId 取自己的 trader，取不到就如实说"还没有"——归属判断只此一处。
  */
-@Slf4j
 @Service
 @RequiredArgsConstructor
 public class TraderChatService {
@@ -45,15 +39,10 @@ public class TraderChatService {
     static final int MAX_DECISIONS = 20;
     static final int DEFAULT_DECISIONS = 5;
     private static final int RECENT_CLOSED_PLANS = 5;
-    /** 留言长度上限：它要原样进下一轮系统提示词，太长会挤掉真正的交易上下文 */
-    static final int MAX_NOTE_CHARS = 500;
 
     private final TraderService traderService;
     private final TraderModelFactory modelFactory;
     private final TraderPlanStore planStore;
-    private final TraderScheduler scheduler;
-    private final ReviewRunner reviewRunner;
-    private final AiTraderMapper traderMapper;
     private final SimTradeClient simTradeClient;
 
     // ===== 查询（纯读库） =====
@@ -88,6 +77,8 @@ public class TraderChatService {
                 .fluentPut("learningNotesNote", "学习笔记全文：learning agent 向同侪学习写的，trader 每次唤醒都会看到")
                 .fluentPut("customPrompt", t.getCustomPrompt())
                 .fluentPut("pendingOwnerNote", t.getOwnerNote())
+                // 剩余轮次一并给：模型答"我刚留的话还剩几次"只能靠库里这个数，卡片本身不进对话历史
+                .fluentPut("pendingOwnerNoteRounds", t.getOwnerNoteRounds())
                 .toJSONString();
     }
 
@@ -174,89 +165,6 @@ public class TraderChatService {
                 .toJSONString();
     }
 
-    // ===== 动作 =====
-
-    /**
-     * 手动唤醒：治理与准入全归调度器，这里只判"能不能唤醒这个 trader"。
-     * <p>
-     * 暂停状态不放行——手动唤醒要是能绕过暂停，那"暂停"就成了摆设；连败自动暂停的
-     * trader 更不该被一句话叫起来接着亏。
-     */
-    public String wake(long userId) {
-        AiTrader t = traderService.mine(userId);
-        if (t == null) {
-            return noTrader();
-        }
-        if (AiTrader.STATUS_LIQUIDATED.equals(t.getStatus())) {
-            return outcome(false, "本局已爆仓终局，要先在配置页重置开新一局才能继续交易");
-        }
-        if (!AiTrader.STATUS_RUNNING.equals(t.getStatus())) {
-            return outcome(false, "trader 当前是暂停状态"
-                    + (t.getPausedReason() == null ? "" : "（" + t.getPausedReason() + "）")
-                    + "，手动唤醒不绕过暂停：请先去「我的 Trader」页启动它");
-        }
-        String why = scheduler.tryManualWake(t);
-        return why == null
-                ? outcome(true, "已触发一次唤醒，trader 正在后台做决策；结果稍后出现在竞技场的决策时间线上")
-                : outcome(false, why);
-    }
-
-    /**
-     * 点播复盘：准入同步、执行异步（与 wake_trader 同一范式）。
-     * <p>
-     * 复盘预算 {@link ReviewRunner#REVIEW_TIMEOUT_SECONDS}，而工作台整条 SSE 也只有 600s——
-     * 同步跑满就没时间让汇总模型开口了，用户等来的是超时不是回答。
-     * 但"有没有新素材"必须留在同步侧当场答：那是用户唯一关心的"会不会白花钱"，
-     * 推给时间线等于让他等几分钟再去扑一场空。
-     */
-    public String reviewNow(long userId) {
-        AiTrader t = traderService.mine(userId);
-        if (t == null) {
-            return noTrader();
-        }
-        // 停工窗口挡点播：三阶段交接期间旁路写复盘，会让 learner 读到"半天"的复盘（脏读进记忆）
-        if (scheduler.isHandoverActive()) {
-            return outcome(false, "全体复盘与学习进行中（日线交接），几分钟后窗口关闭再试");
-        }
-        long at = System.currentTimeMillis();
-        if (!reviewRunner.hasMaterial(t, at)) {
-            return outcome(false, "自上次复盘以来没有新的已了结交易，已跳过（没有消耗模型调用）");
-        }
-        Thread.startVirtualThread(() -> {
-            try {
-                reviewRunner.review(t, at);
-            } catch (Exception e) {
-                // review() 自己兜住了模型调用的失败并留 ERROR 行；这里兜的是它之前那几步库查询——
-                // 同步时异常还能顺着调用栈回给用户，异步之后没人接得住，不打日志就彻底无声了
-                log.warn("[TraderChat] 点播复盘异常逃逸 userId={} msg={}", userId, e.getMessage());
-            }
-        });
-        return outcome(true, "已开始复盘，几分钟后会在竞技场的决策时间线上出现一篇 REVIEW；"
-                + "失败也会留一条 ERROR 记录，不会没有下文");
-    }
-
-    /** 留言：覆盖写（同时只有一条待读），trader 下次唤醒注入后即焚。 */
-    public String leaveNote(long userId, String note) {
-        AiTrader t = traderService.mine(userId);
-        if (t == null) {
-            return noTrader();
-        }
-        if (note == null || note.isBlank()) {
-            return outcome(false, "留言内容不能为空");
-        }
-        String text = note.strip();
-        if (text.length() > MAX_NOTE_CHARS) {
-            text = text.substring(0, MAX_NOTE_CHARS);
-        }
-        traderMapper.update(null, new LambdaUpdateWrapper<AiTrader>()
-                .eq(AiTrader::getId, t.getId())
-                .set(AiTrader::getOwnerNote, text)
-                .set(AiTrader::getUpdatedAt, LocalDateTime.now()));
-        log.info("[TraderChat] 留言已记下 traderId={} 长度={}", t.getId(), text.length());
-        return outcome(true, "留言已记下，trader 下次唤醒时会看到（只看这一次，看完就消失）"
-                + (t.getOwnerNote() == null ? "" : "；覆盖了上一条还没被读走的留言"));
-    }
-
     // ===== 内部 =====
 
     private static JSONObject planJson(AiTraderPlan p) {
@@ -306,7 +214,4 @@ public class TraderChatService {
                 .toJSONString();
     }
 
-    private static String outcome(boolean ok, String message) {
-        return new JSONObject().fluentPut("ok", ok).fluentPut("message", message).toJSONString();
-    }
 }

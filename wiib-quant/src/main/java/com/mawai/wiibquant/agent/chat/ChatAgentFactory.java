@@ -297,7 +297,7 @@ public class ChatAgentFactory {
                 .streaming(true) // 答案要逐字推给前端
                 .toolsFromObject(new DeepAnalysisToolkit(deep, deepAnalysisService, runRegistry))
                 // 可以多次调用：两套工具分别是"研判"与"对 trader 动手"，合成一个类只会让职责糊掉
-                .toolsFromObject(new TraderActionToolkit(traderChatService, userId))
+                .toolsFromObject(new TraderActionToolkit(runRegistry, userId))
                 .defaultSystem("""
                         你是加密货币研判工作台的分析师。对话里已经有专家 agent 取回的真实数据，
                         你的职责是据此写出最终回答（新闻的联网补充也归你，见原则2）。
@@ -318,9 +318,11 @@ public class ChatAgentFactory {
                            返回 PENDING_APPROVAL 时告知用户确认卡片已弹出，等确认后你会被再次唤起执行）；
                            "怎么看走势"这类普通提问不要调它、也不要主动推销，直接按专家数据作答
                         6. 对用户自己 AI 交易员动手的三个工具，同样只在用户明确要求时才调，绝不主动推销：
-                           · wake_trader（立刻唤醒它做一次决策，可能真开/平仓）与 review_trader_now（立刻复盘）
-                             都昂贵、需用户确认，PENDING_APPROVAL 的处理同上
-                           · leave_note_to_trader（给它留一句话，下次唤醒看一次就焚毁）便宜，不需要确认
+                           · wake_trader（立刻唤醒它做一次决策，可能真开/平仓）、review_trader_now（立刻复盘）、
+                             leave_note_to_trader（给它留一句话，按用户设定的轮次逐轮注入，上限24轮）
+                           · 这三个工具只会给用户打开一张表单，真正执不执行由用户点击决定：调用后如实说
+                             "表单已打开，请确认后提交"，绝不能说已经唤醒了／已经复盘了／留言已记下
+                           · 工具返回说表单没能打开时，如实告诉用户去 trader 面板手动操作，不要假装已经打开
                            查询类问题（它现在怎么样/持了什么仓/那笔为什么开）不归你，trader_agent 专家已经取回数据了
 
                         输出精炼中文。""".formatted(supplementTag, mergedTag))

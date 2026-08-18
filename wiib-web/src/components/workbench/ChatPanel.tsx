@@ -1,10 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import { Bot, ChevronLeft, ChevronRight, History, KeyRound, Loader2, MessageSquareText, RotateCcw, Send, ShieldQuestion, Trash2, X } from 'lucide-react';
+import { BookOpenCheck, Bot, ChevronLeft, ChevronRight, Cpu, History, KeyRound, Loader2, MessageSquarePlus, MessageSquareText, RotateCcw, Send, ShieldQuestion, Trash2, X, Zap } from 'lucide-react';
 import { workbenchApi } from '../../api';
 import { Markdown } from '../Markdown';
+import { useClickOutside } from '../../hooks/useClickOutside';
 import { cn, fmtDateTime } from '../../lib/utils';
 import { chatStore, type ChatItem } from './chatStore';
-import type { WorkbenchSessionSummary } from '../../types';
+import { TraderFormCard } from './TraderFormCards';
+import type { TraderFormKind, WorkbenchSessionSummary } from '../../types';
+
+/** trader 动作入口的三项：点了只是把表单卡放进对话，执行要在卡上再按一次 */
+const TRADER_ACTIONS: { form: TraderFormKind; label: string; icon: typeof Zap }[] = [
+  { form: 'note', label: '给它留言', icon: MessageSquarePlus },
+  { form: 'wake', label: '手动唤醒', icon: Zap },
+  { form: 'review', label: '立即复盘', icon: BookOpenCheck },
+];
 
 /** 调度中枢的对外名字：后端事件里仍叫 supervisor，只在展示层换 */
 const HUB_NAME = 'Polaris';
@@ -143,6 +152,8 @@ export function ChatPanel({ onClose, onGoConfig }: ChatPanelProps) {
   const { items, loading, background, sessionId, needsConfig } = useSyncExternalStore(chatStore.subscribe, chatStore.getSnapshot);
   const [input, setInput] = useState('');
   const [hitlBusy, setHitlBusy] = useState(false);
+  const [actionMenu, setActionMenu] = useState(false);
+  const actionMenuRef = useRef<HTMLDivElement>(null);
   const [showHistory, setShowHistory] = useState(false);
   const [sessions, setSessions] = useState<WorkbenchSessionSummary[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -158,6 +169,9 @@ export function ChatPanel({ onClose, onGoConfig }: ChatPanelProps) {
 
   // 首挂：回放历史 + 感知后台运行状态（store 级幂等；关面板再开时 store 状态还在，直接续显）
   useEffect(() => { chatStore.init(); }, []);
+
+  // ref 包住触发按钮本身，否则点按钮会同时触发 onOutside 与 onClick，菜单一闪就关
+  useClickOutside(actionMenuRef, () => setActionMenu(false), actionMenu);
 
   // 换会话后 items 整体重建，旧下标失义
   useEffect(() => { setRailOverride({}); }, [sessionId]);
@@ -210,11 +224,11 @@ export function ChatPanel({ onClose, onGoConfig }: ChatPanelProps) {
     void chatStore.send(msg);
   }, [input]);
 
-  /** HITL 决策交给 store；busy 只是本地防连点。 */
-  const handleHitl = useCallback(async (idx: number, approved: boolean) => {
+  /** HITL 决策交给 store；busy 只是本地防连点。按 requestId 认卡，条目在列表里挪位置也不会打偏。 */
+  const handleHitl = useCallback(async (requestId: string, approved: boolean) => {
     setHitlBusy(true);
     try {
-      await chatStore.hitlDecide(idx, approved);
+      await chatStore.hitlDecide(requestId, approved);
     } catch (err) {
       chatStore.pushError((err as Error).message || '确认失败，请重试');
     } finally {
@@ -244,13 +258,44 @@ export function ChatPanel({ onClose, onGoConfig }: ChatPanelProps) {
     <div className="flex flex-col h-full min-h-0">
       {/* 面板头 */}
       <div className="flex items-center gap-2 px-4 py-3 border-b border-border shrink-0">
-        <Bot className="w-4.5 h-4.5 text-primary" />
-        <span className="text-sm font-black">研判对话</span>
-        <span className="text-[10px] text-muted-foreground hidden sm:inline">{HUB_NAME} 调度 · 关窗后台继续</span>
+        <Bot className="w-4.5 h-4.5 text-primary shrink-0" />
+        <span className="text-sm font-black shrink-0">研判对话</span>
+        {/* 副标题吃掉剩余空间并允许截断：面板宽度可拖到 320，而 sm: 判的是视口不是面板，
+            不给它 flex-1 + truncate 的话 PC 上窄面板会被这句话把按钮挤出去 */}
+        <span className="hidden sm:block flex-1 min-w-0 truncate text-[10px] text-muted-foreground">
+          {HUB_NAME} 调度 · 关窗后台继续
+        </span>
+        <div ref={actionMenuRef} className="relative ml-auto shrink-0">
+          <button
+            onClick={() => setActionMenu(v => !v)}
+            className={cn(
+              'border border-border hover:bg-surface-hover w-7 h-7 rounded-lg flex items-center justify-center hover:text-primary',
+              actionMenu ? 'text-primary' : 'text-muted-foreground',
+            )}
+            title="我的 trader"
+            aria-label="trader 动作面板"
+          >
+            <Cpu className="w-3.5 h-3.5" />
+          </button>
+          {actionMenu && (
+            // z-20 压过历史叠层的 z-10；菜单落在面板框内，不必 portal 到 body
+            <div className="absolute right-0 top-full mt-1 z-20 w-32 rounded-lg pt-card shadow-lg py-1 animate-in fade-in slide-in-from-top-2">
+              {TRADER_ACTIONS.map(a => (
+                <button
+                  key={a.form}
+                  onClick={() => { chatStore.openForm(a.form); setActionMenu(false); }}
+                  className="w-full flex items-center gap-2 px-3 py-1.5 text-xs font-bold text-muted-foreground hover:bg-surface-hover hover:text-foreground"
+                >
+                  <a.icon className="w-3.5 h-3.5 shrink-0" /> {a.label}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
         <button
           onClick={() => showHistory ? setShowHistory(false) : openHistory()}
           className={cn(
-            'ml-auto border border-border hover:bg-surface-hover w-7 h-7 rounded-lg flex items-center justify-center hover:text-primary',
+            'shrink-0 border border-border hover:bg-surface-hover w-7 h-7 rounded-lg flex items-center justify-center hover:text-primary',
             showHistory ? 'text-primary' : 'text-muted-foreground',
           )}
           title="历史对话"
@@ -259,7 +304,7 @@ export function ChatPanel({ onClose, onGoConfig }: ChatPanelProps) {
         </button>
         <button
           onClick={handleNewSession}
-          className="border border-border hover:bg-surface-hover w-7 h-7 rounded-lg flex items-center justify-center text-muted-foreground hover:text-primary"
+          className="shrink-0 border border-border hover:bg-surface-hover w-7 h-7 rounded-lg flex items-center justify-center text-muted-foreground hover:text-primary"
           title="新会话"
         >
           <RotateCcw className="w-3.5 h-3.5" />
@@ -267,7 +312,7 @@ export function ChatPanel({ onClose, onGoConfig }: ChatPanelProps) {
         {onClose && (
           <button
             onClick={onClose}
-            className="border border-border hover:bg-surface-hover w-7 h-7 rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground"
+            className="shrink-0 border border-border hover:bg-surface-hover w-7 h-7 rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground"
             title="关闭"
             aria-label="关闭对话面板"
           >
@@ -342,7 +387,22 @@ export function ChatPanel({ onClose, onGoConfig }: ChatPanelProps) {
                   </div>
                 );
               case 'hitl':
-                return <HitlCard key={index} item={item} busy={hitlBusy} onDecide={a => void handleHitl(index, a)} />;
+                return <HitlCard key={item.requestId} item={item} busy={hitlBusy}
+                                 onDecide={a => void handleHitl(item.requestId, a)} />;
+              case 'form':
+                // key 用卡自身的 id：草稿在卡的组件 state 里，按下标做 key 时列表中间插条目
+                // 会让 React 拿错元素配对、把正在敲的留言卸载掉
+                return (
+                  <TraderFormCard
+                    key={item.id}
+                    form={item.form}
+                    prefill={item.prefill}
+                    status={item.status}
+                    result={item.result}
+                    onSettle={r => chatStore.settleForm(item.id, r)}
+                    onCancel={() => chatStore.closeForm(item.id)}
+                  />
+                );
               case 'error':
                 return (
                   <p key={index} className="text-[11px] text-destructive/80 text-center py-1">{item.message}</p>

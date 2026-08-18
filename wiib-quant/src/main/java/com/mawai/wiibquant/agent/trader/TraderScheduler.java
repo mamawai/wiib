@@ -58,6 +58,9 @@ public class TraderScheduler {
     /** 警报冷静期：距该 trader 上一次任何唤醒（例行/警报）不足 5 分钟不再警报 */
     static final long ALERT_COOLDOWN_MS = 5 * 60_000L;
 
+    /** 同一 trader 不并行的拒因；预检与真占位两处共用一份措辞 */
+    private static final String WAKE_BUSY_REASON = "上一轮唤醒还在跑，本次手动唤醒跳过（同一 trader 不并行）";
+
     private final Semaphore slots = new Semaphore(MAX_CONCURRENT_WAKEUPS);
     private final Set<Long> inFlight = ConcurrentHashMap.newKeySet();
     /** 每 trader 最近已触发的边界时刻：多个 watch 币在同一刻收盘会各发一次事件，靠它去重 */
@@ -312,7 +315,14 @@ public class TraderScheduler {
      *
      * @return null=已触发；非空=没触发的原因（原样给模型转述给用户）
      */
-    public String tryManualWake(AiTrader trader) {
+    /**
+     * 手动唤醒的准入预检：不能唤醒时给出原因，能唤醒返回 null。
+     * 动作面板拿它决定按钮点不点得动，与 {@link #tryManualWake} 共用同一份判断——
+     * 面板显示的拒因就是真点下去会拿到的那一句。
+     * <p>
+     * inFlight 这条只查不占：面板是轮询刷新的，占位会把 trader 锁死。
+     */
+    public String manualWakeBlockedReason(AiTrader trader) {
         if (handoverActive) {
             return "全体复盘与学习进行中（日线交接的停工窗口），几分钟后窗口关闭再试";
         }
@@ -326,8 +336,33 @@ public class TraderScheduler {
         if (TraderWakeupRunner.wakeBudgetSeconds(boundary, intervalMs, now) < TraderWakeupRunner.MIN_WAKE_SECONDS) {
             return "距下一次例行唤醒不足" + TraderWakeupRunner.MIN_WAKE_SECONDS + "秒，本次手动唤醒省下了，稍等就有新决策";
         }
+        if (inFlight.contains(trader.getId())) {
+            return WAKE_BUSY_REASON;
+        }
+        return null;
+    }
+
+    /** 下一次例行唤醒的时刻；档位已下线返回 null。动作面板用它显示"再等多久就自动醒了" */
+    public Long nextRoutineWakeAt(AiTrader trader) {
+        Long intervalMs = INTERVAL_MS.get(trader.getIntervalCode());
+        if (intervalMs == null) {
+            return null;
+        }
+        long now = nowMs.getAsLong();
+        return now - Math.floorMod(now, intervalMs) + intervalMs;
+    }
+
+    public String tryManualWake(AiTrader trader) {
+        String blocked = manualWakeBlockedReason(trader);
+        if (blocked != null) {
+            return blocked;
+        }
+        long intervalMs = INTERVAL_MS.get(trader.getIntervalCode());
+        long now = nowMs.getAsLong();
+        long boundary = now - Math.floorMod(now, intervalMs);
+        // 预检只是"看一眼"不占位；真占位要在这里再抢一次——预检到现在之间可能有别人先进来了
         if (!inFlight.add(trader.getId())) {
-            return "上一轮唤醒还在跑，本次手动唤醒跳过（同一 trader 不并行）";
+            return WAKE_BUSY_REASON;
         }
         // 一并记进冷静期基准：刚手动醒过，紧接着的波动警报就没有增量价值了
         lastWakeAt.put(trader.getId(), now);

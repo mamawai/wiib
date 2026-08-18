@@ -1,5 +1,5 @@
 import { ApiError, workbenchApi } from '../../api';
-import type { WorkbenchChatMessage, WorkbenchEvent } from '../../types';
+import type { TraderFormKind, WorkbenchChatMessage, WorkbenchEvent } from '../../types';
 
 /** 与后端 ErrorCode 对齐：2200 段是研判工作台（1600 段是 Crypto，别复用） */
 export const CHAT_ERROR = {
@@ -15,6 +15,9 @@ export const CHAT_ERROR = {
  * 整页刷新后 store 归零，靠 status 轮询发现"AI 还在后台跑"，结束拉历史补答案。
  */
 
+/** trader 动作表单卡的三种类型（与后端 form_request 的 formType 一一对应） */
+export type FormKind = TraderFormKind;
+
 export type ChatItem =
   // queued=后端不让位（正在出答案）时先上屏排队，本轮结束自动真发；
   // 专家取数期间的新消息会触发后端让位直接插话，不走排队
@@ -25,8 +28,10 @@ export type ChatItem =
   | { kind: 'agent'; node: string; agent: string }
   // 长工具阶段进度（深研判等）：最新一条亮着转圈，后续事件到达即熄灭
   | { kind: 'progress'; text: string; active: boolean }
-  // requestId 存在 item 上：hitlDecide 按 index 取回本条再原样回传，服务端据此确认"点的是哪张卡"
+  // requestId 存在 item 上：hitlDecide 按它取回本条再原样回传，服务端据此确认"点的是哪张卡"
   | { kind: 'hitl'; symbol: string; reason: string; requestId: string; resumeMessage: string; status: 'pending' | 'approved' | 'rejected' }
+  // trader 动作表单卡：模型只有弹卡的权，执行权归用户点击。纯前端态不落历史，id 本地发
+  | { kind: 'form'; id: string; form: FormKind; prefill?: Record<string, unknown>; status: 'pending' | 'done'; result?: string }
   | { kind: 'error'; message: string };
 
 export interface ChatState {
@@ -59,6 +64,11 @@ let initialized = false;
 let sendQueue: string[] = [];
 /** 有被让位的问题还没补答：流一收尾就转后台轮询，等补答落历史后整体回放补显 */
 let deferredPending = false;
+/** 表单卡只活在本地 items 里（不落历史），自增序号足够把几张卡区分开 */
+let formSeq = 0;
+function nextFormId() {
+  return `form-${++formSeq}`;
+}
 
 function set(patch: Partial<ChatState>) {
   state = { ...state, ...patch };
@@ -80,6 +90,11 @@ function toItems(messages: WorkbenchChatMessage[]): ChatItem[] {
   return messages.map(m => m.role === 'user'
     ? { kind: 'user' as const, content: m.content }
     : { kind: 'assistant' as const, content: m.content, streaming: false });
+}
+
+/** 没填完的表单卡：历史回放整体重建 items 时得接回尾部，否则用户填一半的内容无声消失 */
+function pendingForms(): ChatItem[] {
+  return state.items.filter(it => it.kind === 'form' && it.status === 'pending');
 }
 
 /** 进度行熄灭：token/新进度到达说明上个阶段已过去 */
@@ -146,12 +161,15 @@ function handleEvent(e: WorkbenchEvent) {
         const next = base.map(it =>
           it.kind === 'expert' && it.streaming ? { ...it, streaming: false } : it,
         );
-        const last = next[next.length - 1];
-        if (last?.kind === 'assistant' && last.streaming) {
-          next[next.length - 1] = { ...last, content: last.content + e.text };
-        } else {
-          next.push({ kind: 'assistant', content: e.text, streaming: true });
+        // 同样从尾部回扫本轮答案块：表单卡这类条目会插到尾部，只认最后一项会把一轮答案劈成两截
+        for (let j = next.length - 1; j >= 0; j--) {
+          const it = next[j];
+          if (it.kind === 'assistant' && it.streaming) {
+            next[j] = { ...it, content: it.content + e.text };
+            return next;
+          }
         }
+        next.push({ kind: 'assistant', content: e.text, streaming: true });
         return next;
       });
       break;
@@ -159,6 +177,12 @@ function handleEvent(e: WorkbenchEvent) {
       updateItems(prev => [...prev, {
         kind: 'hitl', symbol: e.symbol, reason: e.reason, requestId: e.requestId,
         resumeMessage: e.resumeMessage, status: 'pending',
+      }]);
+      break;
+    case 'form_request':
+      // 模型只把卡推上屏就到头了，动作等用户在卡上点，后端不会自己往下走
+      updateItems(prev => [...prev, {
+        kind: 'form', id: nextFormId(), form: e.form, prefill: e.prefill, status: 'pending',
       }]);
       break;
     case 'done':
@@ -213,9 +237,9 @@ function startPolling(sid: string) {
           if (abortCtrl) return;
           // 后端说没有在跑也不欠补答了（status 口径含补答队列）：欠的账都已在历史里
           deferredPending = false;
-          // 历史回放会整体重建 items：排队气泡还没进后端历史，得补回尾部再续发
+          // 历史回放会整体重建 items：排队气泡和没填完的表单卡都不在后端历史里，得补回尾部
           const queued = sendQueue.map(m => ({ kind: 'user' as const, content: m, queued: true }));
-          set({ items: [...toItems(msgs), ...queued], loading: false, background: false });
+          set({ items: [...toItems(msgs), ...queued, ...pendingForms()], loading: false, background: false });
           drainQueue();
         }
       } catch { /* 网络抖动下轮再试 */ }
@@ -309,18 +333,21 @@ async function openSession(sid: string) {
   ]);
   // await 期间用户已发起新对话流：别用旧快照覆盖在途状态
   if (abortCtrl) return;
+  // 表单卡是 trader 动作、不属于哪个会话（跟排队消息不同），换会话也带过去，别抹掉填一半的
+  const forms = pendingForms();
   setSession(sid);
-  set({ items: toItems(msgs), loading: running, background: running });
+  set({ items: [...toItems(msgs), ...forms], loading: running, background: running });
   if (running) startPolling(sid);
 }
 
 /** HITL 决策：批准→登记授权→自动补发 resumeMessage 恢复执行；拒绝→仅登记。 */
-async function hitlDecide(index: number, approved: boolean) {
-  const item = state.items[index];
+async function hitlDecide(requestId: string, approved: boolean) {
+  // 按 requestId 认卡而不是下标：让位说明行会 splice 到 items 中间，其后所有条目下标整体错位
+  const item = state.items.find(it => it.kind === 'hitl' && it.requestId === requestId);
   if (item?.kind !== 'hitl' || !state.sessionId) return;
-  await workbenchApi.approve(state.sessionId, approved, item.requestId);
-  updateItems(prev => prev.map((it, i) =>
-    i === index && it.kind === 'hitl' ? { ...it, status: approved ? 'approved' : 'rejected' } : it,
+  await workbenchApi.approve(state.sessionId, approved, requestId);
+  updateItems(prev => prev.map(it =>
+    it.kind === 'hitl' && it.requestId === requestId ? { ...it, status: approved ? 'approved' : 'rejected' } : it,
   ));
   if (approved) await send(item.resumeMessage);
 }
@@ -348,13 +375,28 @@ export const chatStore = {
     if (initialized) return;
     initialized = true;
     const sid = state.sessionId;
-    if (!sid || state.items.length || state.loading) return;
+    // 本地弹的表单卡不算"聊过了"：只数非表单项，否则先点了动作按钮就再也回放不到历史
+    if (!sid || state.items.some(it => it.kind !== 'form') || state.loading) return;
     void openSession(sid).catch(() => {});
   },
   send,
   openSession,
   hitlDecide,
   newSession,
+  /** 入口按钮直接弹卡：跟模型弹的卡走同一条 items 通路，不经后端 */
+  openForm(form: FormKind, prefill?: Record<string, unknown>) {
+    updateItems(prev => [...prev, { kind: 'form', id: nextFormId(), form, prefill, status: 'pending' }]);
+  },
+  /** 用户关掉卡：卡留在对话里当痕迹（无 result），只是不再可填 */
+  closeForm(id: string) {
+    updateItems(prev => prev.map(it =>
+      it.kind === 'form' && it.id === id ? { ...it, status: 'done' as const } : it));
+  },
+  /** 卡执行完：result 是给用户看的一行回执 */
+  settleForm(id: string, result: string) {
+    updateItems(prev => prev.map(it =>
+      it.kind === 'form' && it.id === id ? { ...it, status: 'done' as const, result } : it));
+  },
   /** 删除的是当前会话时清空回到全新状态 */
   clearIfCurrent(sid: string) {
     if (state.sessionId === sid) newSession();

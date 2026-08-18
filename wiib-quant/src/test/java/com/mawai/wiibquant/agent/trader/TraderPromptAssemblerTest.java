@@ -54,11 +54,11 @@ class TraderPromptAssemblerTest {
     // ---------- 主人留言：读后即焚 ----------
 
     /**
-     * 注入与清空必须是同一件事：注了没清，一句临时交代会每轮重念、被模型当成长期规则；
-     * 清了没注，主人的话直接蒸发。所以这条一次断言两头。
+     * 注入与递减必须是同一件事：注了没减，一句交代会每轮重念、被模型当成长期规则；
+     * 减了没注，主人的话直接蒸发。所以这条一次断言两头。
      */
     @Test
-    void 留言注入的同时就被焚毁() {
+    void 留言注入的同时就消费一轮() {
         AiTrader t = trader();
         t.setId(7L);
         t.setOwnerNote("今晚有 CPI 数据，仓位放轻一点");
@@ -66,13 +66,13 @@ class TraderPromptAssemblerTest {
         String prompt = assembler.assemble(t, "{}", List.of());
 
         assertThat(prompt).contains("今晚有 CPI 数据，仓位放轻一点").contains("主人的留言");
-        verify(traderMapper).update(isNull(), any(LambdaUpdateWrapper.class));   // 注了就一定清了
+        verify(traderMapper).update(isNull(), any(LambdaUpdateWrapper.class));   // 注了就一定减了
         assertThat(t.getOwnerNote()).isNull();  // 同一轮里别处再读到它就会重复露面
     }
 
-    /** 焚过之后再组一次提示词：留言不该复活，也不该再写一次库 */
+    /** 单轮留言消费完再组一次提示词：不该复活，也不该再写一次库 */
     @Test
-    void 留言只出现一次() {
+    void 单轮留言只出现一次() {
         AiTrader t = trader();
         t.setId(7L);
         t.setOwnerNote("今晚有 CPI 数据");
@@ -82,6 +82,57 @@ class TraderPromptAssemblerTest {
 
         assertThat(second).doesNotContain("今晚有 CPI 数据").doesNotContain("主人的留言");
         verify(traderMapper, times(1)).update(isNull(), any(LambdaUpdateWrapper.class));
+    }
+
+    /**
+     * 多轮留言：注入一次减一轮，正文留着下轮还念。措辞必须报出剩余次数——
+     * 模型据此把它当持续叮嘱而不是"现在就执行一次"的动作指令，这是多轮重放风险的唯一防线。
+     */
+    @Test
+    void 多轮留言逐轮递减且报出剩余次数() {
+        AiTrader t = trader();
+        t.setId(7L);
+        t.setOwnerNote("今晚有 CPI 数据");
+        t.setOwnerNoteRounds(3);
+
+        String first = assembler.assemble(t, "{}", List.of());
+
+        assertThat(first).contains("今晚有 CPI 数据").contains("本次之后还会出现 2 次");
+        assertThat(t.getOwnerNote()).isNotNull();
+        assertThat(t.getOwnerNoteRounds()).isEqualTo(2);
+    }
+
+    /** 最后一轮：措辞切回"只在本次出现"，内存副本与库写同构地清空 */
+    @Test
+    void 最后一轮留言注入后清空() {
+        AiTrader t = trader();
+        t.setId(7L);
+        t.setOwnerNote("今晚有 CPI 数据");
+        t.setOwnerNoteRounds(1);
+
+        String prompt = assembler.assemble(t, "{}", List.of());
+
+        assertThat(prompt).contains("只在本次唤醒出现").doesNotContain("还会出现");
+        assertThat(t.getOwnerNote()).isNull();
+        assertThat(t.getOwnerNoteRounds()).isZero();
+    }
+
+    /**
+     * 迁移半途的存量行：ALTER 跑了、回填 UPDATE 漏跑，库里就是"有正文、轮次 0/null"。
+     * 必须退化成一次性留言——拆箱 NPE 会让 assemble 抛异常，每轮唤醒写一条 ERROR 行、
+     * 连败 5 次后 trader 被自动暂停，用户看到的是"它莫名其妙停了"。
+     */
+    @Test
+    void 轮次缺失的存量留言当一次性处理() {
+        AiTrader t = trader();
+        t.setId(7L);
+        t.setOwnerNote("存量留言");
+        t.setOwnerNoteRounds(null);
+
+        String prompt = assembler.assemble(t, "{}", List.of());
+
+        assertThat(prompt).contains("存量留言").contains("只在本次唤醒出现");
+        assertThat(t.getOwnerNote()).isNull();
     }
 
     /** 没留言就别去动库：每轮唤醒都白写一次 UPDATE 是纯浪费 */

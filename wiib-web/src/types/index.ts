@@ -620,10 +620,44 @@ export type WorkbenchEvent =
   | { type: 'progress'; text: string }
   // requestId：这张卡的唯一标识，点同意/拒绝时原样回传，服务端据此确认"点的是哪张卡"
   | { type: 'hitl_request'; sessionId: string; symbol: string; reason: string; requestId: string; resumeMessage: string }
+  // 模型请求给用户弹一张待填的表单卡；执行权在用户点击，模型只能开卡不能动手。
+  // prefill 是模型草拟的初值（留言正文与轮次），可能整个缺席
+  | { type: 'form_request'; form: TraderFormKind; prefill?: Record<string, unknown> }
   // deferred=true：让位收尾（专家还在取数就来了新消息），answer 只是过渡话术；
   // 真答案由后端补答轮落历史，前端靠 status 轮询等它落库后整体回放补显
   | { type: 'done'; sessionId: string; answer: string; deferred?: boolean }
   | { type: 'error'; message: string };
+
+/** trader 动作面板的三张卡 */
+export type TraderFormKind = 'note' | 'wake' | 'review';
+
+/** 动作面板一次取齐的状态：三张卡显示什么、按钮点不点得动，全看它 */
+export interface TraderActionPanel {
+  hasTrader: boolean;
+  name: string | null;
+  status: string | null;
+  pausedReason: string | null;
+  /** 上次唤醒的真实时刻（决策行落库时间，不是 K 线边界） */
+  lastWakeAt: number | null;
+  nextWakeAt: number | null;
+  /** null=可唤醒，否则是不能唤醒的原话，直接显示给用户 */
+  wakeBlockedReason: string | null;
+  lastReviewAt: number | null;
+  lastReviewStatus: string | null;
+  hasReviewMaterial: boolean;
+  reviewBlockedReason: string | null;
+  /** 当前待读留言正文，null=没有 */
+  note: string | null;
+  noteRounds: number;
+  noteMaxRounds: number;
+  noteMaxChars: number;
+}
+
+/** 动作执行结果：ok 只表示这次请求被正常处理，message 一律要显示 */
+export interface TraderActionResult {
+  ok: boolean;
+  message: string;
+}
 
 // ========== 策略账户监控 ==========
 /** 已平仓历史（静态字段快照，无实时价字段） */

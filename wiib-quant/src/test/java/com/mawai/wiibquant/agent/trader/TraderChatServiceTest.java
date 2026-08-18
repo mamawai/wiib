@@ -2,65 +2,36 @@ package com.mawai.wiibquant.agent.trader;
 
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONObject;
-import com.baomidou.mybatisplus.core.MybatisConfiguration;
-import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
-import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.mawai.wiibcommon.entity.AiTrader;
-import com.mawai.wiibcommon.entity.AiTraderDecision;
-import com.mawai.wiibquant.agent.learning.ReviewRunner;
 import com.mawai.wiibquant.external.sim.SimTradeClient;
-import com.mawai.wiibquant.mapper.AiTraderDecisionMapper;
-import com.mawai.wiibquant.mapper.AiTraderMapper;
-import org.apache.ibatis.builder.MapperBuilderAssistant;
-import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.math.BigDecimal;
-import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyLong;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.timeout;
-import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * 对话轨访问 trader 的唯一入口。
+ * 对话轨读 trader 的唯一入口：只查询、不动手。
  * <p>
- * 这里钉的核心是<b>归属</b>与<b>动作的准入</b>：查询只经 userId 取自己的 trader，
- * 唤醒/复盘是花钱且动真仓位的事，什么情况下不许做必须写死。
+ * 这里钉的核心是<b>归属</b>：工具签名里没有用户参数，谁的 trader 全靠这一层按 userId 取。
+ * 动作（留言/唤醒/点播复盘）的准入与语义归 {@link TraderActionServiceTest}。
  */
 class TraderChatServiceTest {
 
     private static final long ME = 1L;
     private static final long OTHERS = 2L;
 
-    /** Lambda 条件构造器要查 TableInfo；不预热的话本类单独跑会炸，全量跑却因别的类先热过而假绿 */
-    @BeforeAll
-    static void initTableInfoCache() {
-        TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""), AiTrader.class);
-        TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""),
-                AiTraderDecision.class);
-    }
-
     private final TraderService traderService = mock(TraderService.class);
     private final TraderPlanStore planStore = mock(TraderPlanStore.class);
-    private final TraderScheduler scheduler = mock(TraderScheduler.class);
-    private final ReviewRunner reviewRunner = mock(ReviewRunner.class);
-    private final AiTraderMapper traderMapper = mock(AiTraderMapper.class);
     private final SimTradeClient simTradeClient = mock(SimTradeClient.class);
-
     private final TraderModelFactory modelFactory = mock(TraderModelFactory.class);
 
-    private final TraderChatService service = new TraderChatService(traderService, modelFactory, planStore,
-            scheduler, reviewRunner, traderMapper, simTradeClient);
+    private final TraderChatService service =
+            new TraderChatService(traderService, modelFactory, planStore, simTradeClient);
 
     private AiTrader running() {
         AiTrader t = new AiTrader();
@@ -82,8 +53,6 @@ class TraderChatServiceTest {
     private static JSONObject parse(String json) {
         return JSON.parseObject(json);
     }
-
-    // ---------- 归属隔离 ----------
 
     /**
      * 每个查询都只按"当前是谁"取 trader。工具签名里没有用户参数，这一层再按 userId 取一次，
@@ -109,165 +78,5 @@ class TraderChatServiceTest {
             case "decisions" -> service.decisions(userId, null);
             default -> service.plans(userId);
         };
-    }
-
-    /** 没有 trader 的用户去动作：要拿到"你还没有"，而不是 NPE（工具异常会把整轮对话炸掉） */
-    @Test
-    void 没有trader时动作不炸() {
-        when(traderService.mine(ME)).thenReturn(null);
-
-        assertThat(parse(service.wake(ME)).getBooleanValue("hasTrader")).isFalse();
-        assertThat(parse(service.reviewNow(ME)).getBooleanValue("hasTrader")).isFalse();
-        assertThat(parse(service.leaveNote(ME, "随便说说")).getBooleanValue("hasTrader")).isFalse();
-        verify(scheduler, never()).tryManualWake(any());
-        verify(reviewRunner, never()).review(any(), anyLong());
-        verify(traderMapper, never()).update(any(), any());
-    }
-
-    // ---------- 唤醒 ----------
-
-    @Test
-    void 唤醒触发调度器() {
-        when(traderService.mine(ME)).thenReturn(running());
-        when(scheduler.tryManualWake(any())).thenReturn(null);   // null=已触发
-
-        JSONObject out = parse(service.wake(ME));
-
-        assertThat(out.getBooleanValue("ok")).isTrue();
-        verify(scheduler).tryManualWake(any(AiTrader.class));
-    }
-
-    /** 调度器说没触发（上一轮还在跑/例行将至），就得如实转述，不能报"已唤醒" */
-    @Test
-    void 唤醒未触发时如实回报() {
-        when(traderService.mine(ME)).thenReturn(running());
-        when(scheduler.tryManualWake(any())).thenReturn("上一轮唤醒还在跑");
-
-        JSONObject out = parse(service.wake(ME));
-
-        assertThat(out.getBooleanValue("ok")).isFalse();
-        assertThat(out.getString("message")).contains("上一轮唤醒还在跑");
-    }
-
-    /** 暂停就是暂停：手动唤醒要是能绕过它，连败自动暂停的 trader 会被一句话叫起来接着亏 */
-    @Test
-    void 暂停中的trader不许被唤醒() {
-        AiTrader t = running();
-        t.setStatus(AiTrader.STATUS_PAUSED);
-        t.setPausedReason("连续5次唤醒失败");
-        when(traderService.mine(ME)).thenReturn(t);
-
-        JSONObject out = parse(service.wake(ME));
-
-        assertThat(out.getBooleanValue("ok")).isFalse();
-        assertThat(out.getString("message")).contains("暂停").contains("连续5次唤醒失败");
-        verify(scheduler, never()).tryManualWake(any());
-    }
-
-    @Test
-    void 爆仓终局的trader不许被唤醒() {
-        AiTrader t = running();
-        t.setStatus(AiTrader.STATUS_LIQUIDATED);
-        when(traderService.mine(ME)).thenReturn(t);
-
-        JSONObject out = parse(service.wake(ME));
-
-        assertThat(out.getBooleanValue("ok")).isFalse();
-        assertThat(out.getString("message")).contains("爆仓");
-        verify(scheduler, never()).tryManualWake(any());
-    }
-
-    // ---------- 点播复盘 ----------
-
-    /**
-     * 复盘预算 600s、工作台整条 SSE 也只有 600s——同步跑满就没时间让汇总模型开口了。
-     * 所以点播是"准入同步、执行异步"：当场答复派没派出去，结果去时间线上看。
-     */
-    @Test
-    void 有素材时异步开跑并当场答复() {
-        AiTrader t = running();
-        when(traderService.mine(ME)).thenReturn(t);
-        when(reviewRunner.hasMaterial(eq(t), anyLong())).thenReturn(true);
-
-        JSONObject out = parse(service.reviewNow(ME));
-
-        assertThat(out.getBooleanValue("ok")).isTrue();
-        assertThat(out.getString("message")).contains("时间线");
-        verify(reviewRunner, timeout(2000)).review(eq(t), anyLong());
-    }
-
-    /**
-     * 无素材时 review() 是静默跳过的，而点播现在异步——不当场判，用户就得等几分钟
-     * 再去时间线上扑一场空。会不会白花钱这件事必须同步答复。
-     */
-    @Test
-    void 无素材当场答复跳过且不开跑() {
-        AiTrader t = running();
-        when(traderService.mine(ME)).thenReturn(t);
-        when(reviewRunner.hasMaterial(eq(t), anyLong())).thenReturn(false);
-
-        JSONObject out = parse(service.reviewNow(ME));
-
-        assertThat(out.getBooleanValue("ok")).isFalse();
-        assertThat(out.getString("message")).contains("跳过");
-        verify(reviewRunner, never()).review(any(), anyLong());
-    }
-
-    /** 停工窗口内旁路写复盘，learner 会读到"半天"的复盘、脏读进记忆——连素材都不该去查 */
-    @Test
-    void 停工窗口内拒绝点播复盘() {
-        when(traderService.mine(ME)).thenReturn(running());
-        when(scheduler.isHandoverActive()).thenReturn(true);
-
-        JSONObject out = parse(service.reviewNow(ME));
-
-        assertThat(out.getBooleanValue("ok")).isFalse();
-        verify(reviewRunner, never()).review(any(), anyLong());
-    }
-
-    // ---------- 留言 ----------
-
-    @Test
-    void 留言落库() {
-        when(traderService.mine(ME)).thenReturn(running());
-
-        JSONObject out = parse(service.leaveNote(ME, "  今晚有 CPI，仓位轻点  "));
-
-        assertThat(out.getBooleanValue("ok")).isTrue();
-        verify(traderMapper).update(isNull(), any(LambdaUpdateWrapper.class));
-    }
-
-    @Test
-    void 空留言不落库() {
-        when(traderService.mine(ME)).thenReturn(running());
-
-        JSONObject out = parse(service.leaveNote(ME, "   "));
-
-        assertThat(out.getBooleanValue("ok")).isFalse();
-        verify(traderMapper, never()).update(any(), any());
-    }
-
-    /** 留言要原样进下一轮系统提示词，不设上限的话一条超长留言能把交易上下文挤没 */
-    @Test
-    void 超长留言被截断() {
-        when(traderService.mine(ME)).thenReturn(running());
-        String tooLong = "啊".repeat(TraderChatService.MAX_NOTE_CHARS + 100);
-
-        JSONObject out = parse(service.leaveNote(ME, tooLong));
-
-        assertThat(out.getBooleanValue("ok")).isTrue();
-        verify(traderMapper).update(isNull(), any(LambdaUpdateWrapper.class));
-    }
-
-    /** 覆盖写要告诉用户：不然他以为两条都在，实际上只剩最后一条 */
-    @Test
-    void 覆盖未读留言时提示() {
-        AiTrader t = running();
-        t.setOwnerNote("上一条还没被读走");
-        when(traderService.mine(ME)).thenReturn(t);
-
-        JSONObject out = parse(service.leaveNote(ME, "新的一条"));
-
-        assertThat(out.getString("message")).contains("覆盖");
     }
 }

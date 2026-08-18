@@ -180,8 +180,11 @@ public class ChatYieldCoordinator {
     private void runDeferred(DeferredWork work, Queue<DeferredWork> queue) {
         try {
             // 先登记运行中再出队：status = isRunning || hasPending，顺序反了会闪出两者皆 false 的空窗，
-            // 轮询端会误判"已结束"，拉走没有补答的历史并停表
-            runRegistry.start(work.sessionId(), text -> { });
+            // 轮询端会误判"已结束"，拉走没有补答的历史并停表。
+            // 登记的是空出口：补答轮是后台跑的，没有 SSE 通道可推——这里只借"运行中"这个标记。
+            // 后果要清楚：补答轮里 summarizer 仍带着动作类工具，它调 publishForm 一律返回 false，
+            // 工具据此如实告诉模型"卡没弹出去"，别让模型宣称已弹卡（用户根本看不到）
+            runRegistry.start(work.sessionId(), WorkbenchRunRegistry.NO_EMITTER);
             queue.remove(work);
             String answer = turnRunner.runDeferredSummary(work.leaves(), work.userId(), work.sessionId(),
                     work.question(), work.experts().join());

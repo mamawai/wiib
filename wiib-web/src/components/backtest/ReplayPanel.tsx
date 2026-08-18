@@ -480,7 +480,7 @@ export function ReplayPanel() {
           </div>
         </div>
         {/* flex-wrap + shrink-0：右边那段说明是纯中文长文本，min-content 只有一个字宽，
-            不拦着的话按钮会被一路压到 78px，"开始复盘"四个字竖成一列还溢出按钮外 */}
+            不拦着就会把按钮一路压窄；shrink-0 保住按钮整宽，同行放不下时整体换行 */}
         <div className="flex flex-wrap items-center gap-3">
           <button
             type="button"
@@ -624,9 +624,9 @@ export function ReplayPanel() {
                     ))}
                   </div>
                   {/* 开多/开空成对：flex-wrap 是贪心排列，这两颗按 min-w-[110px] 参与换行判定，
-                      小到能钻进比例档剩下的空档里——于是窄屏成了"比例+开多"一行、"开空"独占一行。
+                      小到能钻进比例档剩下的空档，窄屏会被拆到两行去。
                       套一层 w-full 强制它俩自成一行左右平分；md:contents 让这层不生成盒子，
-                      ≥768px 时两颗按钮重新变回外层 flex 的直接子项，布局与改前逐像素一致 */}
+                      ≥768px 时两颗按钮仍是外层 flex 的直接子项，宽屏布局不受这层影响 */}
                   <div className="w-full flex items-stretch gap-2 md:contents">
                     <button type="button" onClick={() => handleOpen('LONG')}
                       className="flex-1 min-w-[110px] h-11 rounded-lg bg-gain text-white font-black text-[13px] md:text-sm flex items-center justify-center gap-1.5 hover:brightness-105 active:scale-[.98] machined">
@@ -687,7 +687,7 @@ export function ReplayPanel() {
                 <span className="text-[11px] font-black">AI 盘面提示</span>
                 {hint.at && <span className="text-[10px] text-muted-foreground num">· {hint.at}</span>}
                 <span className="ml-auto text-[10px] text-muted-foreground truncate max-w-[160px]">{aiLabel}</span>
-                {/* p-2 -m-2：命中区扩到 30px 而不占额外布局空间（原本只有图标那 14px，手指点不中） */}
+                {/* p-2 -m-2：图标只有 14px，手指点不中——内边距把命中区撑到 30px，负外边距抵掉占位 */}
                 <button type="button" aria-label="关闭"
                   onClick={() => { aiAbortRef.current?.abort(); setHint(null); }}
                   className="p-2 -m-2 text-muted-foreground/60 hover:text-foreground">
