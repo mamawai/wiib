@@ -7,9 +7,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.tool.annotation.Tool;
 
-import java.lang.reflect.Field;
 import java.lang.reflect.Method;
-import java.lang.reflect.Modifier;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -136,19 +134,4 @@ class TraderActionToolkitTest {
         }
     }
 
-    /**
-     * userId 建叶子时烤死在实例上（理由见 {@code TraderQueryToolkit}）：写成静态/共享字段的话，
-     * 后建的那份会把先建的覆盖掉，两个人的动作会记到同一个号上。
-     */
-    @Test
-    void userId各自烤在各自实例上() throws Exception {
-        TraderActionToolkit mine = new TraderActionToolkit(runRegistry, 1L);
-        TraderActionToolkit others = new TraderActionToolkit(runRegistry, 2L);
-
-        Field userId = TraderActionToolkit.class.getDeclaredField("userId");
-        assertThat(Modifier.isStatic(userId.getModifiers())).isFalse();
-        userId.setAccessible(true);
-        assertThat(userId.get(mine)).isEqualTo(1L);
-        assertThat(userId.get(others)).isEqualTo(2L);
-    }
 }

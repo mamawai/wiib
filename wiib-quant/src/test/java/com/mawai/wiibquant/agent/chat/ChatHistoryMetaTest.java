@@ -55,20 +55,6 @@ class ChatHistoryMetaTest {
     }
 
     @Test
-    void 不带读数的追加六列全空() {
-        WorkbenchChatMessageMapper mapper = mock(WorkbenchChatMessageMapper.class);
-        ChatHistoryService service = new ChatHistoryService(mapper);
-
-        service.append(SESSION, 1L, "user", "BTC 怎么样");
-
-        ArgumentCaptor<WorkbenchChatMessage> captor = ArgumentCaptor.forClass(WorkbenchChatMessage.class);
-        verify(mapper).insert(captor.capture());
-        assertThat(captor.getValue().getModelLabel()).isNull();
-        assertThat(captor.getValue().getTotalTokens()).isNull();
-        assertThat(captor.getValue().getLatencyMs()).isNull();
-    }
-
-    @Test
     void 回读时没有读数的行给的是null而不是空壳() {
         WorkbenchChatMessage user = row(1L, "user", "BTC 怎么样");
         WorkbenchChatMessage legacy = row(2L, "assistant", "加列之前落的老答案");

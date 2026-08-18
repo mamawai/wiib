@@ -24,13 +24,12 @@ import java.util.concurrent.CompletableFuture;
 /**
  * 贵操作的 HITL 闸门，挂在工具执行边上。
  * <p>
- * <b>管辖范围只剩深度研判</b>：wake_trader / review_trader_now 已改成"模型只弹表单卡、
- * 执行权归用户点击"，不再进这道闸——弹一张表单还要先批准一次，用户就得走
- * "先批准打开表单、再填表单"两道确认，第一道毫无信息量。
+ * <b>管辖范围：只有深度研判</b>。弹表单卡的三个 trader 工具不受管辖——执行权本来就归用户
+ * 在卡上点击，再批准一次等于让用户确认两遍，第一道毫无信息量。
  * <p>
- * <b>但闸门本身不能跟着摘掉</b>：{@link #passThrough} 里的 {@link ToolRunContext#set} 是
- * 工具方法体拿 sessionId 的唯一来源，<b>不受管辖的工具也是从那条路进去的</b>。
- * 摘了闸门，弹表单的工具就不知道该往哪个会话推 SSE，卡片哪儿也去不了。
+ * <b>但每个工具都得从这里走一趟</b>：{@link #passThrough} 里的 {@link ToolRunContext#set} 是
+ * 工具方法体拿 sessionId 的唯一来源，受不受管辖都一样。绕开它，弹表单的工具就不知道
+ * 该往哪个会话推 SSE，卡片哪儿也去不了。
  * <p>
  * <b>为什么在这一层而不在工具里</b>：授权要绑到"哪个会话、批准了哪个工具的哪个标的"。
  * 工具方法体看不到 sessionId（框架的 ChatService 签名里没有 RunnableConfig，
@@ -131,8 +130,8 @@ public class ApprovalGate implements EdgeHook.WrapCall<MessagesState<Message>> {
     /**
      * 放行：把会话号放进 ThreadLocal 供工具推进度、推表单卡，执行完清掉。
      * <p>
-     * <b>闸门只管一个工具了，这几行也不能删</b>：不受管辖的工具（applyWrap 开头那个分支）
-     * 同样是从这里进去的，{@link ToolRunContext#set} 是工具方法体拿 sessionId 的唯一来源。
+     * <b>所有工具都从这里进</b>，受不受管辖都一样（applyWrap 开头那个分支也落到这里）：
+     * {@link ToolRunContext#set} 是工具方法体拿 sessionId 的唯一来源，
      * 没有它，弹表单的工具不知道该往哪个会话推，进度条也没了。
      * <p>
      * <b>必须直接调 action.apply</b>——包一层 thenCompose 就换线程了，ThreadLocal 立刻失效。

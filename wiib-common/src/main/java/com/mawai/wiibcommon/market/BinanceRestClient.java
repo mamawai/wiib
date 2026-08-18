@@ -186,7 +186,8 @@ public class BinanceRestClient extends BaseRestTemplateConfig {
     /**
      * 按分钟数回看 1m K 线取 [periodLow, periodHigh]。
      * 上面几个 getRecent* 是 feed 断线重连用的固定短窗（断线期间有 REST 轮询兜底，够用）；
-     * sim 自己停机时没人轮询，得按真实停机时长回看，所以走这一组。minutes 由调用方限在 1000 内（K 线单次上限）。
+     * sim 自己停机时没人轮询，得按真实停机时长回看，所以走这一组。
+     * minutes 直接当 limit 传，由调用方限在 MatchPriceConsumer.RECOVER_MAX_MINUTES 内。
      */
     public BigDecimal[] getSpotHighLowByMinutes(String symbol, int minutes) {
         return highLowOrNull(getKlines(symbol, "1m", minutes, null), symbol, "现货");

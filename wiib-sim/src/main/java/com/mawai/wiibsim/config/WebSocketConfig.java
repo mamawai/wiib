@@ -109,7 +109,7 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
                                 connectionCount.incrementAndGet();
                             }
                             log.info("WebSocket连接: sessionId={}, 连接数={}", sessionId, connectionCount.get());
-                            // token 走 CONNECT 头不走 URL，握手那层看不到，只能在这儿认身份。
+                            // 身份认在 CONNECT 帧的 token 头上（握手那层看不到它）。
                             // Principal 必须是 userId：convertAndSendToUser 靠它把点对点消息投到具体连接。
                             String token = accessor.getFirstNativeHeader("token");
                             if (token != null && !token.isEmpty()) {
@@ -119,7 +119,12 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
                                         String principal = String.valueOf(loginId);
                                         accessor.setUser(() -> principal);
                                     }
-                                } catch (Exception ignored) {} // token 过期/无效就当游客
+                                } catch (Exception e) {
+                                    // 无效/过期 token 本身不抛异常（换不出 loginId 而已），能到这儿的
+                                    // 是 sa-token 背后的存储出了问题。静默吞掉的话线上表现是"所有人突然
+                                    // 都变游客、通知全静默"，没有任何线索
+                                    log.warn("WebSocket认身份失败 sessionId={} msg={}", sessionId, e.toString());
+                                }
                             }
                             break;
                         case SUBSCRIBE:

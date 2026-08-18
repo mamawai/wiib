@@ -210,7 +210,11 @@ public class BankruptcyServiceImpl implements BankruptcyService {
         }
     }
 
-    /** 爆仓清算/破产恢复共用的持仓清理序列；futuresCloseStatus 区分 LIQUIDATED/CLOSED。 */
+    /**
+     * 爆仓清算/破产恢复共用的持仓清理序列；futuresCloseStatus 区分 LIQUIDATED/CLOSED。
+     * 索引摘在改库之前、且整段在调用方的事务里：回滚就是单还在PENDING而索引没了，
+     * 这段悬空由每小时的 reconcileLimitOrderIndex 补回来。
+     */
     private void cleanupUserHoldings(Long userId, String futuresCloseStatus) {
         cryptoOrderMapper.cancelOpenOrdersByUserId(userId);
         cryptoPositionMapper.deleteByUserId(userId);

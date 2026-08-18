@@ -533,7 +533,7 @@ export const traderApi = {
     api.get<unknown, TraderEquityPoint[]>(`/ai/trader/${id}/equity-curve`, { params: { round } }),
 
   // ---- 动作面板：三个动作的唯一执行入口，对话轨只负责把表单卡弹出来 ----
-  /** 三张卡的状态一次取齐；打开面板与提交后各拉一次 */
+  /** 三张卡的状态一次取齐；每张卡挂载且未落地时拉一次 */
   actionPanel: () => api.get<unknown, TraderActionPanel>('/ai/trader/action-panel'),
   /** 留言：覆盖未读的那条；rounds 空=1 轮，越界由后端钳到 1~24 */
   saveNote: (note: string, rounds?: number) =>

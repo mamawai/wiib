@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { KeyRound, Loader2, PlugZap, ScanSearch } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { EFFORT_PRESETS } from '../lib/llmEffort';
 import { useToast } from './ui/use-toast';
 
 /** 一条端点的表单值（与后端 LlmEndpointSaveRequest 同形） */
@@ -27,15 +28,6 @@ export interface LlmEndpointFormProps {
   /** 连通性探测 */
   onTest: () => Promise<void>;
 }
-
-/** 常见档位的快捷填充；空串=不传，与后端 normalizeEffort 的"留空一律 null"对齐 */
-const EFFORT_PRESETS: { value: string; label: string }[] = [
-  { value: '', label: '默认' },
-  { value: 'none', label: 'none' },
-  { value: 'low', label: 'low' },
-  { value: 'medium', label: 'medium' },
-  { value: 'high', label: 'high' },
-];
 
 /**
  * LLM 端点表单（BYOK 端点库里的一条：名称 + 协议 + Base URL + 模型 + 思考档位 + key）。

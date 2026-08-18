@@ -26,9 +26,8 @@ export function Backtest() {
         <div className="w-11 h-11 rounded-lg pt-card flex items-center justify-center bg-primary/10">
           <FlaskConical className="w-5.5 h-5.5 text-primary" />
         </div>
-        {/* flex-1 把 basis 归零、只按剩余空间伸缩：副标题的 max-content 有 330px，
-            带着这个宽度参与换行判定就会独占窄屏一行、把标题挤下去
-            （truncate 只管渲染，不参与 flex 的换行判定） */}
+        {/* flex-1 把 basis 归零、只按剩余空间伸缩：副标题不归零就带着 max-content 参与换行判定，
+            独占窄屏一行把标题挤下去（truncate 只管渲染，不参与换行判定） */}
         <div className="min-w-0 flex-1">
           <h1 className="text-xl font-black tracking-tight">回测</h1>
           <p className="text-[11px] text-muted-foreground truncate">

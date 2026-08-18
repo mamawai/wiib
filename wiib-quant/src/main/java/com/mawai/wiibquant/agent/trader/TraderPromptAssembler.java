@@ -33,7 +33,7 @@ public class TraderPromptAssembler {
     private static final DateTimeFormatter TIME_FMT =
             DateTimeFormatter.ofPattern("MM-dd HH:mm").withZone(ZoneId.systemDefault());
 
-    /** 只为留言的"读后即焚"而来：注入的同一处就得把列清掉，见 {@link #burnOwnerNote} */
+    /** 只为留言而来：注入的同一处就得把轮次减掉，见 {@link #consumeOwnerNote} */
     private final AiTraderMapper traderMapper;
 
     public String assemble(AiTrader trader, String accountStateJson, List<AiTraderDecision> recent) {

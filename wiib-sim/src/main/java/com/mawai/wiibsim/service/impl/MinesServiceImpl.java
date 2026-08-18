@@ -26,8 +26,8 @@ import static com.mawai.wiibcommon.enums.LedgerBizType.MINES_CASHOUT;
 
 /**
  * 矿工（扫雷）。<b>进行中的那一局就是 mines_game 里 status=PLAYING 的那行</b>——
- * 雷位、已翻格、倍率本来每步就写库，事实源只此一份，没有过期这回事：
- * 扣了本金的局永远能接着玩，也不会因为缓存没了变成"钱扣了局没了"。
+ * 雷位、已翻格、倍率每步就写库，事实源只此一份，没有过期这回事：
+ * 扣了本金的局永远能接着玩。
  */
 @Slf4j
 @Service
@@ -278,9 +278,9 @@ public class MinesServiceImpl implements MinesService {
         return dto;
     }
 
-    /** 逗号串 → 格子号；空串给空表。返回可变表，调用方要往里加格子 */
+    /** 逗号串 → 格子号；空串（新局的 revealed_cells）给空表。返回可变表，调用方要往里加格子 */
     private List<Integer> parseCells(String csv) {
-        if (csv == null || csv.isEmpty()) return new ArrayList<>();
+        if (csv.isEmpty()) return new ArrayList<>();
         return Arrays.stream(csv.split(","))
                 .map(Integer::parseInt)
                 .collect(Collectors.toCollection(ArrayList::new));

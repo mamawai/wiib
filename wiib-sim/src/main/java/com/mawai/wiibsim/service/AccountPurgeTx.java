@@ -62,11 +62,12 @@ public class AccountPurgeTx {
     }
 
     /**
-     * 清表前先锁 user 行，这是重置与并发交易之间唯一的互斥点（那个 7 天键只是限频）。
-     * 所有动钱的 UPDATE...RETURNING 都打这一行，并发中的下单/成交/派彩会排到本事务提交后再动，
-     * 动的已是复位后的余额，语义等于"重置后发生的交易"。不锁的话：READ COMMITTED 下 DELETE 之后、
-     * COMMIT 之前插进来的订单/仓位行会活下来，随后 resetToInitial 整体覆写余额，
-     * 等于白送一个仓位或 frozen 对不上。
+     * 清表前先锁 user 行（那个 7 天键只是限频，不是互斥）：动钱的 UPDATE...RETURNING 都打这一行，
+     * 并发中的下单/成交/派彩会排到本事务提交后再动，动的已是复位后的余额。
+     * <p>
+     * 两处边界要知道：不涉资金的挂单插入（全仓限价开/平仓单只读快照再 insert）不打 user 行，
+     * 不受这把锁保护；交易侧的加锁顺序是"先订单行后 user 行"、这里反过来，同一用户重置与交易
+     * 真撞上时靠 PG 死锁检测打回其中一个（重置或那笔交易失败，都可重试）。
      */
     private void lockUserRow(long userId) {
         userMapper.selectByIdForUpdate(userId);

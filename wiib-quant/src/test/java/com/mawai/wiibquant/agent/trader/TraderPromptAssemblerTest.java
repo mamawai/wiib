@@ -51,7 +51,7 @@ class TraderPromptAssemblerTest {
         return d;
     }
 
-    // ---------- 主人留言：读后即焚 ----------
+    // ---------- 主人留言：按轮次递减 ----------
 
     /**
      * 注入与递减必须是同一件事：注了没减，一句交代会每轮重念、被模型当成长期规则；
@@ -62,6 +62,7 @@ class TraderPromptAssemblerTest {
         AiTrader t = trader();
         t.setId(7L);
         t.setOwnerNote("今晚有 CPI 数据，仓位放轻一点");
+        t.setOwnerNoteRounds(1);
 
         String prompt = assembler.assemble(t, "{}", List.of());
 
@@ -76,6 +77,7 @@ class TraderPromptAssemblerTest {
         AiTrader t = trader();
         t.setId(7L);
         t.setOwnerNote("今晚有 CPI 数据");
+        t.setOwnerNoteRounds(1);
         assembler.assemble(t, "{}", List.of());
 
         String second = assembler.assemble(t, "{}", List.of());

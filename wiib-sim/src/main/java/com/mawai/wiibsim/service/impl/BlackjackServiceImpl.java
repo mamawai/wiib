@@ -100,7 +100,7 @@ public class BlackjackServiceImpl implements BlackjackService {
      * 一局 Blackjack 会话快照（序列化后落 blackjack_account.session_json）。
      */
     @Data
-    public static class BlackjackSession implements java.io.Serializable {
+    public static class BlackjackSession {
         /** 当前牌靴（已洗牌），按顺序发牌。 */
         private List<String> shoe;
         /** 下一张待发牌在牌靴中的索引位置。 */
@@ -131,7 +131,7 @@ public class BlackjackServiceImpl implements BlackjackService {
     }
 
     @Data
-    public static class SessionHand implements java.io.Serializable {
+    public static class SessionHand {
         /** 该手的牌面列表。 */
         private List<String> cards;
         /** 该手当前下注额（加倍后会翻倍）。 */
@@ -751,10 +751,10 @@ public class BlackjackServiceImpl implements BlackjackService {
 
     // ==================== 会话管理（挂在 blackjack_account 行上） ====================
 
-    /** session_json 为空 = 当前没有牌局 */
+    /** session_json 为 NULL = 当前没有牌局（persist 只写 null 或整份快照，不会写空串） */
     private BlackjackSession readSession(BlackjackAccount account) {
         String json = account.getSessionJson();
-        return json == null || json.isEmpty() ? null : JSON.parseObject(json, BlackjackSession.class);
+        return json == null ? null : JSON.parseObject(json, BlackjackSession.class);
     }
 
     private BlackjackSession requireSession(BlackjackAccount account) {

@@ -474,8 +474,7 @@ export function ReplayPanel() {
           {/* AI 教练：从 AI 页「模型配置」的端点库里选一条（提示可能每几根点一次，评估一局一次；挑贵的慢的自己掂量） */}
           <div>
             <div className="microlabel uppercase mb-1">AI 教练</div>
-            {/* w-full 不能省：原生 select 的自然宽度由最长 option 决定，只给 max-w 的话
-                360px 机型上它仍会顶到 300px > 卡片内宽 296px，把页面撑出横向滚动 */}
+            {/* 原生 select 的自然宽度由最长 option 撑，只给 max-w 压不住，窄屏会顶出横向滚动 */}
             <LlmEndpointSelect endpoints={endpoints} value={aiEndpointId} onChange={setAiEndpointId} className="w-full max-w-[300px]" />
           </div>
         </div>
@@ -623,10 +622,9 @@ export function ReplayPanel() {
                       </button>
                     ))}
                   </div>
-                  {/* 开多/开空成对：flex-wrap 是贪心排列，这两颗按 min-w-[110px] 参与换行判定，
-                      小到能钻进比例档剩下的空档，窄屏会被拆到两行去。
-                      套一层 w-full 强制它俩自成一行左右平分；md:contents 让这层不生成盒子，
-                      ≥768px 时两颗按钮仍是外层 flex 的直接子项，宽屏布局不受这层影响 */}
+                  {/* 开多/开空成对：外层 flex-wrap 会把这两颗拆开塞进各自的空档，
+                      套一层 w-full 强制它俩自成一行左右平分；md:contents 让这层≥768px 不生成盒子，
+                      两颗按钮仍是外层 flex 的直接子项，宽屏布局不受影响 */}
                   <div className="w-full flex items-stretch gap-2 md:contents">
                     <button type="button" onClick={() => handleOpen('LONG')}
                       className="flex-1 min-w-[110px] h-11 rounded-lg bg-gain text-white font-black text-[13px] md:text-sm flex items-center justify-center gap-1.5 hover:brightness-105 active:scale-[.98] machined">

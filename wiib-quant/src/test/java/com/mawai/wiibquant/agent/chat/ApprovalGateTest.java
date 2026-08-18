@@ -224,12 +224,12 @@ class ApprovalGateTest {
     // ===== 授权的粒度：闸门只管深研判一个工具了，区分维度全落在标的上 =====
 
     /**
-     * 换个标的照样得拦下并登记。参数化而不是抄三遍：抄的话很容易只改标的忘了改断言，
-     * 出现"看着覆盖了三个、其实测了三遍同一个"
+     * 未授权就得拦下并把标的登记进待批。标的写法的归一化（btc / BTCUSDT / BTCUSDC 折成同一个）
+     * 由"批了一个标的不放行另一个"那条覆盖，这里只钉拦截与登记。
      */
-    @ParameterizedTest
-    @ValueSource(strings = {"BTCUSDT", "ETHUSDT", "SOLUSDT"})
-    void 未授权时每个标的都被拦下(String symbol) {
+    @Test
+    void 未授权时拦下并登记待批() {
+        String symbol = "BTCUSDT";
         AtomicBoolean toolRan = new AtomicBoolean();
 
         Command command = gate.applyWrap("tools",
@@ -247,10 +247,9 @@ class ApprovalGateTest {
     }
 
     /** 批准之后就得真放行，否则用户点了同意还是执行不了 */
-    @ParameterizedTest
-    @ValueSource(strings = {"BTCUSDT", "ETHUSDT"})
-    void 批准后同一标的放行(String symbol) {
-        String args = "{\"symbol\":\"" + symbol + "\"}";
+    @Test
+    void 批准后同一标的放行() {
+        String args = "{\"symbol\":\"BTCUSDT\"}";
         gate.applyWrap("tools", stateWithToolCall("run_deep_analysis", args), config(),
                 (s, c) -> CompletableFuture.completedFuture(Command.emptyCommand())).join();
         registry.approve(SESSION, registry.peekPending(SESSION).orElseThrow().requestId());

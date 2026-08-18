@@ -223,7 +223,8 @@ public class ChatTurnRunner {
      * 两个 sink 是这一层与 SSE 的唯一接口：调用方断连后照样让这轮跑完（答案要落历史），
      * 只是不再往通道里写——那是调用方在 sink 里自己判断的事。
      *
-     * @param enrichedMessage 已经拼好记忆前缀的用户消息
+     * @param enrichedMessage 带时间行与提问标记的用户消息（拼法见 ChatWorkbenchController 的两个
+     *                        MARKER 常量，重新生成靠它们在上下文里定位本轮提问）
      * @param answerTokenSink summarizer 的答案增量，逐帧
      * @param progressSink    专家的开始/完成/失败事件
      * @param yield           让位控制面；不支持让位的调用方传 {@link TurnYield#NONE}

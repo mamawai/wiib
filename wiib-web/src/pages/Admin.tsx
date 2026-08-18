@@ -11,20 +11,13 @@ import { useToast } from '../components/ui/use-toast';
 import { FeedStreamHealthCard } from '../components/FeedStreamHealthCard';
 import { MonitorCarousel } from '../components/MonitorCarousel';
 import { RefreshCw, Calendar, Plus, Trash2, Pencil, Save, Ban } from 'lucide-react';
+import { EFFORT_PRESETS } from '../lib/llmEffort';
 
 const FUNCTION_LABELS: Record<string, string> = {
   behavior: '行为分析',
   'news-tagging': '新闻打标',
 };
 const MODEL_ASSIGNMENT_FUNCTIONS = new Set(Object.keys(FUNCTION_LABELS));
-/** 思考档位的快捷填充；空串=不传 */
-const EFFORT_PRESETS: { value: string; label: string }[] = [
-  { value: '', label: '默认' },
-  { value: 'none', label: 'none' },
-  { value: 'low', label: 'low' },
-  { value: 'medium', label: 'medium' },
-  { value: 'high', label: 'high' },
-];
 
 export function Admin() {
   const { user } = useUserStore();

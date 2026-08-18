@@ -403,7 +403,7 @@ COMMENT ON TABLE prediction_round IS 'BTC 5min涨跌预测回合';
 COMMENT ON COLUMN prediction_round.window_start IS '窗口起始时间戳(秒)';
 COMMENT ON COLUMN prediction_round.start_price IS '起始BTC价格(Chainlink)';
 COMMENT ON COLUMN prediction_round.end_price IS '结束BTC价格(Chainlink)';
-COMMENT ON COLUMN prediction_round.outcome IS '结果：UP/DOWN/DRAW';
+COMMENT ON COLUMN prediction_round.outcome IS '结果：UP/DOWN/DRAW/VOID（VOID=取不到收盘价作废，注单退本金）';
 COMMENT ON COLUMN prediction_round.status IS '状态：OPEN/LOCKED/SETTLED';
 
 -- ============================================
@@ -662,7 +662,7 @@ CREATE INDEX IF NOT EXISTS idx_wb_chat_user ON workbench_chat_message (user_id, 
 COMMENT ON TABLE workbench_chat_message IS '工作台对话历史(展示用):user/assistant按会话落库,session_id与workbench_chat_context同值';
 COMMENT ON COLUMN workbench_chat_message.model_label IS '这一轮用的对话主模型:端点名 · 模型名(与LlmEndpointSelect展示口径一致)';
 COMMENT ON COLUMN workbench_chat_message.total_tokens IS '本轮全部模型调用(路由+专家+汇总+压缩+深研判)的token合计;NULL=上游端点没返回usage或本轮账不可信(有别轮的在途专家仍在记账),不是0';
-COMMENT ON COLUMN workbench_chat_message.latency_ms IS '本轮墙钟耗时,口径同[TurnMetrics]日志:不含准入/建叶子/让位握手';
+COMMENT ON COLUMN workbench_chat_message.latency_ms IS '本轮墙钟耗时:从controller接手这一轮起算,不含准入/建叶子/让位握手;比[TurnMetrics]日志多一帧session与user行落库';
 
 -- ============ workbench_chat_context：工作台会话模型侧上下文（续聊主链；一会话一行整体替换） ============
 -- 替代 langgraph4j PostgresSaver 的 lg4j* 表：那套图每走一步存一行完整快照（一轮 8 行、同一份历史重复存），
@@ -675,6 +675,9 @@ CREATE TABLE IF NOT EXISTS workbench_chat_context (
 );
 COMMENT ON TABLE workbench_chat_context IS '工作台会话模型侧上下文:完整消息历史(含专家结论/压缩摘要/工具配对),每轮结束整体替换;删会话随展示表一并清';
 COMMENT ON COLUMN workbench_chat_context.state IS 'StateSerializer(Jackson)序列化的{"messages":[...]}:与叶子agent同一序列化器,保Spring AI Message多态与tool_call配对往返无损';
+
+-- 工作台跨会话记忆表 workbench_memory 已删：召回段对答案质量没有可观测贡献，链路整条拆掉。旧库执行：
+--     DROP TABLE IF EXISTS workbench_memory;
 
 -- ============ news_event：快讯打标存档（K线新闻图标 + 事件研究数据积累） ============
 -- 采集轨独立于 NewsCache 懒加载：定时经缓存拉 BlockBeats（共享额度窗），新条目轻模型打标后落库。
@@ -1005,9 +1008,8 @@ CREATE TABLE IF NOT EXISTS user_llm_binding (
 );
 COMMENT ON TABLE  user_llm_binding IS '用途→端点绑定：CHAT_MAIN 对话主模型 / CHAT_LIGHT 对话轻模型 / TRADER 交易员；无行=跟随默认端点。端点删除时其绑定连带删';
 
--- ============ 三个游戏"进行中的那一局"从 Redis 搬进库表（2026-08） ============
--- 原本牌局存 Redis 且带 TTL：TTL 一到，已扣的本金不退、局也接不上；事务提交失败还会和库表分叉。
--- 现在事实源只剩库表——mines_game 的 PLAYING 行、video_poker_game 的 DEALING 行、
+-- ============ 三个游戏"进行中的那一局"落库所需的两列（2026-08） ============
+-- 事实源只有库表——mines_game 的 PLAYING 行、video_poker_game 的 DEALING 行、
 -- blackjack_account.session_json。Redis 那边只留每日积分池计数器 bj:pool:*。
 ALTER TABLE blackjack_account ADD COLUMN IF NOT EXISTS session_json TEXT;
 COMMENT ON COLUMN blackjack_account.session_json IS '进行中那一局的完整快照(牌靴/各手牌/庄家牌/保险)，NULL=无牌局；与筹码同行同一笔update，钱和牌不会分叉';

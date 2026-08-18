@@ -26,8 +26,8 @@ import static com.mawai.wiibcommon.enums.LedgerBizType.POKER_PAYOUT;
 
 /**
  * 视频扑克。<b>进行中的那一局就是 video_poker_game 里 status=DEALING 的那行</b>：
- * 洗好的整副牌落在 deck 列，draw 从第 6 张起补牌——牌堆进了库，这局就不会因为缓存没了
- * 变成"本金扣了、牌也发了、却永远换不了牌"。
+ * 洗好的整副牌落在 deck 列，draw 从第 6 张起补牌。牌堆与局同行同寿命，
+ * 扣了本金的局永远换得了牌。
  */
 @Slf4j
 @Service
