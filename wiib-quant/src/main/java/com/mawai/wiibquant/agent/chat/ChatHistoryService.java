@@ -96,6 +96,11 @@ public class ChatHistoryService {
                 .eq(WorkbenchChatMessage::getSessionId, sessionId));
     }
 
+    /** 删一条消息（重新生成时抹掉旧答案那行）。调用方已做归属校验。 */
+    public void deleteMessage(long id) {
+        messageMapper.deleteById(id);
+    }
+
     /** 单会话全部消息（按 id 升序＝发生顺序），调用方已做归属校验。 */
     public List<ChatMessage> messages(String sessionId) {
         return messageMapper.selectList(new LambdaQueryWrapper<WorkbenchChatMessage>()

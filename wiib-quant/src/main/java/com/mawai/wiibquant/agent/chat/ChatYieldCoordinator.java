@@ -69,19 +69,22 @@ public class ChatYieldCoordinator {
      */
     public static final class TurnHandle implements ChatTurnRunner.TurnYield {
         private final long userId;
+        /** false=这一轮不开让位窗口，新消息只能按占线拒、回落前端排队 */
+        private final boolean preemptible;
         private final CompletableFuture<Void> yieldSignal = new CompletableFuture<>();
         /** 本轮完全结束（名额已还）：让位等待者以它为"可以抢名额了"的发令枪 */
         private final CompletableFuture<Void> turnDone = new CompletableFuture<>();
         /** 让位窗口开关（写：runner 线程；读：新消息的请求线程） */
         private volatile boolean yieldable = false;
 
-        private TurnHandle(long userId) {
+        private TurnHandle(long userId, boolean preemptible) {
             this.userId = userId;
+            this.preemptible = preemptible;
         }
 
         @Override
         public CompletableFuture<Void> enterExpertWait() {
-            yieldable = true;
+            yieldable = preemptible;
             return yieldSignal;
         }
 
@@ -98,7 +101,16 @@ public class ChatYieldCoordinator {
 
     /** 一轮开跑前登记（拿到名额之后、提交执行之前）。 */
     public TurnHandle openTurn(long userId) {
-        TurnHandle handle = new TurnHandle(userId);
+        return openTurn(userId, true);
+    }
+
+    /**
+     * @param preemptible false=这一轮不许被新消息挤走。重新生成轮要的就是它：
+     *                    它把旧答案的位置腾了出来，被挤掉的话新答案只能由补答轮
+     *                    以【补答】标头追加到会话末尾，位置错、还再也不能重新生成
+     */
+    public TurnHandle openTurn(long userId, boolean preemptible) {
+        TurnHandle handle = new TurnHandle(userId, preemptible);
         activeTurns.put(userId, handle);
         return handle;
     }
@@ -236,12 +248,18 @@ public class ChatYieldCoordinator {
                 : ChatHistoryService.TurnMeta.of(work.leaves().modelLabel(), work.leaves().usageSnapshot(), latencyMs);
     }
 
+    /**
+     * 补答行的标头前缀。对外可见是因为"这条能不能重新生成"要认它：
+     * 补答行对应的提问不在会话末尾，中间夹着别的问答，回退会误伤那些轮次。
+     */
+    static final String DEFERRED_PREFIX = "【补答「";
+
     /** 补答的标头：时间线上它离原问题隔着别的对话，得自己说明在答哪个问题 */
     private static String deferredHeader(String question) {
         String q = question.strip().replaceAll("\\s+", " ");
         if (q.length() > 40) {
             q = q.substring(0, 40) + "…";
         }
-        return "【补答「" + q + "」】\n\n";
+        return DEFERRED_PREFIX + q + "」】\n\n";
     }
 }

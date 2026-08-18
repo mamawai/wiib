@@ -139,7 +139,7 @@ class ChatTurnMetaTest {
 
         RecordingEmitter emitter = new RecordingEmitter();
         h.controller().run(new SseChannel(emitter), 1L, SESSION, "看看行情",
-                leaves(deep, light), h.coordinator().openTurn(1L));
+                leaves(deep, light), h.coordinator().openTurn(1L), null);
 
         ChatHistoryService.TurnMeta meta = capturedMeta(h.history());
         assertThat(meta.modelLabel()).isEqualTo(LABEL);
@@ -162,7 +162,7 @@ class ChatTurnMetaTest {
         Harness h = harness(() -> shared.call(new Prompt("one")));
 
         h.controller().run(new SseChannel(new RecordingEmitter()), 1L, SESSION, "看看行情",
-                leaves(shared, shared), h.coordinator().openTurn(1L));
+                leaves(shared, shared), h.coordinator().openTurn(1L), null);
 
         ChatHistoryService.TurnMeta meta = capturedMeta(h.history());
         assertThat(meta.modelCalls()).isEqualTo(1);
@@ -180,9 +180,9 @@ class ChatTurnMetaTest {
         ChatAgentFactory.Leaves leaves = leaves(deep, light);
 
         h.controller().run(new SseChannel(new RecordingEmitter()), 1L, SESSION, "第一问",
-                leaves, h.coordinator().openTurn(1L));
+                leaves, h.coordinator().openTurn(1L), null);
         h.controller().run(new SseChannel(new RecordingEmitter()), 1L, SESSION, "第二问",
-                leaves, h.coordinator().openTurn(1L));
+                leaves, h.coordinator().openTurn(1L), null);
 
         ArgumentCaptor<ChatHistoryService.TurnMeta> captor =
                 ArgumentCaptor.forClass(ChatHistoryService.TurnMeta.class);
@@ -210,7 +210,7 @@ class ChatTurnMetaTest {
         h.coordinator().registerDeferred(1L, SESSION, leaves, "上一个问题", new CompletableFuture<>());
 
         h.controller().run(new SseChannel(new RecordingEmitter()), 1L, SESSION, "插话",
-                leaves, h.coordinator().openTurn(1L));
+                leaves, h.coordinator().openTurn(1L), null);
 
         ChatHistoryService.TurnMeta meta = capturedMeta(h.history());
         // 端点名与耗时是这一轮自己的，照报；用量混着别轮的账，一律不报

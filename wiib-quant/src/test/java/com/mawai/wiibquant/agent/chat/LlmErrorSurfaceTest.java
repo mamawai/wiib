@@ -142,7 +142,7 @@ class LlmErrorSurfaceTest {
                 new ChatAgentFactory.Leaves("test", model, model, Map.of(), null);
 
         controller.run(new SseChannel(emitter), 1L, "wb-1-boom", "看看行情", leaves,
-                coordinator.openTurn(1L));
+                coordinator.openTurn(1L), null);
 
         String errorEvent = sent.stream().filter(text -> text.startsWith("{") && text.contains("message"))
                 .reduce((first, second) -> second).orElseThrow();

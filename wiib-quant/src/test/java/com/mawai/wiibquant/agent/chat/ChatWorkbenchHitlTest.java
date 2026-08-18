@@ -180,7 +180,7 @@ class ChatWorkbenchHitlTest {
         deepCallsThisTurn.set(0);
         RecordingEmitter emitter = new RecordingEmitter();
         controller.run(new SseChannel(emitter), 1L, SESSION, message, leaves,
-                yieldCoordinator.openTurn(1L));
+                yieldCoordinator.openTurn(1L), null);
         return emitter;
     }
 

@@ -76,7 +76,7 @@ class ChatWorkbenchStreamTest {
         ChatAgentFactory.Leaves leaves =
                 new ChatAgentFactory.Leaves("test", model, model, Map.of(), null);
 
-        controller.run(channel, 1L, SESSION, "看看行情", leaves, coordinator.openTurn(1L));
+        controller.run(channel, 1L, SESSION, "看看行情", leaves, coordinator.openTurn(1L), null);
 
         // 答案完整进历史——这是断连用户唯一还拿得到东西的途径
         verify(historyService).append(eq(SESSION), eq(1L), eq("assistant"), eq("前半段后半段"), any());
