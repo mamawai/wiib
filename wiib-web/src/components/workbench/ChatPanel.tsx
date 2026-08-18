@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import { ArrowDown, BookOpenCheck, Bot, ChevronsDownUp, ChevronsUpDown, Cpu, History, KeyRound, Loader2, MessageSquarePlus, RotateCcw, X, Zap } from 'lucide-react';
+import { ArrowDown, BookOpenCheck, Bot, ChevronsDownUp, ChevronsUpDown, Cpu, History, KeyRound, Loader2, Maximize2, MessageSquarePlus, Minimize2, RotateCcw, X, Zap } from 'lucide-react';
 import { workbenchApi } from '../../api';
 import { useClickOutside } from '../../hooks/useClickOutside';
 import { cn } from '../../lib/utils';
@@ -29,6 +29,9 @@ interface ChatPanelProps {
   onClose?: () => void;
   /** 后端报配置缺失/不可用时，引导条按钮跳模型配置页 */
   onGoConfig?: () => void;
+  /** PC 全屏开关。不传就不出这个按钮——移动端面板本来就是铺满视口的全屏层 */
+  fullscreen?: boolean;
+  onToggleFullscreen?: () => void;
 }
 
 /**
@@ -38,7 +41,7 @@ interface ChatPanelProps {
  * 版式：用户提问是右侧气泡，agent 回答是<b>无框正文</b>（署名行 + 正文 + 脚注读数），
  * 过程条目收进可折叠的工作过程轨。答案是这一屏唯一的主角，所以它不套卡片。
  */
-export function ChatPanel({ onClose, onGoConfig }: ChatPanelProps) {
+export function ChatPanel({ onClose, onGoConfig, fullscreen, onToggleFullscreen }: ChatPanelProps) {
   const { items, loading, background, sessionId, needsConfig } = useSyncExternalStore(chatStore.subscribe, chatStore.getSnapshot);
   const [hitlBusy, setHitlBusy] = useState(false);
   const [actionMenu, setActionMenu] = useState(false);
@@ -238,6 +241,17 @@ export function ChatPanel({ onClose, onGoConfig }: ChatPanelProps) {
         >
           <RotateCcw className="w-3.5 h-3.5" />
         </button>
+        {/* 全屏只在 PC 出：移动端面板本来就铺满视口 */}
+        {onToggleFullscreen && (
+          <button
+            onClick={onToggleFullscreen}
+            className="shrink-0 hidden md:flex border border-border hover:bg-surface-hover w-7 h-7 rounded-lg items-center justify-center text-muted-foreground hover:text-primary"
+            title={fullscreen ? '退出全屏（Esc）' : '全屏'}
+            aria-label={fullscreen ? '退出全屏' : '全屏显示对话面板'}
+          >
+            {fullscreen ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
+          </button>
+        )}
         {onClose && (
           <button
             onClick={onClose}

@@ -139,6 +139,36 @@ html.pwa nav a {
   .slide-in-from-top-2 { animation-name: wiib-slide-in-from-top-2 }
   .zoom-in-95 { animation-name: wiib-zoom-in-95 }
   .wiib-toast-progress { animation-name: wiib-toast-progress; animation-timing-function: linear; animation-fill-mode: both }
+
+  /* 悬浮球的两个状态层（见 ChatDock）。都是覆盖在球上的绝对定位层，只靠 opacity/transform 动，
+     不碰布局，滚动/流式期间不会引起重排 */
+
+  /* 有未读：一圈向外扩散消失。橙点是静态痕迹，这圈是余光里也能捕捉到的那一下 */
+  @keyframes wiib-ball-ping {
+    0% { transform: scale(1); opacity: .5 }
+    70%, 100% { transform: scale(1.55); opacity: 0 }
+  }
+  .wiib-ball-ping { animation: wiib-ball-ping 1.7s cubic-bezier(0, 0, .2, 1) infinite }
+
+  /* 研判中：一道扇形绕球扫。mask 把中心挖空，只在环带上显影 */
+  @keyframes wiib-ball-sweep { to { transform: rotate(360deg) } }
+  .wiib-ball-sweep {
+    background: conic-gradient(from 0deg,
+      transparent 0deg,
+      color-mix(in srgb, var(--color-primary) 55%, transparent) 70deg,
+      transparent 130deg);
+    /* closest-side 让半径跟着盒子走：写死 px 的话球一改尺寸这圈就露边或糊到图标上。
+       82%~84% 落在球的外沿，环带正好压着边框往外一点 */
+    -webkit-mask: radial-gradient(circle closest-side, transparent 82%, #000 84%);
+            mask: radial-gradient(circle closest-side, transparent 82%, #000 84%);
+    animation: wiib-ball-sweep 1.15s linear infinite;
+  }
+
+  /* 关掉动画偏好：扫描/脉冲是纯装饰，停掉不丢信息（橙点与图标本身仍在） */
+  @media (prefers-reduced-motion: reduce) {
+    .wiib-ball-ping { animation: none; opacity: 0 }
+    .wiib-ball-sweep { animation: none }
+  }
 }
 
 /* ===== 页面容器 ===== */

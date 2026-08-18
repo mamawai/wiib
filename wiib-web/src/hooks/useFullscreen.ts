@@ -26,7 +26,10 @@ export function useFullscreen(ref: RefObject<HTMLElement | null>) {
   useEffect(() => {
     const sync = () => {
       const d = document as WebkitDoc;
-      const ours = (d.fullscreenElement ?? d.webkitFullscreenElement) === ref.current;
+      // el 为空要单独挡掉：目标元素被卸载（如对话面板关闭）时 ref.current 与 fullscreenElement
+      // 双双为 null，直接比会得出"是我们的全屏"，把全屏态点亮在一个已经不存在的元素上
+      const el = ref.current;
+      const ours = el != null && (d.fullscreenElement ?? d.webkitFullscreenElement) === el;
       setNative(ours);
       // 手机竖屏进原生全屏顺手锁成横屏：竖屏视口会把 K 线纵向拉成细长条，横屏才是看图的形状。
       // lock 只在全屏态内被允许（Android Chrome 这条路）；iOS 没有 lock，静默落空，
