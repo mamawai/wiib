@@ -378,8 +378,11 @@ export function ChatPanel({ onClose, onGoConfig }: ChatPanelProps) {
           </div>
         )}
 
-        {/* 输入区：快捷提问 + 多行自适应输入 + 状态行 */}
-        <div className="border-t border-border px-3 pt-2 pb-2.5 shrink-0 space-y-2">
+        {/* 输入区：快捷提问 + 多行自适应输入 + 状态行。
+            底部 padding 避让 home indicator：移动端面板是 inset-0 铺满视口的（ChatDock 只配了
+            pt 那侧的安全区），10px 顶不住 34px 手势条。用 max() 而不是相加——手势条那块本身就是留白。
+            md 起固定回 10px：env() 是视口级的，iPad 上不贴底的浮窗也会拿到 34px，那是多余的 */}
+        <div className="border-t border-border px-3 pt-2 pb-[max(0.625rem,env(safe-area-inset-bottom))] md:pb-2.5 shrink-0 space-y-2">
           <div className="flex gap-1.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             {SUGGESTS.map(q => (
               <button
