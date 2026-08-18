@@ -9,6 +9,7 @@ import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.lang.NonNull;
 import reactor.core.publisher.Flux;
 
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -21,12 +22,31 @@ import java.util.concurrent.atomic.AtomicReference;
  * <b>getOptions 必须原样透传</b>：这里返回自己造的 options，
  * ReactAgent 拿到的工具列表就成了空数组，agent 一个工具都调不动（本项目踩过）。
  * <p>
- * 每次唤醒 new 一个实例，用完取 {@link #snapshot()}。
+ * 两种用法：交易员轨每次唤醒 new 一个实例、用完取 {@link #snapshot()}；
+ * 对话轨的实例跟着叶子图跨轮缓存，靠 {@link #reset()} 划轮边界（同一用户同时只有一轮，见 ChatConcurrencyGate）。
  */
 public class UsageTrackingChatModel implements ChatModel {
 
     /** 上游没返回 usage 时 token 三项为 null——不能拿 0 冒充"没花钱" */
     public record UsageSnapshot(int modelCalls, Long promptTokens, Long completionTokens, Long totalTokens) {
+
+        /**
+         * 两条端点（深/浅）的账合并成一轮的总账。
+         * null 语义随字段各算各的：两边都没报才是 null，一边报了就用报了的那份。
+         */
+        public UsageSnapshot merge(UsageSnapshot other) {
+            return new UsageSnapshot(modelCalls + other.modelCalls,
+                    sum(promptTokens, other.promptTokens),
+                    sum(completionTokens, other.completionTokens),
+                    sum(totalTokens, other.totalTokens));
+        }
+
+        private static Long sum(Long a, Long b) {
+            if (a == null) {
+                return b;
+            }
+            return b == null ? a : a + b;
+        }
     }
 
     private final ChatModel delegate;
@@ -55,8 +75,9 @@ public class UsageTrackingChatModel implements ChatModel {
     @Override
     public @NonNull Flux<ChatResponse> stream(@NonNull Prompt prompt) {
         // 流式的 usage 只挂在最后一个 chunk 上，且通常是本次调用的累计值，逐块相加会翻倍。
-        // 只留最后见到的那份，流结束时入账一次。
+        // 只留最后见到的那份，流终止时入账一次。
         AtomicReference<Usage> last = new AtomicReference<>();
+        AtomicBoolean recorded = new AtomicBoolean();
         return delegate.stream(prompt)
                 .doOnNext(r -> {
                     Usage u = usageOf(r);
@@ -64,7 +85,17 @@ public class UsageTrackingChatModel implements ChatModel {
                         last.set(u);
                     }
                 })
-                .doFinally(sig -> record(last.get()));
+                // 入账必须赶在终止信号传给下游之前：消费方一收到 onComplete 就会去读 snapshot()，
+                // 而 doFinally 是信号传播完才跑的——那一次（往往正是最贵的汇总）会漏记
+                .doOnTerminate(() -> recordOnce(recorded, last))
+                // 取消不经 doOnTerminate，但 token 照样是真烧掉的，兜在这儿；CAS 保证同一次流只入账一遍
+                .doFinally(sig -> recordOnce(recorded, last));
+    }
+
+    private void recordOnce(AtomicBoolean recorded, AtomicReference<Usage> last) {
+        if (recorded.compareAndSet(false, true)) {
+            record(last.get());
+        }
     }
 
     @Override
@@ -80,6 +111,19 @@ public class UsageTrackingChatModel implements ChatModel {
     /** 本轮累计；ReAct 循环可能跑在虚拟线程上，加锁保稳。 */
     public synchronized UsageSnapshot snapshot() {
         return new UsageSnapshot(calls, promptTokens, completionTokens, totalTokens);
+    }
+
+    /**
+     * 归零，划出新一轮的账本起点。
+     * <p>
+     * 给"实例跨轮复用"的对话轨用：那边模型被烤进编译好的叶子图、图又按配置指纹缓存，
+     * 拿不到"每轮 new 一个"的机会，只能在轮开头清零。交易员轨每轮新建，不需要调它。
+     */
+    public synchronized void reset() {
+        calls = 0;
+        promptTokens = null;
+        completionTokens = null;
+        totalTokens = null;
     }
 
     private synchronized void record(Usage usage) {

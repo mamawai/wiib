@@ -639,11 +639,30 @@ CREATE TABLE IF NOT EXISTS workbench_chat_message (
     user_id     BIGINT NOT NULL,
     role        VARCHAR(10) NOT NULL,
     content     TEXT NOT NULL,
+    -- 下面 6 列只有 assistant 行有值：这一轮用的端点、烧的 token、花的时间，随答案一起落库
+    -- 200 是按上界算的：端点名上限 32 + 分隔符 3 + user_llm_endpoint.model 的 128。
+    -- 装不下不是丢一列而是丢一整条答案——插入抛异常被 ChatHistoryService 的 catch 吞掉
+    model_label VARCHAR(200),
+    model_calls INT,
+    prompt_tokens BIGINT,
+    completion_tokens BIGINT,
+    total_tokens BIGINT,
+    latency_ms  INT,
     created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+-- 存量库补列（新库上面建表已含）
+ALTER TABLE workbench_chat_message ADD COLUMN IF NOT EXISTS model_label VARCHAR(200);
+ALTER TABLE workbench_chat_message ADD COLUMN IF NOT EXISTS model_calls INT;
+ALTER TABLE workbench_chat_message ADD COLUMN IF NOT EXISTS prompt_tokens BIGINT;
+ALTER TABLE workbench_chat_message ADD COLUMN IF NOT EXISTS completion_tokens BIGINT;
+ALTER TABLE workbench_chat_message ADD COLUMN IF NOT EXISTS total_tokens BIGINT;
+ALTER TABLE workbench_chat_message ADD COLUMN IF NOT EXISTS latency_ms INT;
 CREATE INDEX IF NOT EXISTS idx_wb_chat_session ON workbench_chat_message (session_id, id);
 CREATE INDEX IF NOT EXISTS idx_wb_chat_user ON workbench_chat_message (user_id, id DESC);
 COMMENT ON TABLE workbench_chat_message IS '工作台对话历史(展示用):user/assistant按会话落库,session_id与workbench_chat_context同值';
+COMMENT ON COLUMN workbench_chat_message.model_label IS '这一轮用的对话主模型:端点名 · 模型名(与LlmEndpointSelect展示口径一致)';
+COMMENT ON COLUMN workbench_chat_message.total_tokens IS '本轮全部模型调用(路由+专家+汇总+压缩+深研判)的token合计;NULL=上游端点没返回usage或本轮账不可信(有别轮的在途专家仍在记账),不是0';
+COMMENT ON COLUMN workbench_chat_message.latency_ms IS '本轮墙钟耗时,口径同[TurnMetrics]日志:不含准入/建叶子/让位握手';
 
 -- ============ workbench_chat_context：工作台会话模型侧上下文（续聊主链；一会话一行整体替换） ============
 -- 替代 langgraph4j PostgresSaver 的 lg4j* 表：那套图每走一步存一行完整快照（一轮 8 行、同一份历史重复存），

@@ -2,12 +2,15 @@ package com.mawai.wiibquant.agent.chat;
 
 import com.mawai.wiibquant.agent.llm.LlmEndpointService;
 import com.mawai.wiibquant.agent.llm.SseChannel;
+import com.mawai.wiibquant.agent.llm.UsageTrackingChatModel;
 import org.junit.jupiter.api.Test;
 import org.mockito.stubbing.Answer;
+import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.function.Consumer;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -68,10 +71,15 @@ class ChatWorkbenchStreamTest {
         SseChannel channel = new SseChannel(emitter);
         channel.markClosed();   // 用户切页：连接已经断了，这一轮才刚开始
 
-        controller.run(channel, 1L, SESSION, "看看行情", null, coordinator.openTurn(1L));
+        // run() 要拿叶子清账本、取模型名落库，给不了 null；这条用例不看模型本身，深浅共用一个装饰器
+        UsageTrackingChatModel model = new UsageTrackingChatModel(mock(ChatModel.class));
+        ChatAgentFactory.Leaves leaves =
+                new ChatAgentFactory.Leaves("test", model, model, Map.of(), null);
+
+        controller.run(channel, 1L, SESSION, "看看行情", leaves, coordinator.openTurn(1L));
 
         // 答案完整进历史——这是断连用户唯一还拿得到东西的途径
-        verify(historyService).append(eq(SESSION), eq(1L), eq("assistant"), eq("前半段后半段"));
+        verify(historyService).append(eq(SESSION), eq(1L), eq("assistant"), eq("前半段后半段"), any());
         // 但一帧都没往断掉的通道里写
         assertThat(emitter.raw).isEmpty();
     }

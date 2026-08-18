@@ -149,6 +149,21 @@ public class ChatYieldCoordinator {
     }
 
     /**
+     * 这个用户还有没有跑不完的在途专家批次——有的话，用量账本上就混着不属于当前这一轮的 token。
+     * <p>
+     * 让位交出去的那批专家<b>没人取消</b>（{@link ChatTurnRunner} 的 dispatchAsync 是虚拟线程 fire-and-forget），
+     * 它能跨过好几轮继续往同一份账本上记账。所以"这一轮的用量可不可信"要看它，
+     * 而不是看"这一轮的名额是不是从谁手里抢来的"——后者只盖得住紧邻的那一轮。
+     * <p>
+     * 批次 {@code isDone()} 为真时账已经写完：专家走的是阻塞 invoke，模型调用在 future 完成前就返回了。
+     */
+    public boolean hasInFlightExperts(long userId) {
+        return pendingBySession.values().stream()
+                .flatMap(Queue::stream)
+                .anyMatch(work -> work.userId() == userId && !work.experts().isDone());
+    }
+
+    /**
      * 试跑一单补答。名额每用户 1 个，一次只跑一单，跑完的 finally 里链式再试；
      * 并发调用靠闸门天然串行——第二个进来的拿到 USER_BUSY 直接退。
      */
@@ -178,6 +193,11 @@ public class ChatYieldCoordinator {
 
     /** 一单补答：summarizer 收尾 → 落展示历史（带补答标头）。 */
     private void runDeferred(DeferredWork work, Queue<DeferredWork> queue) {
+        // 账本清零划出这一段的边界。自己这单的专家早已完成（tryDrain 只挑 isDone 的），
+        // 但同一用户名下可能还排着别的在途批次（别的会话/后一单），那些专家仍在往同一份账本上记账
+        boolean dirtyBook = hasInFlightExperts(work.userId());
+        work.leaves().resetUsage();
+        long startedAt = System.currentTimeMillis();
         try {
             // 先登记运行中再出队：status = isRunning || hasPending，顺序反了会闪出两者皆 false 的空窗，
             // 轮询端会误判"已结束"，拉走没有补答的历史并停表。
@@ -189,19 +209,31 @@ public class ChatYieldCoordinator {
             String answer = turnRunner.runDeferredSummary(work.leaves(), work.userId(), work.sessionId(),
                     work.question(), work.experts().join());
             chatHistoryService.append(work.sessionId(), work.userId(), "assistant",
-                    deferredHeader(work.question()) + answer);
+                    deferredHeader(work.question()) + answer, deferredMeta(work, startedAt, dirtyBook));
             log.info("[Yield] 补答完成 session={} chars={}", work.sessionId(), answer.length());
         } catch (Exception e) {
             log.warn("[Yield] 补答失败 session={}", work.sessionId(), e);
             // 失败也要给一行交代：不落的话轮询一停，用户看到的是问题永远没有下文
             chatHistoryService.append(work.sessionId(), work.userId(), "assistant",
-                    deferredHeader(work.question()) + "（补答失败：" + LlmErrorMessages.classify(e) + "，可重新提问）");
+                    deferredHeader(work.question()) + "（补答失败：" + LlmErrorMessages.classify(e) + "，可重新提问）",
+                    deferredMeta(work, startedAt, dirtyBook));   // 失败也照记：token 是真烧掉了
         } finally {
             runRegistry.finish(work.sessionId());
             concurrencyGate.release(work.userId());
             pendingBySession.computeIfPresent(work.sessionId(), (k, q) -> q.isEmpty() ? null : q);
             tryDrain(work.userId()); // 同用户可能还欠着别的补答
         }
+    }
+
+    /**
+     * 补答这一段自己的读数：被让位那轮已经花掉的不算在这里（那轮没落 assistant 行，也就没处可记）。
+     * 账本被别的在途批次写脏时只报耗时——口径同 {@code ChatWorkbenchController.turnMeta}。
+     */
+    private static ChatHistoryService.TurnMeta deferredMeta(DeferredWork work, long startedAt, boolean dirtyBook) {
+        int latencyMs = (int) (System.currentTimeMillis() - startedAt);
+        return dirtyBook
+                ? ChatHistoryService.TurnMeta.latencyOnly(work.leaves().modelLabel(), latencyMs)
+                : ChatHistoryService.TurnMeta.of(work.leaves().modelLabel(), work.leaves().usageSnapshot(), latencyMs);
     }
 
     /** 补答的标头：时间线上它离原问题隔着别的对话，得自己说明在答哪个问题 */

@@ -254,7 +254,8 @@ public class ChatWorkbenchController {
      */
     void run(SseChannel channel, long userId, String sessionId, String message,
              ChatAgentFactory.Leaves leaves, ChatYieldCoordinator.TurnHandle turn) {
-        // 本轮开跑的时刻：结尾只发"这一轮新登记"的确认卡，见下面 hitl_request 那段
+        // 本轮开跑的时刻：结尾只发"这一轮新登记"的确认卡（见下面 hitl_request 那段），
+        // 同时也是落库耗时的起点——口径与 [TurnMetrics] 日志一致，不含准入/建叶子/让位握手
         long turnStartedAt = System.currentTimeMillis();
         // 答案流/过程流分离：专家的结论是"工作过程"（前端折叠展示、不落历史），
         // 只有 summarizer 的汇总才是答案——否则单专家问题会"专家一遍+汇总一遍"重复输出
@@ -274,6 +275,11 @@ public class ChatWorkbenchController {
             String enriched = "【当前时间 " + TIME_FMT.format(Instant.now()) + "】\n"
                     + "用户问题：" + message;
 
+            // 账本清零划出本轮边界：装饰器跟着叶子跨轮缓存，不清就是上一轮的账接着涨。
+            // 同时记下开工时账本干不干净——让位交出去的专家批次没人取消，会跨轮继续往这份账本上记。
+            // 只在开工时查一次就够：新批次只由本用户自己的让位产生，而同一用户同时只有一轮在跑
+            boolean dirtyBook = yieldCoordinator.hasInFlightExperts(userId);
+            leaves.resetUsage();
             ChatTurnRunner.TurnResult result = turnRunner.run(leaves, userId, sessionId, enriched,
                     chunk -> {
                         // 攒答案在断连判断之外：断连后这轮照跑完，答案仍要进历史，
@@ -320,13 +326,15 @@ public class ChatWorkbenchController {
 
             // 极端场景（调用上限截停等）summarizer 没产出汇总，退专家结论，答案不至于丢
             String finalAnswer = !answer.isEmpty() ? answer.toString() : expertLog.toString();
+            ChatHistoryService.TurnMeta meta = turnMeta(leaves, dirtyBook, turnStartedAt);
             // 历史不看连接死活：切页断连后这一轮照跑完，答案必须落库（前端回来靠 status+历史补）。
             // 且必须在 finally 摘运行标记之前写完——轮询端不能出现"已结束但查不到答案"的空窗
-            chatHistoryService.append(sessionId, userId, "assistant", finalAnswer);
+            chatHistoryService.append(sessionId, userId, "assistant", finalAnswer, meta);
             if (!channel.isClosed()) {
                 channel.send("done", new JSONObject()
                         .fluentPut("sessionId", sessionId)
-                        .fluentPut("answer", finalAnswer));
+                        .fluentPut("answer", finalAnswer)
+                        .fluentPut("meta", metaJson(meta)));
                 channel.complete();
             }
         } catch (Exception e) {
@@ -343,6 +351,33 @@ public class ChatWorkbenchController {
             heartbeat.cancel(false);
             runRegistry.finish(sessionId);
         }
+    }
+
+    /**
+     * 本轮读数。账本被别轮的在途专家写脏时只报耗时：读到的数混着别人的账——
+     * 宁可不报，也不能报个错的（null=没报，与全站 token 语义一致）。
+     */
+    private static ChatHistoryService.TurnMeta turnMeta(ChatAgentFactory.Leaves leaves,
+                                                        boolean dirtyBook, long startedAt) {
+        int latencyMs = (int) (System.currentTimeMillis() - startedAt);
+        return dirtyBook
+                ? ChatHistoryService.TurnMeta.latencyOnly(leaves.modelLabel(), latencyMs)
+                : ChatHistoryService.TurnMeta.of(leaves.modelLabel(), leaves.usageSnapshot(), latencyMs);
+    }
+
+    /**
+     * 读数 → SSE 字段，字段名与历史回放的 meta 一一对应。
+     * 形状有一处不同：fastjson2 默认不输出 null，所以没报的项在这里是<b>缺席</b>，
+     * 而历史接口走 Jackson 会输出 {@code null}——前端两边都按"取不到值=没报"判，不要判 0。
+     */
+    private static JSONObject metaJson(ChatHistoryService.TurnMeta meta) {
+        return new JSONObject()
+                .fluentPut("modelLabel", meta.modelLabel())
+                .fluentPut("modelCalls", meta.modelCalls())
+                .fluentPut("promptTokens", meta.promptTokens())
+                .fluentPut("completionTokens", meta.completionTokens())
+                .fluentPut("totalTokens", meta.totalTokens())
+                .fluentPut("latencyMs", meta.latencyMs());
     }
 
     /**

@@ -32,6 +32,22 @@ public class WorkbenchChatMessage {
 
     private String content;
 
+    /**
+     * 以下 6 列是这一轮的读数，只有 assistant 行有值（user 行与历史老数据一律 null）。
+     * 口径与 {@code ai_trader_decision} 同源：token 三项 null=上游端点没返回 usage，不是 0。
+     */
+    private String modelLabel;
+
+    private Integer modelCalls;
+
+    private Long promptTokens;
+
+    private Long completionTokens;
+
+    private Long totalTokens;
+
+    private Integer latencyMs;
+
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdAt;
 }
