@@ -79,6 +79,11 @@ export function fmtDuration(from: number | string | Date, to: number | string | 
   return `${s}秒`;
 }
 
+/** token 数缩写：12480 → 12.5k。一行小字里放得下，不带尾随空格，拼接由调用方管。 */
+export function fmtTokens(n: number): string {
+  return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
+}
+
 /** 大额缩写：≥1亿 → X.XX亿，≥1万 → X.XX万，其余两位小数；null/NaN 返回 '-'。 */
 export function fmtMoney(n: number | null | undefined): string {
   if (n == null || !Number.isFinite(n)) return '-';

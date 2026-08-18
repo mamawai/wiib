@@ -441,6 +441,12 @@ export const workbenchApi = {
   /** 工作台 SSE：POST /ai/workbench/chat，事件 session/agent_start/token/hitl_request/done/error */
   chat: (sessionId: string | null, message: string, onEvent: (e: WorkbenchEvent) => void, signal?: AbortSignal) =>
     postSse<WorkbenchEvent>('/api/ai/workbench/chat', { sessionId, message }, onEvent, signal),
+  /**
+   * 重新生成会话最后一条回答：后端把模型侧上下文回退到那条提问之前，再用原提问重跑，
+   * 事件协议与 chat 完全一致。回不去的会话（末尾不是答案/补答行/本轮压缩过）返回 2206。
+   */
+  regenerate: (sessionId: string, onEvent: (e: WorkbenchEvent) => void, signal?: AbortSignal) =>
+    postSse<WorkbenchEvent>('/api/ai/workbench/regenerate', { sessionId }, onEvent, signal),
   /** requestId 从 hitl_request 事件原样回传：卡片被新请求覆盖后点它，服务端会拒掉 */
   approve: (sessionId: string, approved: boolean, requestId: string) =>
     api.post<unknown, void>('/ai/workbench/approve', { sessionId, approved, requestId }),

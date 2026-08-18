@@ -8,7 +8,7 @@ import { traderApi } from '../api';
 import { STATUS_META } from './Arena';
 import { EquityChart } from '../components/EquityChart';
 import { Markdown } from '../components/Markdown';
-import { cn, fmtDateTime, fmtNum } from '../lib/utils';
+import { cn, fmtDateTime, fmtNum, fmtTokens } from '../lib/utils';
 import type { AiTraderDecisionView, AiTraderPlanView, PlanRevision, TraderDetailView, TraderEquityPoint } from '../types';
 import type { TnEquityPoint } from '../types/testnet';
 
@@ -28,11 +28,6 @@ const TOOL_CN: Record<string, string> = {
   funding_history: '资金费', orderbook_depth: '盘口', option_iv: '期权IV', news_search: '快讯',
 };
 const TRADE_TOOLS = new Set(['open_position', 'close_position', 'set_stop_loss', 'set_take_profit', 'cancel_order', 'write_plan']);
-
-/** token 数缩写：12480 → 12.5k，时间线一行放得下 */
-function fmtTokens(n: number): string {
-  return n >= 1000 ? `${(n / 1000).toFixed(1)}k ` : `${n} `;
-}
 
 interface ActionRow {
   tool: string;
@@ -127,7 +122,7 @@ function DecisionCard({ d }: { d: AiTraderDecisionView }) {
             d.kind !== 'REVIEW' && `${d.toolCalls}次工具`,
             d.modelCalls != null && `${d.modelCalls}次模型`,
             // token 为 null＝上游端点没报 usage，显示「—」而不是 0：0 会被读成"这轮没花钱"
-            d.modelCalls != null && `${d.totalTokens == null ? '— ' : fmtTokens(d.totalTokens)}tokens`,
+            d.modelCalls != null && `${d.totalTokens == null ? '—' : fmtTokens(d.totalTokens)} tokens`,
           ].filter(Boolean).join(' · ')}
         </span>
       </div>

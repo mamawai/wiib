@@ -1,5 +1,5 @@
 import { ApiError, workbenchApi } from '../../api';
-import type { TraderFormKind, WorkbenchChatMessage, WorkbenchEvent } from '../../types';
+import type { TraderFormKind, TurnMeta, WorkbenchChatMessage, WorkbenchEvent } from '../../types';
 
 /** 与后端 ErrorCode 对齐：2200 段是研判工作台（1600 段是 Crypto，别复用） */
 export const CHAT_ERROR = {
@@ -7,6 +7,8 @@ export const CHAT_ERROR = {
   CONFIG_INVALID: 2202,
   ALREADY_RUNNING: 2203,
   CAPACITY_FULL: 2204,
+  /** 这条回答回不去（末尾不是答案／补答行／本轮触发过历史压缩），重新生成被拒 */
+  REGENERATE_UNAVAILABLE: 2206,
 } as const;
 
 /**
@@ -21,13 +23,17 @@ export type FormKind = TraderFormKind;
 export type ChatItem =
   // queued=后端不让位（正在出答案）时先上屏排队，本轮结束自动真发；
   // 专家取数期间的新消息会触发后端让位直接插话，不走排队
-  | { kind: 'user'; content: string; queued?: boolean }
-  | { kind: 'assistant'; content: string; streaming: boolean }
-  // 专家过程流（不落历史）：视图层收进"工作过程"轨，折叠状态归视图管
-  | { kind: 'expert'; agent: string; content: string; streaming: boolean }
-  | { kind: 'agent'; node: string; agent: string }
+  // at=这条消息的时刻（历史回放取库里的 createdAt，实时取本地时钟），面板上要显示
+  | { kind: 'user'; content: string; at: number; queued?: boolean }
+  // meta=这一轮的读数（端点/耗时/token），流式结束时随 done 事件到；历史回放从库里带
+  | { kind: 'assistant'; content: string; streaming: boolean; at: number; meta?: TurnMeta | null }
+  // 专家过程流（不落历史）：视图层收进"工作过程"轨，折叠状态归视图管。
+  // rid=轨内条目的自增号，视图拿轨首那条的 rid 当折叠状态的键——用下标做键的话，
+  // 让位说明行往中间一插、重新生成把尾巴一砍，键就整体错位，收着的轨会自己弹开
+  | { kind: 'expert'; rid: number; agent: string; content: string; streaming: boolean }
+  | { kind: 'agent'; rid: number; node: string; agent: string }
   // 长工具阶段进度（深研判等）：最新一条亮着转圈，后续事件到达即熄灭
-  | { kind: 'progress'; text: string; active: boolean }
+  | { kind: 'progress'; rid: number; text: string; active: boolean }
   // requestId 存在 item 上：hitlDecide 按它取回本条再原样回传，服务端据此确认"点的是哪张卡"
   | { kind: 'hitl'; symbol: string; reason: string; requestId: string; resumeMessage: string; status: 'pending' | 'approved' | 'rejected' }
   // trader 动作表单卡：模型只有弹卡的权，执行权归用户点击。纯前端态不落历史，id 本地发
@@ -48,6 +54,16 @@ const SESSION_KEY = 'wiib-workbench-session';
 const POLL_MS = 3000;
 /** 让位后立在原问题过程轨里的说明行（也当"这个问题已有交代"的标记，防重复插） */
 const DEFERRED_NOTE = '专家仍在取数，这个问题的答案稍后自动补上';
+/** 补答行的标头前缀，与后端 ChatYieldCoordinator.DEFERRED_PREFIX 同值：这类答案不给重新生成 */
+export const DEFERRED_PREFIX = '【补答「';
+/**
+ * HITL 批准后自动补发的续跑指令，与后端 ChatWorkbenchController 发的 resumeMessage 同值。
+ * 它是"批准"这个动作的一部分、不是用户打的字，但后端把它当普通用户消息落了库——
+ * 回放时按这句话认出来还原成过程轨行，否则历史里会多出一句用户从没说过的话。
+ */
+const HITL_RESUME_MESSAGE = '已确认，请继续执行深度研判';
+/** 续跑指令在过程轨里的措辞：与 HITL 卡自己的状态行错开，别同一句话连着显示两遍 */
+const HITL_RESUME_NOTE = '正在恢复深度研判的执行';
 
 let state: ChatState = {
   items: [],
@@ -60,14 +76,24 @@ const listeners = new Set<() => void>();
 let abortCtrl: AbortController | null = null;
 let pollTimer: number | null = null;
 let initialized = false;
-/** 后端不让位（正在出答案）时排队的待发消息（气泡已上屏，只差真发） */
-let sendQueue: string[] = [];
+/**
+ * 后端不让位（正在出答案）时排队的待发消息。
+ * bubbled=屏幕上有没有对应的排队气泡——HITL 续跑那种自动补发的指令没有气泡，
+ * 续发时不能跟着去解别人气泡的排队标记。
+ */
+type QueuedMessage = { text: string; bubbled: boolean };
+let sendQueue: QueuedMessage[] = [];
 /** 有被让位的问题还没补答：流一收尾就转后台轮询，等补答落历史后整体回放补显 */
 let deferredPending = false;
 /** 表单卡只活在本地 items 里（不落历史），自增序号足够把几张卡区分开 */
 let formSeq = 0;
 function nextFormId() {
   return `form-${++formSeq}`;
+}
+/** 过程条目的自增号：视图用轨首那条的 rid 记折叠状态，条目挪位置也认得回来 */
+let railSeq = 0;
+function nextRid() {
+  return ++railSeq;
 }
 
 function set(patch: Partial<ChatState>) {
@@ -87,9 +113,14 @@ function setSession(id: string | null) {
 
 /** 后端历史 → 对话项（专家过程/进度不落库，只回放 user/assistant） */
 function toItems(messages: WorkbenchChatMessage[]): ChatItem[] {
-  return messages.map(m => m.role === 'user'
-    ? { kind: 'user' as const, content: m.content }
-    : { kind: 'assistant' as const, content: m.content, streaming: false });
+  return messages.map(m => {
+    if (m.role !== 'user') {
+      return { kind: 'assistant' as const, content: m.content, streaming: false, at: m.createdAt, meta: m.meta };
+    }
+    return m.content === HITL_RESUME_MESSAGE
+      ? { kind: 'progress' as const, rid: nextRid(), text: HITL_RESUME_NOTE, active: false }
+      : { kind: 'user' as const, content: m.content, at: m.createdAt };
+  });
 }
 
 /** 没填完的表单卡：历史回放整体重建 items 时得接回尾部，否则用户填一半的内容无声消失 */
@@ -122,7 +153,7 @@ function insertDeferredNote(items: ChatItem[]): ChatItem[] {
     if (!settled) {
       return [
         ...items.slice(0, end),
-        { kind: 'progress', text: DEFERRED_NOTE, active: false },
+        { kind: 'progress', rid: nextRid(), text: DEFERRED_NOTE, active: false },
         ...items.slice(end),
       ];
     }
@@ -136,10 +167,10 @@ function handleEvent(e: WorkbenchEvent) {
       setSession(e.sessionId);
       break;
     case 'agent_start':
-      updateItems(prev => [...prev, { kind: 'agent', node: e.node, agent: e.agent }]);
+      updateItems(prev => [...prev, { kind: 'agent', rid: nextRid(), node: e.node, agent: e.agent }]);
       break;
     case 'progress':
-      updateItems(prev => [...deactivateProgress(prev), { kind: 'progress', text: e.text, active: true }]);
+      updateItems(prev => [...deactivateProgress(prev), { kind: 'progress', rid: nextRid(), text: e.text, active: true }]);
       break;
     case 'token':
       updateItems(prev => {
@@ -154,7 +185,7 @@ function handleEvent(e: WorkbenchEvent) {
               return next;
             }
           }
-          next.push({ kind: 'expert', agent: e.agent, content: e.text, streaming: true });
+          next.push({ kind: 'expert', rid: nextRid(), agent: e.agent, content: e.text, streaming: true });
           return next;
         }
         // 答案流开始：专家过程停止流式（视图层据此把工作过程轨默认收起）
@@ -169,7 +200,7 @@ function handleEvent(e: WorkbenchEvent) {
             return next;
           }
         }
-        next.push({ kind: 'assistant', content: e.text, streaming: true });
+        next.push({ kind: 'assistant', content: e.text, streaming: true, at: Date.now() });
         return next;
       });
       break;
@@ -195,7 +226,10 @@ function handleEvent(e: WorkbenchEvent) {
       }
       updateItems(prev => {
         const next = deactivateProgress(prev).map(it => {
-          if (it.kind === 'assistant' && it.streaming) return { ...it, content: it.content || e.answer, streaming: false };
+          // 读数随 done 一起到：本轮不用等刷新就能显示端点/耗时/token
+          if (it.kind === 'assistant' && it.streaming) {
+            return { ...it, content: it.content || e.answer, streaming: false, meta: e.meta };
+          }
           if (it.kind === 'expert' && it.streaming) return { ...it, streaming: false };
           return it;
         });
@@ -205,13 +239,18 @@ function handleEvent(e: WorkbenchEvent) {
           if (next[j].kind === 'user') { lastUser = j; break; }
         }
         const hasAnswer = next.slice(lastUser + 1).some(it => it.kind === 'assistant');
-        if (!hasAnswer && e.answer) next.push({ kind: 'assistant', content: e.answer, streaming: false });
+        if (!hasAnswer && e.answer) {
+          next.push({ kind: 'assistant', content: e.answer, streaming: false, at: Date.now(), meta: e.meta });
+        }
         return next;
       });
       break;
     case 'error':
       updateItems(prev => [...prev, { kind: 'error', message: e.message }]);
       break;
+    default:
+      // 后端日后加新事件类型时不至于静默吞掉；不上屏，排查看控制台
+      console.warn('[chat] 未识别的事件', e);
   }
 }
 
@@ -238,7 +277,8 @@ function startPolling(sid: string) {
           // 后端说没有在跑也不欠补答了（status 口径含补答队列）：欠的账都已在历史里
           deferredPending = false;
           // 历史回放会整体重建 items：排队气泡和没填完的表单卡都不在后端历史里，得补回尾部
-          const queued = sendQueue.map(m => ({ kind: 'user' as const, content: m, queued: true }));
+          const queued = sendQueue.filter(q => q.bubbled)
+            .map(q => ({ kind: 'user' as const, content: q.text, at: Date.now(), queued: true }));
           set({ items: [...toItems(msgs), ...queued, ...pendingForms()], loading: false, background: false });
           drainQueue();
         }
@@ -247,7 +287,14 @@ function startPolling(sid: string) {
   }, POLL_MS);
 }
 
-async function send(message: string, opts?: { silent?: boolean }) {
+/**
+ * 发一条消息。
+ *
+ * @param opts.noBubble   不上气泡：HITL 批准后自动补发的续跑指令（不是用户打的字），
+ *                        以及气泡已在屏上的排队续发
+ * @param opts.requeueAs  被拒时塞回队头用的原样条目（排队续发专用），不传就按新消息入队尾
+ */
+async function send(message: string, opts?: { noBubble?: boolean; requeueAs?: QueuedMessage }) {
   const msg = message.trim();
   if (!msg) return;
   // 有轮在跑也直接真发：后端专家等待期会让位（用户消息优先，专家结果转入补答队列）；
@@ -255,7 +302,7 @@ async function send(message: string, opts?: { silent?: boolean }) {
   const prevAbort = abortCtrl;
   const bubbleIndex = state.items.length;   // 本条气泡的位置，被拒时改标排队
   stopPolling();
-  if (!opts?.silent) updateItems(prev => [...prev, { kind: 'user', content: msg }]);
+  if (!opts?.noBubble) updateItems(prev => [...prev, { kind: 'user', content: msg, at: Date.now() }]);
   set({ loading: true, background: false });
   const abort = new AbortController();
   abortCtrl = abort;
@@ -266,12 +313,15 @@ async function send(message: string, opts?: { silent?: boolean }) {
     if (!abort.signal.aborted) {
       const code = err instanceof ApiError ? err.code : 0;
       if (code === CHAT_ERROR.ALREADY_RUNNING) {
-        // 后端不让位：本条转入排队（silent=排队续发被拒，塞回队头保序）。
+        // 后端不让位：本条转入排队。排队续发与无气泡的自动指令都塞回队头保序，
+        // 新消息入队尾并把自己那只气泡标成排队中。
         // 本地有在跑的流就把主导权还给它；没有（刷新后后台轮在跑）就转后台轮询等那轮结束
-        if (opts?.silent) {
-          sendQueue.unshift(msg);
+        if (opts?.requeueAs) {
+          sendQueue.unshift(opts.requeueAs);
+        } else if (opts?.noBubble) {
+          sendQueue.unshift({ text: msg, bubbled: false });
         } else {
-          sendQueue.push(msg);
+          sendQueue.push({ text: msg, bubbled: true });
           updateItems(prev => prev.map((it, i) =>
             i === bubbleIndex && it.kind === 'user' ? { ...it, queued: true } : it));
         }
@@ -309,15 +359,105 @@ async function send(message: string, opts?: { silent?: boolean }) {
   }
 }
 
-/** 续发排队消息：气泡已上屏，去掉排队标记后以 silent 真发（失败各自报错，不阻塞后面的） */
+/**
+ * 重新生成最后一条回答。
+ * <p>
+ * 后端把模型侧上下文回退到那条提问之前、用原提问重跑，提问行留在库里不动——所以这里也只抹掉
+ * 最后一次提问<b>之后</b>的内容（旧答案与那一轮的工作过程），提问气泡原样留着。
+ * <p>
+ * 抹除放在<b>第一个事件到达之后</b>：准入被拒（2206/占线/没配模型）时一个事件都不会来，
+ * 屏幕上的旧答案就该原样留着——先抹再发的话，被拒的用户会平白丢掉一条好答案。
+ */
+async function regenerate() {
+  const sid = state.sessionId;
+  // background=让位后欠着补答、正靠轮询等它落库。这时候重生成会把轮询掐掉，补答再没人回放
+  if (!sid || state.loading || state.background || abortCtrl) return;
+  const cutAt = lastUserIndex(state.items);
+  if (cutAt < 0) return;
+  stopPolling();
+  set({ loading: true });
+  const abort = new AbortController();
+  abortCtrl = abort;
+  // 抹除前的快照：这一轮没跑出答案就原样接回去。后端是新答案落库之后才删旧答案的，
+  // 库里那条一直还在，本地不该先一步空掉——那样用户看着像把好答案点没了
+  let snapshot: ChatItem[] | null = null;
+  let answered = false;
+  try {
+    await workbenchApi.regenerate(sid, e => {
+      // 抹除等到第一个事件才做：准入被拒（2206/占线/没配模型）时一个事件都不会来，
+      // 屏幕上的旧答案就该原样留着
+      if (!snapshot) {
+        snapshot = state.items;
+        updateItems(prev => dropTurnOutput(prev, cutAt));
+      }
+      // 重生成轮在后端是不可让位的，所以 done 一到就是这一轮真出了答案
+      if (e.type === 'done') answered = true;
+      handleEvent(e);
+    }, abort.signal);
+  } catch (err) {
+    if (!abort.signal.aborted) {
+      const restore = snapshot;
+      if (restore && !answered) updateItems(() => restore);
+      const code = err instanceof ApiError ? err.code : 0;
+      updateItems(prev => [...prev, {
+        kind: 'error',
+        message: code === CHAT_ERROR.REGENERATE_UNAVAILABLE
+          ? '这条回答无法重新生成（它不在会话末尾，或上下文已被压缩）'
+          : (err as Error).message || '重新生成失败',
+      }]);
+      if (code === CHAT_ERROR.CONFIG_MISSING || code === CHAT_ERROR.CONFIG_INVALID) {
+        set({ needsConfig: true });
+      }
+    }
+  } finally {
+    if (abortCtrl === abort) {
+      abortCtrl = null;
+      if (deferredPending && state.sessionId) {
+        // 本轮收尾但还欠着补答：轮询要还回去，否则补答落历史后再没人回放
+        set({ loading: false, background: true });
+        startPolling(state.sessionId);
+      } else {
+        set({ loading: false });
+        drainQueue();
+      }
+    }
+  }
+}
+
+/** 最后一条用户提问的下标；没有提问返回 -1 */
+function lastUserIndex(items: ChatItem[]): number {
+  for (let i = items.length - 1; i >= 0; i--) {
+    if (items[i].kind === 'user') return i;
+  }
+  return -1;
+}
+
+/**
+ * 砍掉 cutAt 那条提问之后的本轮产物（旧答案、工作过程、确认卡、报错）。
+ * <p>
+ * 切点在发起时就记死：等首个事件到达才抹，期间用户可能又发了一条（后端占线会让它排队），
+ * 那条气泡与没填完的表单卡都是用户的东西，不属于这一轮的产物，留着。
+ */
+function dropTurnOutput(prev: ChatItem[], cutAt: number): ChatItem[] {
+  return [
+    ...prev.slice(0, cutAt + 1),
+    ...prev.slice(cutAt + 1).filter(it =>
+      it.kind === 'user' || (it.kind === 'form' && it.status === 'pending')),
+  ];
+}
+
+/** 续发排队消息：气泡已上屏，去掉排队标记后不再重复上屏（失败各自报错，不阻塞后面的） */
 function drainQueue() {
   const next = sendQueue.shift();
   if (next == null) return;
-  updateItems(prev => {
-    const i = prev.findIndex(it => it.kind === 'user' && it.queued);
-    return i < 0 ? prev : prev.map((it, j) => (j === i && it.kind === 'user' ? { ...it, queued: false } : it));
-  });
-  void send(next, { silent: true });
+  // 只有带气泡的条目才去解排队标记：无气泡的自动指令跟着解会把别人的气泡标成已发出
+  if (next.bubbled) {
+    updateItems(prev => {
+      const i = prev.findIndex(it => it.kind === 'user' && it.queued);
+      return i < 0 ? prev : prev.map((it, j) => (j === i && it.kind === 'user' ? { ...it, queued: false } : it));
+    });
+  }
+  void send(next.text, { noBubble: true, requeueAs: next });
 }
 
 /** 载入会话：消息回放 + 运行状态感知（还在跑→轮询等结果，新消息照常可排队） */
@@ -349,7 +489,11 @@ async function hitlDecide(requestId: string, approved: boolean) {
   updateItems(prev => prev.map(it =>
     it.kind === 'hitl' && it.requestId === requestId ? { ...it, status: approved ? 'approved' : 'rejected' } : it,
   ));
-  if (approved) await send(item.resumeMessage);
+  if (!approved) return;
+  // 续跑指令是批准这个动作的一部分，不是用户打的字：立在工作过程轨里，
+  // 用 silent 发出去不上气泡——否则历史里会多出一句用户从没说过的话
+  updateItems(prev => [...prev, { kind: 'progress', rid: nextRid(), text: HITL_RESUME_NOTE, active: false }]);
+  await send(item.resumeMessage, { noBubble: true });
 }
 
 function newSession() {
@@ -380,6 +524,7 @@ export const chatStore = {
     void openSession(sid).catch(() => {});
   },
   send,
+  regenerate,
   openSession,
   hitlDecide,
   newSession,

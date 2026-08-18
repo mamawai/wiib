@@ -625,7 +625,8 @@ export type WorkbenchEvent =
   | { type: 'form_request'; form: TraderFormKind; prefill?: Record<string, unknown> }
   // deferred=true：让位收尾（专家还在取数就来了新消息），answer 只是过渡话术；
   // 真答案由后端补答轮落历史，前端靠 status 轮询等它落库后整体回放补显
-  | { type: 'done'; sessionId: string; answer: string; deferred?: boolean }
+  // meta 是本轮读数，让位收尾那条 done 不带（答案还没出，无账可报）
+  | { type: 'done'; sessionId: string; answer: string; deferred?: boolean; meta?: TurnMeta }
   | { type: 'error'; message: string };
 
 /** trader 动作面板的三张卡 */
@@ -690,11 +691,31 @@ export interface WorkbenchSessionSummary {
   lastAt: number;
 }
 
+/**
+ * 一轮的读数：用的哪个端点、烧了多少 token、花了多久。
+ * <p>
+ * 每一项都可能取不到值 —— 那是"上游端点没报 usage / 这一轮的账不可信"，<b>不是 0</b>，展示层必须区分。
+ * 两条来路的空值形状还不一样：SSE 走 fastjson2，默认不输出 null，字段直接<b>缺席</b>；
+ * 历史接口走 Jackson，会老老实实输出 null。所以一律按 `!= null` 判，别判 0、也别只判 undefined。
+ */
+export interface TurnMeta {
+  /** 端点名 · 模型名 */
+  modelLabel?: string | null;
+  modelCalls?: number | null;
+  promptTokens?: number | null;
+  completionTokens?: number | null;
+  totalTokens?: number | null;
+  latencyMs?: number | null;
+}
+
 /** 工作台历史消息（/ai/workbench/sessions/{id}/messages） */
 export interface WorkbenchChatMessage {
+  id: number;
   role: 'user' | 'assistant' | string;
   content: string;
   createdAt: number;
+  /** 只有 assistant 行有；user 行与加列之前的老数据是 null */
+  meta?: TurnMeta | null;
 }
 
 /** 我的对话端点配置（BYOK）。key 只回尾 4 位，明文不出服务端 */
