@@ -269,11 +269,12 @@ public class ChatYieldCoordinator {
 
     /**
      * 补答这一段自己的读数：被让位那轮已经花掉的不算在这里（那轮没落 assistant 行，也就没处可记）。
-     * 账本被别的在途批次写脏时只报耗时——口径同 {@code ChatWorkbenchController.turnMeta}。
+     * 账本被别的在途批次写脏（dirtyBook）、或被中断丢下的在途流写脏（usageUntrusted）时只报耗时
+     * ——两个判据同 {@code ChatWorkbenchController.turnMeta}，少判一个报出来的就是两轮混在一起的数。
      */
     private static ChatHistoryService.TurnMeta deferredMeta(DeferredWork work, long startedAt, boolean dirtyBook) {
         int latencyMs = (int) (System.currentTimeMillis() - startedAt);
-        return dirtyBook
+        return dirtyBook || work.leaves().usageUntrusted()
                 ? ChatHistoryService.TurnMeta.latencyOnly(work.leaves().modelLabel(), latencyMs)
                 : ChatHistoryService.TurnMeta.of(work.leaves().modelLabel(), work.leaves().usageSnapshot(), latencyMs);
     }

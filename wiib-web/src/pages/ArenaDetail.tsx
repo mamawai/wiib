@@ -144,11 +144,17 @@ function DecisionCard({ d }: { d: AiTraderDecisionView }) {
         <div className="space-y-1">
           {trades.map((a, i) => {
             const failed = a.rejected || a.status === 'error';
+            // unknown=重发确认后仍没问到结果，可能成交也可能没有。不单独标出来就跟成交长得一模一样，
+            // 而这条时间线是对所有人公开的账面事实
+            const unknown = a.status === 'unknown';
             return (
               <div key={i} className={cn('rounded border px-2 py-1.5 text-[11px] leading-relaxed',
-                failed ? 'border-loss/40 bg-loss/5' : 'border-border bg-card-2/60')}>
-                <span className={cn('font-black mr-1.5', failed ? 'text-loss' : 'text-foreground')}>
-                  {TOOL_CN[a.tool] ?? a.tool}{a.rejected ? '·被拒' : a.status === 'error' ? '·出错' : ''}
+                failed ? 'border-loss/40 bg-loss/5'
+                  : unknown ? 'border-warning/40 bg-warning/5' : 'border-border bg-card-2/60')}>
+                <span className={cn('font-black mr-1.5',
+                  failed ? 'text-loss' : unknown ? 'text-warning' : 'text-foreground')}>
+                  {TOOL_CN[a.tool] ?? a.tool}
+                  {a.rejected ? '·被拒' : a.status === 'error' ? '·出错' : unknown ? '·结果未知' : ''}
                 </span>
                 <span className="text-muted-foreground">{tradeArgsSummary(a)}</span>
                 {a.rejected && <p className="mt-0.5 text-loss">{a.rejected}</p>}

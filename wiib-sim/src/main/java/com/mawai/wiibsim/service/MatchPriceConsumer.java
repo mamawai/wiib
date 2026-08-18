@@ -52,13 +52,21 @@ public class MatchPriceConsumer implements MessageListener {
 
     /** last-tick 键上次写入时刻，节流用——每条 tick 都写 Redis 纯浪费 */
     private volatile long lastTickWriteMs = 0L;
+    /** 启动补漏跑完没有：没跑完不许刷 last-tick，见 touchLastTick */
+    private volatile boolean recovered = false;
 
     @PostConstruct
     public void init() {
         // 先算停机时长再订阅：订阅一开，进来的 tick 立刻把 last-tick 刷成当前时刻，读晚了就算不出真实停机多久
         int minutes = downtimeMinutes();
         listenerContainer.addMessageListener(this, new ChannelTopic(MarketStreamChannels.PRICE));
-        Thread.startVirtualThread(() -> recoverOnStartup(minutes));
+        Thread.startVirtualThread(() -> {
+            try {
+                recoverOnStartup(minutes);
+            } finally {
+                recovered = true;
+            }
+        });
         log.info("[MatchPrice] 订阅 {} 启动，启动补漏回看 {}", MarketStreamChannels.PRICE,
                 minutes > 0 ? minutes + " 分钟" : "短窗（无 last-tick）");
     }
@@ -94,7 +102,7 @@ public class MatchPriceConsumer implements MessageListener {
      * minutes>0 按真实停机时长回看 1m K 线；=0（读不到 last-tick）退回 feed 同款固定短窗。
      * 合约侧遍历合约全集（含金/油/TradFi 纯合约标的），现货侧只有 crypto 有现货。
      */
-    void recoverOnStartup(int minutes) {
+    private void recoverOnStartup(int minutes) {
         List<String> spotSymbols = props.getSymbols() == null ? List.of() : props.getSymbols();
         for (String symbol : props.getAllFuturesSymbols()) {
             try {
@@ -177,6 +185,9 @@ public class MatchPriceConsumer implements MessageListener {
 
     /** 记"活到几点了"：节流 5s 写一次，下次重启拿它算停机多久 */
     private void touchLastTick() {
+        // 补漏没跑完先不刷：补漏是几十个 symbol 串行 REST，几十秒起步，这中间进程再挂（部署崩溃循环）
+        // 下次读到的停机时长就只剩这几十秒，本该补的那段窗口再也补不回来
+        if (!recovered) return;
         long now = System.currentTimeMillis();
         if (now - lastTickWriteMs < LAST_TICK_WRITE_INTERVAL_MS) return;
         lastTickWriteMs = now;

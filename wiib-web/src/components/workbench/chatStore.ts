@@ -17,9 +17,6 @@ export const CHAT_ERROR = {
  * 整页刷新后 store 归零，靠 status 轮询发现"AI 还在后台跑"，结束拉历史补答案。
  */
 
-/** trader 动作表单卡的三种类型（与后端 form_request 的 formType 一一对应） */
-export type FormKind = TraderFormKind;
-
 export type ChatItem =
   // queued=后端不让位（正在出答案）时先上屏排队，本轮结束自动真发；
   // 专家取数期间的新消息会触发后端让位直接插话，不走排队
@@ -39,7 +36,7 @@ export type ChatItem =
   // requestId 存在 item 上：hitlDecide 按它取回本条再原样回传，服务端据此确认"点的是哪张卡"
   | { kind: 'hitl'; symbol: string; reason: string; requestId: string; resumeMessage: string; status: 'pending' | 'approved' | 'rejected' }
   // trader 动作表单卡：模型只有弹卡的权，执行权归用户点击。纯前端态不落历史，id 本地发
-  | { kind: 'form'; id: string; form: FormKind; prefill?: Record<string, unknown>; status: 'pending' | 'done'; result?: string }
+  | { kind: 'form'; id: string; form: TraderFormKind; prefill?: Record<string, unknown>; status: 'pending' | 'done'; result?: string }
   | { kind: 'error'; message: string };
 
 export interface ChatState {
@@ -476,13 +473,13 @@ function lastUserIndex(items: ChatItem[]): number {
  * 砍掉 cutAt 那条提问之后的本轮产物（旧答案、工作过程、确认卡、报错）。
  * <p>
  * 切点在发起时就记死：等首个事件到达才抹，期间用户可能又发了一条（后端占线会让它排队），
- * 那条气泡与没填完的表单卡都是用户的东西，不属于这一轮的产物，留着。
+ * 那条气泡留着。表单卡不论填没填完都留着——它是用户自己在卡上点出来的动作，
+ * 已落地的那些（已唤醒／已复盘／已留言）钱都花掉了，而卡是纯前端态、抹了刷新也回不来。
  */
 function dropTurnOutput(prev: ChatItem[], cutAt: number): ChatItem[] {
   return [
     ...prev.slice(0, cutAt + 1),
-    ...prev.slice(cutAt + 1).filter(it =>
-      it.kind === 'user' || (it.kind === 'form' && it.status === 'pending')),
+    ...prev.slice(cutAt + 1).filter(it => it.kind === 'user' || it.kind === 'form'),
   ];
 }
 
@@ -529,7 +526,7 @@ async function hitlDecide(requestId: string, approved: boolean) {
   ));
   if (!approved) return;
   // 续跑指令是批准这个动作的一部分，不是用户打的字：立在工作过程轨里，
-  // 用 silent 发出去不上气泡——否则历史里会多出一句用户从没说过的话
+  // 用 noBubble 发出去不上气泡——否则历史里会多出一句用户从没说过的话
   updateItems(prev => [...prev, { kind: 'progress', rid: nextRid(), text: HITL_RESUME_NOTE, active: false }]);
   await send(item.resumeMessage, { noBubble: true });
 }
@@ -574,7 +571,7 @@ export const chatStore = {
   hitlDecide,
   newSession,
   /** 入口按钮直接弹卡：跟模型弹的卡走同一条 items 通路，不经后端 */
-  openForm(form: FormKind, prefill?: Record<string, unknown>) {
+  openForm(form: TraderFormKind, prefill?: Record<string, unknown>) {
     updateItems(prev => [...prev, { kind: 'form', id: nextFormId(), form, prefill, status: 'pending' }]);
   },
   /** 撤掉一条还没发出去的排队消息：气泡与队列条目共用同一个 id，两边一起走 */

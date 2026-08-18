@@ -51,13 +51,16 @@ public class ChatHistoryService {
     public record ChatMessage(long id, String role, String content, long createdAt, TurnMeta meta) {}
 
     /** 追加一条消息。历史是增益不是主链，失败只记日志不打断对话。 */
-    public void append(String sessionId, long userId, String role, String content) {
-        append(sessionId, userId, role, content, null);
+    public boolean append(String sessionId, long userId, String role, String content) {
+        return append(sessionId, userId, role, content, null);
     }
 
-    /** 带本轮读数的追加（assistant 行专用；meta 为空即退化成普通追加）。 */
-    public void append(String sessionId, long userId, String role, String content, TurnMeta meta) {
-        if (content == null || content.isBlank()) return;
+    /**
+     * 带本轮读数的追加（assistant 行专用；meta 为空即退化成普通追加）。
+     * 返回是否真落了库：重新生成靠它决定敢不敢删旧答案——没落上还删，这个提问就一条答案都不剩了。
+     */
+    public boolean append(String sessionId, long userId, String role, String content, TurnMeta meta) {
+        if (content == null || content.isBlank()) return false;
         try {
             WorkbenchChatMessage row = new WorkbenchChatMessage();
             row.setSessionId(sessionId);
@@ -74,8 +77,10 @@ public class ChatHistoryService {
             }
             // createdAt 由全局 MetaObjectHandler 填，不手塞
             messageMapper.insert(row);
+            return true;
         } catch (Exception e) {
             log.warn("[ChatHistory] 写入失败 sessionId={}", sessionId, e);
+            return false;
         }
     }
 

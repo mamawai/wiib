@@ -89,7 +89,8 @@ class InternalOrderIdempotencyTest {
         Result<FuturesOrderResponse> r = idempotency.execute(99L, "req-1",
                 () -> { throw new IllegalStateException("不该再下单"); });
 
-        assertThat(r.getCode()).isEqualTo(ErrorCode.ORDER_PROCESSING.getCode());
+        // 1106 不是 1105：抢锁失败那个 1105 语义是"确定没成交"，两边混了 quant 会把没下的单报成"可能已成交"
+        assertThat(r.getCode()).isEqualTo(ErrorCode.ORDER_IN_FLIGHT.getCode());
         assertThat(r.getMsg()).contains("clientRequestId");
         assertThat(r.getData()).isNull();
     }

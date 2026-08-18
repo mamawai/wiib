@@ -13,6 +13,7 @@ import com.mawai.wiibquant.mapper.AiTraderDecisionMapper;
 import com.mawai.wiibquant.mapper.AiTraderMapper;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
@@ -22,6 +23,8 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
@@ -70,6 +73,21 @@ class TraderActionServiceTest {
 
     private final TraderActionService service = new TraderActionService(
             traderService, scheduler, reviewRunner, traderMapper, decisionMapper);
+
+    /**
+     * 调度器的 inFlight 是点播复盘与例行唤醒共用的互斥位，拿真集合当替身——
+     * 桩成固定 true/false 就测不出"占了之后第二次会被拦"这条。
+     */
+    @BeforeEach
+    void stubOccupancy() {
+        Set<Long> occupied = ConcurrentHashMap.newKeySet();
+        when(scheduler.tryOccupy(anyLong())).thenAnswer(inv -> occupied.add(inv.getArgument(0)));
+        when(scheduler.isBusy(anyLong())).thenAnswer(inv -> occupied.contains(inv.getArgument(0)));
+        doAnswer(inv -> {
+            occupied.remove(inv.<Long>getArgument(0));
+            return null;
+        }).when(scheduler).release(anyLong());
+    }
 
     // ---------- 夹具 ----------
 
@@ -352,7 +370,9 @@ class TraderActionServiceTest {
     }
 
     /**
-     * 同一 trader 不并行：一次复盘是 600s 预算的深模型大调用，连点两下就是花两份钱写两篇。
+     * 同一 trader 不并行：一次复盘是 600s 预算的深模型大调用，连点两下就是花两份钱写两篇，
+     * 而 ai_trader.memory 是全文覆盖写，后完成的那篇会把另一篇的教训直接顶掉。
+     * 占的是调度器那个 inFlight，所以交接阶段的全体复盘同样会被这个位子挡在外面。
      * 让 mock 卡在 review() 里不返回，复现"上一次还在跑"的那段窗口。
      */
     @Test
@@ -375,7 +395,7 @@ class TraderActionServiceTest {
             ActionResult second = service.review(ME);
 
             assertThat(second.ok()).isFalse();
-            assertThat(second.message()).contains("还在跑");
+            assertThat(second.message()).contains("跑完再点");
         } finally {
             release.countDown();   // 断言失败也要放行，别让虚拟线程把这条用例吊死
         }

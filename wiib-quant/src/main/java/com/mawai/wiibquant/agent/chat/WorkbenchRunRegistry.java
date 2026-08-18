@@ -5,7 +5,7 @@ import org.springframework.stereotype.Component;
 
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.function.BiConsumer;
+import java.util.function.BiPredicate;
 
 /**
  * 工作台运行注册表：sessionId → 运行中标记 + SSE 事件出口。
@@ -20,19 +20,20 @@ import java.util.function.BiConsumer;
 public class WorkbenchRunRegistry {
 
     /**
-     * 无通道占位：补答轮只要"运行中"这个标记，它没有 SSE 可推。
-     * <p>
-     * 用具名常量而不是各处随手写的 {@code (e, d) -> {}}：{@link #publish} 要靠身份认出
-     * "这一轮压根推不出去"并如实返回 false。表单卡最怕的就是回模型一句"已弹出"，
-     * 而用户那边什么都没有。
+     * 事件出口：返回 true=真推出去了。用 BiPredicate 而不是 BiConsumer，是因为"推没推出去"
+     * 必须能一路答给调用方——表单卡最怕的就是回模型一句"已弹出"，而用户那边什么都没有。
      */
-    public static final BiConsumer<String, JSONObject> NO_EMITTER = (event, data) -> { };
+    public interface Emitter extends BiPredicate<String, JSONObject> {
+    }
 
-    /** value=SSE 事件出口（事件名+data；没有通道可推时放 {@link #NO_EMITTER} 占位，key 存在即"运行中"） */
-    private final Map<String, BiConsumer<String, JSONObject>> runs = new ConcurrentHashMap<>();
+    /** 无通道占位：补答轮只要"运行中"这个标记，它没有 SSE 可推，一律推不出去。 */
+    public static final Emitter NO_EMITTER = (event, data) -> false;
+
+    /** value=SSE 事件出口（没有通道可推时放 {@link #NO_EMITTER} 占位，key 存在即"运行中"） */
+    private final Map<String, Emitter> runs = new ConcurrentHashMap<>();
 
     /** 一轮对话开跑：登记运行中 + 挂事件出口。 */
-    public void start(String sessionId, BiConsumer<String, JSONObject> emitter) {
+    public void start(String sessionId, Emitter emitter) {
         runs.put(sessionId, emitter);
     }
 
@@ -67,13 +68,9 @@ public class WorkbenchRunRegistry {
         return publish(sessionId, "form_request", data);
     }
 
-    /** 统一出口：无监听（会话已结束/断连）或无通道（补答轮）都静默丢弃，返回 false。 */
+    /** 统一出口：会话已结束、补答轮无通道、通道已断连，三种都返回 false。 */
     private boolean publish(String sessionId, String event, JSONObject data) {
-        BiConsumer<String, JSONObject> listener = runs.get(sessionId);
-        if (listener == null || listener == NO_EMITTER) {
-            return false;
-        }
-        listener.accept(event, data);
-        return true;
+        Emitter emitter = runs.get(sessionId);
+        return emitter != null && emitter.test(event, data);
     }
 }

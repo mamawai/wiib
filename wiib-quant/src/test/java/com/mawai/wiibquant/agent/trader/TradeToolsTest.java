@@ -326,7 +326,7 @@ class TradeToolsTest {
                 throw new ResourceAccessException("I/O error on POST request: 读超时");
             }
             if (keys.size() == 2) {
-                throw new IllegalStateException("sim api 业务失败 code=1105 msg=请求处理中，请稍后用同一 clientRequestId 重试");
+                throw new IllegalStateException("sim api 业务失败 code=1106 msg=请求处理中，请稍后用同一 clientRequestId 重试");
             }
             FuturesOrderResponse resp = new FuturesOrderResponse();
             resp.setOrderId(888L);

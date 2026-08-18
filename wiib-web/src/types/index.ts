@@ -881,7 +881,7 @@ export interface AiTraderDecisionView {
   status: 'OK' | 'ERROR' | 'SKIPPED';
   equity: number | null;
   reasoning: string | null;
-  /** [{tool,args,status,result/rejected/error}...] */
+  /** [{tool,args,status,result/rejected/error}...]；status=unknown 表示重发也没问到结果，可能已成交 */
   actionsJson: string | null;
   toolCalls: number;
   /** 本轮模型调用次数：ReAct 是循环，一次唤醒会调很多次 */

@@ -17,7 +17,6 @@ import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.Set;
 
 @Slf4j
 @Tag(name = "AI Agent管理")
@@ -27,8 +26,8 @@ import java.util.Set;
 @RequireAdmin // 整个 AI Agent 管理控制器仅管理员(userId=1)可访问
 public class AiAgentAdminController {
 
-    /** Responses API 的思考档位合法值（none=完全关思考，仅部分模型支持如 grok-4.3） */
-    private static final Set<String> EFFORT_LEVELS = Set.of("none", "low", "medium", "high");
+    /** 档位列宽 VARCHAR(16)，超了留给 SQL 报错不如这里说人话 */
+    private static final int MAX_EFFORT_LEN = 16;
 
     private final AiAgentRuntimeManager aiAgentRuntimeManager;
     private final AiRuntimeConfigMapper configMapper;
@@ -57,13 +56,14 @@ public class AiAgentAdminController {
         if (req.getModel() == null || req.getModel().isBlank()) {
             return Result.fail("model不能为空");
         }
-        // 档位留空=不传（走模型默认）；有值必须是合法档位，别让手误值静默传到上游被拒
+        // 档位留空=不传（走模型默认）。不限白名单：各家档位名字自己定（xhigh/minimal…），
+        // 认不认只有上游知道；只挡列宽 VARCHAR(16) 免得存的时候炸 SQL
         String effort = req.getReasoningEffort() == null ? null : req.getReasoningEffort().trim().toLowerCase();
         if (effort != null && effort.isEmpty()) {
             effort = null;
         }
-        if (effort != null && !EFFORT_LEVELS.contains(effort)) {
-            return Result.fail("思考档位仅支持 none/low/medium/high 或留空");
+        if (effort != null && effort.length() > MAX_EFFORT_LEN) {
+            return Result.fail("思考档位最长 " + MAX_EFFORT_LEN + " 字符，留空=不传");
         }
         // 协议留空=openai（存量兼容）；responses 需上游支持 /v1/responses（CPA/OpenAI官方/xAI）
         String protocol = req.getApiProtocol() == null || req.getApiProtocol().isBlank()
@@ -186,7 +186,7 @@ public class AiAgentAdminController {
         private String apiKey;
         private String baseUrl;
         private String model;
-        /** 思考档位 none/low/medium/high；空=不传走模型默认 */
+        /** 思考档位，任意上游认的值（none/low/medium/high/xhigh…）；空=不传走模型默认 */
         private String reasoningEffort;
         /** 上游协议 openai/responses；空=openai */
         private String apiProtocol;

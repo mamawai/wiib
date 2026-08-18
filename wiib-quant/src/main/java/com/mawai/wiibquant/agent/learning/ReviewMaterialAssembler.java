@@ -452,8 +452,9 @@ public class ReviewMaterialAssembler {
         }
         int idx = reasoning.lastIndexOf("【本轮结论】");
         if (idx < 0) {
-            String tail = reasoning.strip();
-            return (tail.length() > 120 ? "…" + tail.substring(tail.length() - 120) : tail).replace('\n', ' ');
+            // 没有结论块就没有等待条件。这里若退回正文尾巴，对账那步会拿一段行情叙述当条件去判
+            // 命中/未命中，只能编出假结论——观望对账正是复盘的核心产出
+            return "";
         }
         Matcher m = WAIT_SECTION.matcher(reasoning.substring(idx + "【本轮结论】".length()).strip());
         // 没有等待段就是没有：不拿正文冒充条件，对账时它该被当成"这轮没给条件"
@@ -461,12 +462,13 @@ public class ReviewMaterialAssembler {
     }
 
     /**
-     * 合并键：抹掉纯注解括号与空白。括号里多是"（前高/MA20 63450）"这类每轮微动的依据说明，
-     * 核心价位没变就是同一个等待，不该拆成两段重复喂；但带条件词的括号
-     * （"（且成交量&gt;1.5倍）"）是条件本身的一部分，抹了会把两个不同条件合成一个。
+     * 合并键：只抹掉纯文字注解括号与空白（"（前高）""（观望）"）。
+     * 带数字或条件词的括号一律留着——"转空（跌破 63140）"与"转空（跌破 62800）"括号外一模一样，
+     * 抹掉就并成一段，而 flushHold 只输出段首那条，后一个价位在对账素材里彻底消失。
+     * 宁可少合并几段（多占几行、早段被省略时还会明说省了几段），也不能把两个不同条件说成同一个。
      */
     private static String waitKey(String wait) {
-        return wait.replaceAll("[（(](?![^）)]*[且或><≥≤])[^）)]*[）)]", "").replaceAll("\\s+", "");
+        return wait.replaceAll("[（(](?![^）)]*[且或><≥≤0-9])[^）)]*[）)]", "").replaceAll("\\s+", "");
     }
 
     /**
@@ -483,7 +485,7 @@ public class ReviewMaterialAssembler {
                 ? "- " + TIME_FMT.format(Instant.ofEpochMilli(from)) + " " + tag
                 : "- " + TIME_FMT.format(Instant.ofEpochMilli(from)) + "~"
                   + TIME_FMT.format(Instant.ofEpochMilli(to)) + "（" + rounds + "轮）" + tag;
-        String w = wait == null || wait.isEmpty() ? "（本轮未给等待条件）"
+        String w = wait.isEmpty() ? "（本轮未给等待条件）"
                 : wait.length() > WAIT_MAX_CHARS ? wait.substring(0, WAIT_MAX_CHARS) + "…" : wait;
         out.add(new TimelineEntry(head + "等待：" + w, false));
     }

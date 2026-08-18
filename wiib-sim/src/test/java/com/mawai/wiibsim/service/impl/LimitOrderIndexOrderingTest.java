@@ -56,12 +56,29 @@ class LimitOrderIndexOrderingTest {
 
         verify(lockUtil).tryLock("crypto:order:execute:1", 30);
         verify(zset, never()).remove(anyString(), any());
-        // 自检：同一套matcher在真摘索引时必须验得到，免得上面那条 never() 因matcher不匹配白过
-        zset.remove("crypto:limit:buy:BTCUSDT", "1");
-        verify(zset).remove(anyString(), any());
     }
 
-    /** 合约：扫描只查不摘（原先是Lua原子取走），摘索引归触发方在CAS落定之后做 */
+    /**
+     * 现货：CAS 改库这一步抛异常，索引同样必须留着。
+     * 摘早了这单在库里还是 PENDING、却没人盯价，只能等每小时对账捞回来。
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    void 现货CAS抛异常时不许摘索引() {
+        StringRedisTemplate redis = mock(StringRedisTemplate.class);
+        ZSetOperations<String, String> zset = mock(ZSetOperations.class);
+        when(redis.opsForZSet()).thenReturn(zset);
+        when(zset.rangeByScore("crypto:limit:buy:BTCUSDT", 50000d, Double.MAX_VALUE)).thenReturn(Set.of("1"));
+        RedisLockUtil lockUtil = mock(RedisLockUtil.class);
+        when(lockUtil.tryLock("crypto:order:execute:1", 30)).thenReturn("lock-val");
+
+        // 拿到锁之后 markOrderTriggered 走 AOP 代理，代理拿不到就抛——等价于 CAS 那步炸了
+        cryptoService(redis, lockUtil).onPriceUpdate("BTCUSDT", new BigDecimal("50000"));
+
+        verify(zset, never()).remove(anyString(), any());
+    }
+
+    /** 合约：扫描只查不摘，摘索引归触发方在CAS落定之后做 */
     @Test
     void 合约扫描不许原子取走索引() {
         CacheService cacheService = mock(CacheService.class);

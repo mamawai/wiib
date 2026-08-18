@@ -140,12 +140,19 @@ class SimTradeClientTest {
         }
     }
 
-    /** sim 幂等占位回的"处理中"：错误码 1105 得能认出来，认成普通业务失败就不会去重发确认了 */
+    /**
+     * 幂等占位的"处理中"是 1106，认不出来就不会去重发确认。
+     * 1105 是 sim 抢 Redis 锁失败，语义是"确定没成交"，混进来会让没下出去的单被报成"可能已成交"。
+     */
     @Test
-    void 处理中按错误码识别_不与普通业务失败混淆() {
-        responseJson = "{\"code\":1105,\"msg\":\"请求处理中，请稍后用同一 clientRequestId 重试\",\"data\":null}";
+    void 处理中按错误码识别_不与抢锁失败和普通业务失败混淆() {
+        responseJson = "{\"code\":1106,\"msg\":\"请求处理中，请稍后用同一 clientRequestId 重试\",\"data\":null}";
         Throwable processing = catchThrowable(() -> client.openPosition(42L, new FuturesOpenRequest()));
         assertThat(SimTradeClient.isProcessing(processing)).isTrue();
+
+        responseJson = "{\"code\":1105,\"msg\":\"订单正在处理中，请稍后再试\",\"data\":null}";
+        Throwable lockBusy = catchThrowable(() -> client.openPosition(42L, new FuturesOpenRequest()));
+        assertThat(SimTradeClient.isProcessing(lockBusy)).isFalse();
 
         responseJson = "{\"code\":1751,\"msg\":\"余额不足\",\"data\":null}";
         Throwable business = catchThrowable(() -> client.openPosition(42L, new FuturesOpenRequest()));

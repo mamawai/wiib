@@ -4,6 +4,7 @@ import com.mawai.wiibcommon.broadcast.MarketBroadcaster;
 import com.mawai.wiibcommon.cache.CacheService;
 import com.mawai.wiibcommon.entity.PredictionBet;
 import com.mawai.wiibcommon.entity.PredictionRound;
+import com.mawai.wiibcommon.exception.BizException;
 import com.mawai.wiibcommon.market.PolymarketPriceClient;
 import com.mawai.wiibsim.mapper.PredictionBetMapper;
 import com.mawai.wiibsim.mapper.PredictionRoundMapper;
@@ -18,7 +19,9 @@ import org.springframework.transaction.support.TransactionTemplate;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
+import java.util.function.Supplier;
 
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -30,8 +33,10 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
- * 结算兜底回归。卡死的根因是"取不到价就 return，回合永久 LOCKED、本金冻着"，
- * 这里锁死修完后的三条出路：缓存有价照常派彩 / 缓存没价回源 REST 并补开盘价 / 实在没价作废退本金。
+ * 回合结算的四条出路：缓存有价照常派彩 / 缓存没价回源 REST 并补开盘价 / 超时仍没价作废退本金 /
+ * 没到阈值就留给下次巡检。外加巡检对卡在 OPEN 的回合补锁重跑，以及"只卖得掉当前窗口"这条闸。
+ * <p>
+ * 钉的是"钱不能卡住也不能白送"：回合停在哪一步都得有人收尾，收尾之前那笔注单不许按新价套现。
  */
 class PredictionSettleTest {
 
@@ -111,7 +116,7 @@ class PredictionSettleTest {
 
     @Test
     void 缓存缺价时回源REST并补上开盘价() {
-        // 开盘价一直没回填过（建行时就是 null），旧代码在这里 compareTo(null) 直接 NPE
+        // 开盘价一直没回填过（建行时就是 null），定盘要先把它补上才比得出涨跌
         when(roundMapper.selectOne(any())).thenReturn(lockedRound(null, WS));
         when(cacheService.getPolymarketClosePrice(WS)).thenReturn(null);
         when(cacheService.getPolymarketOpenPrice(WS)).thenReturn(null);
@@ -143,6 +148,73 @@ class PredictionSettleTest {
         verify(betMapper).settleDraw(1L);
         verify(userService).updateGameBalance(7L, new BigDecimal("2"));   // 退的是 cost
         verify(roundMapper, never()).casSettleRound(anyLong(), any(), anyString());
+    }
+
+    /**
+     * 巡检是"重跑"，所以幂等边界必须钉死：casSettleRound 的 WHERE 带 status='LOCKED'，
+     * 返 0 就说明别人已经结过了，这一趟一分钱都不许动——不然一个回合派彩两遍。
+     */
+    @Test
+    void CAS没抢到就不许再派一次彩() {
+        when(roundMapper.selectOne(any())).thenReturn(lockedRound(new BigDecimal("100"), WS));
+        when(cacheService.getPolymarketClosePrice(WS)).thenReturn(new BigDecimal("110"));
+        when(roundMapper.casSettleRound(eq(1L), any(), eq("UP"))).thenReturn(0);
+
+        service.settleRound(WS);
+
+        verify(betMapper, never()).settleWon(anyLong(), anyString());
+        verify(betMapper, never()).settleLost(anyLong(), anyString());
+        verifyNoInteractions(userService);
+    }
+
+    /** 作废退款同理：casVoidRound 返 0 说明这回合已经被人收拾过，不能再退一次本金 */
+    @Test
+    void 作废的CAS没抢到就不许再退一次本金() {
+        long staleWs = windowAgo(20);
+        when(roundMapper.selectOne(any())).thenReturn(lockedRound(new BigDecimal("100"), staleWs));
+        when(cacheService.getPolymarketClosePrice(staleWs)).thenReturn(null);
+        when(priceClient.fetch(staleWs)).thenReturn(null);
+        when(betMapper.selectCount(any())).thenReturn(1L);
+        when(roundMapper.casVoidRound(1L)).thenReturn(0);
+
+        service.settleRound(staleWs);
+
+        verify(betMapper, never()).settleDraw(anyLong());
+        verifyNoInteractions(userService);
+    }
+
+    @Test
+    void 巡检把卡在OPEN的旧回合补锁后再结算() {
+        long staleWs = windowAgo(3);
+        PredictionRound open = lockedRound(new BigDecimal("100"), staleWs);
+        open.setStatus("OPEN");   // lock 事件没到，回合一直没锁上
+        when(roundMapper.selectUnsettledBefore(anyLong())).thenReturn(List.of(open));
+        when(roundMapper.casLockRound(staleWs)).thenReturn(1);
+        // 补锁之后 doSettle 再查一次，此时已是 LOCKED
+        when(roundMapper.selectOne(any())).thenReturn(lockedRound(new BigDecimal("100"), staleWs));
+        when(cacheService.getPolymarketClosePrice(staleWs)).thenReturn(new BigDecimal("110"));
+        when(roundMapper.casSettleRound(eq(1L), any(), eq("UP"))).thenReturn(1);
+        when(betMapper.selectList(any())).thenReturn(List.of());
+
+        service.sweepStuckRounds();
+
+        verify(roundMapper).casLockRound(staleWs);
+        verify(roundMapper).casSettleRound(1L, new BigDecimal("110"), "UP");
+    }
+
+    @Test
+    void 卖出只认当前窗口的回合() {
+        when(redisLockUtil.executeWithLock(anyString(), anyLong(), anyLong(), any()))
+                .thenAnswer(inv -> inv.getArgument(3, Supplier.class).get());
+        when(betMapper.selectById(9L)).thenReturn(bet("ACTIVE", new BigDecimal("5"), new BigDecimal("2")));
+        PredictionRound stale = lockedRound(new BigDecimal("100"), windowAgo(3));
+        stale.setStatus("OPEN");   // 结果早已定死，只是没人把它锁上
+        when(roundMapper.selectById(1L)).thenReturn(stale);
+
+        assertThatThrownBy(() -> service.sell(7L, 9L, null))
+                .isInstanceOf(BizException.class);
+        // 一分钱都不能动：这一笔要走结算，不是按今天的盘口价卖
+        verifyNoInteractions(userService);
     }
 
     @Test

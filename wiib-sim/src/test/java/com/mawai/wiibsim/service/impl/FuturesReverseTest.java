@@ -56,26 +56,15 @@ class FuturesReverseTest {
                 mock(CrossMarginService.class), new TradeFilterRegistry(mock(BinanceRestClient.class))));
     }
 
-    private static FuturesPosition pos(String side, String mode, int leverage, String qty) {
-        FuturesPosition p = new FuturesPosition();
-        p.setId(POS_ID);
-        p.setUserId(UID);
-        p.setSymbol(SYMBOL);
-        p.setSide(side);
-        p.setMarginMode(mode);
-        p.setLeverage(leverage);
-        p.setEntryPrice(new BigDecimal("100"));
-        p.setQuantity(new BigDecimal(qty));
-        p.setMargin(new BigDecimal("10"));
-        p.setStatus("OPEN");
-        return p;
-    }
-
-    private static FuturesOrderResponse closedOrder(String orderSide, String qty, String pnl) {
+    /** 平仓回执＝反向开仓的唯一参数来源（doClosePosition 在仓位锁内读的那份快照） */
+    private static FuturesOrderResponse closedOrder(String orderSide, String mode, int leverage,
+                                                    String qty, String pnl) {
         FuturesOrderResponse r = new FuturesOrderResponse();
         r.setOrderId(100L);
         r.setSymbol(SYMBOL);
         r.setOrderSide(orderSide);
+        r.setMarginMode(mode);
+        r.setLeverage(leverage);
         r.setQuantity(new BigDecimal(qty));
         r.setRealizedPnl(new BigDecimal(pnl));
         r.setStatus("FILLED");
@@ -84,8 +73,8 @@ class FuturesReverseTest {
 
     @Test
     void 平多开空_方向翻转_杠杆与保证金模式照抄原仓() {
-        when(positionMapper.selectById(POS_ID)).thenReturn(pos("LONG", FuturesPosition.CROSS, 20, "2"));
-        doReturn(closedOrder("CLOSE_LONG", "2", "50")).when(service).closePosition(eq(UID), any());
+        doReturn(closedOrder("CLOSE_LONG", FuturesPosition.CROSS, 20, "2", "50"))
+                .when(service).closePosition(eq(UID), any());
         FuturesOrderResponse opened = new FuturesOrderResponse();
         doReturn(opened).when(service).openPosition(eq(UID), any());
 
@@ -118,8 +107,8 @@ class FuturesReverseTest {
 
     @Test
     void 平空开多_逐仓同样照抄() {
-        when(positionMapper.selectById(POS_ID)).thenReturn(pos("SHORT", FuturesPosition.ISOLATED, 5, "3"));
-        doReturn(closedOrder("CLOSE_SHORT", "3", "-8")).when(service).closePosition(eq(UID), any());
+        doReturn(closedOrder("CLOSE_SHORT", FuturesPosition.ISOLATED, 5, "3", "-8"))
+                .when(service).closePosition(eq(UID), any());
         doReturn(new FuturesOrderResponse()).when(service).openPosition(eq(UID), any());
 
         service.reversePosition(UID, POS_ID);
@@ -138,8 +127,8 @@ class FuturesReverseTest {
      */
     @Test
     void 开仓量按实际平掉的量_不按查库快照量() {
-        when(positionMapper.selectById(POS_ID)).thenReturn(pos("LONG", FuturesPosition.CROSS, 20, "2"));
-        doReturn(closedOrder("CLOSE_LONG", "1.5", "30")).when(service).closePosition(eq(UID), any());
+        doReturn(closedOrder("CLOSE_LONG", FuturesPosition.CROSS, 20, "1.5", "30"))
+                .when(service).closePosition(eq(UID), any());
         doReturn(new FuturesOrderResponse()).when(service).openPosition(eq(UID), any());
 
         service.reversePosition(UID, POS_ID);
@@ -155,8 +144,8 @@ class FuturesReverseTest {
      */
     @Test
     void 反向开仓失败_不抛异常_返回里带着已平仓信息() {
-        when(positionMapper.selectById(POS_ID)).thenReturn(pos("LONG", FuturesPosition.CROSS, 20, "2"));
-        doReturn(closedOrder("CLOSE_LONG", "2", "50")).when(service).closePosition(eq(UID), any());
+        doReturn(closedOrder("CLOSE_LONG", FuturesPosition.CROSS, 20, "2", "50"))
+                .when(service).closePosition(eq(UID), any());
         doThrow(new BizException(ErrorCode.FUTURES_INSUFFICIENT_BALANCE)).when(service).openPosition(eq(UID), any());
 
         FuturesTradingService.ReverseResult result = service.reversePosition(UID, POS_ID);
@@ -170,7 +159,6 @@ class FuturesReverseTest {
     /** 平仓这步失败照常抛：什么都没发生，没有半成功要交代 */
     @Test
     void 平仓失败_直接抛_不去开反向仓() {
-        when(positionMapper.selectById(POS_ID)).thenReturn(pos("LONG", FuturesPosition.CROSS, 20, "2"));
         doThrow(new BizException(ErrorCode.ORDER_PROCESSING)).when(service).closePosition(eq(UID), any());
 
         assertThatThrownBy(() -> service.reversePosition(UID, POS_ID))
@@ -178,18 +166,7 @@ class FuturesReverseTest {
                 .extracting("code").isEqualTo(ErrorCode.ORDER_PROCESSING.getCode());
 
         verify(service, never()).openPosition(any(), any());
-    }
-
-    @Test
-    void 仓位不属于自己_直接拒() {
-        FuturesPosition other = pos("LONG", FuturesPosition.CROSS, 20, "2");
-        other.setUserId(999L);
-        when(positionMapper.selectById(POS_ID)).thenReturn(other);
-
-        assertThatThrownBy(() -> service.reversePosition(UID, POS_ID))
-                .isInstanceOf(BizException.class)
-                .extracting("code").isEqualTo(ErrorCode.FUTURES_POSITION_NOT_FOUND.getCode());
-
-        verify(service, never()).closePosition(any(), any());
+        // 反手自己不查仓位：属主/状态校验和杠杆快照都在平仓的锁内做
+        verifyNoInteractions(positionMapper);
     }
 }

@@ -446,37 +446,35 @@ public class FuturesTradingServiceImpl implements FuturesTradingService {
      */
     @Override
     public ReverseResult reversePosition(Long userId, Long positionId) {
-        FuturesPosition position = getUserPosition(userId, positionId);
-        // 平完这个仓位就查不到了，反向开仓要用的参数必须先抄进局部变量
-        String symbol = position.getSymbol();
-        String side = position.getSide();
-        int leverage = position.getLeverage();
-        String marginMode = position.getMarginMode();
-
         FuturesCloseRequest closeReq = new FuturesCloseRequest();
         closeReq.setPositionId(positionId);
         closeReq.setOrderType("MARKET");   // quantity 不设=锁内取实时持仓量全平
-        // 这步失败正常抛：什么都还没发生
+        // 这步失败正常抛：什么都还没发生。属主与状态校验由 doClosePosition 在仓位锁内做
         FuturesOrderResponse closed = closePosition(userId, closeReq);
 
+        // 新仓参数一律取自平仓回执：那份是 doClosePosition 在仓位锁内读到的快照。
+        // 自己在锁外先查一遍的话，这中间 adjustLeverage 跑完就会拿旧杠杆去开新仓——
+        // 该币还有别的仓位就撞杠杆一致性校验变半成功，没有则静默把用户刚改的杠杆顶回去。
+        // 数量同理，锁外那份可能已被 SL/TP 吃掉一部分
         FuturesOpenRequest openReq = new FuturesOpenRequest();
-        openReq.setSymbol(symbol);
-        openReq.setSide("LONG".equals(side) ? "SHORT" : "LONG");
-        openReq.setMarginMode(marginMode);
-        // 等量按"真平掉多少"来（平仓是锁内取实时量），不能用上面那份可能已被 SL/TP 吃掉一部分的快照量
+        openReq.setSymbol(closed.getSymbol());
+        openReq.setSide("CLOSE_LONG".equals(closed.getOrderSide()) ? "SHORT" : "LONG");
+        openReq.setMarginMode(closed.getMarginMode());
         openReq.setQuantity(closed.getQuantity());
-        openReq.setLeverage(leverage);
+        openReq.setLeverage(closed.getLeverage());
         openReq.setOrderType("MARKET");
 
         try {
             FuturesOrderResponse opened = openPosition(userId, openReq);
-            log.info("futures反手 userId={} posId={} symbol={} {}→{} qty={} pnl={}",
-                    userId, positionId, symbol, side, openReq.getSide(), closed.getQuantity(), closed.getRealizedPnl());
+            log.info("futures反手 userId={} posId={} symbol={} {}→{} qty={} pnl={}", userId, positionId,
+                    closed.getSymbol(), closed.getOrderSide(), openReq.getSide(),
+                    closed.getQuantity(), closed.getRealizedPnl());
             return new ReverseResult(closed, opened, null);
         } catch (Exception e) {
             // 不回滚也不外抛：仓位是真平了、盈亏是真结算了，硬"回滚"等于凭空造一个仓位出来。
             // 抛出去前端只看到一句失败，用户不知道自己其实已经空仓——带着已平信息返回让前端说清楚
-            log.warn("反手的反向开仓失败 userId={} posId={} symbol={} qty={}", userId, positionId, symbol, closed.getQuantity(), e);
+            log.warn("反手的反向开仓失败 userId={} posId={} symbol={} qty={}",
+                    userId, positionId, closed.getSymbol(), closed.getQuantity(), e);
             return new ReverseResult(closed, null, e.getMessage());
         }
     }

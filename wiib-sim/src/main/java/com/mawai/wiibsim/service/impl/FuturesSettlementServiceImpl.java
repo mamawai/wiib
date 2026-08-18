@@ -65,7 +65,8 @@ public class FuturesSettlementServiceImpl implements FuturesSettlementService {
 
     @PostConstruct
     void init() {
-        rebuildLimitOrderZSets();
+        // 启动重建与每小时对账是同一件事：按 DB 的 PENDING 单把索引补回去（ZADD 同 member 覆盖 score）
+        reconcileLimitOrderIndex();
     }
 
     // ==================== 限价单触发 ====================
@@ -77,8 +78,7 @@ public class FuturesSettlementServiceImpl implements FuturesSettlementService {
         String closeLongKey = LIMIT_CLOSE_LONG_PREFIX + symbol;
         String closeShortKey = LIMIT_CLOSE_SHORT_PREFIX + symbol;
 
-        // 只查不摘：DB是事实、索引跟着事实走，CAS落定后由triggerLimitOrder摘自己那条。
-        // 原先Lua原子取走，中途CAS抛错这单就没人盯了（DB还是PENDING、索引已空），只能等重启重建
+        // 只查不摘：DB是事实、索引跟着事实走，CAS落定后由triggerLimitOrder摘自己那条
         fireHits(openLongKey, cacheService.zRangeByScoreWithScores(openLongKey, price.doubleValue(), Double.MAX_VALUE), price);
         fireHits(openShortKey, cacheService.zRangeByScoreWithScores(openShortKey, 0, price.doubleValue()), price);
         fireHits(closeLongKey, cacheService.zRangeByScoreWithScores(closeLongKey, 0, price.doubleValue()), price);
@@ -702,16 +702,6 @@ public class FuturesSettlementServiceImpl implements FuturesSettlementService {
         return orderMapper.selectList(new LambdaQueryWrapper<FuturesOrder>()
                 .eq(FuturesOrder::getStatus, "PENDING")
                 .eq(FuturesOrder::getOrderType, "LIMIT"));
-    }
-
-    private void rebuildLimitOrderZSets() {
-        List<FuturesOrder> pendingOrders = pendingLimitOrders();
-        if (pendingOrders.isEmpty()) return;
-
-        for (FuturesOrder order : pendingOrders) {
-            addToLimitZSet(order, cacheService);
-        }
-        log.info("重建futures限价单ZSet索引 共{}个订单", pendingOrders.size());
     }
 
     // ==================== 内部工具 ====================

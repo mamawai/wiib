@@ -46,12 +46,8 @@ public interface PredictionRoundMapper extends BaseMapper<PredictionRound> {
             "WHERE id = #{id} AND status = 'LOCKED'")
     int casVoidRound(@Param("id") Long id);
 
-    /**
-     * 补结算巡检的取数：还停在 LOCKED、窗口却早该结算完的回合。
-     * 结算事件单次触发，事件没发或结算事务失败回合就卡在 LOCKED，而 sell 要求回合 OPEN，
-     * 用户买入时扣的钱既卖不掉也退不了。这些回合由 sweepStuckRounds 逐个重跑 settleRound。
-     */
-    @Select("SELECT * FROM prediction_round WHERE status = 'LOCKED' AND window_start < #{before} " +
+    /** 补结算巡检的取数：窗口早该结束、却还没结算完的回合（OPEN=lock 事件没到，LOCKED=结算没成） */
+    @Select("SELECT * FROM prediction_round WHERE status IN ('OPEN', 'LOCKED') AND window_start < #{before} " +
             "ORDER BY window_start")
-    List<PredictionRound> selectLockedBefore(@Param("before") long before);
+    List<PredictionRound> selectUnsettledBefore(@Param("before") long before);
 }

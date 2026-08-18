@@ -250,8 +250,11 @@ public class PredictionServiceImpl implements PredictionService {
                     throw new BizException(ErrorCode.PREDICTION_BET_NOT_FOUND);
                 }
 
+                // 卖价取的是全局当前盘口（不分回合），所以只卖得掉当前窗口这一回合的注单：
+                // 巡检还没扫到的那几分钟里，卡在 OPEN 的旧回合结果早已定死，不挡就是照今天的价卖已知结果
                 PredictionRound round = roundMapper.selectById(bet.getRoundId());
-                if (round == null || !"OPEN".equals(round.getStatus())) {
+                if (round == null || !"OPEN".equals(round.getStatus())
+                        || round.getWindowStart() != currentWindowStart()) {
                     throw new BizException(ErrorCode.PREDICTION_ROUND_LOCKED);
                 }
 
@@ -637,15 +640,20 @@ public class PredictionServiceImpl implements PredictionService {
     }
 
     /**
-     * 补结算巡检。结算靠 Stream 事件单次触发，事件没发（feed 抓价全失败）或结算事务失败，
-     * 回合就停在 LOCKED；而 sell 要求回合 OPEN，用户买入时扣的 cost + commission 既卖不掉也退不了。
-     * 这里把这些回合重新跑一遍 settleRound：缺价回源 REST，实在没价的按 VOID 退本金。
+     * 补结算巡检：捞出窗口早该结束、却还停在 OPEN / LOCKED 的回合，补锁并重跑结算。
+     * lock 与 settle 都靠 Stream 事件单次触发（feed 跨窗口重启只发 create、不补发 lock），
+     * 漏一次这个回合就没人管了——买入扣的 cost + commission 既卖不掉也退不了。
+     * 重跑口径：缺价回源 REST，实在没价的按 VOID 退本金。
      */
     @Override
     public void sweepStuckRounds() {
         // 阈值取上一窗口的起点：prevWs 那个回合正被正常结算，合法地停在 LOCKED，必须排除
         long staleBefore = previousWindowStart();
-        for (PredictionRound round : roundMapper.selectLockedBefore(staleBefore)) {
+        for (PredictionRound round : roundMapper.selectUnsettledBefore(staleBefore)) {
+            // doSettle 只认 LOCKED，OPEN 的先补一次锁；casLockRound 的 WHERE 带 status='OPEN'，重复跑无害
+            if ("OPEN".equals(round.getStatus())) {
+                lockRound(round.getWindowStart());
+            }
             settleRound(round.getWindowStart());
         }
     }

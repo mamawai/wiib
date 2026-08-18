@@ -52,7 +52,7 @@ export function ChatPanel({ onClose, onGoConfig, fullscreen, onToggleFullscreen 
   const [historyLoading, setHistoryLoading] = useState(false);
   // 工作过程轨的手动开合，键是轨首条目的 rid（条目挪位置也认得回来）。默认展开：轨里全是本次
   // 会话实时产生的条目（专家过程不落库），用户正看着专家分析时把它收起来是最恼人的一种"自作主张"
-  const [railClosed, setRailClosed] = useState<Record<number, boolean>>({});
+  const [railClosed, setRailClosed] = useState<Record<string, boolean>>({});
   const scrollRef = useRef<HTMLDivElement>(null);
   // 用户往回翻时不再强行拉到底：长回答无框铺开后，往回看是常态
   const [stuckToBottom, setStuckToBottom] = useState(true);

@@ -19,8 +19,10 @@ const isRailKind = (it: ChatItem): it is RailItem =>
 
 export type RailStep = { item: ChatItem; index: number };
 export type Block =
+  // key 带 rail- 前缀：单条块用的是 items 下标，轨用的是自增 rid，两者都是小整数，
+  // 同处一层 children 就会撞（第一轮的答案下标 2 撞第二轮的轨 rid 2）。前缀让两套编号各占各的空间
   | { kind: 'single'; item: ChatItem; index: number }
-  | { kind: 'rail'; steps: RailStep[]; key: number };
+  | { kind: 'rail'; steps: RailStep[]; key: string };
 
 /** 相邻过程条目并轨：user/assistant/hitl/form/error 断轨 */
 export function groupBlocks(items: ChatItem[]): Block[] {
@@ -31,7 +33,7 @@ export function groupBlocks(items: ChatItem[]): Block[] {
       if (last?.kind === 'rail') last.steps.push({ item, index });
       // 键取轨首条目的 rid 而不是下标：条目在 items 里挪位置（让位说明行插队、
       // 重新生成砍尾巴）时下标会整体错位，收着的轨会自己弹开
-      else out.push({ kind: 'rail', steps: [{ item, index }], key: item.rid });
+      else out.push({ kind: 'rail', steps: [{ item, index }], key: `rail-${item.rid}` });
     } else {
       out.push({ kind: 'single', item, index });
     }

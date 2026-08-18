@@ -13,8 +13,6 @@ import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
 import java.time.ZoneId;
-import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * trader 三个动作（留言 / 手动唤醒 / 点播复盘）的唯一实现。
@@ -40,9 +38,6 @@ public class TraderActionService {
     private final ReviewRunner reviewRunner;
     private final AiTraderMapper traderMapper;
     private final AiTraderDecisionMapper decisionMapper;
-
-    /** 点播复盘的 per-trader 占位：单次复盘是 600s 预算的深模型大调用，同一 trader 不并行 */
-    private final Set<Long> reviewing = ConcurrentHashMap.newKeySet();
 
     /** 动作结果：ok=这次请求被正常处理；message 一律直接给用户看 */
     public record ActionResult(boolean ok, String message) {
@@ -168,7 +163,9 @@ public class TraderActionService {
             // 成功而不是失败：跳过是一次省下模型调用的正确决定，界面上不该是红的
             return new ActionResult(true, "自上次复盘以来没有新的已了结交易，已跳过（没有消耗模型调用）");
         }
-        if (!reviewing.add(t.getId())) {
+        // 占的是调度侧同一个位子：只挡点播与点播之间的话，日线交接阶段1 会对同一个 trader
+        // 再排一篇复盘，两条都落 REVIEW 行、ai_trader.memory 被覆盖写两次，后完成的赢
+        if (!scheduler.tryOccupy(t.getId())) {
             return new ActionResult(false, REVIEW_BUSY_REASON);
         }
         Thread.startVirtualThread(() -> {
@@ -179,14 +176,14 @@ public class TraderActionService {
                 // 异步之后没人接得住，不打日志就彻底无声
                 log.warn("[TraderAction] 点播复盘异常逃逸 userId={} msg={}", userId, e.getMessage());
             } finally {
-                reviewing.remove(t.getId());
+                scheduler.release(t.getId());
             }
         });
         return new ActionResult(true, "已开始复盘，几分钟后会在竞技场的决策时间线上出现一篇 REVIEW；"
                 + "失败也会留一条 ERROR 记录，不会没有下文");
     }
 
-    private static final String REVIEW_BUSY_REASON = "上一次复盘还在跑，等它出结果再点";
+    private static final String REVIEW_BUSY_REASON = "这个 trader 手上还有活（唤醒或复盘在跑），等它跑完再点";
 
     /** 不能复盘的原因，null=可以。素材有无另看 {@link ReviewRunner#hasMaterial} */
     public String reviewBlockedReason(AiTrader t) {
@@ -194,7 +191,7 @@ public class TraderActionService {
             // 三阶段交接期间旁路写复盘，会让 learner 读到"半天"的复盘并脏读进记忆
             return "全体复盘与学习进行中（日线交接），几分钟后窗口关闭再试";
         }
-        if (reviewing.contains(t.getId())) {
+        if (scheduler.isBusy(t.getId())) {
             return REVIEW_BUSY_REASON;
         }
         return null;

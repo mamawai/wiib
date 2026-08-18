@@ -70,6 +70,8 @@ export function TraderFormCard({ form, prefill, status, result, onSettle, onCanc
   const [loadFailed, setLoadFailed] = useState(false);
   // 哪个按钮在提交：留言卡有"保存"和"撤回"两个入口，转圈要落在按下的那个上
   const [busy, setBusy] = useState<'main' | 'clear' | null>(null);
+  /** 这次没办成的原因，就地显示；办成了就落地成 result，不走这儿 */
+  const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState(() => (typeof prefill?.note === 'string' ? prefill.note : ''));
   const [roundsText, setRoundsText] = useState(() => (typeof prefill?.rounds === 'number' ? String(prefill.rounds) : '1'));
 
@@ -85,12 +87,17 @@ export function TraderFormCard({ form, prefill, status, result, onSettle, onCanc
     return () => { alive = false; };
   }, [done]);
 
-  /** 提交统一出口：ok 真假都把 message 交给宿主——失败原因同样要让用户看见 */
+  /**
+   * 提交统一出口：只有真办成了才落地这张卡。
+   * 业务拒绝（trader 暂停中、上次复盘还在跑…）和网络失败都就地显示、卡留着可编辑——
+   * 落地是单向的，卡一关草稿跟着没，而这些拒绝多半去处理一下就能重试。
+   */
   const submit = (tag: 'main' | 'clear', call: () => Promise<TraderActionResult>) => {
     setBusy(tag);
+    setError(null);
     call()
-      .then(res => onSettle(res.message))
-      .catch((err: Error) => onSettle(err?.message || '操作失败，请稍后再试'))
+      .then(res => (res.ok ? onSettle(res.message) : setError(res.message)))
+      .catch((err: Error) => setError(err?.message || '操作失败，请稍后再试'))
       .finally(() => setBusy(null));
   };
 
@@ -242,6 +249,7 @@ export function TraderFormCard({ form, prefill, status, result, onSettle, onCanc
         <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-primary/10 text-primary">{meta.badge}</span>
       </div>
       {body}
+      {error && <p className="text-[10px] text-loss leading-snug">{error}</p>}
     </div>
   );
 }

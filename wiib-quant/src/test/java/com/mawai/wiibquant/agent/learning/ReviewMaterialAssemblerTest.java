@@ -309,9 +309,8 @@ class ReviewMaterialAssemblerTest {
     }
 
     /**
-     * 等待条件分条换行写是模型的常态写法。早先按行 startsWith 取，只捞得到"等待："标签行本身，
-     * 后面几条 bullet 整段丢掉——线上 59 条观望里 49 条就这么丢的，观望对账一直在空转。
-     * 这条是那个 bug 的回归闸。
+     * 等待条件分条换行写是模型的常态写法，整段都要抓全（观望对账的唯一原料）；
+     * 而"判断"段是当时的指标读数、复盘没有对照物，不许混进来占额度。
      */
     @Test
     void waitSectionReadsMultiLineBullets() {
@@ -334,15 +333,15 @@ class ReviewMaterialAssemblerTest {
 
     /**
      * 连续同一等待条件压成一段：15m 档一天 96 轮，行情不动时几十轮等的是同一句话。
-     * 括号里的依据说明每轮微动不算条件变化；条件真变了要断开；警报轮不并进例行观望。
+     * 纯文字注解括号每轮微动不算条件变化；条件真变了要断开；警报轮不并进例行观望。
      */
     @Test
     void timelineMergesConsecutiveSameWaits() {
         List<AiTraderDecision> rows = List.of(
                 okRow(FROM + 900_000, AiTraderDecision.KIND_TRADE,
-                        "【本轮结论】\n判断：贴上轨\n动作：HOLD\n等待：回踩 63370–63480（MA20 63450）后再评估", "[]"),
+                        "【本轮结论】\n判断：贴上轨\n动作：HOLD\n等待：回踩 63370–63480 后再评估（前高）", "[]"),
                 okRow(FROM + 1800_000, AiTraderDecision.KIND_TRADE,
-                        "【本轮结论】\n判断：浅回撤\n动作：HOLD\n等待：回踩 63370–63480（MA20 63465）后再评估", "[]"),
+                        "【本轮结论】\n判断：浅回撤\n动作：HOLD\n等待：回踩 63370–63480 后再评估（观望）", "[]"),
                 okRow(FROM + 2700_000, AiTraderDecision.KIND_TRADE,
                         "【本轮结论】\n判断：继续走弱\n动作：HOLD\n等待：跌破 63140 转空", "[]"),
                 okRow(FROM + 3600_000, AiTraderDecision.KIND_ALERT,
@@ -352,12 +351,40 @@ class ReviewMaterialAssemblerTest {
 
         String timeline = assembler.assemble(trader(), FROM, TO).timelineBlock();
 
-        // 前两轮括号内注解不同但价位一致 → 一段两轮；后两轮条件相同但一例行一警报 → 不并
+        // 前两轮只有纯文字注解不同 → 一段两轮；后两轮条件相同但一例行一警报 → 不并
         assertThat(timeline).contains("（2轮）");
         assertThat(timeline).contains("[警报]");
         assertThat(timeline.lines().filter(l -> l.startsWith("- ")).count()).isEqualTo(3);
         // 合并只省字，轮数统计仍按原始行走，保守度自检的对照物不能缩水
         assertThat(timeline).contains("本期活动：唤醒 4 轮");
+    }
+
+    /**
+     * 括号里带价位的两轮绝不能并段：并了 flushHold 只输出段首那条，后一个价位在对账素材里就没了。
+     * 而等待条件是观望对账的唯一原料，丢一个价位＝模型对着不存在的条件判命中。
+     */
+    @Test
+    void timelineKeepsDifferentPricesInParenthesesApart() {
+        List<AiTraderDecision> rows = List.of(
+                okRow(FROM + 900_000, AiTraderDecision.KIND_TRADE,
+                        "【本轮结论】\n判断：走弱\n动作：HOLD\n等待：转空（跌破 63140）", "[]"),
+                okRow(FROM + 1800_000, AiTraderDecision.KIND_TRADE,
+                        "【本轮结论】\n判断：更弱\n动作：HOLD\n等待：转空（跌破 62800）", "[]"));
+        when(decisionMapper.selectOne(any())).thenReturn(null);
+        when(decisionMapper.selectList(any())).thenReturn(List.of(), rows);
+
+        String timeline = assembler.assemble(trader(), FROM, TO).timelineBlock();
+
+        assertThat(timeline.lines().filter(l -> l.startsWith("- ")).count()).isEqualTo(2);
+        assertThat(timeline).contains("63140").contains("62800");
+        assertThat(timeline).doesNotContain("（2轮）");
+    }
+
+    /** 没有【本轮结论】块就是这轮没给条件，不能拿正文尾巴冒充——那段是行情叙述，对账对不了 */
+    @Test
+    void waitSectionReturnsEmptyWhenNoConclusionBlock() {
+        assertThat(ReviewMaterialAssembler.waitSection("BTC 走强，我先看着。ETH 也在震荡，暂时不动手。"))
+                .isEmpty();
     }
 
     // ==================== 价格路径 ====================

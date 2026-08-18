@@ -6,6 +6,7 @@ import com.mawai.wiibcommon.enums.ErrorCode;
 import com.mawai.wiibcommon.exception.BizException;
 import com.mawai.wiibcommon.util.Result;
 import com.mawai.wiibquant.agent.llm.ChatEndpoints;
+import com.mawai.wiibquant.agent.llm.ConversationSummarizer;
 import com.mawai.wiibquant.agent.llm.LlmEndpointService;
 import com.mawai.wiibquant.agent.llm.LlmErrorMessages;
 import com.mawai.wiibquant.agent.llm.SseChannel;
@@ -212,8 +213,7 @@ public class ChatWorkbenchController {
      *（见 {@code ConversationSummarizer}），那条正是会话第一轮的提问、同样带着标记。
      * 所以标记只用来找候选，还要拿它与展示表里那条提问核对——对不上就说明本轮提问已被压进摘要，回不去了。
      * <p>
-     * 四种回不去的一律拒绝，不做半吊子的补偿：末尾不是一条答案、答案是补答行（它对应的提问不在会话末尾，
-     * 回退会误伤中间轮次）、找不到提问行、上下文里那条提问与展示表对不上。
+     * 回不去的一律抛 2206 拒绝，不做半吊子的补偿。
      */
     private Rollback rollbackLastTurn(String sessionId, long userId) {
         List<ChatHistoryService.ChatMessage> history = chatHistoryService.messages(sessionId);
@@ -245,6 +245,11 @@ public class ChatWorkbenchController {
         // 核对的是 enriched 的尾巴（拼法见 run() 里那两行），对不上就是压缩把本轮提问吃掉了，
         // 此时命中的那条是压缩留下的首问——照它切会把中间好几轮连同摘要一起抹掉
         if (cut < 0 || !context.get(cut).getText().endsWith(QUESTION_MARKER + question)) {
+            throw new BizException(ErrorCode.CHAT_REGENERATE_UNAVAILABLE);
+        }
+        // 切在队首且紧跟着摘要，说明命中的是压缩原样放回的首问，不是本轮提问——
+        // 同一句常用问法在一个会话里问两遍就会这样，文本对得上但位置是假的，照切会把整段上下文连摘要清空
+        if (cut == 0 && context.size() > 1 && ConversationSummarizer.isSummary(context.get(1))) {
             throw new BizException(ErrorCode.CHAT_REGENERATE_UNAVAILABLE);
         }
         contextStore.save(sessionId, userId, List.copyOf(context.subList(0, cut)));
@@ -391,7 +396,8 @@ public class ChatWorkbenchController {
     void run(SseChannel channel, long userId, String sessionId, String message,
              ChatAgentFactory.Leaves leaves, ChatYieldCoordinator.TurnHandle turn, Long replacedAnswerId) {
         // 本轮开跑的时刻：结尾只发"这一轮新登记"的确认卡（见下面 hitl_request 那段），
-        // 同时也是落库耗时的起点——口径与 [TurnMetrics] 日志一致，不含准入/建叶子/让位握手
+        // 同时也是落库耗时的起点。不含准入/建叶子/让位握手；比 [TurnMetrics] 日志早一点，
+        // 那条是从 ChatTurnRunner 里起算的，这里还多了一帧 session 和 user 行落库
         long turnStartedAt = System.currentTimeMillis();
         // 答案流/过程流分离：专家的结论是"工作过程"（前端折叠展示、不落历史），
         // 只有 summarizer 的汇总才是答案——否则单专家问题会"专家一遍+汇总一遍"重复输出
@@ -402,8 +408,15 @@ public class ChatWorkbenchController {
                 channel::heartbeat, HEARTBEAT_SECONDS, HEARTBEAT_SECONDS, TimeUnit.SECONDS);
         try {
             // 运行登记：status 接口靠它回答"是否还在跑"；事件出口把工具侧的进度/表单卡转成 SSE 帧。
-            // SseChannel.send(String, JSONObject) 无重载、返回 void，签名恰好就是出口要的形状，直接方法引用
-            runRegistry.start(sessionId, channel::send);
+            // 断连要如实答 false：SseChannel.send 把发送异常吞成 closed 标记、本身返回 void，
+            // 不在这儿拦一道的话，工具侧收到的永远是"推出去了"，模型就会宣称卡已弹出
+            runRegistry.start(sessionId, (event, data) -> {
+                if (channel.isClosed()) {
+                    return false;
+                }
+                channel.send(event, data);
+                return true;
+            });
             channel.send("session", new JSONObject().fluentPut("sessionId", sessionId));
             // 重新生成用的是库里已有的那条提问，不能再落一遍 user 行
             if (replacedAnswerId == null) {
@@ -438,10 +451,11 @@ public class ChatWorkbenchController {
                 // 与让位不同，这一轮不欠补答，done 收尾即完结
                 String stopped = ChatTurnRunner.cancelledAnswer(answer.toString());
                 ChatHistoryService.TurnMeta meta = turnMeta(leaves, dirtyBook, turnStartedAt);
-                chatHistoryService.append(sessionId, userId, "assistant", stopped, meta);
-                // 重生成轮被中断时旧答案照样要顶掉：半截也是这一次重生成的产物，
-                // 留着它同一个提问下就是两条 assistant 行，而模型侧上下文里只有半截那条
-                if (replacedAnswerId != null) {
+                boolean saved = chatHistoryService.append(sessionId, userId, "assistant", stopped, meta);
+                // 重生成轮：出了半截才顶掉旧答案，半截也是这一次重生成的产物，留着旧的同一个提问下
+                // 就是两条 assistant 行。一个字都没出（点得快）就别删——那等于拿一行"未作答"
+                // 换掉用户原来那条好答案，而且不可恢复
+                if (replacedAnswerId != null && saved && !answer.isEmpty()) {
                     chatHistoryService.deleteMessage(replacedAnswerId);
                 }
                 if (!channel.isClosed()) {
@@ -490,10 +504,11 @@ public class ChatWorkbenchController {
             ChatHistoryService.TurnMeta meta = turnMeta(leaves, dirtyBook, turnStartedAt);
             // 历史不看连接死活：切页断连后这一轮照跑完，答案必须落库（前端回来靠 status+历史补）。
             // 且必须在 finally 摘运行标记之前写完——轮询端不能出现"已结束但查不到答案"的空窗
-            chatHistoryService.append(sessionId, userId, "assistant", finalAnswer, meta);
-            // 旧答案留到新答案确实落库之后才删（空产出压根不落行，那就别删）：重跑抛异常、产出为空、
-            // 中途被让位的任何一条路上，用户至少还留着原来那条，也还能再点一次重新生成
-            if (replacedAnswerId != null && !finalAnswer.isBlank()) {
+            boolean saved = chatHistoryService.append(sessionId, userId, "assistant", finalAnswer, meta);
+            // 旧答案留到新答案确实落库之后才删（append 落没落库看返回值，空产出压根不落行）：
+            // 重跑抛异常、产出为空、insert 失败、中途被让位的任何一条路上，用户至少还留着原来那条，
+            // 也还能再点一次重新生成——两条都没了的话末尾是 user 行，连重新生成都点不了
+            if (replacedAnswerId != null && saved) {
                 chatHistoryService.deleteMessage(replacedAnswerId);
             }
             if (!channel.isClosed()) {

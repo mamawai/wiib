@@ -25,6 +25,7 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.after;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -67,6 +68,8 @@ class ChatRegenerateTest {
     private static Harness harness(List<ChatHistoryService.ChatMessage> stored, List<Message> context) {
         ChatHistoryService history = mock(ChatHistoryService.class);
         when(history.messages(SESSION)).thenReturn(stored);
+        // 默认落库成功：删旧答案的前提就是这个返回值，桩成默认的 false 整条重生成都不会走到删
+        when(history.append(any(), anyLong(), any(), any(), any())).thenReturn(true);
         ChatContextStore contextStore = mock(ChatContextStore.class);
         when(contextStore.load(SESSION)).thenReturn(context);
 
@@ -140,6 +143,41 @@ class ChatRegenerateTest {
         verify(h.history(), timeout(5_000)).append(eq(SESSION), eq(1L), eq("assistant"), eq("新答案"), any());
         verify(h.history(), timeout(5_000)).deleteMessage(2L);
         verify(h.history(), never()).deleteMessage(1L);
+    }
+
+    /**
+     * append 自己吞异常、只记日志（历史是增益不是主链），所以"落库了没有"必须看返回值。
+     * 没落上还照删，这个提问下就一条答案都不剩了——末尾是 user 行，连重新生成都点不了。
+     */
+    @Test
+    void 新答案没落库就绝不删旧答案() {
+        Harness h = harness(
+                List.of(msg(1, "user", "BTC 怎么样"), msg(2, "assistant", "旧答案")),
+                List.of(turnStart("BTC 怎么样"), new AssistantMessage("旧答案")));
+        when(h.history().append(any(), anyLong(), eq("assistant"), any(), any())).thenReturn(false);
+
+        regenerate(h);
+
+        verify(h.history(), timeout(5_000)).append(eq(SESSION), eq(1L), eq("assistant"), eq("新答案"), any());
+        verify(h.history(), never()).deleteMessage(anyLong());
+    }
+
+    /**
+     * 点了重新生成又马上点停止：一个字都没出，这时候顶掉旧答案等于拿一行"（未作答）"
+     * 换掉用户原来那条好答案，而且找不回来。出了半截才算这一次重生成的产物，那才该顶替。
+     */
+    @Test
+    void 重生成刚开跑就被中断_旧答案不许被顶掉() {
+        Harness h = harness(
+                List.of(msg(1, "user", "BTC 怎么样"), msg(2, "assistant", "旧答案")),
+                List.of(turnStart("BTC 怎么样"), new AssistantMessage("旧答案")));
+        doReturn(ChatTurnRunner.TurnResult.CANCELLED)
+                .when(h.turnRunner()).run(any(), anyLong(), any(), any(), any(), any(), any());
+
+        regenerate(h);
+
+        verify(h.history(), timeout(5_000)).append(eq(SESSION), eq(1L), eq("assistant"), any(), any());
+        verify(h.history(), never()).deleteMessage(anyLong());
     }
 
     @Test

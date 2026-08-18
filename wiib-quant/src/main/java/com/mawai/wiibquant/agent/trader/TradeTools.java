@@ -14,6 +14,7 @@ import com.mawai.wiibcommon.entity.AiTraderRequest;
 import com.mawai.wiibcommon.entity.FuturesPosition;
 import com.mawai.wiibcommon.entity.FuturesStopLoss;
 import com.mawai.wiibcommon.entity.FuturesTakeProfit;
+import com.mawai.wiibquant.external.sim.SimOrderRetry;
 import com.mawai.wiibquant.external.sim.SimTradeClient;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.tool.annotation.Tool;
@@ -25,7 +26,6 @@ import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
-import java.util.function.Supplier;
 
 /**
  * 交易工具（非 Spring bean）：每次唤醒 new 一个，绑定该 trader 的 sim 子账户与白名单。
@@ -38,10 +38,6 @@ public class TradeTools {
     /** 唤醒上下文：计划落库与风险护栏所需的 trader 侧信息；deadlineMs＝本轮预算耗尽的墙钟时刻 */
     public record WakeCtx(long traderId, int roundNo, long boundaryTime, long deadlineMs, TraderRiskConfig risk) {
     }
-
-    /** 结果未知时同键重发的次数与间隔：sim 读超时 5s，再问两次足够覆盖抢锁+事务那点慢 */
-    private static final int SEND_RETRIES = 2;
-    private static final long RETRY_INTERVAL_MS = 2000;
 
     /** 本类自带富记录（结果/拒因）的工具名——轨迹合并时用富记录替换 hook 的轻量占位 */
     public static final Set<String> RECORDED_TOOLS = Set.of(
@@ -209,10 +205,10 @@ public class TradeTools {
                 tp.setQuantity(req.quantity());
                 openReq.setTakeProfits(List.of(tp));
             }
-            FuturesOrderResponse resp = send(() -> simTradeClient.openPosition(simUserId, openReq));
+            FuturesOrderResponse resp = SimOrderRetry.send(() -> simTradeClient.openPosition(simUserId, openReq));
             persistPlan(req, mark, sameSide != null);
             return ok("open_position", argSummary, JSON.toJSONString(resp));
-        } catch (UnknownOutcome e) {
+        } catch (SimOrderRetry.UnknownOutcome e) {
             return unknown("open_position", argSummary, e);
         } catch (Exception e) {
             return fail("open_position", argSummary, e);
@@ -279,9 +275,9 @@ public class TradeTools {
             req.setQuantity(BigDecimal.valueOf(quantity));
             req.setOrderType("MARKET");
             req.setClientRequestId(UUID.randomUUID().toString());
-            FuturesOrderResponse resp = send(() -> simTradeClient.closePosition(simUserId, req));
+            FuturesOrderResponse resp = SimOrderRetry.send(() -> simTradeClient.closePosition(simUserId, req));
             return ok("close_position", args, JSON.toJSONString(resp));
-        } catch (UnknownOutcome e) {
+        } catch (SimOrderRetry.UnknownOutcome e) {
             return unknown("close_position", args, e);
         } catch (Exception e) {
             return fail("close_position", args, e);
@@ -538,46 +534,9 @@ public class TradeTools {
         return rejected(tool, args, "本轮已超时（预算耗尽），不再执行任何交易动作，本次调用未发出");
     }
 
-    /** 重发确认后仍问不到结果：这笔单可能已经在 sim 成交了。 */
-    private static class UnknownOutcome extends RuntimeException {
-        UnknownOutcome(Throwable cause) {
-            super(cause);
-        }
-    }
-
-    /**
-     * 下单发送：读超时和 sim 回的"处理中"都只说明结果未知（sim 很可能已经成交），
-     * 这时拿同一个 clientRequestId 重发就是去问结果——sim 侧幂等，重发不会多成交。
-     * 明确的业务失败（余额不足等）不重发，原样抛出去回给模型。
-     * 重发不看本轮截止时间：确认一笔已发出的单，比守着预算更重要。
-     */
-    private <T> T send(Supplier<T> call) {
-        RuntimeException last = null;
-        for (int i = 0; i <= SEND_RETRIES; i++) {
-            if (i > 0) {
-                try {
-                    Thread.sleep(RETRY_INTERVAL_MS);
-                } catch (InterruptedException ie) {
-                    // 唤醒超时会 cancel(true) 打断这里：结果照样未知，别把中断吞成成功
-                    Thread.currentThread().interrupt();
-                    throw new UnknownOutcome(last);
-                }
-            }
-            try {
-                return call.get();
-            } catch (RuntimeException e) {
-                if (!SimTradeClient.isTransportFailure(e) && !SimTradeClient.isProcessing(e)) {
-                    throw e;
-                }
-                last = e;
-            }
-        }
-        throw new UnknownOutcome(last);
-    }
-
     /** 结果未知：绝不能当普通失败回——模型看见 ERROR 会重下一单，那就是双仓。 */
-    private String unknown(String tool, JSONObject args, UnknownOutcome e) {
-        String cause = e.getCause() == null ? "无响应" : String.valueOf(e.getCause().getMessage());
+    private String unknown(String tool, JSONObject args, SimOrderRetry.UnknownOutcome e) {
+        String cause = String.valueOf(e.getCause().getMessage());
         if (cause.length() > 200) {
             cause = cause.substring(0, 200) + "…";
         }

@@ -125,10 +125,14 @@ public class SimTradeClient {
         return e instanceof ResourceAccessException;
     }
 
-    /** sim 幂等占位回的"处理中"：同一笔还在跑，结果同样未知，同键再来即可（错误码由 unwrap 拼进消息）。 */
+    /**
+     * sim 幂等占位回的"处理中"：同一笔还在跑，结果同样未知，同键再来即可（错误码由 unwrap 拼进消息）。
+     * 只认 1106 不认 1105——1105 是 sim 侧抢 Redis 锁失败，那种是确定没成交，当"未知"处理
+     * 会让模型收到一句"可能已经成交、别重下"，白丢一次交易。
+     */
     public static boolean isProcessing(Throwable e) {
-        return e != null && e.getMessage() != null
-                && e.getMessage().contains("code=" + ErrorCode.ORDER_PROCESSING.getCode());
+        return e.getMessage() != null
+                && e.getMessage().contains("code=" + ErrorCode.ORDER_IN_FLIGHT.getCode());
     }
 
     /** 拆 Result 壳：sim 业务失败统一转异常抛出（sim 异常一律 200+Result.fail，不靠 HTTP 状态码）。 */
