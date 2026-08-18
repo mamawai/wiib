@@ -76,6 +76,10 @@ public class ChatYieldCoordinator {
         private final CompletableFuture<Void> turnDone = new CompletableFuture<>();
         /** 让位窗口开关（写：runner 线程；读：新消息的请求线程） */
         private volatile boolean yieldable = false;
+        /** 用户点了停止（写：请求线程；读：runner 线程）。粘滞，跑到下一个检查点就收尾 */
+        private volatile boolean cancelled = false;
+        /** 中断信号：专家等待期阻塞在 anyOf 上，只有 future 能把它叫醒，光有布尔叫不醒 */
+        private final CompletableFuture<Void> cancelSignal = new CompletableFuture<>();
 
         private TurnHandle(long userId, boolean preemptible) {
             this.userId = userId;
@@ -97,6 +101,32 @@ public class ChatYieldCoordinator {
         public boolean yieldRequested() {
             return yieldSignal.isDone();
         }
+
+        @Override
+        public boolean cancelRequested() {
+            return cancelled;
+        }
+
+        @Override
+        public CompletableFuture<Void> cancelSignal() {
+            return cancelSignal;
+        }
+    }
+
+    /**
+     * 用户请求中断在跑的那一轮。没有轮在跑（已经结束了）返回 false，让调用方如实告诉用户按钮点晚了。
+     * <p>
+     * 与 {@link #requestYield} 的区别：让位是"这个问题稍后补答"，中断是"到此为止不补"，
+     * 所以这里不动 yieldSignal、也不排补答队列。
+     */
+    public boolean requestCancel(long userId) {
+        TurnHandle handle = activeTurns.get(userId);
+        if (handle == null) {
+            return false;
+        }
+        handle.cancelled = true;
+        handle.cancelSignal.complete(null);   // 布尔叫不醒专家等待期那一等，得靠它
+        return true;
     }
 
     /** 一轮开跑前登记（拿到名额之后、提交执行之前）。 */

@@ -104,6 +104,11 @@ public class ChatWorkbenchController {
     }
 
     @Data
+    public static class CancelRequest {
+        private String sessionId;
+    }
+
+    @Data
     public static class ApprovalRequest {
         private String sessionId;
         private boolean approved;
@@ -312,6 +317,17 @@ public class ChatWorkbenchController {
         }
     }
 
+    @PostMapping("/cancel")
+    @Operation(summary = "中断在跑的这一轮（跑到下一个检查点收尾，半截答案照落库）")
+    public Result<Boolean> cancel(@CurrentUserId long userId, @RequestBody CancelRequest request) {
+        String sessionId = request.getSessionId();
+        if (sessionId == null || !sessionId.startsWith("wb-" + userId + "-")) {
+            return Result.ok(false);
+        }
+        // 按 userId 找在跑的那一轮（闸门保证每人至多一轮）；没在跑就是按钮点晚了，如实回 false
+        return Result.ok(yieldCoordinator.requestCancel(userId));
+    }
+
     @GetMapping("/sessions")
     @Operation(summary = "我的历史会话列表（标题=首条提问，按最后活跃倒序）")
     public Result<List<ChatHistoryService.SessionSummary>> sessions(@CurrentUserId long userId) {
@@ -417,6 +433,28 @@ public class ChatWorkbenchController {
                     },
                     event -> onExpertProgress(channel, expertLog, event), turn);
 
+            if (result.cancelled()) {
+                // 用户点了停止：半截答案照落库（token 已经烧掉了，屏幕上那段也该留得住）。
+                // 与让位不同，这一轮不欠补答，done 收尾即完结
+                String stopped = ChatTurnRunner.cancelledAnswer(answer.toString());
+                ChatHistoryService.TurnMeta meta = turnMeta(leaves, dirtyBook, turnStartedAt);
+                chatHistoryService.append(sessionId, userId, "assistant", stopped, meta);
+                // 重生成轮被中断时旧答案照样要顶掉：半截也是这一次重生成的产物，
+                // 留着它同一个提问下就是两条 assistant 行，而模型侧上下文里只有半截那条
+                if (replacedAnswerId != null) {
+                    chatHistoryService.deleteMessage(replacedAnswerId);
+                }
+                if (!channel.isClosed()) {
+                    channel.send("done", new JSONObject()
+                            .fluentPut("sessionId", sessionId)
+                            .fluentPut("answer", stopped)
+                            .fluentPut("cancelled", true)
+                            .fluentPut("meta", metaJson(meta)));
+                    channel.complete();
+                }
+                return;
+            }
+
             if (result.yielded()) {
                 // 让位收尾：答案欠着（记账给协调器补答），本轮不落 assistant 历史——
                 // 补答轮会补齐。registerDeferred 必须在本轮结束（runRegistry.finish）之前：
@@ -488,7 +526,8 @@ public class ChatWorkbenchController {
     private static ChatHistoryService.TurnMeta turnMeta(ChatAgentFactory.Leaves leaves,
                                                         boolean dirtyBook, long startedAt) {
         int latencyMs = (int) (System.currentTimeMillis() - startedAt);
-        return dirtyBook
+        // usageUntrusted：中断丢下的在途流会在读数之后才入账，这一轮和下一轮的数都不可信
+        return dirtyBook || leaves.usageUntrusted()
                 ? ChatHistoryService.TurnMeta.latencyOnly(leaves.modelLabel(), latencyMs)
                 : ChatHistoryService.TurnMeta.of(leaves.modelLabel(), leaves.usageSnapshot(), latencyMs);
     }

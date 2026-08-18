@@ -55,6 +55,10 @@ public class UsageTrackingChatModel implements ChatModel {
     private Long promptTokens;
     private Long completionTokens;
     private Long totalTokens;
+    /** 本轮有过被抛弃的在途流 */
+    private boolean abandoned;
+    /** 上一轮抛弃的流：它可能在这一轮清零之后才终止入账，所以脏要往后带一轮 */
+    private boolean abandonedCarry;
 
     public UsageTrackingChatModel(ChatModel delegate) {
         this.delegate = delegate;
@@ -124,6 +128,25 @@ public class UsageTrackingChatModel implements ChatModel {
         promptTokens = null;
         completionTokens = null;
         totalTokens = null;
+        abandonedCarry = abandoned;
+        abandoned = false;
+    }
+
+    /**
+     * 标记"这一轮丢下了一条还在跑的流"（用户中断时会发生）。
+     * <p>
+     * 被丢下的流不会停：图生成器不支持取消（见 {@code ChatAgentFactory} 的说明），
+     * 模型照样一路吐到终止，而入账挂在流终止上——它会在<b>这一轮读完数之后</b>、
+     * 甚至<b>下一轮清零之后</b>才把整次调用的 token 加进来。
+     * 所以这一轮和紧接着的下一轮，账都不能报，见 {@link #untrusted()}。
+     */
+    public synchronized void markAbandoned() {
+        abandoned = true;
+    }
+
+    /** 账本被抛弃的流写脏了：宁可不报，也别报个错的（与全站 token null≠0 同口径） */
+    public synchronized boolean untrusted() {
+        return abandoned || abandonedCarry;
     }
 
     private synchronized void record(Usage usage) {

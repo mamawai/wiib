@@ -1,12 +1,16 @@
 import { useCallback, useState } from 'react';
-import { Check, ChevronRight, Copy, Loader2, RefreshCw, ShieldQuestion } from 'lucide-react';
+import { Check, ChevronRight, Copy, Loader2, RefreshCw, ShieldQuestion, X } from 'lucide-react';
 import { Markdown } from '../Markdown';
 import { cn, fmtTime, fmtTokens } from '../../lib/utils';
 import { DEFERRED_PREFIX, type ChatItem } from './chatStore';
 import { AGENT_CN, HUB_NAME, type RailStep } from './chatView';
 
 /** 用户提问：右侧气泡，下面挂时刻 */
-export function UserBubble({ item }: { item: Extract<ChatItem, { kind: 'user' }> }) {
+export function UserBubble({ item, onCancelQueued }: {
+  item: Extract<ChatItem, { kind: 'user' }>;
+  /** 只有排队中的能撤：已经发出去的那条正在烧钱，撤不回来 */
+  onCancelQueued?: () => void;
+}) {
   return (
     <div className="flex flex-col items-end gap-0.5">
       <div className={cn(
@@ -17,9 +21,23 @@ export function UserBubble({ item }: { item: Extract<ChatItem, { kind: 'user' }>
         {item.content}
       </div>
       {/* 时刻才挂 .num（等宽数字）；中文套上它会掉到 mono 的回退字体 */}
-      {item.queued
-        ? <span className="microlabel">排队中 · 本轮结束后发出</span>
-        : <span className="microlabel num">{fmtTime(item.at)}</span>}
+      {item.queued ? (
+        <span className="flex items-center gap-1.5">
+          <span className="microlabel">排队中 · 本轮结束后发出</span>
+          {onCancelQueued && (
+            <button
+              onClick={onCancelQueued}
+              className="text-muted-foreground/60 hover:text-loss transition-colors"
+              title="不发了"
+              aria-label="取消这条排队消息"
+            >
+              <X className="w-3 h-3" />
+            </button>
+          )}
+        </span>
+      ) : (
+        <span className="microlabel num">{fmtTime(item.at)}</span>
+      )}
     </div>
   );
 }
@@ -162,12 +180,16 @@ export function ProcessRail({ steps, active, open, onToggle }: {
   );
 }
 
-/** HITL 确认卡：深研判 3 次深模型调用是贵操作，人工把关后 agent 才继续。 */
-export function HitlCard({ item, onDecide, busy }: {
+/**
+ * HITL 确认卡：深研判 3 次深模型调用是贵操作，人工把关后 agent 才继续。
+ * submitting 是这张卡自己的在途状态——面板里可能挂着好几张，别一张在提交把所有卡都禁掉。
+ */
+export function HitlCard({ item, onDecide, submitting }: {
   item: Extract<ChatItem, { kind: 'hitl' }>;
   onDecide: (approved: boolean) => void;
-  busy: boolean;
+  submitting: 'approve' | 'reject' | null;
 }) {
+  const busy = submitting !== null;
   return (
     <div className={cn(
       'rounded-xl border border-border border-l-[3px] p-3.5 space-y-2.5',
@@ -184,15 +206,17 @@ export function HitlCard({ item, onDecide, busy }: {
           <button
             disabled={busy}
             onClick={() => onDecide(true)}
-            className="border border-border hover:bg-primary/8 flex-1 py-1.5 rounded-lg text-xs font-bold text-primary disabled:opacity-50 transition-colors"
+            className="border border-border hover:bg-primary/8 flex-1 py-1.5 rounded-lg text-xs font-bold text-primary disabled:opacity-50 transition-colors inline-flex items-center justify-center gap-1.5"
           >
+            {submitting === 'approve' && <Loader2 className="w-3 h-3 animate-spin" />}
             批准执行
           </button>
           <button
             disabled={busy}
             onClick={() => onDecide(false)}
-            className="border border-border hover:bg-surface-hover flex-1 py-1.5 rounded-lg text-xs font-bold text-muted-foreground disabled:opacity-50 transition-colors"
+            className="border border-border hover:bg-surface-hover flex-1 py-1.5 rounded-lg text-xs font-bold text-muted-foreground disabled:opacity-50 transition-colors inline-flex items-center justify-center gap-1.5"
           >
+            {submitting === 'reject' && <Loader2 className="w-3 h-3 animate-spin" />}
             拒绝
           </button>
         </div>

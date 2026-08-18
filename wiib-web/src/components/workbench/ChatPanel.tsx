@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import { ArrowDown, BookOpenCheck, Bot, ChevronsDownUp, ChevronsUpDown, Cpu, History, KeyRound, Loader2, Maximize2, MessageSquarePlus, Minimize2, RotateCcw, X, Zap } from 'lucide-react';
+import { ArrowDown, BookOpenCheck, Bot, ChevronsDownUp, ChevronsUpDown, Cpu, History, KeyRound, Loader2, Maximize2, MessageSquarePlus, Minimize2, RotateCcw, Square, X, Zap } from 'lucide-react';
 import { workbenchApi } from '../../api';
 import { useClickOutside } from '../../hooks/useClickOutside';
 import { cn } from '../../lib/utils';
@@ -43,7 +43,8 @@ interface ChatPanelProps {
  */
 export function ChatPanel({ onClose, onGoConfig, fullscreen, onToggleFullscreen }: ChatPanelProps) {
   const { items, loading, background, sessionId, needsConfig } = useSyncExternalStore(chatStore.subscribe, chatStore.getSnapshot);
-  const [hitlBusy, setHitlBusy] = useState(false);
+  // 在途的那张确认卡（按 requestId 认）。面板里可能同时挂着几张，用一个布尔会把别的卡一起禁掉
+  const [hitlBusy, setHitlBusy] = useState<{ requestId: string; approved: boolean } | null>(null);
   const [actionMenu, setActionMenu] = useState(false);
   const actionMenuRef = useRef<HTMLDivElement>(null);
   const [showHistory, setShowHistory] = useState(false);
@@ -55,6 +56,10 @@ export function ChatPanel({ onClose, onGoConfig, fullscreen, onToggleFullscreen 
   const scrollRef = useRef<HTMLDivElement>(null);
   // 用户往回翻时不再强行拉到底：长回答无框铺开后，往回看是常态
   const [stuckToBottom, setStuckToBottom] = useState(true);
+  // 点了停止、还没等到收尾。收尾后 loading 落下即复位；新一轮开跑也要复位——
+  // 排队消息续发这类路径下 loading 中间不会落下，只认边沿会让按钮永远卡在"收尾中"
+  const [stopping, setStopping] = useState(false);
+  useEffect(() => { if (!loading) setStopping(false); }, [loading]);
 
   const onScroll = useCallback(() => {
     const el = scrollRef.current;
@@ -135,28 +140,38 @@ export function ChatPanel({ onClose, onGoConfig, fullscreen, onToggleFullscreen 
 
   const handleSend = useCallback((msg: string) => {
     scrollToBottom();   // 自己刚发的话总要看见
+    setStopping(false);
     void chatStore.send(msg);
   }, [scrollToBottom]);
 
   const handleRegenerate = useCallback(() => {
     scrollToBottom();
+    setStopping(false);
     void chatStore.regenerate();
   }, [scrollToBottom]);
 
-  /** HITL 决策交给 store；busy 只是本地防连点。按 requestId 认卡，条目在列表里挪位置也不会打偏。 */
+  /** 停止：后端跑到下一个检查点才收尾，所以按钮先进"收尾中"；后端说没轮在跑就恢复原状 */
+  const handleStop = useCallback(async () => {
+    setStopping(true);
+    if (!await chatStore.cancelRun()) setStopping(false);
+  }, []);
+
+  /** HITL 决策交给 store；本地只记"哪张卡在提交"用来防连点+出转圈。按 requestId 认卡，条目挪位置也不会打偏。 */
   const handleHitl = useCallback(async (requestId: string, approved: boolean) => {
-    setHitlBusy(true);
+    setHitlBusy({ requestId, approved });
     try {
       await chatStore.hitlDecide(requestId, approved);
     } catch (err) {
       chatStore.pushError((err as Error).message || '确认失败，请重试');
     } finally {
-      setHitlBusy(false);
+      // 只收自己那张：同时挂两张卡时，先点那张收尾会把后点那张的转圈一起清掉
+      setHitlBusy(cur => (cur?.requestId === requestId ? null : cur));
     }
   }, []);
 
-  /** 删除会话：列表移除；删的是当前会话时 store 一并清空。 */
+  /** 删除会话：列表移除；删的是当前会话时 store 一并清空。删了不可恢复，先问一句（站内破坏性操作的既有写法） */
   const removeSession = useCallback(async (s: WorkbenchSessionSummary) => {
+    if (!window.confirm(`删除会话「${s.title}」？${s.messageCount} 条消息与它的续聊上下文会一并清掉，不可恢复。`)) return;
     try {
       await workbenchApi.deleteSession(s.sessionId);
       setSessions(prev => prev.filter(x => x.sessionId !== s.sessionId));
@@ -297,7 +312,14 @@ export function ChatPanel({ onClose, onGoConfig, fullscreen, onToggleFullscreen 
               const { item, index } = block;
               switch (item.kind) {
                 case 'user':
-                  return <UserBubble key={index} item={item} />;
+                  return (
+                    <UserBubble
+                      key={index}
+                      item={item}
+                      onCancelQueued={item.queued && item.queuedId != null
+                        ? () => chatStore.cancelQueued(item.queuedId as number) : undefined}
+                    />
+                  );
                 case 'assistant':
                   return (
                     <AssistantAnswer
@@ -309,8 +331,15 @@ export function ChatPanel({ onClose, onGoConfig, fullscreen, onToggleFullscreen 
                     />
                   );
                 case 'hitl':
-                  return <HitlCard key={item.requestId} item={item} busy={hitlBusy}
-                                   onDecide={a => void handleHitl(item.requestId, a)} />;
+                  return (
+                    <HitlCard
+                      key={item.requestId}
+                      item={item}
+                      submitting={hitlBusy?.requestId === item.requestId
+                        ? (hitlBusy.approved ? 'approve' : 'reject') : null}
+                      onDecide={a => void handleHitl(item.requestId, a)}
+                    />
+                  );
                 case 'form':
                   // key 用卡自身的 id：草稿在卡的组件 state 里，按下标做 key 时列表中间插条目
                   // 会让 React 拿错元素配对、把正在敲的留言卸载掉
@@ -331,10 +360,26 @@ export function ChatPanel({ onClose, onGoConfig, fullscreen, onToggleFullscreen 
                   );
               }
             })}
-            {loading && !streamingNow && (
+            {loading && (
               <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                {background ? `${HUB_NAME} 在后台继续研判，完成后自动展示答案` : `${HUB_NAME} 分析问题中...`}
+                {!streamingNow && (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    {background ? `${HUB_NAME} 在后台继续研判，完成后自动展示答案` : `${HUB_NAME} 分析问题中...`}
+                  </>
+                )}
+                {/* 后台轮询态没有可中断的本地轮：补答跑在后台，没有面板可点停止 */}
+                {!background && (
+                  <button
+                    onClick={() => void handleStop()}
+                    disabled={stopping}
+                    className="inline-flex items-center gap-1 border border-border rounded-full px-2.5 py-0.5 text-[11px] font-bold hover:text-loss hover:border-loss/40 disabled:opacity-50 transition-colors"
+                    title="停止这一轮"
+                  >
+                    <Square className="w-2.5 h-2.5 fill-current" />
+                    {stopping ? '收尾中' : '停止'}
+                  </button>
+                )}
               </div>
             )}
           </div>

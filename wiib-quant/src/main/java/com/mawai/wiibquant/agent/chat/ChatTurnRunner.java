@@ -110,6 +110,19 @@ public class ChatTurnRunner {
         /** 让位信号是否已发。粘滞：一旦发出，本轮后续任何检查点都立即让位 */
         boolean yieldRequested();
 
+        /**
+         * 用户点了停止。与让位的区别：让位是"这个问题稍后补答"，中断是"这个问题到此为止，不补"。
+         * 同样粘滞，跑到下一个检查点就收尾。
+         */
+        default boolean cancelRequested() {
+            return false;
+        }
+
+        /** 中断信号：专家等待期要靠它唤醒，否则点了停止得挂到整批专家跑完 */
+        default CompletableFuture<Void> cancelSignal() {
+            return new CompletableFuture<>();   // 永不完成＝这个调用方不支持中断
+        }
+
         /** 无让位能力的空实现：调用方不支持让位（测试/一次性调用）时用 */
         TurnYield NONE = new TurnYield() {
             private final CompletableFuture<Void> never = new CompletableFuture<>();
@@ -135,8 +148,10 @@ public class ChatTurnRunner {
      * 让位时 {@code deferredExperts} 是在途的专家批次（可能已完成），
      * 由调用方交给 {@link ChatYieldCoordinator} 排队补答。
      */
-    public record TurnResult(CompletableFuture<List<Message>> deferredExperts) {
-        public static final TurnResult COMPLETED = new TurnResult(null);
+    public record TurnResult(CompletableFuture<List<Message>> deferredExperts, boolean cancelled) {
+        public static final TurnResult COMPLETED = new TurnResult(null, false);
+        /** 用户中断：与让位不同，这一轮不欠补答，半截答案就是最终答案 */
+        public static final TurnResult CANCELLED = new TurnResult(null, true);
 
         public boolean yielded() {
             return deferredExperts != null;
@@ -145,6 +160,15 @@ public class ChatTurnRunner {
 
     /** 让位时垫进模型上下文的占位答复：拦住新一轮 summarizer 替这个未回答的问题代答 */
     static final String YIELD_PLACEHOLDER = "（该问题的专家数据仍在获取中，稍后单独补答，本轮暂不回答）";
+
+    /** 中断收尾的措辞：展示历史与模型上下文用同一份，两边不打架 */
+    static final String CANCELLED_NOTE = "（已中断）";
+    private static final String CANCELLED_EMPTY = "（本轮已被用户中断，未作答）";
+
+    /** 中断这一轮的最终文本：半截答案照留（token 已经烧掉了），一个字都没出就立块牌子 */
+    static String cancelledAnswer(String partial) {
+        return partial == null || partial.isBlank() ? CANCELLED_EMPTY : partial + "\n\n" + CANCELLED_NOTE;
+    }
 
     /**
      * 派发结束、进汇总前垫的收尾指令：<b>整段输入必须以用户侧消息结尾</b>。
@@ -223,6 +247,11 @@ public class ChatTurnRunner {
                 log.info("[Workbench] 存在未消费的深研判授权，跳过派发直通汇总 session={}", sessionId);
                 break;
             }
+            // 中断压过让位：让位只是"这个问题稍后补答"，中断是"销账、不补"。
+            // 顺序反了的话，点完停止再发一条消息就会让让位赢，被停掉的问题照样被补答轮跑完
+            if (yield.cancelRequested()) {
+                return cancelTurn(userId, sessionId, working, "");
+            }
             // 信号粘滞的兜底：等待期的 anyOf 竞争恰好被批次赢了，但用户消息已在门口等——
             // 结论已并入 working，不再烧新一轮派发，直接让位（空批次），欠的账交给补答轮
             if (yield.yieldRequested()) {
@@ -253,13 +282,23 @@ public class ChatTurnRunner {
             CompletableFuture<List<Message>> batch =
                     dispatchAsync(leaves, fresh, List.copyOf(working), progressSink);
             CompletableFuture<Void> signal = yield.enterExpertWait();
+            CompletableFuture<Void> stop = yield.cancelSignal();
             try {
-                CompletableFuture.anyOf(batch, signal).join();
+                // 中断也要能唤醒这一等：专家是带工具的 ReAct 图、同步阻塞几十秒起，
+                // 只等批次的话点了停止要挂到整批跑完，按钮会一直卡在"收尾中"
+                CompletableFuture.anyOf(batch, signal, stop).join();
             } finally {
                 yield.exitExpertWait();
             }
+            if (yield.cancelRequested()) {
+                // 在途批次照 fire-and-forget（与让位路径同哲学）：它们跑完也没人接，
+                // 但账本被它们写脏了，见 markAbandoned
+                leaves.deep().markAbandoned();
+                leaves.light().markAbandoned();
+                return cancelTurn(userId, sessionId, working, "");
+            }
             if (signal.isDone()) {
-                // 让位优先：批次恰好同刻完成也让——用户的新消息不该等一整段汇总流
+                // 让位优先于批次：批次恰好同刻完成也让——用户的新消息不该等一整段汇总流
                 return yieldTurn(userId, sessionId, working, batch);
             }
             working.addAll(batch.join());
@@ -269,8 +308,21 @@ public class ChatTurnRunner {
         if (!dispatched.isEmpty()) {
             working.add(new UserMessage(EXPERT_HANDOFF));
         }
+        // 答案流的检查点在拉流循环里，中断时半截答案已经攒在这儿
+        StringBuilder emitted = new StringBuilder();
         NodeOutput<MessagesState<Message>> last =
-                streamSummarizer(leaves, working, userId, sessionId, answerTokenSink);
+                streamSummarizer(leaves, working, userId, sessionId, chunk -> {
+                    emitted.append(chunk);
+                    answerTokenSink.accept(chunk);
+                }, yield);
+        if (yield.cancelRequested()) {
+            // 拉流是 break 出来的，被丢下的那条流还在跑：图生成器不支持取消（见 ChatAgentFactory
+            // 的说明），模型照样吐完、入账挂在流终止上。所以这次汇总调用的 token 省不掉，
+            // 而且会落在读数之后——账本就此不可信，标记让它退化成只报耗时
+            leaves.deep().markAbandoned();
+            leaves.light().markAbandoned();
+            return cancelTurn(userId, sessionId, working, emitted.toString());
+        }
 
         // 终态含压缩替换 + 本轮全部新消息，整体覆盖会话历史（下一轮从这里起跑）
         List<Message> finalMessages = last.state().messages();
@@ -296,7 +348,18 @@ public class ChatTurnRunner {
         working.add(new AssistantMessage(YIELD_PLACEHOLDER));
         contextStore.save(sessionId, userId, working);
         log.info("[Workbench] 专家等待期让位 session={}", sessionId);
-        return new TurnResult(inFlight);
+        return new TurnResult(inFlight, false);
+    }
+
+    /**
+     * 用户中断收尾：把已产出的半截当这一轮的答复存档，续聊接得上。
+     * 与让位的区别是<b>不欠补答</b>——这个问题就到此为止，用户要么接着问、要么点重新生成。
+     */
+    private TurnResult cancelTurn(long userId, String sessionId, List<Message> working, String partial) {
+        working.add(new AssistantMessage(cancelledAnswer(partial)));
+        contextStore.save(sessionId, userId, working);
+        log.info("[Workbench] 用户中断 session={} 已产出={}字", sessionId, partial.length());
+        return TurnResult.CANCELLED;
     }
 
     /**
@@ -314,7 +377,8 @@ public class ChatTurnRunner {
 
         NodeOutput<MessagesState<Message>> last;
         StringBuilder answer = new StringBuilder();
-        last = streamSummarizer(leaves, working, userId, sessionId, answer::append);
+        // 补答轮在后台跑、没有面板可点停止，不参与中断
+        last = streamSummarizer(leaves, working, userId, sessionId, answer::append, TurnYield.NONE);
         contextStore.save(sessionId, userId, last.state().messages());
         log.info("[TurnMetrics] 补答 session={} experts={} durationMs={}",
                 sessionId, expertReplies.size(), System.currentTimeMillis() - startedAt);
@@ -337,7 +401,8 @@ public class ChatTurnRunner {
      */
     private NodeOutput<MessagesState<Message>> streamSummarizer(ChatAgentFactory.Leaves leaves,
                                                                 List<Message> working, long userId,
-                                                                String sessionId, Consumer<String> tokenSink) {
+                                                                String sessionId, Consumer<String> tokenSink,
+                                                                TurnYield yield) {
         // threadId 是 ApprovalGate 取会话号的唯一来源（工具方法体看不到它），少了它 HITL 整条链断掉
         RunnableConfig config = RunnableConfig.builder().threadId(sessionId).build();
         NodeOutput<MessagesState<Message>> last = null;
@@ -353,6 +418,9 @@ public class ChatTurnRunner {
                     }
                 }
                 last = output;
+                if (yield.cancelRequested()) {
+                    break;
+                }
             }
         } catch (RuntimeException e) {
             contextStore.save(sessionId, userId, working);

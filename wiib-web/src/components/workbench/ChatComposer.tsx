@@ -1,5 +1,6 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { Send } from 'lucide-react';
+import { chatStore } from './chatStore';
 import { HUB_NAME } from './chatView';
 
 /** 输入区上方的快捷提问（点击直发）：行情/新闻/交易员/深研判四能力各一条 */
@@ -7,22 +8,40 @@ const SUGGESTS = ['BTC 现在的市场结构怎么样？', '最近有什么值�
 
 /**
  * 输入区：快捷提问 + 多行自适应输入 + 状态行。
- * 草稿留在输入区自己身上：敲字只重渲染这一小块，不带着上面整条消息列表一起重画。
+ * <p>
+ * 敲字只动这一小块的本地 state，不带着上面整条消息列表重画；
+ * 同时同步一份到 store —— 关面板会把整个面板卸载，只留本地 state 的话草稿就没了。
  */
 export function ChatComposer({ loading, onSend }: {
   loading: boolean;
   onSend: (text: string) => void;
 }) {
-  const [input, setInput] = useState('');
+  const [input, setInput] = useState(chatStore.getDraft);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  /** 内容撑到哪就多高，最多 96px（rows=1 是起始高度，靠这个函数往上长） */
+  const fitHeight = (el: HTMLTextAreaElement) => {
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, 96)}px`;
+  };
+
+  // 挂载时把恢复回来的草稿撑开：只灌 value 不调高度的话，多行草稿回来只剩一行
+  useLayoutEffect(() => {
+    if (inputRef.current && inputRef.current.value) fitHeight(inputRef.current);
+  }, []);
+
+  const edit = useCallback((text: string) => {
+    setInput(text);
+    chatStore.setDraft(text);
+  }, []);
 
   const submit = useCallback((text?: string) => {
     const msg = (text ?? input).trim();
     if (!msg) return;
-    setInput('');
+    edit('');
     if (inputRef.current) inputRef.current.style.height = 'auto';
     onSend(msg);
-  }, [input, onSend]);
+  }, [input, edit, onSend]);
 
   return (
     // 底部 padding 避让 home indicator：移动端面板是 inset-0 铺满视口的（ChatDock 只配了
@@ -45,12 +64,8 @@ export function ChatComposer({ loading, onSend }: {
           ref={inputRef}
           rows={1}
           value={input}
-          onChange={e => setInput(e.target.value)}
-          onInput={e => {
-            const t = e.currentTarget;
-            t.style.height = 'auto';
-            t.style.height = `${Math.min(t.scrollHeight, 96)}px`;
-          }}
+          onChange={e => edit(e.target.value)}
+          onInput={e => fitHeight(e.currentTarget)}
           onKeyDown={e => {
             if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
               e.preventDefault();

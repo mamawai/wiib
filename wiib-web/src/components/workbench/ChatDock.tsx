@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from '
 import { useNavigate } from 'react-router-dom';
 import { Bot, KeyRound, Loader2, X } from 'lucide-react';
 import { llmEndpointApi } from '../../api';
+import { useClickOutside } from '../../hooks/useClickOutside';
 import { useFullscreen } from '../../hooks/useFullscreen';
 import { cn } from '../../lib/utils';
 import { chatStore } from './chatStore';
@@ -16,12 +17,24 @@ type Axis = 'x' | 'y' | 'xy';
 /** 球停在哪：横向只有贴左/贴右两种，竖向存比例——存像素的话换个窗口高度就跑到视口外了 */
 type BallPos = { side: 'left' | 'right'; yRatio: number };
 
-const BALL = 48;
-const BALL_EDGE = 16;
-/** 竖向留白：移动端下方是底部导航（Layout 的 h-20），PC 没有 */
-const BALL_BOTTOM_MOBILE = 80, BALL_BOTTOM_DESKTOP = 24;
-/** 位移超过它才算拖动；一旦算过就不回退，手抖着挪回原点也不该当成点击 */
-const DRAG_THRESHOLD = 4;
+/**
+ * 位移超过它才算拖动；一旦算过就不回退，手抖着挪回原点也不该当成点击。
+ * 8 是照触屏的 tap slop 定的：给 4 的话手指落下时的自然滑动就会被判成拖，
+ * 而那点位移吸完边球根本没动、click 又被吞，用户看到的是"点了没反应"。
+ */
+const DRAG_THRESHOLD = 8;
+
+/** 拖完补的那个 click 在这段时间内到达就吞掉。用时间戳不用布尔：补不出 click 的路径
+ *  （拖出元素、触摸被取消）会把布尔标记一直留着，下一次键盘 Enter 就被冤枉吞掉 */
+const CLICK_SWALLOW_MS = 300;
+
+/** 面板尺寸的 CSS 上限用的是 rem（max-w-[calc(100vw-2rem)] / max-h-[calc(100vh-6.5rem)]），
+ *  JS 侧的钳制得用同一把尺子，写死 px 在 PC(17px 根字号) 下会差出十几像素 */
+const DOCK_MAX_W_GAP_REM = 2, DOCK_MAX_H_GAP_REM = 6.5;
+
+function rootFontSize() {
+  return parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+}
 
 function loadSize(): Size {
   try {
@@ -38,30 +51,48 @@ function loadBall(): BallPos {
       return { side: b.side, yRatio: Math.min(Math.max(b.yRatio, 0), 1) };
     }
   } catch { /* 没存过/存坏了都用默认 */ }
-  return { side: 'right', yRatio: 1 };   // 右下角，与拖拽上线前的位置一致
+  return { side: 'right', yRatio: 1 };   // 右下角：悬浮入口的常规落点，压不着主内容
 }
 
-/** 球的活动范围，随视口变化实时算 */
+/**
+ * 球的直径与活动范围，随视口和根字号实时算。
+ * <p>
+ * 尺寸不写死 px：球是 w-12(3rem)、边距对齐 right-4(1rem)，而 PC 根字号是 17px——
+ * 按 48/16 算的话球会比实际小 3px，贴边永远差一截。
+ */
 function ballBounds() {
-  const bottom = window.matchMedia('(min-width: 768px)').matches ? BALL_BOTTOM_DESKTOP : BALL_BOTTOM_MOBILE;
+  const rem = rootFontSize();
+  const size = rem * 3, edge = rem;
+  // 移动端底部压着导航栏（Layout 里 fixed bottom-0 那条，高度随内容+安全区走），
+  // 给一段宽裕的留白让开；PC 没有导航，只留视觉边距
+  const bottom = window.matchMedia('(min-width: 768px)').matches ? edge * 1.5 : rem * 5;
   return {
-    minX: BALL_EDGE,
-    maxX: window.innerWidth - BALL - BALL_EDGE,
-    minY: BALL_EDGE,
-    maxY: window.innerHeight - bottom - BALL,
+    size,
+    minX: edge,
+    maxX: window.innerWidth - size - edge,
+    minY: edge,
+    maxY: window.innerHeight - bottom - size,
   };
 }
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), Math.max(lo, hi));
 
 /**
- * 全站悬浮对话入口（Layout 挂载，登录后可见）：右下角气泡 + PC 锚定浮窗 / 移动端全屏层。
- * chatStore 是页面无关的单例，SSE 不随面板关闭中断——关掉气泡研判照跑；
- * 面板关着时一轮跑完，气泡亮橙点提醒。PC 浮窗可从左/上边缘拖拽调大小（记忆到 localStorage）。
+ * 全站悬浮对话入口（Layout 挂载，登录后可见）：可拖的悬浮球 + PC 浮窗 / 移动端全屏层。
+ * <p>
+ * <b>球</b>：按住拖走，松手吸最近的左右边（竖向随手停），位置记 localStorage；
+ * 未读脉冲环、研判中雷达扫描都是纯 CSS。开着面板时球收起来——它能停在任意高度，
+ * 而面板锚点固定，两者重叠时球会盖住面板的按钮。
+ * <p>
+ * <b>面板</b>：跟着球换边（球在左就从左下角长出来），拖拽把手在外侧边缘、增量方向随之镜像，
+ * 尺寸记 localStorage。PC 支持全屏（原生 Fullscreen API，不支持的退成 position:fixed 铺满）。
+ * <p>
+ * chatStore 是页面无关的单例，SSE 不随面板关闭中断——关掉球研判照跑，
+ * 一轮跑完球亮橙点提醒；输入草稿也存在 store 里，关面板不会把正在敲的字弄丢。
  */
 export function ChatDock() {
   const navigate = useNavigate();
-  const { loading } = useSyncExternalStore(chatStore.subscribe, chatStore.getSnapshot);
+  const { loading, items } = useSyncExternalStore(chatStore.subscribe, chatStore.getSnapshot);
   const [open, setOpen] = useState(false);
   const [unread, setUnread] = useState(false);
   // null=首次还没查回来（面板内转圈）。每次打开都重查：用户去配置页存完回来，不用刷新页面
@@ -76,28 +107,50 @@ export function ChatDock() {
   const [ball, setBall] = useState<BallPos>(loadBall);
   // 拖动中的实时像素位置；null=没在拖，位置由 ball 算出来
   const [ballDrag, setBallDrag] = useState<{ x: number; y: number } | null>(null);
-  const ballRef = useRef<{ sx: number; sy: number; ox: number; oy: number; moved: boolean } | null>(null);
-  // 拖完松手浏览器还会补一个 click，用它吞掉那一下。开合仍挂在 onClick 上——
+  // id=这一次拖动的指针，cx/cy=拖动中的实时落点。落点同时记在 ref 里是必须的：
+  // pointermove 的 setState 走 continuous lane，快速甩一下松手时它还没 flush，
+  // 松手那一刻读 state 会把球吸回拖动前的位置
+  const ballRef = useRef<{
+    id: number; sx: number; sy: number; ox: number; oy: number; cx: number; cy: number; moved: boolean;
+  } | null>(null);
+  // 拖完松手浏览器还会补一个 click，记下时刻把那一下吞掉。开合仍挂在 onClick 上——
   // 键盘 Enter/Space 只触发 click，改成在 pointerup 里开合的话球就没法用键盘操作了
-  const swallowClickRef = useRef(false);
+  const swallowClickRef = useRef(0);
   // 球的落点存的是比例，视口一变就得按新范围重算
   const [bounds, setBounds] = useState(ballBounds);
+  const [desktop, setDesktop] = useState(() => window.matchMedia('(min-width: 768px)').matches);
   useEffect(() => {
-    const onResize = () => setBounds(ballBounds());
+    const onResize = () => {
+      setBounds(ballBounds());
+      setDesktop(window.matchMedia('(min-width: 768px)').matches);
+    };
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
   }, []);
 
   // PC 全屏：原生 Fullscreen API，不支持的（iPhone Safari）退成 position:fixed 铺满
   const dockRef = useRef<HTMLDivElement>(null);
+  const ballBtnRef = useRef<HTMLButtonElement>(null);
   const fs = useFullscreen(dockRef);
+
+  // 球在面板打开时是 display:none 的，焦点会跟着掉进 body。打开时把焦点送进面板，
+  // 关闭时还给球——不接的话键盘用户开完面板就找不着北，关完也回不到原处。
+  // 只认"开过又关上"这一次：首挂时 open 就是 false，不判的话页面一加载就把焦点抢到球上
+  const wasOpenRef = useRef(false);
+  useEffect(() => {
+    if (open) dockRef.current?.focus();
+    else if (wasOpenRef.current) ballBtnRef.current?.focus();
+    wasOpenRef.current = open;
+  }, [open]);
 
   // 关面板时退出全屏。原生那条路浏览器会自己退（宿主元素没了），但 CSS 降级路只是个类名，
   // 不主动退的话全屏态会挂在关着的面板上——而全屏时球是藏起来的，等于再也打不开
-  const fsActive = fs.active, fsToggle = fs.toggle;
+  // 用 exit 不用 toggle：面板一关，dockRef.current 就是 null 了，而 toggle 开头要读 ref，
+  // 读不到就早退——CSS 降级那条路（正是最需要主动退的一条）会永远退不掉
+  const fsActive = fs.active, fsExit = fs.exit;
   useEffect(() => {
-    if (!open && fsActive) fsToggle();
-  }, [open, fsActive, fsToggle]);
+    if (!open && fsActive) fsExit();
+  }, [open, fsActive, fsExit]);
 
   // 面板关着时一轮研判跑完（loading 真→假）→ 气泡亮橙点
   useEffect(() => {
@@ -123,6 +176,25 @@ export function ChatDock() {
     setOpenBoth(next);
   }, [setOpenBoth]);
 
+  // 面板里有没有没填完的表单卡：它的草稿在卡自己的组件 state 里，关面板就没了，
+  // 所以这时候不给 ESC / 点外部这两条"顺手关掉"的路。输入框草稿另有 store 兜着，不受影响
+  const hasPendingForm = items.some(it => it.kind === 'form' && it.status === 'pending');
+
+  // ESC 关面板。全屏态下不接管：那一下该先退全屏（原生由浏览器发，降级由 useFullscreen 自己接）
+  useEffect(() => {
+    if (!open || fs.active || hasPendingForm) return;
+    const onKey = (e: KeyboardEvent) => {
+      // 中文输入法组合态里的 Esc 是"取消候选词"，不该顺手把面板也关了
+      if (e.key === 'Escape' && !e.isComposing) setOpenBoth(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open, fs.active, hasPendingForm, setOpenBoth]);
+
+  // 点面板外部关闭。只在 PC 浮窗态：移动端是铺满视口的全屏层，没有"外部"可点；全屏态同理
+  const closeOnOutside = useCallback(() => setOpenBoth(false), [setOpenBoth]);
+  useClickOutside(dockRef, closeOnOutside, open && desktop && !fs.active && !hasPendingForm);
+
   const goConfig = useCallback(() => {
     setOpenBoth(false);
     navigate('/ai?tab=config');
@@ -130,37 +202,38 @@ export function ChatDock() {
 
   /* ===== 悬浮球拖拽：按住挪走 → 松手吸最近的左右边；位移没过阈值才算点击 ===== */
   const ballDown = (e: React.PointerEvent<HTMLButtonElement>) => {
+    // 已经有手指在拖就不抢：第二根手指进来会把起点算成它的，正在拖的球会瞬间跳位，
+    // 它先松手还会把拖动整个终结掉
+    if (ballRef.current) return;
     e.currentTarget.setPointerCapture(e.pointerId);
-    swallowClickRef.current = false;   // 上一次若没等到 click，标记不该留到这一次
     const b = ballBounds();
-    ballRef.current = {
-      sx: e.clientX, sy: e.clientY, moved: false,
-      ox: ball.side === 'left' ? b.minX : b.maxX,
-      oy: clamp(b.minY + ball.yRatio * (b.maxY - b.minY), b.minY, b.maxY),
-    };
+    const ox = ball.side === 'left' ? b.minX : b.maxX;
+    const oy = clamp(b.minY + ball.yRatio * (b.maxY - b.minY), b.minY, b.maxY);
+    ballRef.current = { id: e.pointerId, sx: e.clientX, sy: e.clientY, ox, oy, cx: ox, cy: oy, moved: false };
   };
   const ballMove = (e: React.PointerEvent) => {
     const d = ballRef.current;
-    if (!d) return;
+    if (!d || d.id !== e.pointerId) return;
     const dx = e.clientX - d.sx, dy = e.clientY - d.sy;
     if (Math.abs(dx) > DRAG_THRESHOLD || Math.abs(dy) > DRAG_THRESHOLD) d.moved = true;
     if (!d.moved) return;
     const b = ballBounds();
-    setBallDrag({ x: clamp(d.ox + dx, b.minX, b.maxX), y: clamp(d.oy + dy, b.minY, b.maxY) });
+    d.cx = clamp(d.ox + dx, b.minX, b.maxX);
+    d.cy = clamp(d.oy + dy, b.minY, b.maxY);
+    setBallDrag({ x: d.cx, y: d.cy });
   };
   /** @param expectClick pointerup 之后浏览器会补一个 click，pointercancel 不会——别留个吞不掉的标记 */
-  const ballEnd = (expectClick: boolean) => {
+  const ballEnd = (e: React.PointerEvent, expectClick: boolean) => {
     const d = ballRef.current;
-    if (!d) return;
+    if (!d || d.id !== e.pointerId) return;
     ballRef.current = null;
     if (!d.moved) { setBallDrag(null); return; }   // 没拖动，交给随后那个 click 去开合
-    if (expectClick) swallowClickRef.current = true;
+    if (expectClick) swallowClickRef.current = performance.now();
     const b = ballBounds();
-    const cur = ballDrag ?? { x: d.ox, y: d.oy };
     // 横向永远吸边（贴哪边看球心落在哪半屏），竖向随手停——微信悬浮窗那个手感
     const next: BallPos = {
-      side: cur.x + BALL / 2 < window.innerWidth / 2 ? 'left' : 'right',
-      yRatio: b.maxY > b.minY ? (cur.y - b.minY) / (b.maxY - b.minY) : 1,
+      side: d.cx + b.size / 2 < window.innerWidth / 2 ? 'left' : 'right',
+      yRatio: b.maxY > b.minY ? (d.cy - b.minY) / (b.maxY - b.minY) : 1,
     };
     setBall(next);
     setBallDrag(null);
@@ -178,11 +251,14 @@ export function ChatDock() {
     if (!d) return;
     // 锚左时把手在右边缘，往右拖才是放大，增量方向跟着镜像
     const widen = ball.side === 'left' ? e.clientX - d.x : d.x - e.clientX;
+    // 上限跟 CSS 的 max-w/max-h 用同一把尺子（都是 rem）：写死 px 的话 PC 根字号 17px
+    // 会让 JS 比 CSS 松十几像素，拖到顶时面板会先被 CSS 截住、把手却还在动
+    const rem = rootFontSize();
     const next: Size = {
       w: d.axis === 'y' ? d.w
-        : Math.min(Math.max(d.w + widen, MIN_W), Math.min(MAX_W, window.innerWidth - 32)),
+        : Math.min(Math.max(d.w + widen, MIN_W), Math.min(MAX_W, window.innerWidth - rem * DOCK_MAX_W_GAP_REM)),
       h: d.axis === 'x' ? d.h
-        : Math.min(Math.max(d.h + (d.y - e.clientY), MIN_H), window.innerHeight - 96),
+        : Math.min(Math.max(d.h + (d.y - e.clientY), MIN_H), window.innerHeight - rem * DOCK_MAX_H_GAP_REM),
     };
     d.cur = next;
     setSize(next);
@@ -205,13 +281,17 @@ export function ChatDock() {
       {/* 悬浮球：可拖，松手吸最近的左右边（位置记 localStorage）。z-90 夹在 GuidedTour 之上、toast 之下。
           移动端面板全屏时球藏起来，否则会压在输入区上 */}
       <button
+        ref={ballBtnRef}
         type="button"
         onPointerDown={ballDown}
         onPointerMove={ballMove}
-        onPointerUp={() => ballEnd(true)}
-        onPointerCancel={() => ballEnd(false)}
+        onPointerUp={e => ballEnd(e, true)}
+        onPointerCancel={e => ballEnd(e, false)}
         onClick={() => {
-          if (swallowClickRef.current) { swallowClickRef.current = false; return; }
+          if (performance.now() - swallowClickRef.current < CLICK_SWALLOW_MS) {
+            swallowClickRef.current = 0;
+            return;
+          }
           toggle();
         }}
         style={{
@@ -224,34 +304,30 @@ export function ChatDock() {
             : 'left .34s cubic-bezier(.22,1.4,.36,1), top .34s cubic-bezier(.22,1.4,.36,1),'
               + ' transform .16s ease, box-shadow .16s ease, background-color .16s ease',
         }}
-        title={open ? '关闭对话' : '研判对话'}
-        aria-label={open ? '关闭对话' : '打开研判对话'}
+        title="研判对话"
+        aria-label="打开研判对话"
         className={cn(
           'fixed z-[90] w-12 h-12 rounded-full pt-card touch-none',
           'items-center justify-center hover:bg-surface-hover',
           dragging ? 'cursor-grabbing scale-105 shadow-2xl' : 'cursor-grab active:scale-95',
-          // 全屏时球没有立足之地：原生全屏下它根本不在全屏元素里，压根渲染不出来
-          open ? 'hidden md:flex' : 'flex',
-          open && fs.active && 'hidden md:hidden',
+          // 开着面板就把球收起来（PC 也一样）：球能停在任意高度，而面板锚点固定，
+          // 两者一旦重叠，球（z-90）会盖住面板（z-85）的头部按钮和输入区，点上去还会误把面板关掉。
+          // 关闭入口交给面板头部的 X / ESC / 点外部，与移动端本来的行为一致
+          open ? 'hidden' : 'flex',
         )}
       >
+        {/* 下面这些不必再判 open：球只在面板关着时渲染 */}
         {/* 研判中：一道扇形绕球扫。-inset-1 让环带落在球外沿，压在图标下面不挡它 */}
-        {!open && loading && (
+        {loading && (
           <span aria-hidden className="absolute -inset-1 rounded-full pointer-events-none wiib-ball-sweep" />
         )}
         {/* 有未读：一圈向外扩散 */}
-        {!open && unread && (
+        {unread && (
           <span aria-hidden className="absolute inset-0 rounded-full border-[1.5px] border-primary pointer-events-none wiib-ball-ping" />
         )}
-        {open ? (
-          <X className="w-5 h-5 text-muted-foreground" />
-        ) : loading ? (
-          <Loader2 className="w-5 h-5 text-primary animate-spin" />
-        ) : (
-          <Bot className="w-5 h-5 text-primary" />
-        )}
-        {/* 关着时答案到了：亮橙点。脉冲环扩散完的那一瞬靠它留住痕迹。打开即清 */}
-        {!open && unread && (
+        {loading ? <Loader2 className="w-5 h-5 text-primary animate-spin" /> : <Bot className="w-5 h-5 text-primary" />}
+        {/* 答案到了：亮橙点。脉冲环扩散完的那一瞬靠它留住痕迹。打开面板即清 */}
+        {unread && (
           <span className="absolute top-1 right-1 w-2.5 h-2.5 rounded-full bg-primary" />
         )}
       </button>
@@ -259,12 +335,13 @@ export function ChatDock() {
       {open && (
         <div
           ref={dockRef}
+          tabIndex={-1}
           style={{ '--dock-w': `${size.w}px`, '--dock-h': `${size.h}px` } as React.CSSProperties}
           className={cn(
             'fixed z-[85] pt-card flex flex-col overflow-hidden',
             fs.active
               // 全屏铺满，浮窗那套尺寸/锚点全让开。cssMode 是没有原生 API 的降级路，得自己钉住视口
-              ? cn('inset-0 rounded-none w-full h-full max-w-none max-h-none', fs.cssMode && 'z-[95]')
+              ? 'inset-0 rounded-none w-full h-full max-w-none max-h-none'
               : cn(
                   // 移动端全屏（让开刘海），PC 锚定在球那一侧的浮窗（尺寸可拖拽，CSS 变量只在 md 生效）
                   'inset-0 rounded-none pt-[env(safe-area-inset-top)]',

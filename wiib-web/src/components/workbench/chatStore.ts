@@ -23,8 +23,10 @@ export type FormKind = TraderFormKind;
 export type ChatItem =
   // queued=后端不让位（正在出答案）时先上屏排队，本轮结束自动真发；
   // 专家取数期间的新消息会触发后端让位直接插话，不走排队
-  // at=这条消息的时刻（历史回放取库里的 createdAt，实时取本地时钟），面板上要显示
-  | { kind: 'user'; content: string; at: number; queued?: boolean }
+  // at=这条消息的时刻（历史回放取库里的 createdAt，实时取本地时钟），面板上要显示。
+  // queuedId=这条消息的身份，气泡与队列条目共用——靠下标对应的话，
+  // 排队期间流式往 items 里插条目、回放整体重建、重生成砍尾巴，任一处都会让两边错位
+  | { kind: 'user'; content: string; at: number; queued?: boolean; queuedId?: number }
   // meta=这一轮的读数（端点/耗时/token），流式结束时随 done 事件到；历史回放从库里带
   | { kind: 'assistant'; content: string; streaming: boolean; at: number; meta?: TurnMeta | null }
   // 专家过程流（不落历史）：视图层收进"工作过程"轨，折叠状态归视图管。
@@ -81,8 +83,9 @@ let initialized = false;
  * bubbled=屏幕上有没有对应的排队气泡——HITL 续跑那种自动补发的指令没有气泡，
  * 续发时不能跟着去解别人气泡的排队标记。
  */
-type QueuedMessage = { text: string; bubbled: boolean };
+type QueuedMessage = { id: number; text: string; bubbled: boolean };
 let sendQueue: QueuedMessage[] = [];
+let queueSeq = 0;
 /** 有被让位的问题还没补答：流一收尾就转后台轮询，等补答落历史后整体回放补显 */
 let deferredPending = false;
 /** 表单卡只活在本地 items 里（不落历史），自增序号足够把几张卡区分开 */
@@ -90,6 +93,13 @@ let formSeq = 0;
 function nextFormId() {
   return `form-${++formSeq}`;
 }
+/**
+ * 输入框草稿。关面板会把 ChatPanel 整棵卸载，草稿放在这儿才不会跟着没。
+ * <b>刻意不进 state、不发通知</b>：它只在面板重新挂载时被读一次，
+ * 跟着 items 一起触发重渲染纯属浪费——流式期间那是每帧一次。
+ */
+let draft = '';
+
 /** 过程条目的自增号：视图用轨首那条的 rid 记折叠状态，条目挪位置也认得回来 */
 let railSeq = 0;
 function nextRid() {
@@ -165,6 +175,9 @@ function handleEvent(e: WorkbenchEvent) {
   switch (e.type) {
     case 'session':
       setSession(e.sessionId);
+      // 流能建起来就说明端点是通的（配置类错误在准入期就拒了，根本到不了这里），
+      // 引导条自己撤掉——挂着不动会让刚配好的用户以为还没生效
+      if (state.needsConfig) set({ needsConfig: false });
       break;
     case 'agent_start':
       updateItems(prev => [...prev, { kind: 'agent', rid: nextRid(), node: e.node, agent: e.agent }]);
@@ -226,9 +239,16 @@ function handleEvent(e: WorkbenchEvent) {
       }
       updateItems(prev => {
         const next = deactivateProgress(prev).map(it => {
-          // 读数随 done 一起到：本轮不用等刷新就能显示端点/耗时/token
+          // 读数随 done 一起到：本轮不用等刷新就能显示端点/耗时/token。
+          // 中断的那条要整段用服务端定稿覆盖——"（已中断）"这个尾标只在服务端拼一次，
+          // 前端复刻一份的话两处措辞迟早对不上，刷新前后看到的就不是同一段文字
           if (it.kind === 'assistant' && it.streaming) {
-            return { ...it, content: it.content || e.answer, streaming: false, meta: e.meta };
+            return {
+              ...it,
+              content: e.cancelled ? e.answer : (it.content || e.answer),
+              streaming: false,
+              meta: e.meta,
+            };
           }
           if (it.kind === 'expert' && it.streaming) return { ...it, streaming: false };
           return it;
@@ -278,7 +298,7 @@ function startPolling(sid: string) {
           deferredPending = false;
           // 历史回放会整体重建 items：排队气泡和没填完的表单卡都不在后端历史里，得补回尾部
           const queued = sendQueue.filter(q => q.bubbled)
-            .map(q => ({ kind: 'user' as const, content: q.text, at: Date.now(), queued: true }));
+            .map(q => ({ kind: 'user' as const, content: q.text, at: Date.now(), queued: true, queuedId: q.id }));
           set({ items: [...toItems(msgs), ...queued, ...pendingForms()], loading: false, background: false });
           drainQueue();
         }
@@ -300,9 +320,13 @@ async function send(message: string, opts?: { noBubble?: boolean; requeueAs?: Qu
   // 有轮在跑也直接真发：后端专家等待期会让位（用户消息优先，专家结果转入补答队列）；
   // 不可让位（正在出答案）会拒 2203，届时再回落本地排队——排不排队由后端仲裁，前端不预判
   const prevAbort = abortCtrl;
-  const bubbleIndex = state.items.length;   // 本条气泡的位置，被拒时改标排队
+  // 这条消息的身份：上屏时就发好，被拒时按它找回自己那只气泡。
+  // 用下标的话，被拒之前流式往 items 里插过条目就会认错人
+  const queuedId = ++queueSeq;
   stopPolling();
-  if (!opts?.noBubble) updateItems(prev => [...prev, { kind: 'user', content: msg, at: Date.now() }]);
+  if (!opts?.noBubble) {
+    updateItems(prev => [...prev, { kind: 'user', content: msg, at: Date.now(), queuedId }]);
+  }
   set({ loading: true, background: false });
   const abort = new AbortController();
   abortCtrl = abort;
@@ -319,11 +343,11 @@ async function send(message: string, opts?: { noBubble?: boolean; requeueAs?: Qu
         if (opts?.requeueAs) {
           sendQueue.unshift(opts.requeueAs);
         } else if (opts?.noBubble) {
-          sendQueue.unshift({ text: msg, bubbled: false });
+          sendQueue.unshift({ id: queuedId, text: msg, bubbled: false });
         } else {
-          sendQueue.push({ text: msg, bubbled: true });
-          updateItems(prev => prev.map((it, i) =>
-            i === bubbleIndex && it.kind === 'user' ? { ...it, queued: true } : it));
+          sendQueue.push({ id: queuedId, text: msg, bubbled: true });
+          updateItems(prev => prev.map(it =>
+            it.kind === 'user' && it.queuedId === queuedId ? { ...it, queued: true } : it));
         }
         if (prevAbort && !prevAbort.signal.aborted) {
           if (abortCtrl === abort) abortCtrl = prevAbort;
@@ -424,6 +448,22 @@ async function regenerate() {
   }
 }
 
+/**
+ * 请后端在下一个检查点收尾这一轮。
+ * <p>
+ * <b>不 abort 本地的流</b>：收尾的 done 事件还要靠它把半截答案定稿、把读数带回来。
+ * 返回 false=后端说没有轮在跑（按钮点晚了，这一轮其实已经结束）。
+ */
+async function cancelRun(): Promise<boolean> {
+  const sid = state.sessionId;
+  if (!sid || !state.loading) return false;
+  try {
+    return await workbenchApi.cancel(sid);
+  } catch {
+    return false;   // 网络抖动或那轮刚好结束，都按"点晚了"处理
+  }
+}
+
 /** 最后一条用户提问的下标；没有提问返回 -1 */
 function lastUserIndex(items: ChatItem[]): number {
   for (let i = items.length - 1; i >= 0; i--) {
@@ -450,12 +490,10 @@ function dropTurnOutput(prev: ChatItem[], cutAt: number): ChatItem[] {
 function drainQueue() {
   const next = sendQueue.shift();
   if (next == null) return;
-  // 只有带气泡的条目才去解排队标记：无气泡的自动指令跟着解会把别人的气泡标成已发出
+  // 按 id 解自己那只气泡：无气泡的自动指令没有 id 对应的条目，天然什么都不动
   if (next.bubbled) {
-    updateItems(prev => {
-      const i = prev.findIndex(it => it.kind === 'user' && it.queued);
-      return i < 0 ? prev : prev.map((it, j) => (j === i && it.kind === 'user' ? { ...it, queued: false } : it));
-    });
+    updateItems(prev => prev.map(it =>
+      it.kind === 'user' && it.queuedId === next.id ? { ...it, queued: false } : it));
   }
   void send(next.text, { noBubble: true, requeueAs: next });
 }
@@ -523,14 +561,27 @@ export const chatStore = {
     if (!sid || state.items.some(it => it.kind !== 'form') || state.loading) return;
     void openSession(sid).catch(() => {});
   },
+  getDraft() {
+    return draft;
+  },
+  setDraft(text: string) {
+    draft = text;
+  },
   send,
   regenerate,
+  cancelRun,
   openSession,
   hitlDecide,
   newSession,
   /** 入口按钮直接弹卡：跟模型弹的卡走同一条 items 通路，不经后端 */
   openForm(form: FormKind, prefill?: Record<string, unknown>) {
     updateItems(prev => [...prev, { kind: 'form', id: nextFormId(), form, prefill, status: 'pending' }]);
+  },
+  /** 撤掉一条还没发出去的排队消息：气泡与队列条目共用同一个 id，两边一起走 */
+  cancelQueued(queuedId: number) {
+    const at = sendQueue.findIndex(q => q.id === queuedId);
+    if (at >= 0) sendQueue.splice(at, 1);
+    updateItems(prev => prev.filter(it => !(it.kind === 'user' && it.queuedId === queuedId)));
   },
   /** 用户关掉卡：卡留在对话里当痕迹（无 result），只是不再可填 */
   closeForm(id: string) {

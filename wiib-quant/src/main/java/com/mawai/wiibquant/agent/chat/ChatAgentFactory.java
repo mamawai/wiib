@@ -82,6 +82,11 @@ public class ChatAgentFactory {
         public UsageTrackingChatModel.UsageSnapshot usageSnapshot() {
             return light == deep ? deep.snapshot() : deep.snapshot().merge(light.snapshot());
         }
+
+        /** 账本被中断丢下的在途流写脏了，这一轮的数不能报 */
+        public boolean usageUntrusted() {
+            return deep.untrusted() || light.untrusted();
+        }
     }
 
     private final ChatModelFactory chatModelFactory;

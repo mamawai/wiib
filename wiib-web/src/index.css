@@ -164,10 +164,13 @@ html.pwa nav a {
     animation: wiib-ball-sweep 1.15s linear infinite;
   }
 
-  /* 关掉动画偏好：扫描/脉冲是纯装饰，停掉不丢信息（橙点与图标本身仍在） */
+  /* 关掉动画偏好：这两层是纯装饰，停掉不丢信息（橙点与图标本身仍在）。
+     两者都要连 opacity 一起收——只停动画的话，扇形会定格成一道常驻的静止橙弧 */
   @media (prefers-reduced-motion: reduce) {
     .wiib-ball-ping { animation: none; opacity: 0 }
-    .wiib-ball-sweep { animation: none }
+    .wiib-ball-sweep { animation: none; opacity: 0 }
+    /* 入场动画同理：一次性位移/缩放停掉即可，元素靠 fill-mode 停在终态 */
+    .animate-in { animation: none }
   }
 }
 

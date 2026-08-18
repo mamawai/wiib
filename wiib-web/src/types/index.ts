@@ -625,8 +625,9 @@ export type WorkbenchEvent =
   | { type: 'form_request'; form: TraderFormKind; prefill?: Record<string, unknown> }
   // deferred=true：让位收尾（专家还在取数就来了新消息），answer 只是过渡话术；
   // 真答案由后端补答轮落历史，前端靠 status 轮询等它落库后整体回放补显
-  // meta 是本轮读数，让位收尾那条 done 不带（答案还没出，无账可报）
-  | { type: 'done'; sessionId: string; answer: string; deferred?: boolean; meta?: TurnMeta }
+  // meta 是本轮读数，让位收尾那条 done 不带（答案还没出，无账可报）。
+  // cancelled=用户中断，answer 是"半截 + （已中断）"的定稿，前端要整段用它覆盖屏上那半截
+  | { type: 'done'; sessionId: string; answer: string; deferred?: boolean; cancelled?: boolean; meta?: TurnMeta }
   | { type: 'error'; message: string };
 
 /** trader 动作面板的三张卡 */

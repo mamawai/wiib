@@ -75,5 +75,20 @@ export function useFullscreen(ref: RefObject<HTMLElement | null>) {
     }
   }, [ref]);
 
-  return { active: native || css, cssMode: css, toggle };
+  /**
+   * 无条件退出全屏。
+   * <p>
+   * 与 {@link toggle} 的区别：这里<b>不读 ref</b>。宿主元素被卸载时（如对话面板关闭）
+   * ref.current 已经是 null，toggle 会在开头早退，CSS 降级那条路就永远退不掉——
+   * 而降级路正是最需要主动退的一条（它只是个类名，没有浏览器帮忙收场）。
+   */
+  const exit = useCallback(() => {
+    setCss(false);
+    const d = document as WebkitDoc;
+    if (d.fullscreenElement ?? d.webkitFullscreenElement) {
+      (d.exitFullscreen ?? d.webkitExitFullscreen)?.call(d);
+    }
+  }, []);
+
+  return { active: native || css, cssMode: css, toggle, exit };
 }

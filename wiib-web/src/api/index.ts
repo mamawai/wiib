@@ -447,6 +447,12 @@ export const workbenchApi = {
    */
   regenerate: (sessionId: string, onEvent: (e: WorkbenchEvent) => void, signal?: AbortSignal) =>
     postSse<WorkbenchEvent>('/api/ai/workbench/regenerate', { sessionId }, onEvent, signal),
+  /**
+   * 中断在跑的这一轮：后端跑到下一个检查点收尾，半截答案照落库。
+   * 返回 false=没有轮在跑（按钮点晚了），前端据此把按钮恢复原状。
+   */
+  cancel: (sessionId: string) =>
+    api.post<unknown, boolean>('/ai/workbench/cancel', { sessionId }),
   /** requestId 从 hitl_request 事件原样回传：卡片被新请求覆盖后点它，服务端会拒掉 */
   approve: (sessionId: string, approved: boolean, requestId: string) =>
     api.post<unknown, void>('/ai/workbench/approve', { sessionId, approved, requestId }),
