@@ -21,13 +21,10 @@ import org.springframework.ai.tool.annotation.ToolParam;
 public class TraderActionToolkit {
 
     private final TraderChatService traderChatService;
-    private final WorkbenchRunRegistry runRegistry;
     private final long userId;
 
-    public TraderActionToolkit(TraderChatService traderChatService, WorkbenchRunRegistry runRegistry,
-                               long userId) {
+    public TraderActionToolkit(TraderChatService traderChatService, long userId) {
         this.traderChatService = traderChatService;
-        this.runRegistry = runRegistry;
         this.userId = userId;
     }
 
@@ -48,15 +45,14 @@ public class TraderActionToolkit {
             daily boundary: it re-reads the closed trades, writes a REVIEW entry and rewrites the
             trader's memory notes. EXPENSIVE: costs one deep-model call. Requires user approval.
             If the result status is PENDING_APPROVAL, tell the user a confirmation card is waiting.
-            Skips itself (and costs nothing) when there is no newly closed trade to review.""")
+            Skips itself (and costs nothing) when there is no newly closed trade to review.
+            It starts in the background and returns immediately: the finished REVIEW appears on the
+            arena decision timeline minutes later, so never claim to know what the review says.""")
     public String reviewTraderNow() {
-        String sessionId = ToolRunContext.sessionId();
-        log.info("[TraderAction] 点播复盘 userId={} session={}", userId, sessionId);
-        // 复盘是同步的、最长 180s，期间 SSE 通道一个字节都没有——不推进度前端就是干等
-        progress(sessionId, "正在复盘 trader 的近期交易（约需 1~3 分钟）");
-        String result = traderChatService.reviewNow(userId);
-        progress(sessionId, "复盘结束，正在生成回答");
-        return result;
+        // 复盘异步跑（它的预算和整条 SSE 都是 600s，同步跑满就一秒不剩给回答了），
+        // 所以不再推进度：工具立刻返回，前端根本没有干等窗口
+        log.info("[TraderAction] 点播复盘 userId={} session={}", userId, ToolRunContext.sessionId());
+        return traderChatService.reviewNow(userId);
     }
 
     @Tool(name = "leave_note_to_trader", description = """
@@ -68,12 +64,5 @@ public class TraderActionToolkit {
             "The note in the user's own words, <=500 chars, e.g. 今晚有 CPI 数据，仓位放轻一点") String note) {
         log.info("[TraderAction] 留言 userId={}", userId);
         return traderChatService.leaveNote(userId, note);
-    }
-
-    /** 进度尽力而为：拿不到会话号（不在工具执行栈里）就静默跳过，不影响正确性。 */
-    private void progress(String sessionId, String text) {
-        if (sessionId != null) {
-            runRegistry.publishProgress(sessionId, text);
-        }
     }
 }

@@ -287,13 +287,14 @@ class ReviewMaterialAssemblerTest {
     @Test
     void timelineCompressesOldHoldsWhenOverCap() {
         List<AiTraderDecision> rows = new ArrayList<>();
-        // 200 条纯 HOLD + 最早的 1 条动作行：动作行必须保住，早段 HOLD 被省略且有说明
+        // 200 条 HOLD + 最早的 1 条动作行：动作行必须保住，早段观望被省略且有说明。
+        // 等待条件逐条不同，否则会先被合并压成一段、根本走不到上限这条路上
         rows.add(okRow(FROM + 60_000, AiTraderDecision.KIND_TRADE,
                 "【本轮结论】\n判断：早段开仓\n动作：开多\n等待：无",
                 "[{\"tool\":\"open_position\",\"args\":{\"symbol\":\"BTCUSDT\"},\"result\":\"ok\"}]"));
         for (int i = 1; i <= 200; i++) {
             rows.add(okRow(FROM + 60_000L + i * 300_000L, AiTraderDecision.KIND_TRADE,
-                    "【本轮结论】\n判断：无事(" + i + ")\n动作：HOLD\n等待：无", "[]"));
+                    "【本轮结论】\n判断：无事(" + i + ")\n动作：HOLD\n等待：回踩 " + (100000 + i) + " 再评估", "[]"));
         }
         when(decisionMapper.selectOne(any())).thenReturn(null);
         when(decisionMapper.selectList(any())).thenReturn(List.of(), rows);
@@ -302,9 +303,61 @@ class ReviewMaterialAssemblerTest {
 
         assertThat(m.timelineBlock()).contains("open_position");
         assertThat(m.timelineBlock()).contains("已省略");
-        // 上限内：条目数 = 动作1 + 补齐的最新HOLD
+        // 上限内：条目数 = 动作1 + 补齐的最新观望段
         long lines = m.timelineBlock().lines().filter(l -> l.startsWith("- ")).count();
         assertThat(lines).isLessThanOrEqualTo(ReviewMaterialAssembler.MAX_TIMELINE_ENTRIES);
+    }
+
+    /**
+     * 等待条件分条换行写是模型的常态写法。早先按行 startsWith 取，只捞得到"等待："标签行本身，
+     * 后面几条 bullet 整段丢掉——线上 59 条观望里 49 条就这么丢的，观望对账一直在空转。
+     * 这条是那个 bug 的回归闸。
+     */
+    @Test
+    void waitSectionReadsMultiLineBullets() {
+        String reasoning = """
+                空仓，无旧计划可验。【本轮结论】
+                判断：BTC 63636、ETH 1906，15m 均为 TREND_UP，但价格已贴上轨
+                动作：HOLD，不开仓
+                计划依据：账户空仓，无持仓计划需要维护
+                等待：
+                - BTC 多：15m 回踩 63370–63480 且收盘仍站上 63280，目标 64000–64450
+                - ETH 多：15m 回踩 1896–1901 且收盘站上 1892，目标 1925/1937
+                - 转空：BTC 15m 收盘跌破 63140；ETH 15m 收盘跌破 1888""";
+
+        String wait = ReviewMaterialAssembler.waitSection(reasoning);
+
+        assertThat(wait).contains("63370–63480").contains("1896–1901").contains("63140");
+        // 判断段是当时的指标读数，复盘没有对账物，不该混进等待里占额度
+        assertThat(wait).doesNotContain("TREND_UP");
+    }
+
+    /**
+     * 连续同一等待条件压成一段：15m 档一天 96 轮，行情不动时几十轮等的是同一句话。
+     * 括号里的依据说明每轮微动不算条件变化；条件真变了要断开；警报轮不并进例行观望。
+     */
+    @Test
+    void timelineMergesConsecutiveSameWaits() {
+        List<AiTraderDecision> rows = List.of(
+                okRow(FROM + 900_000, AiTraderDecision.KIND_TRADE,
+                        "【本轮结论】\n判断：贴上轨\n动作：HOLD\n等待：回踩 63370–63480（MA20 63450）后再评估", "[]"),
+                okRow(FROM + 1800_000, AiTraderDecision.KIND_TRADE,
+                        "【本轮结论】\n判断：浅回撤\n动作：HOLD\n等待：回踩 63370–63480（MA20 63465）后再评估", "[]"),
+                okRow(FROM + 2700_000, AiTraderDecision.KIND_TRADE,
+                        "【本轮结论】\n判断：继续走弱\n动作：HOLD\n等待：跌破 63140 转空", "[]"),
+                okRow(FROM + 3600_000, AiTraderDecision.KIND_ALERT,
+                        "【本轮结论】\n判断：急跌\n动作：HOLD\n等待：跌破 63140 转空", "[]"));
+        when(decisionMapper.selectOne(any())).thenReturn(null);
+        when(decisionMapper.selectList(any())).thenReturn(List.of(), rows);
+
+        String timeline = assembler.assemble(trader(), FROM, TO).timelineBlock();
+
+        // 前两轮括号内注解不同但价位一致 → 一段两轮；后两轮条件相同但一例行一警报 → 不并
+        assertThat(timeline).contains("（2轮）");
+        assertThat(timeline).contains("[警报]");
+        assertThat(timeline.lines().filter(l -> l.startsWith("- ")).count()).isEqualTo(3);
+        // 合并只省字，轮数统计仍按原始行走，保守度自检的对照物不能缩水
+        assertThat(timeline).contains("本期活动：唤醒 4 轮");
     }
 
     // ==================== 价格路径 ====================
@@ -337,6 +390,8 @@ class ReviewMaterialAssemblerTest {
                 .contains("64000").contains("60800").contains("+4.10%");
         // 逐小时收盘只该有两根（每组末根收），不是四根 5m
         assertThat(m.pricePathBlock()).contains("1h收盘: 61200→63500");
+        // 逐小时高低是组内极值：等待条件多是"回踩到某区间"，只给收盘判不出这一小时探到过没有
+        assertThat(m.pricePathBlock()).contains("1h高/低: 61500/60800→64000/61100");
     }
 
     /**

@@ -27,6 +27,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -54,13 +55,12 @@ class TraderChatServiceTest {
     private final TraderScheduler scheduler = mock(TraderScheduler.class);
     private final ReviewRunner reviewRunner = mock(ReviewRunner.class);
     private final AiTraderMapper traderMapper = mock(AiTraderMapper.class);
-    private final AiTraderDecisionMapper decisionMapper = mock(AiTraderDecisionMapper.class);
     private final SimTradeClient simTradeClient = mock(SimTradeClient.class);
 
     private final TraderModelFactory modelFactory = mock(TraderModelFactory.class);
 
     private final TraderChatService service = new TraderChatService(traderService, modelFactory, planStore,
-            scheduler, reviewRunner, traderMapper, decisionMapper, simTradeClient);
+            scheduler, reviewRunner, traderMapper, simTradeClient);
 
     private AiTrader running() {
         AiTrader t = new AiTrader();
@@ -179,76 +179,50 @@ class TraderChatServiceTest {
 
     // ---------- 点播复盘 ----------
 
+    /**
+     * 复盘预算 600s、工作台整条 SSE 也只有 600s——同步跑满就没时间让汇总模型开口了。
+     * 所以点播是"准入同步、执行异步"：当场答复派没派出去，结果去时间线上看。
+     */
     @Test
-    void 复盘成功时回传复盘全文() {
+    void 有素材时异步开跑并当场答复() {
         AiTrader t = running();
         when(traderService.mine(ME)).thenReturn(t);
-        // review() 是 void，用回调模拟"它落了一行 REVIEW"
-        org.mockito.Mockito.doAnswer(inv -> {
-            long at = inv.getArgument(1);
-            when(decisionMapper.selectOne(any())).thenReturn(review(at, AiTraderDecision.STATUS_OK));
-            return null;
-        }).when(reviewRunner).review(eq(t), anyLong());
+        when(reviewRunner.hasMaterial(eq(t), anyLong())).thenReturn(true);
 
         JSONObject out = parse(service.reviewNow(ME));
 
         assertThat(out.getBooleanValue("ok")).isTrue();
-        assertThat(out.getString("review")).contains("本期复盘");
-        verify(reviewRunner).review(eq(t), anyLong());
+        assertThat(out.getString("message")).contains("时间线");
+        verify(reviewRunner, timeout(2000)).review(eq(t), anyLong());
     }
 
     /**
-     * 无素材时 review() 静默跳过、什么都不写。这时报"复盘完成"会让用户去时间线上
-     * 找一篇根本不存在的复盘——必须认出这次没跑。
+     * 无素材时 review() 是静默跳过的，而点播现在异步——不当场判，用户就得等几分钟
+     * 再去时间线上扑一场空。会不会白花钱这件事必须同步答复。
      */
     @Test
-    void 无素材跳过时不谎报完成() {
-        when(traderService.mine(ME)).thenReturn(running());
-        when(decisionMapper.selectOne(any())).thenReturn(null);   // 没有落下新的 REVIEW 行
-
-        JSONObject out = parse(service.reviewNow(ME));
-
-        assertThat(out.getBooleanValue("ok")).isFalse();
-        assertThat(out.getString("message")).contains("跳过");
-    }
-
-    /** 上一期的旧 REVIEW 行不能被当成"这次跑出来的"：判据是时刻要对得上 */
-    @Test
-    void 旧复盘行不算这次的结果() {
-        when(traderService.mine(ME)).thenReturn(running());
-        when(decisionMapper.selectOne(any())).thenReturn(review(123L, AiTraderDecision.STATUS_OK));
-
-        JSONObject out = parse(service.reviewNow(ME));
-
-        assertThat(out.getBooleanValue("ok")).isFalse();
-        assertThat(out.getString("message")).contains("跳过");
-    }
-
-    @Test
-    void 复盘失败时如实回报() {
+    void 无素材当场答复跳过且不开跑() {
         AiTrader t = running();
         when(traderService.mine(ME)).thenReturn(t);
-        org.mockito.Mockito.doAnswer(inv -> {
-            long at = inv.getArgument(1);
-            AiTraderDecision d = review(at, AiTraderDecision.STATUS_ERROR);
-            d.setError("复盘超时(180s)");
-            when(decisionMapper.selectOne(any())).thenReturn(d);
-            return null;
-        }).when(reviewRunner).review(eq(t), anyLong());
+        when(reviewRunner.hasMaterial(eq(t), anyLong())).thenReturn(false);
 
         JSONObject out = parse(service.reviewNow(ME));
 
         assertThat(out.getBooleanValue("ok")).isFalse();
-        assertThat(out.getString("message")).contains("复盘超时");
+        assertThat(out.getString("message")).contains("跳过");
+        verify(reviewRunner, never()).review(any(), anyLong());
     }
 
-    private static AiTraderDecision review(long wakeTime, String status) {
-        AiTraderDecision d = new AiTraderDecision();
-        d.setWakeTime(wakeTime);
-        d.setStatus(status);
-        d.setKind(AiTraderDecision.KIND_REVIEW);
-        d.setReasoning("【本期复盘】战绩：2胜1负");
-        return d;
+    /** 停工窗口内旁路写复盘，learner 会读到"半天"的复盘、脏读进记忆——连素材都不该去查 */
+    @Test
+    void 停工窗口内拒绝点播复盘() {
+        when(traderService.mine(ME)).thenReturn(running());
+        when(scheduler.isHandoverActive()).thenReturn(true);
+
+        JSONObject out = parse(service.reviewNow(ME));
+
+        assertThat(out.getBooleanValue("ok")).isFalse();
+        verify(reviewRunner, never()).review(any(), anyLong());
     }
 
     // ---------- 留言 ----------

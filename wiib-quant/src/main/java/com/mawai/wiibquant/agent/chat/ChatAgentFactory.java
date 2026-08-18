@@ -297,7 +297,7 @@ public class ChatAgentFactory {
                 .streaming(true) // 答案要逐字推给前端
                 .toolsFromObject(new DeepAnalysisToolkit(deep, deepAnalysisService, runRegistry))
                 // 可以多次调用：两套工具分别是"研判"与"对 trader 动手"，合成一个类只会让职责糊掉
-                .toolsFromObject(new TraderActionToolkit(traderChatService, runRegistry, userId))
+                .toolsFromObject(new TraderActionToolkit(traderChatService, userId))
                 .defaultSystem("""
                         你是加密货币研判工作台的分析师。对话里已经有专家 agent 取回的真实数据，
                         你的职责是据此写出最终回答（新闻的联网补充也归你，见原则2）。

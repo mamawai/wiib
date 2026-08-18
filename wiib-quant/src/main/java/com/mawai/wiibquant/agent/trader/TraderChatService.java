@@ -3,7 +3,6 @@ package com.mawai.wiibquant.agent.trader;
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.mawai.wiibcommon.dto.FuturesPositionDTO;
 import com.mawai.wiibcommon.entity.AiTrader;
@@ -14,7 +13,6 @@ import com.mawai.wiibcommon.entity.FuturesTakeProfit;
 import com.mawai.wiibcommon.entity.UserLlmEndpoint;
 import com.mawai.wiibquant.agent.learning.ReviewRunner;
 import com.mawai.wiibquant.external.sim.SimTradeClient;
-import com.mawai.wiibquant.mapper.AiTraderDecisionMapper;
 import com.mawai.wiibquant.mapper.AiTraderMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -56,7 +54,6 @@ public class TraderChatService {
     private final TraderScheduler scheduler;
     private final ReviewRunner reviewRunner;
     private final AiTraderMapper traderMapper;
-    private final AiTraderDecisionMapper decisionMapper;
     private final SimTradeClient simTradeClient;
 
     // ===== 查询（纯读库） =====
@@ -205,10 +202,12 @@ public class TraderChatService {
     }
 
     /**
-     * 点播复盘：同步跑完（{@link ReviewRunner#review} 内部有 180s 预算）。
+     * 点播复盘：准入同步、执行异步（与 wake_trader 同一范式）。
      * <p>
-     * review() 无返回值、无素材时会静默跳过，所以拿"本次时刻有没有落下 REVIEW 行"来判定——
-     * 跳过了却报"复盘完成"，用户会去时间线上找一篇根本不存在的复盘。
+     * 复盘预算 {@link ReviewRunner#REVIEW_TIMEOUT_SECONDS}，而工作台整条 SSE 也只有 600s——
+     * 同步跑满就没时间让汇总模型开口了，用户等来的是超时不是回答。
+     * 但"有没有新素材"必须留在同步侧当场答：那是用户唯一关心的"会不会白花钱"，
+     * 推给时间线等于让他等几分钟再去扑一场空。
      */
     public String reviewNow(long userId) {
         AiTrader t = traderService.mine(userId);
@@ -220,19 +219,20 @@ public class TraderChatService {
             return outcome(false, "全体复盘与学习进行中（日线交接），几分钟后窗口关闭再试");
         }
         long at = System.currentTimeMillis();
-        reviewRunner.review(t, at);
-        AiTraderDecision d = latestReview(t);
-        if (d == null || d.getWakeTime() == null || d.getWakeTime() != at) {
-            return outcome(false, "本期没有新的已了结交易可复盘，已跳过（没有消耗模型调用）");
+        if (!reviewRunner.hasMaterial(t, at)) {
+            return outcome(false, "自上次复盘以来没有新的已了结交易，已跳过（没有消耗模型调用）");
         }
-        if (!AiTraderDecision.STATUS_OK.equals(d.getStatus())) {
-            return outcome(false, "复盘执行失败：" + d.getError());
-        }
-        return new JSONObject()
-                .fluentPut("ok", true)
-                .fluentPut("message", "复盘已完成，记忆笔记已更新")
-                .fluentPut("review", d.getReasoning())
-                .toJSONString();
+        Thread.startVirtualThread(() -> {
+            try {
+                reviewRunner.review(t, at);
+            } catch (Exception e) {
+                // review() 自己兜住了模型调用的失败并留 ERROR 行；这里兜的是它之前那几步库查询——
+                // 同步时异常还能顺着调用栈回给用户，异步之后没人接得住，不打日志就彻底无声了
+                log.warn("[TraderChat] 点播复盘异常逃逸 userId={} msg={}", userId, e.getMessage());
+            }
+        });
+        return outcome(true, "已开始复盘，几分钟后会在竞技场的决策时间线上出现一篇 REVIEW；"
+                + "失败也会留一条 ERROR 记录，不会没有下文");
     }
 
     /** 留言：覆盖写（同时只有一条待读），trader 下次唤醒注入后即焚。 */
@@ -258,15 +258,6 @@ public class TraderChatService {
     }
 
     // ===== 内部 =====
-
-    private AiTraderDecision latestReview(AiTrader t) {
-        return decisionMapper.selectOne(new LambdaQueryWrapper<AiTraderDecision>()
-                .eq(AiTraderDecision::getTraderId, t.getId())
-                .eq(AiTraderDecision::getRoundNo, t.getRoundNo())
-                .eq(AiTraderDecision::getKind, AiTraderDecision.KIND_REVIEW)
-                .orderByDesc(AiTraderDecision::getWakeTime)
-                .last("LIMIT 1"));
-    }
 
     private static JSONObject planJson(AiTraderPlan p) {
         JSONObject row = new JSONObject()

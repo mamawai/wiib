@@ -54,9 +54,9 @@ import java.util.concurrent.TimeoutException;
 public class LearningRunner {
 
     /**
-     * 学习超时：ReAct 多轮（挑人 → 查 2~3 个详情 → 收束）比复盘那一次调用慢，180s 不够。
+     * 学习超时：ReAct 多轮（挑人 → 查 2~3 个详情 → 收束），每轮都短，300s 够用。
      * 这个数直接算进日线交接的停工窗口（≈复盘超时 + 学习超时），窗口期间调度拒绝一切唤醒——
-     * 代价是跳过 1~2 根 5m K 线，每天只有一次，可接受。
+     * 代价是跳过几根 5m K 线，每天只有一次，可接受。
      */
     static final int LEARN_TIMEOUT_SECONDS = 300;
     /** 学习笔记总量硬约束（与 memory 同口径）：取舍归模型，超限截断兜底 */
