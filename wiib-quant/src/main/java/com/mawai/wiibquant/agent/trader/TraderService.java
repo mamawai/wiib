@@ -52,7 +52,7 @@ public class TraderService {
     private final TraderPlanStore planStore;
     private final AiTraderRequestMapper requestMapper;
 
-    /** llmEndpointId：端点库里的一条；空=跟随用户默认端点 */
+    /** llmEndpointId：端点库里的一条；空=跟随用户默认端点。wakeWindow：唤醒时段"HH:mm-HH:mm"（北京时间），null=全天 */
     public record UpsertReq(String name, String symbols, String intervalCode, String customPrompt,
                             Long llmEndpointId,
                             Boolean useDefaultPrompt,
@@ -61,7 +61,8 @@ public class TraderService {
                             Boolean allowMultiPosition, Boolean allowHedge,
                             Boolean allowSelfAdd, Boolean allowSelfReduce,
                             Boolean alertEnabled, BigDecimal alertThresholdMult,
-                            Boolean reviewEnabled, Boolean learningEnabled) {
+                            Boolean reviewEnabled, Boolean learningEnabled,
+                            String wakeWindow) {
     }
 
     public AiTrader mine(long userId) {
@@ -151,6 +152,7 @@ public class TraderService {
                 .set(AiTrader::getAlertThresholdMult, probe.getAlertThresholdMult())
                 .set(AiTrader::getReviewEnabled, probe.getReviewEnabled())
                 .set(AiTrader::getLearningEnabled, probe.getLearningEnabled())
+                .set(AiTrader::getWakeWindow, probe.getWakeWindow())
                 .set(AiTrader::getUpdatedAt, LocalDateTime.now()));
         endpointService.bind(userId, UserLlmBinding.TRADER, req.llmEndpointId());
         if (modelChanged) {
@@ -313,6 +315,20 @@ public class TraderService {
         if (req.intervalCode() == null || !INTERVALS.contains(req.intervalCode())) {
             return "K线级别仅支持 5m/15m/1h/4h";
         }
+        WakeWindow window;
+        try {
+            window = WakeWindow.parse(req.wakeWindow());
+        } catch (IllegalArgumentException e) {
+            return e.getMessage();
+        }
+        // 4h 档选 21:00-23:00 这种时段里一根本档K线都不收盘 = 永远不醒，拦在入口
+        if (window != null) {
+            long intervalMs = TraderScheduler.INTERVAL_MS.get(req.intervalCode());
+            long now = System.currentTimeMillis();
+            if (window.nextBoundaryFrom(now - Math.floorMod(now, intervalMs), intervalMs) < 0) {
+                return "唤醒时段内没有任何一根 " + req.intervalCode() + " K线收盘，等于永远不会醒；请放宽时段或换档位";
+            }
+        }
         String spec = validateSpec(req);
         if (spec != null) {
             return spec;
@@ -389,6 +405,9 @@ public class TraderService {
         t.setAlertThresholdMult(req.alertThresholdMult() == null ? BigDecimal.ONE : req.alertThresholdMult());
         t.setReviewEnabled(!Boolean.FALSE.equals(req.reviewEnabled()));
         t.setLearningEnabled(!Boolean.FALSE.equals(req.learningEnabled()));
+        // 存归一化文本（validate 已 parse 过），全天存 null
+        WakeWindow window = WakeWindow.parse(req.wakeWindow());
+        t.setWakeWindow(window == null ? null : window.text());
     }
 
     private static Set<String> parseSymbols(String symbols) {

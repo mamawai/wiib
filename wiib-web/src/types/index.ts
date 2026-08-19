@@ -776,6 +776,8 @@ export interface TraderPublicView {
   equity: number;
   pnlPct: number;
   mine: boolean;
+  /** 唤醒时段 "HH:mm-HH:mm"（北京时间，两端含，可跨午夜），null=全天；进公开视图是让观众看得懂"半天没决策" */
+  wakeWindow: string | null;
 }
 
 /** 主人视图：公开视图 + 配置回显（key 只回尾4位） */
@@ -794,6 +796,8 @@ export interface TraderOwnerView {
   reviewEnabled: boolean;
   /** 同侪学习开关：learning agent 在全体复盘完成后向同侪学习写 LEARN 行并整理学习笔记 */
   learningEnabled: boolean;
+  /** 唤醒时段 "HH:mm-HH:mm"，null=全天 */
+  wakeWindow: string | null;
 }
 
 /**
@@ -914,6 +918,8 @@ export interface TraderUpsertRequest {
   alertThresholdMult: number;
   reviewEnabled: boolean;
   learningEnabled: boolean;
+  /** 唤醒时段 "HH:mm-HH:mm"（北京时间），null=全天 */
+  wakeWindow: string | null;
 }
 
 /** 重要快讯（BlockBeats 缓存透传，plain 为脱 HTML 纯文本） */

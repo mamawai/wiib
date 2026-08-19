@@ -38,9 +38,15 @@ public class TraderPromptAssembler {
 
     public String assemble(AiTrader trader, String accountStateJson, List<AiTraderDecision> recent) {
         StringBuilder sb = new StringBuilder();
+        WakeWindow window = WakeWindow.of(trader);
+        String windowText = window == null ? null : window.text();
         // 用户可退出平台模板（自定义成为唯一指令来源，护栏仍硬校验）；账户状态/最近决策/复盘笔记是数据不是指令，永远注入
         if (!Boolean.FALSE.equals(trader.getUseDefaultPrompt())) {
-            sb.append(platformTemplate(trader.getIntervalCode(), trader.getSymbols(), TraderRiskConfig.of(trader)));
+            sb.append(platformTemplate(trader.getIntervalCode(), trader.getSymbols(), TraderRiskConfig.of(trader), windowText));
+        } else if (windowText != null) {
+            // 退出平台模板时节奏行不在了，时段是事实不是指令，单独补一行——否则模型按"每根K线都醒"管仓位，休眠 12 小时它却不知道
+            sb.append("\n唤醒时段：每天 ").append(windowText)
+                    .append("（北京时间，两端含）。时段外不做例行唤醒（波动警报也停），只有主人手动叫醒才会例外；持仓只靠止损止盈单自动触发。\n");
         }
 
         sb.append("\n当前账户状态（实时数据）：\n").append(accountStateJson).append('\n');
@@ -131,15 +137,19 @@ public class TraderPromptAssembler {
         trader.setOwnerNoteRounds(left);
     }
 
-    /** 平台系统提示词模板（身份/工具/规格/成本/分析流程/纪律）——前端预览与唤醒组装共用同一份文本。 */
-    public String platformTemplate(String intervalCode, String symbols, TraderRiskConfig risk) {
+    /**
+     * 平台系统提示词模板（身份/工具/规格/成本/分析流程/纪律）——前端预览与唤醒组装共用同一份文本。
+     *
+     * @param wakeWindowText 唤醒时段"HH:mm-HH:mm"，null=全天——节奏行按它说真话，模板与事实不许打架
+     */
+    public String platformTemplate(String intervalCode, String symbols, TraderRiskConfig risk, String wakeWindowText) {
         // 措辞红线：不许出现"不开仓才是失败"式行动偏置（nof1第一季过度交易的教训），
         // 退出纪律必须锚定在开仓时立的计划上——恐慌平仓的根治在这段文本里
         return """
                 你是一名职业加密货币合约交易员，在纯模拟的竞技场用真实行情检验你的交易体系。账户是虚拟资金，
                 唯一真实的东西是你的判断力排名——净值曲线与决策日志全程公开，有观众在看。职业性的标志不是
                 交易频率，而是每一笔交易都有清晰的论点、事先定义好的退出方式，以及对自己计划的执行力。
-                节奏：每根 %s K线收盘唤醒你一次，两次唤醒之间世界照常运转（止损止盈单会自动触发）；
+                节奏：%s，两次唤醒之间世界照常运转（止损止盈单会自动触发）；
                 持仓期间遇到极端波动，你可能被临时警报唤醒，警报开场白会说明情况。
                 你每次醒来只需要回答一个问题：这根K线收盘后，我的计划需要改变吗？
                 可交易标的：%s。所有输出一律使用中文——决策日志面向中文观众公开展示。
@@ -204,10 +214,18 @@ public class TraderPromptAssembler {
                    判断：一句话说清当前市场状态与你的核心看法（带数字）
                    动作：本轮实际执行了什么及理由；没有动作写 HOLD
                    等待：下一步的具体触发条件（价位/指标值），没有则写"无"
-                %s""".formatted(intervalCode, symbols,
+                %s""".formatted(rhythmText(intervalCode, wakeWindowText), symbols,
                 risk.leverageMin(), risk.leverageMax(),
                 plain(risk.marginPctMin()), plain(risk.marginPctMax()),
                 positionRule(risk), hedgeRule(risk), approvalSection(risk));
+    }
+
+    /** 节奏行按时段说真话：全天="每根 15m K线收盘唤醒你一次"；有时段就把"只在时段内醒、时段外例行与警报都停、手动例外"写进同一句 */
+    static String rhythmText(String intervalCode, String wakeWindowText) {
+        return wakeWindowText == null
+                ? "每根 " + intervalCode + " K线收盘唤醒你一次"
+                : "每天 " + wakeWindowText + "（北京时间，两端含）内每根 " + intervalCode
+                        + " K线收盘唤醒你一次，时段外不做例行唤醒（波动警报也停），只有主人手动叫醒才会例外";
     }
 
     private static String plain(java.math.BigDecimal v) {

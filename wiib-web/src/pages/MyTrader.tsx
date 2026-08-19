@@ -26,6 +26,13 @@ const TOUR_STEPS: TourStep[] = [
       + '选 15m 起步。5m 意味着一天叫醒它 288 次——你的 API key 在烧钱，双边手续费也在磨损本金。',
   },
   {
+    target: 'wake-window',
+    title: '什么时候醒',
+    body: '默认全天候：每根 K 线收盘都醒。设了时段就只在时段内醒（北京时间，可跨午夜，如 21:00–08:30 只盯夜盘）。\n'
+      + '时段外例行唤醒和波动警报都停，持仓只靠止损止盈单自动触发；你手动唤醒不受限。\n'
+      + '每日复盘与同侪学习不看时段，仍在每天 08:00 照常进行。',
+  },
+  {
     target: 'symbols',
     title: '让它交易哪些币',
     body: '白名单。AI 只能在这几个币里做，开别的会被当场拒绝。\n\n'
@@ -100,6 +107,7 @@ const EMPTY_FORM: TraderUpsertRequest = {
   name: '', symbols: 'BTCUSDT', intervalCode: '15m', customPrompt: '',
   llmEndpointId: null, useDefaultPrompt: true,
   spec: DEFAULT_SPEC, alertEnabled: true, alertThresholdMult: 1, reviewEnabled: true, learningEnabled: true,
+  wakeWindow: null,
 };
 
 /**
@@ -133,6 +141,7 @@ export function MyTrader() {
           spec: v.spec,
           alertEnabled: v.alertEnabled, alertThresholdMult: v.alertThresholdMult,
           reviewEnabled: v.reviewEnabled, learningEnabled: v.learningEnabled,
+          wakeWindow: v.wakeWindow,
         });
         loadRequests();
       }
@@ -153,11 +162,11 @@ export function MyTrader() {
     setTour(false);
   }, []);
 
-  // 平台提示词预览随级别/币种/仓位规格联动（与唤醒组装同一份文本，所见即所得）
+  // 平台提示词预览随级别/币种/仓位规格/唤醒时段联动（与唤醒组装同一份文本，所见即所得）
   useEffect(() => {
-    traderApi.promptTemplate(form.intervalCode, form.symbols || 'BTCUSDT', form.spec)
+    traderApi.promptTemplate(form.intervalCode, form.symbols || 'BTCUSDT', form.spec, form.wakeWindow)
       .then(setTemplate).catch(() => setTemplate(''));
-  }, [form.intervalCode, form.symbols, form.spec]);
+  }, [form.intervalCode, form.symbols, form.spec, form.wakeWindow]);
 
   const run = useCallback(async (name: string, action: () => Promise<unknown>, okMsg: string) => {
     setBusy(name);
@@ -311,6 +320,15 @@ export function MyTrader() {
               </p>
             )}
           </label>
+        </div>
+
+        {/* 唤醒时段：只管例行/警报唤醒；复盘学习不看它；末次唤醒时模型会被告知即将休眠 */}
+        <div className="space-y-2 rounded-lg border border-border/60 bg-card-2/40 p-3" data-tour="wake-window">
+          <div className="flex flex-wrap items-baseline justify-between gap-x-2">
+            <span className="microlabel">唤醒时段（北京时间）</span>
+            <span className="text-[10px] text-muted-foreground">时段外不例行唤醒也不警报；手动唤醒不受限；复盘/学习仍在 08:00</span>
+          </div>
+          <WakeWindowField value={form.wakeWindow} onChange={v => set({ wakeWindow: v })} />
         </div>
 
         <div className="space-y-1 text-xs" data-tour="symbols">
@@ -517,6 +535,58 @@ export function MyTrader() {
         </p>
       </div>
     </div>
+  );
+}
+
+const HOURS = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0'));
+const MINUTES = Array.from({ length: 12 }, (_, i) => String(i * 5).padStart(2, '0'));
+
+/** 唤醒时段：全天开关 + 起止时/分（分钟只给 0/5 的倍数——K 线按 5 分钟收盘）。值形如 "21:00-08:30"，null=全天 */
+function WakeWindowField({ value, onChange }: { value: string | null; onChange: (v: string | null) => void }) {
+  // 开着时起止就是 value 本身（表单是唯一真值）；关掉时 value 变 null，把关掉那一刻的起止记住，再打开还是刚才那组
+  const [remembered, setRemembered] = useState<[string, string]>(['21:00', '08:30']);
+  const enabled = value != null;
+  const [from, to] = enabled ? value.split('-') as [string, string] : remembered;
+  const toggle = (on: boolean) => {
+    setRemembered([from, to]);
+    onChange(on ? `${from}-${to}` : null);
+  };
+  const setPart = (which: 'from' | 'to', hh: string, mm: string) => {
+    const t = `${hh}:${mm}`;
+    onChange(which === 'from' ? `${t}-${to}` : `${from}-${t}`);
+  };
+  const [fh, fm] = from.split(':');
+  const [th, tm] = to.split(':');
+  return (
+    <div className="space-y-2">
+      <SpecToggle checked={enabled} onChange={toggle}
+                  label={enabled ? '仅在时段内唤醒' : '全天唤醒'}
+                  hint="两端含，可跨午夜（起点晚于终点即跨到次日）；分钟只能是 0/5 的倍数" />
+      {enabled && (
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          <TimeSelect hh={fh} mm={fm} onChange={(h, m) => setPart('from', h, m)} />
+          <span className="text-muted-foreground">至</span>
+          <TimeSelect hh={th} mm={tm} onChange={(h, m) => setPart('to', h, m)} />
+          {from > to && <span className="text-[10px] text-muted-foreground">（次日）</span>}
+          {from === to && <span className="text-[10px] text-loss">起止不能相同（全天请关闭时段）</span>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TimeSelect({ hh, mm, onChange }: { hh: string; mm: string; onChange: (hh: string, mm: string) => void }) {
+  const cls = 'h-9 rounded-lg border border-border bg-card-2 px-2 text-xs num';
+  return (
+    <span className="inline-flex items-center gap-1">
+      <select value={hh} onChange={e => onChange(e.target.value, mm)} className={cls}>
+        {HOURS.map(h => <option key={h} value={h}>{h}</option>)}
+      </select>
+      <span>:</span>
+      <select value={mm} onChange={e => onChange(hh, e.target.value)} className={cls}>
+        {MINUTES.map(m => <option key={m} value={m}>{m}</option>)}
+      </select>
+    </span>
   );
 }
 

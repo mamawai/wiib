@@ -69,6 +69,8 @@ public class TraderChatService {
                 .fluentPut("reviewEnabled", t.getReviewEnabled())
                 .fluentPut("learningEnabled", t.getLearningEnabled())
                 .fluentPut("alertEnabled", t.getAlertEnabled())
+                .fluentPut("wakeWindow", t.getWakeWindow() == null ? "全天"
+                        : t.getWakeWindow() + "（北京时间，时段外不例行唤醒也不警报）")
                 .fluentPut("leverageRange", t.getLeverageMin() + "~" + t.getLeverageMax() + "倍")
                 .fluentPut("marginPctRange", plain(t.getMarginPctMin()) + "~" + plain(t.getMarginPctMax()) + "%")
                 .fluentPut("memory", t.getMemory())

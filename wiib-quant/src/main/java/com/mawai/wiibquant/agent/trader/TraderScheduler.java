@@ -26,6 +26,8 @@ import java.util.concurrent.atomic.AtomicLong;
  * 事件是 per-symbol 的，同一边界多币多次触发靠 firedBoundary 去重。
  * 不做兜底补漏：WS/事件断流丢的K线就丢了——陈旧信号唤醒没有意义（迟到事件由唤醒预算兜底：
  * 距下一边界不足 30s 直接放弃，见 TraderWakeupRunner）。
+ * 唤醒时段（ai_trader.wake_window，见 {@link WakeWindow}）只在这里过滤：例行/警报时段外静默跳过（不写 SKIPPED，
+ * 5m 档一天会写 150 行"休眠中"），手动唤醒不拦，日线交接的复盘/学习不看它。
  * <p>
  * 日线边界走三阶段交接（见 {@link #startDailyHandover}）：先交易、再全体复盘、最后全体学习，
  * 复盘与学习之间是全局屏障——learning 读的是同侪<b>刚写好</b>的复盘，没有屏障，同一轮学习里
@@ -211,6 +213,11 @@ public class TraderScheduler {
                 .eq(AiTrader::getIntervalCode, intervalCode));
         List<Thread> started = new ArrayList<>();
         for (AiTrader trader : traders) {
+            // 时段外静默跳过：不占 firedBoundary、不写 SKIPPED——休眠就是没这回事
+            WakeWindow window = WakeWindow.of(trader);
+            if (window != null && !window.contains(boundary)) {
+                continue;
+            }
             Thread t = fireTrader(trader, boundary);
             if (t != null) {
                 started.add(t);
@@ -267,6 +274,11 @@ public class TraderScheduler {
             return;
         }
         long now = nowMs.getAsLong();
+        WakeWindow window = WakeWindow.of(trader);
+        if (window != null && !window.contains(now)) {
+            // 休眠时段：警报也不叫——"其他时间段就不唤醒"的另一半
+            return;
+        }
         Long last = lastWakeAt.get(trader.getId());
         if (last != null && now - last < ALERT_COOLDOWN_MS) {
             return;
@@ -322,7 +334,8 @@ public class TraderScheduler {
         long boundary = now - Math.floorMod(now, intervalMs);
         // 距下一根K线太近就别烧这一次：例行唤醒马上到，内容几乎一样
         if (TraderWakeupRunner.wakeBudgetSeconds(boundary, intervalMs, now) < TraderWakeupRunner.MIN_WAKE_SECONDS) {
-            return "距下一次例行唤醒不足" + TraderWakeupRunner.MIN_WAKE_SECONDS + "秒，本次手动唤醒省下了，稍等就有新决策";
+            // 措辞不提"例行马上来"：休眠时段里没有"稍等就来"的例行唤醒，手动是那时唯一的通道；拦本身保留（预算不够会落 SKIPPED）
+            return "距下一根K线收盘不足" + TraderWakeupRunner.MIN_WAKE_SECONDS + "秒，这一轮时间预算不够，等这根K线收了再点";
         }
         if (inFlight.contains(trader.getId())) {
             return WAKE_BUSY_REASON;
@@ -348,14 +361,23 @@ public class TraderScheduler {
         inFlight.remove(traderId);
     }
 
-    /** 下一次例行唤醒的时刻；档位已下线返回 null。动作面板用它显示"再等多久就自动醒了" */
+    /**
+     * 下一次例行唤醒的时刻；档位已下线返回 null。动作面板用它显示"再等多久就自动醒了"。
+     * 有唤醒时段的跳到时段内的下一根——面板"下次例行"显示的必须是真会醒的那一刻
+     */
     public Long nextRoutineWakeAt(AiTrader trader) {
         Long intervalMs = INTERVAL_MS.get(trader.getIntervalCode());
         if (intervalMs == null) {
             return null;
         }
         long now = nowMs.getAsLong();
-        return now - Math.floorMod(now, intervalMs) + intervalMs;
+        long next = now - Math.floorMod(now, intervalMs) + intervalMs;
+        WakeWindow window = WakeWindow.of(trader);
+        if (window == null) {
+            return next;
+        }
+        long inWindow = window.nextBoundaryFrom(next, intervalMs);
+        return inWindow < 0 ? null : inWindow;
     }
 
     /**

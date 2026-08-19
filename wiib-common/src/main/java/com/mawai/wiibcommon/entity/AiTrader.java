@@ -87,6 +87,14 @@ public class AiTrader {
     /** 警报灵敏度系数 ≥1.0 只能调高：生效阈值 = 每币基准 × 本系数 */
     private BigDecimal alertThresholdMult;
 
+    /**
+     * 唤醒时段（北京时间）"HH:mm-HH:mm"，5 分钟粒度、两端含、可跨午夜；null=全天。
+     * 只管交易类唤醒（例行/警报），手动唤醒不拦；日线交接的复盘/学习不看它——夜里交易了就该复盘夜里的交易。
+     * 解析与判断见 WakeWindow。改回全天=写 null（updateConfig 列级 set）
+     */
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
+    private String wakeWindow;
+
     // BYOK 四件套（协议/URL/模型/key）已迁到 user_llm_endpoint：trader 按 UserLlmBinding.TRADER 绑定选端点，
     // 没绑定就用该用户的默认端点，见 LlmEndpointService.resolve
 

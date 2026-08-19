@@ -8,6 +8,7 @@ import com.mawai.wiibquant.mapper.AiTraderMapper;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
+import java.time.ZonedDateTime;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 
@@ -29,7 +30,7 @@ import static org.mockito.Mockito.when;
 
 class TraderSchedulerTest {
 
-    // 2026-08-05 09:00:00 UTC 整点前 1ms —— Binance closeTime 口径 xx:59:59.999
+    // 2026-07-27 17:00:00 UTC 整点前 1ms —— Binance closeTime 口径 xx:59:59.999
     private static final long H1_CLOSE = 1785171599999L;
     private static final long H1_BOUNDARY = 1785171600000L;
     // 2026-07-27 00:00:00 UTC（日线边界）
@@ -49,6 +50,91 @@ class TraderSchedulerTest {
 
     private AlertTrigger trig() {
         return new AlertTrigger("BTCUSDT", new BigDecimal("1.2"), new BigDecimal("63120"), "下跌", H1_BOUNDARY);
+    }
+
+    /** 北京时间 2026-07-27 hh:mm 的 epoch ms（与 DAY_BOUNDARY 同一天；+8 整时区，整点即 UTC 整点） */
+    private static long bj(int h, int m) {
+        return ZonedDateTime.of(2026, 7, 27, h, m, 0, 0, WakeWindow.ZONE).toInstant().toEpochMilli();
+    }
+
+    private AiTrader nightTrader() {
+        AiTrader t = trader1h();
+        t.setWakeWindow("21:00-08:30");
+        return t;
+    }
+
+    // ---------- 唤醒时段 ----------
+
+    /** 正午整点收盘（北京 12:00 = UTC 04:00，四档全是边界）：夜间档不醒，不写 SKIPPED */
+    @Test
+    void routineWakeSkippedOutsideWindow() {
+        when(traderMapper.selectList(any())).thenReturn(List.of(nightTrader()));
+        TraderScheduler s = new TraderScheduler(traderMapper, runner, reviewRunner, learningRunner);
+
+        s.onKlineClosed(new KlineClosedEvent(this, "BTCUSDT", "5m", bj(12, 0) - 1));
+
+        verify(runner, after(300).never()).wake(any(), anyLong());
+        verify(runner, never()).recordSkipped(any(), anyLong());
+    }
+
+    /** 时段内（22:00）照常醒 */
+    @Test
+    void routineWakeFiresInsideWindow() {
+        when(traderMapper.selectList(any())).thenReturn(List.of(nightTrader()));
+        TraderScheduler s = new TraderScheduler(traderMapper, runner, reviewRunner, learningRunner);
+
+        s.onKlineClosed(new KlineClosedEvent(this, "BTCUSDT", "5m", bj(22, 0) - 1));
+
+        verify(runner, timeout(2_000)).wake(any(AiTrader.class), eq(bj(22, 0)));
+    }
+
+    /** 时段外警报也不叫 */
+    @Test
+    void alertSkippedOutsideWindow() {
+        TraderScheduler s = new TraderScheduler(traderMapper, runner, reviewRunner, learningRunner);
+        s.nowMs = () -> bj(12, 10);
+
+        s.tryAlertWake(nightTrader(),
+                new AlertTrigger("BTCUSDT", new BigDecimal("1.2"), new BigDecimal("63120"), "下跌", bj(12, 10)));
+
+        verify(runner, after(300).never()).wakeAlert(any(), any());
+    }
+
+    /** 手动唤醒不看时段：主人亲手扣扳机 */
+    @Test
+    void manualWakeIgnoresWindow() {
+        TraderScheduler s = new TraderScheduler(traderMapper, runner, reviewRunner, learningRunner);
+        s.nowMs = () -> bj(12, 10); // 时段外；距下一 1h 边界 50 分钟预算充足
+
+        assertThat(s.tryManualWake(nightTrader())).isNull();
+
+        verify(runner, timeout(2_000)).wakeManual(any(), anyLong());
+    }
+
+    /** 面板"下次例行"跳到时段起点：正午看是当晚 21:00；全天的不变 */
+    @Test
+    void nextRoutineWakeJumpsIntoWindow() {
+        TraderScheduler s = new TraderScheduler(traderMapper, runner, reviewRunner, learningRunner);
+        s.nowMs = () -> bj(12, 10);
+
+        assertThat(s.nextRoutineWakeAt(nightTrader())).isEqualTo(bj(21, 0));
+        assertThat(s.nextRoutineWakeAt(trader1h())).isEqualTo(bj(13, 0));
+    }
+
+    /** 时段不覆盖 08:00（21:00-07:00）：日线交接照样复盘+学习，只是 08:00 那根不做交易唤醒 */
+    @Test
+    void dailyHandoverIgnoresWindowButPhase0Respects() {
+        AiTrader t = trader1h();
+        t.setWakeWindow("21:00-07:00");
+        when(traderMapper.selectList(any())).thenReturn(List.of(t));
+        when(traderMapper.selectCount(any())).thenReturn(3L);
+        TraderScheduler s = new TraderScheduler(traderMapper, runner, reviewRunner, learningRunner);
+
+        s.onKlineClosed(new KlineClosedEvent(this, "BTCUSDT", "5m", DAY_BOUNDARY - 1));
+
+        verify(learningRunner, timeout(2_000)).learn(any(AiTrader.class), eq(DAY_BOUNDARY));
+        verify(reviewRunner).review(any(AiTrader.class), eq(DAY_BOUNDARY));
+        verify(runner, never()).wake(any(), anyLong());
     }
 
     // ---------- 警报唤醒准入 ----------
@@ -134,7 +220,7 @@ class TraderSchedulerTest {
 
         String why = s.tryManualWake(trader1h());
 
-        assertThat(why).contains("距下一次例行唤醒不足");
+        assertThat(why).contains("距下一根K线收盘不足");
         verify(runner, after(300).never()).wakeManual(any(), anyLong());
     }
 

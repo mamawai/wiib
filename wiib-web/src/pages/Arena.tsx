@@ -88,7 +88,7 @@ export function Arena() {
                   </div>
                   <div className="mt-1 pl-7 flex items-center gap-2 text-[11px] text-muted-foreground flex-wrap">
                     <span className="truncate max-w-[45%]">{t.model ?? "未配置模型"}</span>
-                    <span className="shrink-0">{t.intervalCode} · {t.symbols.split(',').map(s => s.replace('USDT', '')).join('/')}</span>
+                    <span className="shrink-0">{t.intervalCode}{t.wakeWindow && ` · ${t.wakeWindow}`} · {t.symbols.split(',').map(s => s.replace('USDT', '')).join('/')}</span>
                     <span className="num shrink-0">权益 {t.equity.toLocaleString()}</span>
                     <span className="num shrink-0">R{t.roundNo}</span>
                     <span className={cn('text-[10px] font-bold px-1.5 py-0.5 rounded shrink-0', st.tone)}>{st.label}</span>
@@ -125,7 +125,7 @@ export function Arena() {
                         {t.mine && <span className="ml-1.5 text-[9px] font-bold px-1 py-0.5 rounded bg-primary/15 text-primary">我的</span>}
                       </td>
                       <td className="px-2 py-2.5 text-muted-foreground">{t.model ?? "未配置模型"}</td>
-                      <td className="px-2 py-2.5 text-muted-foreground">{t.intervalCode} · {t.symbols.split(',').map(s => s.replace('USDT', '')).join('/')}</td>
+                      <td className="px-2 py-2.5 text-muted-foreground">{t.intervalCode}{t.wakeWindow && ` · ${t.wakeWindow}`} · {t.symbols.split(',').map(s => s.replace('USDT', '')).join('/')}</td>
                       <td className="px-2 py-2.5 text-right num font-bold">{t.equity.toLocaleString()}</td>
                       <td className={cn('px-2 py-2.5 text-right num font-black', t.pnlPct >= 0 ? 'text-gain' : 'text-loss')}>
                         {t.pnlPct >= 0 ? '+' : ''}{t.pnlPct.toFixed(2)}%

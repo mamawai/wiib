@@ -72,7 +72,7 @@ class TraderServiceTest {
                                                Boolean multi, Boolean hedge,
                                                Boolean alertEnabled, java.math.BigDecimal alertMult) {
         return new TraderService.UpsertReq("小虎", "BTCUSDT", "5m", customPrompt, null, useDefaultPrompt,
-                levMin, levMax, null, null, multi, hedge, null, null, alertEnabled, alertMult, null, null);
+                levMin, levMax, null, null, multi, hedge, null, null, alertEnabled, alertMult, null, null, null);
     }
 
     /** 退出平台模板后自定义就是唯一指令来源，空着=模型裸奔 */
@@ -155,12 +155,57 @@ class TraderServiceTest {
         when(simTradeClient.ensureAccount(any(), any())).thenReturn(99L);
 
         String err = service.create(1L, new TraderService.UpsertReq("小虎", "BTCUSDT", "5m", null, 5L, true,
-                null, null, null, null, null, null, null, null, null, null, null, null));
+                null, null, null, null, null, null, null, null, null, null, null, null, null));
 
         assertThat(err).isNull();
         verify(modelFactory).testConnection(chosen);
         verify(traderMapper).insert(any(AiTrader.class));
         verify(endpointService).bind(1L, UserLlmBinding.TRADER, 5L);
+    }
+
+    /** 时段格式错直接回消息 */
+    @Test
+    void wakeWindowBadFormatRejected() {
+        when(binanceProperties.getSymbols()).thenReturn(List.of("BTCUSDT"));
+        when(traderMapper.selectOne(any())).thenReturn(null);
+
+        String err = service.create(1L, new TraderService.UpsertReq("小虎", "BTCUSDT", "5m", null, null, true,
+                null, null, null, null, null, null, null, null, null, null, null, null, "21:03-08:30"));
+
+        assertThat(err).contains("0/5");
+        verify(traderMapper, never()).insert(any(AiTrader.class));
+    }
+
+    /** 4h 档 21:00-23:00 一根都不收盘 = 永眠，拦在入口 */
+    @Test
+    void wakeWindowWithoutAnyBoundaryRejected() {
+        when(binanceProperties.getSymbols()).thenReturn(List.of("BTCUSDT"));
+        when(traderMapper.selectOne(any())).thenReturn(null);
+
+        String err = service.create(1L, new TraderService.UpsertReq("小虎", "BTCUSDT", "4h", null, null, true,
+                null, null, null, null, null, null, null, null, null, null, null, null, "21:00-23:00"));
+
+        assertThat(err).contains("永远不会醒");
+        verify(traderMapper, never()).insert(any(AiTrader.class));
+    }
+
+    /** 合法时段落库为归一化文本 */
+    @Test
+    void wakeWindowPersistedNormalized() {
+        when(binanceProperties.getSymbols()).thenReturn(List.of("BTCUSDT"));
+        when(traderMapper.selectOne(any())).thenReturn(null);
+        UserLlmEndpoint chosen = endpoint(5, "deepseek-chat");
+        when(endpointService.get(1L, 5L)).thenReturn(chosen);
+        when(modelFactory.testConnection(chosen)).thenReturn(null);
+        when(simTradeClient.ensureAccount(any(), any())).thenReturn(99L);
+
+        String err = service.create(1L, new TraderService.UpsertReq("小虎", "BTCUSDT", "5m", null, 5L, true,
+                null, null, null, null, null, null, null, null, null, null, null, null, " 21:00-08:30 "));
+
+        assertThat(err).isNull();
+        ArgumentCaptor<AiTrader> captor = ArgumentCaptor.forClass(AiTrader.class);
+        verify(traderMapper).insert(captor.capture());
+        assertThat(captor.getValue().getWakeWindow()).isEqualTo("21:00-08:30");
     }
 
     /** 连通性测试不过：不入库、不绑定 */
@@ -265,6 +310,8 @@ class TraderServiceTest {
         verify(traderMapper).update(isNull(), cap.capture());
         String sqlSet = cap.getValue().getSqlSet();
         assertThat(sqlSet).contains("custom_prompt");
+        // 改回全天=写 null 只靠这条列级 set（@TableField ALWAYS 对 LambdaUpdateWrapper 不生效）：wake_window 必须在 set 列表里
+        assertThat(sqlSet).contains("wake_window");
         assertThat(sqlSet).doesNotContain("status").doesNotContain("consecutive_failures").doesNotContain("api_key");
         verify(endpointService).bind(1L, UserLlmBinding.TRADER, null);   // 跟随默认 = 解绑
     }
@@ -283,7 +330,7 @@ class TraderServiceTest {
         when(modelFactory.testConnection(next)).thenReturn(null);
 
         String err = service.updateConfig(1L, new TraderService.UpsertReq("小虎", "BTCUSDT", "5m", null, 6L, true,
-                null, null, null, null, null, null, null, null, null, null, null, null));
+                null, null, null, null, null, null, null, null, null, null, null, null, null));
 
         assertThat(err).isNull();
         verify(modelFactory).testConnection(next);
