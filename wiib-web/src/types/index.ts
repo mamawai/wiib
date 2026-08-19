@@ -862,6 +862,34 @@ export interface AiTraderPlanView {
   revisionsJson: string | null;
 }
 
+/** 交易记录里引用的那一轮决策：id 对应时间线卡；reason 只有平仓有（close_position 的一句话理由） */
+export interface TradeDecisionRef {
+  id: number;
+  wakeTime: number;
+  kind: 'TRADE' | 'ALERT' | 'MANUAL';
+  reasoning: string | null;
+  reason: string | null;
+}
+
+/** 已了结交易（当前局）：sim 已平仓位 + 配对的计划 + 开/平仓决策——竞技场"论点→结局"卡的一行 */
+export interface TradeRecordView {
+  positionId: number;
+  symbol: string;
+  side: 'LONG' | 'SHORT';
+  leverage: number | null;
+  entryPrice: number;
+  closedPrice: number | null;
+  closedPnl: number | null;
+  openedAt: number;
+  closedAt: number;
+  /** 止盈带走 / 止损带走 / 主动平仓 / 强平 / UNKNOWN（与复盘素材同一套推断） */
+  closeManner: string;
+  plan: AiTraderPlanView | null;
+  openDecision: TradeDecisionRef | null;
+  /** 只有主动平仓才有：止损/止盈带走的依据就是计划里的原始止损/目标 */
+  closeDecision: TradeDecisionRef | null;
+}
+
 /** trader 详情：公开视图 + 实时持仓/挂单 + 各持仓交易计划 */
 export interface TraderDetailView {
   trader: TraderPublicView;

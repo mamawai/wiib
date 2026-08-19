@@ -12,6 +12,7 @@ import com.mawai.wiibcommon.entity.UserLlmEndpoint;
 import com.mawai.wiibcommon.util.Result;
 import com.mawai.wiibquant.agent.llm.LlmEndpointService;
 import com.mawai.wiibquant.external.sim.SimTradeClient;
+import com.mawai.wiibquant.agent.trader.TradeRecordService;
 import com.mawai.wiibquant.agent.trader.TraderActionService;
 import com.mawai.wiibquant.agent.trader.TraderPromptAssembler;
 import com.mawai.wiibquant.agent.trader.TraderRequestService;
@@ -46,6 +47,7 @@ public class TraderController {
     private final TraderRequestService requestService;
     private final LlmEndpointService endpointService;
     private final TraderActionService actionService;
+    private final TradeRecordService tradeRecordService;
 
     // ========== 我的 trader ==========
 
@@ -298,6 +300,23 @@ public class TraderController {
                                                     @RequestParam(required = false) Integer round) {
         StpUtil.checkLogin();
         return Result.ok(traderService.decisions(id, limit, before, round));
+    }
+
+    @GetMapping("/{id}/trades")
+    @Operation(summary = "已了结交易（当前局；论点→结局配对 + 开/平仓那一轮的决策全文）")
+    public Result<List<TradeRecordService.TradeRecord>> trades(@PathVariable long id) {
+        StpUtil.checkLogin();
+        AiTrader t = traderService.byId(id);
+        if (t == null) {
+            return Result.fail("trader不存在");
+        }
+        try {
+            return Result.ok(tradeRecordService.closedTrades(t));
+        } catch (Exception e) {
+            // 与 detail 同口径：sim 抖一下不该让整页红，空列表 + warn
+            log.warn("[Trader] 已了结交易查询失败 traderId={} msg={}", id, e.getMessage());
+            return Result.ok(List.of());
+        }
     }
 
     public record EquityPoint(long wakeTime, BigDecimal equity) {

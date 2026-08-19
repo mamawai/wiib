@@ -229,9 +229,10 @@ public class ReviewMaterialAssembler {
 
     /**
      * 同 symbol/side 里选开仓时刻最贴近该仓位开仓时间的计划（懒归档时刻粗糙，openedWakeTime 才可靠）。
-     * 对同包 PeerInsightService 开放：同侪详情的论点→结局配对必须与复盘同一套算法，两处各配一套就会自相矛盾。
+     * 对同侪学习（PeerInsightService）与竞技场（TradeRecordService）开放：论点→结局的配对三处必须同一套算法，
+     * 各配一套就会自相矛盾。
      */
-    static AiTraderPlan bestMatch(List<AiTraderPlan> plans, FuturesPositionDTO pos, Set<AiTraderPlan> used) {
+    public static AiTraderPlan bestMatch(List<AiTraderPlan> plans, FuturesPositionDTO pos, Set<AiTraderPlan> used) {
         long posOpen = msOf(pos.getCreatedAt());
         long posClose = msOf(pos.getUpdatedAt());
         return plans.stream()
@@ -251,7 +252,7 @@ public class ReviewMaterialAssembler {
      * 不能按相等判。保护单实时监控在先，带内成交只能是主动平仓（模型自平或审批执行）。
      * 全平不清保护单列表（sim 只在部分平仓时改写），closed 行上的列表就是了结时在岗的那组。
      */
-    static String closeManner(FuturesPositionDTO p) {
+    public static String closeManner(FuturesPositionDTO p) {
         if ("LIQUIDATED".equals(p.getStatus())) {
             return "强平";
         }
@@ -603,7 +604,7 @@ public class ReviewMaterialAssembler {
                 .toList();
     }
 
-    static long msOf(java.time.LocalDateTime t) {
+    public static long msOf(java.time.LocalDateTime t) {
         return t == null ? 0 : t.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
     }
 
