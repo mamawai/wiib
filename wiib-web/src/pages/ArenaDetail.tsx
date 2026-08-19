@@ -8,8 +8,10 @@ import { traderApi } from '../api';
 import { STATUS_META } from './Arena';
 import { EquityChart } from '../components/EquityChart';
 import { Markdown } from '../components/Markdown';
-import { cn, fmtDateTime, fmtNum, fmtTokens } from '../lib/utils';
-import type { AiTraderDecisionView, AiTraderPlanView, PlanRevision, TraderDetailView, TraderEquityPoint } from '../types';
+import { cn, fmtDateTime, fmtDuration, fmtNum, fmtTokens } from '../lib/utils';
+import type {
+  AiTraderDecisionView, AiTraderPlanView, PlanRevision, TradeDecisionRef, TradeRecordView, TraderDetailView, TraderEquityPoint,
+} from '../types';
 import type { TnEquityPoint } from '../types/testnet';
 
 const REFRESH_MS = 60_000;
@@ -63,9 +65,27 @@ function tradeArgsSummary(a: ActionRow): string {
   }
 }
 
+/** 决策全文折叠：默认一行纯文本预览，展开成 markdown——时间线卡与交易记录卡同一套阅读节奏 */
+function ReasoningFold({ reasoning }: { reasoning: string | null }) {
+  const [open, setOpen] = useState(false);
+  const text = reasoning?.trim() || '';
+  if (!text) return null;
+  // 折叠预览是纯文本，去掉 markdown 符号免得满屏井号
+  const preview = text.replace(/[#*`]/g, '').replace(/\s+/g, ' ').slice(0, 120) + (text.length > 120 ? '…' : '');
+  return (
+    <div className="text-xs leading-relaxed text-foreground/90">
+      {open ? <Markdown content={text} /> : <p>{preview}</p>}
+      {text.length > 120 && (
+        <button onClick={() => setOpen(!open)} className="mt-1 text-[10px] font-bold text-primary flex items-center gap-0.5">
+          {open ? <>收起 <ChevronUp className="w-3 h-3" /></> : <>展开全文 <ChevronDown className="w-3 h-3" /></>}
+        </button>
+      )}
+    </div>
+  );
+}
+
 /** 单条决策卡：时间/权益 + 数据工具chip + 交易动作行（参数/拒因） + 推理 markdown 折叠——竞技场的观赏核心。 */
 function DecisionCard({ d }: { d: AiTraderDecisionView }) {
-  const [open, setOpen] = useState(false);
   // 复盘行不是交易决策，徽章与配色单独一套：reviewer 的每日日志，时间线上要一眼认出
   // 学习行同样不交易，但来源不同（复盘看自己、学习看同侪），再分一套色——两种日志行混在时间线上要能一眼分清
   const meta = d.kind === 'REVIEW'
@@ -86,9 +106,6 @@ function DecisionCard({ d }: { d: AiTraderDecisionView }) {
   }, [d.actionsJson]);
   const dataCalls = actions.filter(a => !TRADE_TOOLS.has(a.tool));
   const trades = actions.filter(a => TRADE_TOOLS.has(a.tool));
-  const reasoning = d.reasoning?.trim() || '';
-  // 折叠预览是纯文本，去掉 markdown 符号免得满屏井号
-  const preview = reasoning.replace(/[#*`]/g, '').replace(/\s+/g, ' ').slice(0, 120) + (reasoning.length > 120 ? '…' : '');
 
   return (
     <div className={cn('rounded-md border bg-card p-3 space-y-2',
@@ -169,16 +186,7 @@ function DecisionCard({ d }: { d: AiTraderDecisionView }) {
         <p className="text-[11px] text-loss leading-relaxed">{d.error}</p>
       )}
 
-      {reasoning && (
-        <div className="text-xs leading-relaxed text-foreground/90">
-          {open ? <Markdown content={reasoning} /> : <p>{preview}</p>}
-          {reasoning.length > 120 && (
-            <button onClick={() => setOpen(!open)} className="mt-1 text-[10px] font-bold text-primary flex items-center gap-0.5">
-              {open ? <>收起 <ChevronUp className="w-3 h-3" /></> : <>展开全文 <ChevronDown className="w-3 h-3" /></>}
-            </button>
-          )}
-        </div>
-      )}
+      <ReasoningFold reasoning={d.reasoning} />
     </div>
   );
 }
@@ -225,13 +233,76 @@ function PlanBlock({ plan }: { plan: AiTraderPlanView }) {
   );
 }
 
-/** trader 详情：净值曲线 + 实时持仓挂单 + 决策时间线。 */
+/** 了结方式徽章色：止盈/止损是计划兑现，主动平仓是模型的手，强平是事故 */
+const CLOSE_MANNER_TONE: Record<string, string> = {
+  '止盈带走': 'bg-gain/15 text-gain', '止损带走': 'bg-loss/15 text-loss',
+  '主动平仓': 'bg-primary/15 text-primary', '强平': 'bg-loss/25 text-loss',
+};
+
+/** 单笔已了结交易：头行（币种·多空·了结方式·入场→出场·盈亏）→ 计划（论点/失效条件/修订史）→ 开仓/平仓决策折叠 */
+function TradeCard({ r }: { r: TradeRecordView }) {
+  const isLong = r.side === 'LONG';
+  const pnl = r.closedPnl;
+  return (
+    <div className="rounded-md border border-border bg-card p-2.5 text-[11px] space-y-1.5">
+      <div className="flex items-center gap-2 flex-wrap">
+        {isLong ? <ArrowUpRight className="w-3.5 h-3.5 text-gain" /> : <ArrowDownRight className="w-3.5 h-3.5 text-loss" />}
+        <span className="font-black text-xs">{r.symbol}</span>
+        <span className={cn('text-[10px] font-bold px-1.5 py-0.5 rounded', isLong ? 'bg-gain/15 text-gain' : 'bg-loss/15 text-loss')}>
+          {isLong ? '多' : '空'}{r.leverage != null && ` ${r.leverage}x`}
+        </span>
+        <span className={cn('text-[10px] font-bold px-1.5 py-0.5 rounded', CLOSE_MANNER_TONE[r.closeManner] ?? 'bg-muted text-muted-foreground')}>
+          {r.closeManner}
+        </span>
+        <span className="text-muted-foreground num">{fmtNum(r.entryPrice)} → {r.closedPrice != null ? fmtNum(r.closedPrice) : '—'}</span>
+        <span className={cn('ml-auto num font-black', pnl == null ? 'text-muted-foreground' : pnl >= 0 ? 'text-gain' : 'text-loss')}>
+          {pnl == null ? '—' : `${pnl >= 0 ? '+' : ''}${fmtNum(pnl)}`}
+        </span>
+      </div>
+      <div className="text-muted-foreground num flex flex-wrap gap-x-3 gap-y-0.5">
+        <span>{fmtDateTime(r.openedAt)} 开</span>
+        <span>{fmtDateTime(r.closedAt)} 平</span>
+        <span>持有 {fmtDuration(r.openedAt, r.closedAt)}</span>
+      </div>
+      {r.plan ? <PlanBlock plan={r.plan} /> : <p className="text-muted-foreground/70">无计划记录</p>}
+      {r.openDecision && <DecisionRefBlock label="开仓决策" d={r.openDecision} />}
+      {r.closeDecision && <DecisionRefBlock label="平仓决策" d={r.closeDecision} />}
+    </div>
+  );
+}
+
+/** 交易记录挂的那一轮决策：标签 + 时刻 + 一句话理由（平仓才有）+ 全文折叠 */
+function DecisionRefBlock({ label, d }: { label: string; d: TradeDecisionRef }) {
+  return (
+    <div className="rounded border border-border/60 bg-card-2/40 px-2.5 py-2 space-y-1 leading-relaxed">
+      <div className="flex items-center gap-1.5 flex-wrap">
+        <span className="font-black">{label}</span>
+        <span className="text-muted-foreground/80 num">{fmtDateTime(d.wakeTime)}</span>
+        {d.kind === 'ALERT' && (
+          <span className="inline-flex items-center gap-0.5 text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-600">
+            <Zap className="w-3 h-3" />警报轮
+          </span>
+        )}
+        {d.kind === 'MANUAL' && (
+          <span className="inline-flex items-center gap-0.5 text-[10px] font-bold px-1.5 py-0.5 rounded bg-teal-500/15 text-teal-600">
+            <MousePointerClick className="w-3 h-3" />手动轮
+          </span>
+        )}
+        {d.reason && <span className="text-muted-foreground">—— {d.reason}</span>}
+      </div>
+      <ReasoningFold reasoning={d.reasoning} />
+    </div>
+  );
+}
+
+/** trader 详情：净值曲线 + 实时持仓挂单 + 已了结交易 + 决策时间线。 */
 export function ArenaDetail() {
   const { id } = useParams();
   const traderId = Number(id);
   const [detail, setDetail] = useState<TraderDetailView | null>(null);
   const [curve, setCurve] = useState<TraderEquityPoint[]>([]);
   const [decisions, setDecisions] = useState<AiTraderDecisionView[]>([]);
+  const [trades, setTrades] = useState<TradeRecordView[]>([]);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   // null=跟随当前局（会随 detail 刷新自动跟上）；数字=用户选了某一历史局
@@ -241,6 +312,7 @@ export function ArenaDetail() {
     if (!Number.isFinite(traderId)) return;
     void traderApi.detail(traderId).then(setDetail).catch(() => setDetail(null));
     void traderApi.equityCurve(traderId, round ?? undefined).then(setCurve).catch(() => setCurve([]));
+    void traderApi.trades(traderId).then(setTrades).catch(() => setTrades([]));
     void traderApi.decisions(traderId, 50, undefined, round ?? undefined).then(list => {
       setDecisions(list);
       setHasMore(list.length >= 50);
@@ -339,8 +411,8 @@ export function ArenaDetail() {
 
           <div className="rounded-lg pt-card p-4 space-y-2">
             <span className="microlabel">当前持仓 / 挂单</span>
-            {/* 持仓是实时现查当前账户的，看历史局时这块跟左边的曲线不是同一局，得说清楚 */}
-            {viewingRound !== t?.roundNo && (
+            {/* 持仓是实时现查当前账户的，看历史局时这块跟左边的曲线不是同一局，得说清楚（t 未到时不闪黄字） */}
+            {t && viewingRound !== t.roundNo && (
               <p className="text-[10px] text-amber-600">
                 下方持仓属于当前局 R{t?.roundNo}，与你正在查看的 R{viewingRound} 无关
               </p>
@@ -391,6 +463,20 @@ export function ArenaDetail() {
                 {o.limitPrice != null && <span>限价 <span className="num font-bold text-foreground">{fmtNum(o.limitPrice)}</span></span>}
               </div>
             ))}
+          </div>
+
+          <div className="rounded-lg pt-card p-4 space-y-2">
+            <span className="microlabel">已了结交易 · 论点→结局</span>
+            {/* 已平仓位来自当前局的 sim 子账户；看历史局时说清楚，与上面持仓卡同一口径 */}
+            {t && viewingRound !== t.roundNo && (
+              <p className="text-[10px] text-amber-600">下方交易属于当前局 R{t?.roundNo}，历史局的子账户不在此列</p>
+            )}
+            {trades.length === 0 && (
+              <div className="py-6 text-center text-xs text-muted-foreground">本局还没有了结的交易</div>
+            )}
+            <div className="space-y-2 lg:max-h-[60vh] lg:overflow-y-auto lg:pr-1">
+              {trades.map(r => <TradeCard key={r.positionId} r={r} />)}
+            </div>
           </div>
         </div>
 
