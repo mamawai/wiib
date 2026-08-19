@@ -52,6 +52,7 @@ import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.FutureTask;
@@ -83,6 +84,9 @@ public class TraderWakeupRunner {
     private static final int RECENT_DECISIONS = 5;
     private static final DateTimeFormatter TIME_FMT =
             DateTimeFormatter.ofPattern("MM-dd HH:mm").withZone(ZoneId.systemDefault());
+    /** 休眠提示里的时刻按北京时间（与 WakeWindow.ZONE 同源）：时段是北京时间，下次时刻也得是，否则容器 TZ 非 +8 时两句会错位 */
+    private static final DateTimeFormatter BJ_FMT =
+            DateTimeFormatter.ofPattern("MM-dd HH:mm").withZone(WakeWindow.ZONE);
 
     private final TraderModelFactory modelFactory;
     private final TraderPromptAssembler promptAssembler;
@@ -331,9 +335,34 @@ public class TraderWakeupRunner {
         return "新一根 " + trader.getIntervalCode() + " K线已收盘（"
                 + TIME_FMT.format(Instant.ofEpochMilli(boundaryTime)) + "）。"
                 + (snapshot.isEmpty() ? "" : "\n行情快照（细节自己用工具查证）：\n" + snapshot)
+                // 休眠提示放快照之后（事实区）、单问题框架之前：不让"要睡了"成为模型读到的第一件事
+                + sleepNotice(WakeWindow.of(trader), boundaryTime,
+                        TraderScheduler.INTERVAL_MS.getOrDefault(trader.getIntervalCode(), 300_000L), nowMs.getAsLong())
                 + "本轮只需回答一个问题：这根K线收盘后，你的计划需要改变吗？"
                 + "先检验上一轮【本轮结论】里的等待条件与各持仓的失效条件，再考虑新机会；"
                 + "最后按纪律用【本轮结论】固定格式收尾。";
+    }
+
+    /**
+     * 时段内末次唤醒的休眠提示：只给事实（例行唤醒到哪根为止、下次何时醒、期间止损止盈照常），并明说休眠本身
+     * 不是任何方向动作的理由——"13 小时看不见"既诱导睡前减仓/收紧止损，也诱导"赶在休眠前多开一笔"，
+     * 与警报开场白治的是同一种病（被事件驱动的非计划动作），措辞红线同一条。
+     * 措辞不说"本轮是末次"：手动唤醒也走这条开场白（boundary 是当前边界），"到 X 那根为止"对两种轮次都成立；
+     * 小时数从 now 算，手动轮晚于边界几十分钟也不会说错。不是末次或全天 → 空串。
+     */
+    static String sleepNotice(WakeWindow window, long boundaryTime, long intervalMs, long now) {
+        if (window == null || !window.isLastBoundary(boundaryTime, intervalMs)) {
+            return "";
+        }
+        // 末次唤醒⇒下一天同一时刻仍在时段内，一天之内必有下一根，不会 -1
+        long next = window.nextBoundaryFrom(boundaryTime + intervalMs, intervalMs);
+        double hours = (next - now) / 3_600_000.0;
+        return "\n本唤醒时段（" + window.text() + "）内的例行唤醒到 " + BJ_FMT.format(Instant.ofEpochMilli(boundaryTime))
+                + " 这根K线为止，下次例行唤醒在 " + BJ_FMT.format(Instant.ofEpochMilli(next))
+                + "（北京时间，约 " + String.format(Locale.ROOT, "%.1f", hours) + " 小时后），"
+                + "期间不会有例行唤醒和波动警报，止损止盈单照常自动触发。"
+                + "这只是时间跨度的事实：休眠本身既不是平仓或收紧止损的理由，也不是赶在休眠前多开一笔的理由；"
+                + "失效条件没被触发就不需要为休眠做任何动作。\n";
     }
 
     /**

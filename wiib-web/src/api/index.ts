@@ -513,8 +513,8 @@ export const quantApi = {
 export const traderApi = {
   mine: () => api.get<unknown, TraderOwnerView | null>('/ai/trader/mine'),
   /** 平台系统提示词预览（与唤醒组装同一份文本）：规格项多，走 POST 带 body */
-  promptTemplate: (intervalCode: string, symbols: string, spec: TraderSpec) =>
-    api.post<unknown, string>('/ai/trader/prompt-template', { intervalCode, symbols, spec }),
+  promptTemplate: (intervalCode: string, symbols: string, spec: TraderSpec, wakeWindow: string | null) =>
+    api.post<unknown, string>('/ai/trader/prompt-template', { intervalCode, symbols, spec, wakeWindow }),
   /** 待确认的加仓/减仓请求（自主开关关掉时才会有） */
   requests: () => api.get<unknown, TraderRequestView[]>('/ai/trader/requests'),
   approveRequest: (id: number) => api.post<unknown, void>(`/ai/trader/requests/${id}/approve`),

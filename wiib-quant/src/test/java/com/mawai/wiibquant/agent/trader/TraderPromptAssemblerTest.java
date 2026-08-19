@@ -71,6 +71,26 @@ class TraderPromptAssemblerTest {
         assertThat(t.getOwnerNote()).isNull();  // 同一轮里别处再读到它就会重复露面
     }
 
+    /** 默认模板：节奏行按时段说真话；退出模板：单独注入事实行；全天：两处都不提 */
+    @Test
+    void wakeWindowTruthfulInTemplateAndInjectedWithoutTemplate() {
+        AiTrader t = trader();
+        t.setId(1L);
+        t.setWakeWindow("21:00-08:30");
+
+        String withTemplate = assembler.assemble(t, "{}", List.of());
+        assertThat(withTemplate).contains("节奏：每天 21:00-08:30（北京时间，两端含）内每根 1h K线收盘唤醒你一次");
+        assertThat(withTemplate).doesNotContain("\n唤醒时段：");
+
+        t.setUseDefaultPrompt(false);
+        assertThat(assembler.assemble(t, "{}", List.of())).contains("唤醒时段：每天 21:00-08:30");
+
+        t.setWakeWindow(null);
+        assertThat(assembler.assemble(t, "{}", List.of())).doesNotContain("唤醒时段");
+        t.setUseDefaultPrompt(true);
+        assertThat(assembler.assemble(t, "{}", List.of())).contains("节奏：每根 1h K线收盘唤醒你一次");
+    }
+
     /** 单轮留言消费完再组一次提示词：不该复活，也不该再写一次库 */
     @Test
     void 单轮留言只出现一次() {

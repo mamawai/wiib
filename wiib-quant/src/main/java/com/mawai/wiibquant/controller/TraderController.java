@@ -17,6 +17,7 @@ import com.mawai.wiibquant.agent.trader.TraderPromptAssembler;
 import com.mawai.wiibquant.agent.trader.TraderRequestService;
 import com.mawai.wiibquant.agent.trader.TraderRiskConfig;
 import com.mawai.wiibquant.agent.trader.TraderService;
+import com.mawai.wiibquant.agent.trader.WakeWindow;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
@@ -48,17 +49,21 @@ public class TraderController {
 
     // ========== 我的 trader ==========
 
-    /** 公开视图：任何登录用户可见的字段（model 是它当前用的端点的模型名，现解析）。key/baseUrl/自定义提示词绝不进公开视图。 */
+    /**
+     * 公开视图：任何登录用户可见的字段（model 是它当前用的端点的模型名，现解析）。key/baseUrl/自定义提示词绝不进公开视图。
+     * wakeWindow 进公开视图：观众要看得懂"15m 档为什么半天不出一条决策"，null=全天
+     */
     public record TraderPublicView(long id, String name, String model, String status, String pausedReason,
                                    String symbols, String intervalCode, int roundNo,
-                                   BigDecimal equity, BigDecimal pnlPct, boolean mine) {
+                                   BigDecimal equity, BigDecimal pnlPct, boolean mine, String wakeWindow) {
     }
 
-    /** 主人视图：公开视图 + 配置回显。llmEndpointId=显式绑定的端点，null=跟随默认端点 */
+    /** 主人视图：公开视图 + 配置回显。llmEndpointId=显式绑定的端点，null=跟随默认端点；wakeWindow null=全天 */
     public record TraderOwnerView(TraderPublicView pub, Long llmEndpointId,
                                   String customPrompt, boolean useDefaultPrompt,
                                   TraderSpec spec, boolean alertEnabled, BigDecimal alertThresholdMult,
-                                  boolean reviewEnabled, boolean learningEnabled) {
+                                  boolean reviewEnabled, boolean learningEnabled,
+                                  String wakeWindow) {
     }
 
     /** 仓位规格：配置回显与提示词预览共用一个形状，前端改一处两边同步。 */
@@ -92,11 +97,12 @@ public class TraderController {
                 !Boolean.FALSE.equals(t.getAlertEnabled()),
                 t.getAlertThresholdMult() == null ? BigDecimal.ONE : t.getAlertThresholdMult(),
                 !Boolean.FALSE.equals(t.getReviewEnabled()),
-                !Boolean.FALSE.equals(t.getLearningEnabled())));
+                !Boolean.FALSE.equals(t.getLearningEnabled()),
+                t.getWakeWindow()));
     }
 
     /** 提示词预览的入参：规格项太多，走 POST 带 body 比堆十个 query 参数干净。 */
-    public record PromptPreviewRequest(String intervalCode, String symbols, TraderSpec spec) {
+    public record PromptPreviewRequest(String intervalCode, String symbols, TraderSpec spec, String wakeWindow) {
     }
 
     @PostMapping("/prompt-template")
@@ -107,7 +113,14 @@ public class TraderController {
         String symbols = req.symbols() == null || req.symbols().isBlank() ? "BTCUSDT" : req.symbols();
         TraderRiskConfig cfg = req.spec() == null
                 ? TraderRiskConfig.of(new AiTrader()) : req.spec().toConfig();
-        return Result.ok(promptAssembler.platformTemplate(interval, symbols, cfg));
+        String windowText;
+        try {
+            WakeWindow w = WakeWindow.parse(req.wakeWindow());
+            windowText = w == null ? null : w.text();
+        } catch (IllegalArgumentException e) {
+            windowText = null; // 预览只是看文本，时段还没填对就按全天预览，保存时才真校验
+        }
+        return Result.ok(promptAssembler.platformTemplate(interval, symbols, cfg, windowText));
     }
 
     /** llmEndpointId：端点库里的一条，空=跟随用户默认端点 */
@@ -115,7 +128,8 @@ public class TraderController {
                                 Long llmEndpointId,
                                 Boolean useDefaultPrompt, TraderSpec spec,
                                 Boolean alertEnabled, BigDecimal alertThresholdMult,
-                                Boolean reviewEnabled, Boolean learningEnabled) {
+                                Boolean reviewEnabled, Boolean learningEnabled,
+                                String wakeWindow) {
         TraderService.UpsertReq toReq() {
             TraderSpec s = spec;
             return new TraderService.UpsertReq(name, symbols, intervalCode, customPrompt,
@@ -124,7 +138,7 @@ public class TraderController {
                     s == null ? null : s.marginPctMin(), s == null ? null : s.marginPctMax(),
                     s == null ? null : s.allowMultiPosition(), s == null ? null : s.allowHedge(),
                     s == null ? null : s.allowSelfAdd(), s == null ? null : s.allowSelfReduce(),
-                    alertEnabled, alertThresholdMult, reviewEnabled, learningEnabled);
+                    alertEnabled, alertThresholdMult, reviewEnabled, learningEnabled, wakeWindow);
         }
     }
 
@@ -317,6 +331,6 @@ public class TraderController {
         return new TraderPublicView(t.getId(), t.getName(), model, t.getStatus(), t.getPausedReason(),
                 t.getSymbols(), t.getIntervalCode(), t.getRoundNo(),
                 equity.setScale(2, RoundingMode.HALF_UP), pnlPct.setScale(2, RoundingMode.HALF_UP),
-                t.getUserId() == viewerUserId);
+                t.getUserId() == viewerUserId, t.getWakeWindow());
     }
 }
