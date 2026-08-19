@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom';
 import { Bot, KeyRound, Loader2, X } from 'lucide-react';
 import { llmEndpointApi } from '../../api';
 import { useClickOutside } from '../../hooks/useClickOutside';
-import { useFullscreen } from '../../hooks/useFullscreen';
 import { cn } from '../../lib/utils';
 import { chatStore } from './chatStore';
 import { ChatPanel } from './ChatPanel';
@@ -85,7 +84,7 @@ const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), M
  * 而面板锚点固定，两者重叠时球会盖住面板的按钮。
  * <p>
  * <b>面板</b>：跟着球换边（球在左就从左下角长出来），拖拽把手在外侧边缘、增量方向随之镜像，
- * 尺寸记 localStorage。PC 支持全屏（原生 Fullscreen API，不支持的退成 position:fixed 铺满）。
+ * 尺寸记 localStorage。PC 可全屏——铺满<b>浏览器视口</b>（地址栏、标签栏都还在），全屏时左边多出常驻的历史会话栏。
  * <p>
  * chatStore 是页面无关的单例，SSE 不随面板关闭中断——关掉球研判照跑，
  * 一轮跑完球亮橙点提醒；输入草稿也存在 store 里，关面板不会把正在敲的字弄丢。
@@ -128,10 +127,12 @@ export function ChatDock() {
     return () => window.removeEventListener('resize', onResize);
   }, []);
 
-  // PC 全屏：原生 Fullscreen API，不支持的（iPhone Safari）退成 position:fixed 铺满
   const dockRef = useRef<HTMLDivElement>(null);
   const ballBtnRef = useRef<HTMLButtonElement>(null);
-  const fs = useFullscreen(dockRef);
+  // 全屏 = 铺满浏览器视口的一个 fixed 层，不走原生 Fullscreen API：那个连地址栏、标签栏一起吃掉，
+  // 整块屏幕只剩对话，跟"一边看盘一边问"是反着的。K 线那边仍用原生（看图本来就该独占屏幕）
+  const [fullscreen, setFullscreen] = useState(false);
+  const toggleFullscreen = useCallback(() => setFullscreen(v => !v), []);
 
   // 球在面板打开时是 display:none 的，焦点会跟着掉进 body。打开时把焦点送进面板，
   // 关闭时还给球——不接的话键盘用户开完面板就找不着北，关完也回不到原处。
@@ -143,15 +144,6 @@ export function ChatDock() {
     wasOpenRef.current = open;
   }, [open]);
 
-  // 关面板时退出全屏。原生那条路浏览器会自己退（宿主元素没了），但 CSS 降级路只是个类名，
-  // 不主动退的话全屏态会挂在关着的面板上——而全屏时球是藏起来的，等于再也打不开
-  // 用 exit 不用 toggle：面板一关，dockRef.current 就是 null 了，而 toggle 开头要读 ref，
-  // 读不到就早退——CSS 降级那条路（正是最需要主动退的一条）会永远退不掉
-  const fsActive = fs.active, fsExit = fs.exit;
-  useEffect(() => {
-    if (!open && fsActive) fsExit();
-  }, [open, fsActive, fsExit]);
-
   // 面板关着时一轮研判跑完（loading 真→假）→ 气泡亮橙点
   useEffect(() => {
     let prev = chatStore.getSnapshot().loading;
@@ -162,9 +154,12 @@ export function ChatDock() {
     });
   }, []);
 
+  // 所有关面板的路径都走这里，退全屏就收口在这一处：全屏态留在一个关着的面板上，
+  // 下次点球会直接铺满整屏，不是用户点那一下预期的样子
   const setOpenBoth = useCallback((v: boolean) => {
     openRef.current = v;
     setOpen(v);
+    if (!v) setFullscreen(false);
   }, []);
 
   const toggle = useCallback(() => {
@@ -180,20 +175,22 @@ export function ChatDock() {
   // 所以这时候不给 ESC / 点外部这两条"顺手关掉"的路。输入框草稿另有 store 兜着，不受影响
   const hasPendingForm = items.some(it => it.kind === 'form' && it.status === 'pending');
 
-  // ESC 关面板。全屏态下不接管：那一下该先退全屏（原生由浏览器发，降级由 useFullscreen 自己接）
+  // ESC 一级一级退：全屏时先回浮窗，浮窗态再按才关面板。不走原生全屏之后浏览器不再帮忙收场，这条得自己接
   useEffect(() => {
-    if (!open || fs.active || hasPendingForm) return;
+    if (!open) return;
     const onKey = (e: KeyboardEvent) => {
       // 中文输入法组合态里的 Esc 是"取消候选词"，不该顺手把面板也关了
-      if (e.key === 'Escape' && !e.isComposing) setOpenBoth(false);
+      if (e.key !== 'Escape' || e.isComposing) return;
+      if (fullscreen) setFullscreen(false);
+      else if (!hasPendingForm) setOpenBoth(false);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [open, fs.active, hasPendingForm, setOpenBoth]);
+  }, [open, fullscreen, hasPendingForm, setOpenBoth]);
 
   // 点面板外部关闭。只在 PC 浮窗态：移动端是铺满视口的全屏层，没有"外部"可点；全屏态同理
   const closeOnOutside = useCallback(() => setOpenBoth(false), [setOpenBoth]);
-  useClickOutside(dockRef, closeOnOutside, open && desktop && !fs.active && !hasPendingForm);
+  useClickOutside(dockRef, closeOnOutside, open && desktop && !fullscreen && !hasPendingForm);
 
   const goConfig = useCallback(() => {
     setOpenBoth(false);
@@ -339,8 +336,8 @@ export function ChatDock() {
           style={{ '--dock-w': `${size.w}px`, '--dock-h': `${size.h}px` } as React.CSSProperties}
           className={cn(
             'fixed z-[85] pt-card flex flex-col overflow-hidden',
-            fs.active
-              // 全屏铺满，浮窗那套尺寸/锚点全让开。cssMode 是没有原生 API 的降级路，得自己钉住视口
+            fullscreen
+              // 全屏铺满浏览器视口，浮窗那套尺寸/锚点全让开
               ? 'inset-0 rounded-none w-full h-full max-w-none max-h-none'
               : cn(
                   // 移动端全屏（让开刘海），PC 锚定在球那一侧的浮窗（尺寸可拖拽，CSS 变量只在 md 生效）
@@ -357,7 +354,7 @@ export function ChatDock() {
         >
           {/* 拖拽把手（仅 PC 浮窗态）：贴外侧的那条边缘调宽、上边缘调高、外侧上角双向。
               锚右时"外侧"是左边，锚左时是右边；全屏没有尺寸可调，整组撤掉 */}
-          {!fs.active && (
+          {!fullscreen && (
             <>
               <div onPointerDown={resizeStart('x')} onPointerMove={resizeMove} onPointerUp={resizeEnd} onPointerCancel={resizeEnd}
                    className={cn('hidden md:block absolute top-4 bottom-0 w-1.5 cursor-ew-resize z-20',
@@ -383,7 +380,7 @@ export function ChatDock() {
             </PanelShell>
           ) : hasConfig ? (
             <ChatPanel onClose={() => setOpenBoth(false)} onGoConfig={goConfig}
-                       fullscreen={fs.active} onToggleFullscreen={fs.toggle} />
+                       fullscreen={fullscreen} onToggleFullscreen={toggleFullscreen} />
           ) : (
             <PanelShell onClose={() => setOpenBoth(false)}>
               <div className="flex-1 flex flex-col items-center justify-center gap-3 text-center px-6">

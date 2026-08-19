@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { RefreshCw, Loader2, Plus, ChevronRight } from 'lucide-react';
+import { ArrowLeftRight, RefreshCw, Loader2, Plus, ChevronRight } from 'lucide-react';
 import { futuresApi } from '../../api';
 import { useUserStore } from '../../stores/userStore';
 import { useCryptoStream } from '../../hooks/useCryptoStream';
@@ -362,6 +362,23 @@ function PositionItem({ pos, brackets, wide, onMutated }: {
         )}
         <Badge variant={isLong ? 'success' : 'destructive'} className="text-[10px] px-2 py-0.5">{isLong ? '做多' : '做空'}</Badge>
         <Badge variant="outline" className="text-[10px] px-2 py-0.5">{isCrossPos ? '全仓' : '逐仓'} {pos.leverage}x</Badge>
+        {/* 反手挂在卡右上角：它跟这排徽标说的是同一件事——做多/做空、杠杆、保证金模式，正是反手要翻面的那些。
+            平时只占一格图标，确认态才展成文字。确认态写"确认"两个字而不是"确认反手"：
+            Portfolio 四格窄卡这一行只剩三十来像素余量，四个字必被 flex-wrap 甩到下一排 */}
+        <div className="ml-auto flex items-center gap-1">
+          <Button
+            size="sm"
+            variant={confirmReverse ? 'destructive' : 'outline'}
+            className={confirmReverse ? 'h-7 sm:h-6 px-2 text-[11px]' : 'h-7 w-7 sm:h-6 sm:w-6 p-0'}
+            disabled={reversing}
+            title={confirmReverse ? '确认反手（再点一次执行）' : '反手'}
+            aria-label={confirmReverse ? '确认反手' : '反手'}
+            onClick={() => confirmReverse ? void handleReverse() : setConfirmReverse(true)}
+          >
+            {reversing ? <Loader2 className="w-3 h-3 animate-spin" /> : confirmReverse ? '确认' : <ArrowLeftRight className="w-3 h-3" />}
+          </Button>
+          <HelpTip text={'反手 = 市价全平当前仓位，立刻反向开等量新仓，同杠杆、同保证金模式。\n做多一步变做空，不用自己先平再开。\n原仓的止损止盈不会带到新仓，要的话重新设。\n余额不够开反向仓时只完成平仓（亏着反手多半会这样：亏掉的那部分正是新仓保证金的缺口）。'} />
+        </div>
       </div>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className={`text-xl font-black tabular-nums leading-none ${isPnlUp ? 'text-green-500' : 'text-red-500'}`}>
@@ -407,20 +424,6 @@ function PositionItem({ pos, brackets, wide, onMutated }: {
       <div className="flex flex-wrap gap-1.5 pt-1">
         {/* 加仓无独立入口（对齐Binance）：同方向再下一单即自动并入仓位，走开仓面板 */}
         <Button size="sm" variant={action === 'close' ? 'default' : 'outline'} className="h-9 sm:h-7 text-[11px] flex-1 min-w-15" onClick={() => toggleAction('close')}>平仓</Button>
-        {/* 反手紧挨平仓：两个都是"处理掉当前仓位"，换行时优先留在同一排。问号连着按钮走，不单独占格。
-            确认态 basis-full 独占一行：等分格子塞不下"确认反手？"会被裁字，顺带也让这步更醒目 */}
-        <div className={`${confirmReverse ? 'basis-full' : 'flex-1'} min-w-15 flex items-center gap-1`}>
-          <Button
-            size="sm"
-            variant={confirmReverse ? 'destructive' : 'outline'}
-            className="h-9 sm:h-7 text-[11px] flex-1"
-            disabled={reversing}
-            onClick={() => confirmReverse ? void handleReverse() : setConfirmReverse(true)}
-          >
-            {reversing ? <Loader2 className="w-3 h-3 animate-spin" /> : confirmReverse ? '确认反手？' : '反手'}
-          </Button>
-          <HelpTip text={'反手 = 市价全平当前仓位，立刻反向开等量新仓，同杠杆、同保证金模式。\n做多一步变做空，不用自己先平再开。\n原仓的止损止盈不会带到新仓，要的话重新设。\n余额不够开反向仓时只完成平仓（亏着反手多半会这样：亏掉的那部分正是新仓保证金的缺口）。'} />
-        </div>
         {/* 全仓保证金按账户统一算，单仓加减保证金没意义，后端也会拒（1761），直接不给入口 */}
         {!isCrossPos && <Button size="sm" variant={action === 'margin' ? 'default' : 'outline'} className="h-9 sm:h-7 text-[11px] flex-1 min-w-15" onClick={() => toggleAction('margin')}>+保证金</Button>}
         {!isCrossPos && <Button size="sm" variant={action === 'reduceMargin' ? 'default' : 'outline'} className="h-9 sm:h-7 text-[11px] flex-1 min-w-15" onClick={() => toggleAction('reduceMargin')}>-保证金</Button>}
