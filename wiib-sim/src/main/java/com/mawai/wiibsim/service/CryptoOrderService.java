@@ -28,6 +28,9 @@ public interface CryptoOrderService extends IService<CryptoOrder> {
     /** 重启/重连后，根据期间高低价恢复触发限价单 */
     void recoverLimitOrders(String symbol, BigDecimal periodLow, BigDecimal periodHigh);
 
+    /** 限价单索引对账：DB里的PENDING挂单全部补回ZSet（纯追加、幂等） */
+    void reconcileLimitOrderIndex();
+
     /** 最新成交20条-匿名 */
     List<CryptoOrderResponse> getLatestOrders();
 }

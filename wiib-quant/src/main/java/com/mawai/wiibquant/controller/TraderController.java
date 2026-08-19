@@ -12,6 +12,7 @@ import com.mawai.wiibcommon.entity.UserLlmEndpoint;
 import com.mawai.wiibcommon.util.Result;
 import com.mawai.wiibquant.agent.llm.LlmEndpointService;
 import com.mawai.wiibquant.external.sim.SimTradeClient;
+import com.mawai.wiibquant.agent.trader.TraderActionService;
 import com.mawai.wiibquant.agent.trader.TraderPromptAssembler;
 import com.mawai.wiibquant.agent.trader.TraderRequestService;
 import com.mawai.wiibquant.agent.trader.TraderRiskConfig;
@@ -43,6 +44,7 @@ public class TraderController {
     private final TraderPromptAssembler promptAssembler;
     private final TraderRequestService requestService;
     private final LlmEndpointService endpointService;
+    private final TraderActionService actionService;
 
     // ========== 我的 trader ==========
 
@@ -190,6 +192,46 @@ public class TraderController {
     public Result<Void> reset(@CurrentUserId long userId) {
         String err = traderService.reset(userId);
         return err == null ? Result.ok(null) : Result.fail(err);
+    }
+
+    // ========== 动作面板（留言 / 手动唤醒 / 点播复盘） ==========
+    // 三个动作的执行入口只有这里。对话轨的工具只把表单推给用户看，模型碰不到执行那一步。
+    // 一律 Result.ok(ActionResult)：业务结果（被拦下、无素材跳过）要显示在卡片里，
+    // 走 Result.fail 会被前端当成接口报错弹 toast。
+
+    @GetMapping("/action-panel")
+    @Operation(summary = "动作面板状态：上次/下次唤醒、留言剩余轮次、可否唤醒与复盘")
+    public Result<TraderActionService.ActionPanel> actionPanel(@CurrentUserId long userId) {
+        return Result.ok(actionService.panel(userId));
+    }
+
+    @PostMapping("/note")
+    @Operation(summary = "给 trader 留言（覆盖未读的那条，按轮次逐轮注入）")
+    public Result<TraderActionService.ActionResult> saveNote(@CurrentUserId long userId,
+                                                             @RequestBody NoteRequest req) {
+        return Result.ok(actionService.saveNote(userId, req.note(), req.rounds()));
+    }
+
+    @DeleteMapping("/note")
+    @Operation(summary = "撤回还没被读走的留言")
+    public Result<TraderActionService.ActionResult> clearNote(@CurrentUserId long userId) {
+        return Result.ok(actionService.clearNote(userId));
+    }
+
+    @PostMapping("/wake")
+    @Operation(summary = "手动唤醒（真实执行一次决策，可能开/平仓）")
+    public Result<TraderActionService.ActionResult> wake(@CurrentUserId long userId) {
+        return Result.ok(actionService.wake(userId));
+    }
+
+    @PostMapping("/review")
+    @Operation(summary = "点播复盘（异步跑；无新素材则跳过且不消耗模型调用）")
+    public Result<TraderActionService.ActionResult> review(@CurrentUserId long userId) {
+        return Result.ok(actionService.review(userId));
+    }
+
+    /** rounds 空=1 轮（等同"念一次就清"）；越界由 service 钳到 1~24 */
+    public record NoteRequest(String note, Integer rounds) {
     }
 
     // ========== 公开竞技场 ==========

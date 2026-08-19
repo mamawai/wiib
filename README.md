@@ -6,8 +6,8 @@
 
 **如果当初买了会怎样**
 
-代币化美股 · 加密现货 / 永续 · 大宗商品 · BTC 预测 · AI 量化研判
-一个用虚拟资金跑真实行情的交易实验平台
+代币化美股 · 加密现货 / 永续 · 大宗商品 · BTC 预测 · AI 量化研判<br/>
+<sub>一个用虚拟资金跑真实行情的交易实验平台</sub>
 
 <br/>
 
@@ -43,9 +43,13 @@
 
 | 进程 | 端口 | 职责 | 对外 |
 |---|:---:|---|:---:|
-| **wiib-feed** | `8081` | 统一接入 Binance（现货 + 永续 WS/REST）与 Polymarket，写入 Redis（Stream / KV / Pub-Sub），crypto 永续 5m K 线落库 | ✗ 上游进程 |
-| **wiib-sim** | `8080` | 真人模拟交易 + 游戏 + BTC 预测，账本 = 自研模拟盘 DB，提供 REST / WebSocket | ✓ 前端连它 |
-| **wiib-quant** | `8082` | agent harness（AI Trader 竞技场 / 复盘 / 研判工作台）+ FIBO / LIQFADE / SQZMOM / TURTLE 四策略，都由 5m K 线收盘驱动；下单一律走 sim 的独立子账户，不碰真人账本 | ✗ 内部 |
+| **wiib-feed** | `8081` | 行情接入：Binance / Polymarket → Redis，K 线落库 | 否，上游进程 |
+| **wiib-sim** | `8080` | 真人模拟交易 + 游戏 + BTC 预测，REST / WebSocket | 是，前端连它 |
+| **wiib-quant** | `8082` | agent harness + 四策略，下单走 sim 子账户 | 否，内部 |
+
+- **wiib-feed**：统一接入 Binance（现货 + 永续 WS/REST）与 Polymarket，写入 Redis（Stream / KV / Pub-Sub），crypto 永续 5m K 线落库。
+- **wiib-sim**：账本是自研模拟盘 DB，前端只连它。
+- **wiib-quant**：AI Trader 竞技场 / 复盘 / 研判工作台 + FIBO / LIQFADE / SQZMOM / TURTLE 四策略，都由 5m K 线收盘驱动；下单一律走 sim 的独立子账户，不碰真人账本。
 
 > 策略执行目标二选一（`strategy.execution.target=sim｜testnet`）：本平台模拟盘的独立量化账户 `quant-<策略ID>`，或 Binance USDT-M Testnet。
 
@@ -54,7 +58,7 @@
 | 品类 | 标的 |
 |---|---|
 | 加密现货 / 永续 | `BTC` `ETH` `DOGE` `SOL` `XRP` `BNB` |
-| bStock 代币化美股（10） | NVDA · TSLA · MU · SNDK · CRCL · MSTR · AMD · SPCX · QQQ · SOXL（Binance 现货，如 `NVDABUSDT`） |
+| bStock 代币化美股 | 10 只：NVDA · TSLA · MU · SNDK · CRCL · MSTR · AMD · SPCX · QQQ · SOXL（Binance 现货，如 `NVDABUSDT`） |
 | 大宗商品 | 黄金 `XAUUSDT` · 原油 `CLUSDT`（TradFi 永续，无现货） |
 | TradFi 合约 | 闪迪 `SNDK` · `SOXL` · SK海力士 `SKHYNIX` · 美光 `MU` · `KORU` · SpaceX `SPCX`（美股/ETF 永续，无现货，盈亏归股票桶） |
 | 策略实盘篮子 | FIBO: `BTC/ETH` · LIQFADE: `BTC/ETH/DOGE` · SQZMOM: `SOL/DOGE/XRP` · TURTLE: `SOL/ETH/DOGE/BNB` |
@@ -97,7 +101,7 @@
 - **AI Trader**（每用户一个）：接自己的模型和 key，按选定的 K 线级别定时唤醒做决策；杠杆区间、保证金占比、单仓 / 双开、能否自主加减仓由主人设定，越界的下单直接拒绝而不是截断；持仓遇到剧烈波动时由哨兵临时唤醒。
 - **每日复盘**：日线边界回看自己一天的交易，写一份复盘笔记，下一轮唤醒时注入；战绩数字由代码算好给它，模型只负责解读。
 - **竞技场**：全员按收益率排行，点进详情看决策时间线（推理全文 / 工具轨迹 / 论点与修订史 / 复盘卡片）与净值曲线。
-- **研判工作台**（全员开放，BYOK）：SSE 流式；路由用结构化 tool_call 决定派哪些子 agent（market / news / trader）并行取数，再由主模型汇总作答；支持断点续聊、跨会话记忆，贵操作要用户确认。对话烧的是用户自己的 key（与交易员共用同一个端点库，可以绑同一条也可以分开），平台不承担 LLM 成本；行情配额按 IP 计、分摊不了，所以并发限制在全局 10 轮 + 每用户 1 轮。
+- **研判工作台**（全员开放，BYOK）：SSE 流式；路由用结构化 tool_call 决定派哪些子 agent（market / news / trader）并行取数，再由主模型汇总作答；支持断点续聊，贵操作要用户确认。对话烧的是用户自己的 key（与交易员共用同一个端点库，可以绑同一条也可以分开），平台不承担 LLM 成本；行情配额按 IP 计、分摊不了，所以并发限制在全局 10 轮 + 每用户 1 轮。
 - **MCP Server**：同一工具层暴露只读市场工具（`market_snapshot` / `option_iv` / `funding_history` / `orderbook_depth`），SSE 端点。只监听本机、公网未反代；要给 Claude Desktop / Cursor 这类客户端连需要自己反代，且反代前必须先加鉴权（MCP 路径不走 quant 的登录校验）。
 - **研究工具**：策略 K 线 / 组合回测引擎与 walk-forward 样本外评估 REST API；可视化回测页：策略回测任务链，以及手动复盘（按周期逐根揭示 K 线，多空双开、加减仓、杠杆随时调，AI 教练可在局中给盘面提示、结算后评估整局操作）。
 - 详见 [Agent Harness 架构](#agent-harness-架构)。
@@ -106,7 +110,7 @@
 
 - **Binance WS**：现货 miniTicker、永续 markPrice、永续 miniTicker、forceOrder（订全市场流白名单过滤）、aggTrade、depth20、K 线流（crypto 永续 5m 驱动策略 / 预测并落库；15m / 1h、大宗商品与 bStock 现货 5m 仅广播）。
 - **Binance REST**：K 线、ticker、funding、OI、多空比、大户持仓、taker 买卖比、盘口。
-- **断线处理**：WS 断开自动切 REST 轮询保价不中断，重连后按离线区间高低价补触发错过的限价单 / 强平；K 线缺口 REST 回补；流健康注册表 + 管理端手动重试。
+- **断线处理**：WS 断开自动切 REST 轮询保价不中断，按离线区间高低价补触发错过的限价单 / 强平——feed 重连拉固定短窗（断线期间有 REST 轮询兜底），sim 重启则按 Redis 里记的停机时长回看 1m K 线（上限 1000 分钟）；K 线缺口 REST 回补；流健康注册表 + 管理端手动重试。
 - **Deribit**：DVOL 与期权 book summary（供 quant 做 IV / vol 上下文，非用户交易）。
 - **宏观 / 资金面**：farside ETF 资金流、稳定币流通量、IV / OI 分位、Fear & Greed 指数（供 quant 快照上下文）。
 - **Polymarket**：BTC 预测 live-data、UP/DOWN CLOB 盘口。
@@ -223,7 +227,7 @@ flowchart TB
     DB -->|"同侪的复盘/学习笔记/开仓论点<br/>（peer_insights 只读工具）"| LA
     LA -->|"学习笔记 → learning_notes<br/>+ LEARN 决策行（公开）"| DB
     DB ==>|"注入三份：系统提示词<br/>+ 复盘笔记 + 学习笔记"| TA
-    CA -->|"只读感知 trader<br/>（trader_agent 专家）+ 三个动作过 HITL"| DB
+    CA -->|"只读感知 trader<br/>（trader_agent 专家）<br/>动作只弹表单，用户自己按"| DB
 ```
 
 trader 每次唤醒收到三份注入：平台系统提示词（身份 / 规格 / 纪律）、复盘笔记（自己的教训）、学习笔记（从别人那学到的）。三份并列不合并，来源分开模型才分得清哪条是自己的教训、哪条是学来的。trader 只读这些笔记，不关心是谁写的，以后再加一份新笔记也不用改 trader。
@@ -314,7 +318,7 @@ flowchart LR
 
 - 路由：浅模型调 route 工具给出结构化去向，循环只认这个值，不解析消息文本。summarizer 一个字都不提"要不要再派发"，让它同时纠结作答和派发就会在两者之间反复横跳。
 - 并行与停止：专家在虚拟线程上并行跑；同一专家整轮只派一次（去重名单），另设 3 轮派发上限兜底。
-- trader 联动：`trader_agent` 专家只读用户自己的 AI Trader（概况 / 持仓 / 决策 / 计划）；`wake_trader` / `review_trader_now` / `run_deep_analysis` 三个烧钱动作要用户确认（HITL），`leave_note_to_trader` 只写一行字，不拦。
+- trader 联动：`trader_agent` 专家只读用户自己的 AI Trader（概况 / 持仓 / 决策 / 计划）；`wake_trader` / `review_trader_now` / `leave_note_to_trader` 只往对话里推一张表单（留言连草稿带轮次一起预填），按下按钮的是用户，模型碰不到执行路径；只有当场就烧钱的 `run_deep_analysis` 走 HITL 闸。
 - 韧性：自研 `ResilientChatService` 装配进 `ReactAgent.ChatService`，对叶子透明。流式路径带退避重试，仅在尚未吐帧时重订阅。不挂兜底模型：BYOK 只有一个端点，切到同端点的另一个模型没有意义。
 - 横切：会话历史落 `workbench_chat_context` 自建表（终态整体覆盖写入）、跨会话长期记忆（规则化写入，不烧 LLM）、调用限额 + 历史摘要压缩控预算。
 - 新闻双源分工：`news_agent` 出 BlockBeats 清单，summarizer 用联网搜索补充合并，独有条目带源标签。服务端搜索关不掉，与其硬压不如分工。
@@ -369,11 +373,11 @@ sequenceDiagram
     L-->>T: 下一根 K 线带着两份新笔记醒来
 ```
 
-窗口时长约等于复盘超时 180s + 学习超时 300s（两阶段各自内部并行，共用并发闸）。5m 档 trader 会丢 1~2 根 K 线，日线交接每天只有一次，可接受。
+窗口时长上界约等于复盘超时 600s + 学习超时 300s（两阶段各自内部并行、并发闸 10 槽，超过 10 人按批次再乘）。这是上界不是常态——两阶段都跑完就关。5m 档 trader 最多丢 3 根 K 线、15m 档 1 根，日线交接每天只有一次，可接受。
 
 同一工具层的第三个消费方是 MCP Server（SSE 端点）：只读市场工具，新闻抓取与深研判等贵操作不对外。它只监听本机、公网未反代：quant 的鉴权靠 controller 手写 `StpUtil.checkLogin()` 与 `@RequireAdmin` 切面，而 MCP 走 RouterFunction，两者都不经过，一旦反代出去就是无鉴权端点。那几个工具虽有 60s 缓存，但缓存按 symbol 分片、入口又不校验白名单，换个币种就是一次全新的上游采集，会被当免费代理刷配额，进而连累共用同一 REST 客户端的策略执行轨。
 
-chat 与 trader 的联动只到这一步：`trader_agent` 专家只读用户自己的 trader（memory / learning_notes / 决策行 / 计划），三个烧钱动作过 HITL 闸。learning 只写笔记列与决策行，chat 只读同样几样东西，两边都不碰 trader 本体。
+chat 与 trader 的联动只到这一步：`trader_agent` 专家只读用户自己的 trader（memory / learning_notes / 决策行 / 计划），三个动作只弹表单，真执行走 trader 动作面板的 REST。learning 只写笔记列与决策行，chat 只读同样几样东西，两边都不碰 trader 本体。
 
 ---
 

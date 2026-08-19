@@ -24,7 +24,7 @@ import java.util.List;
  * ④ 检验先于发明——先对上一轮的承诺（等待条件/失效条件）做检验，再考虑新机会，治翻烙饼；
  * ⑤ 固定收尾格式——结论块既是公开展示单元，也是下一轮回注后的检验基准；
  * ⑥ 用户风格指令放最后（近因权重最高）且明示优先级：风格冲突听主人的，硬规格不可覆盖；
- * ⑦ 主人留言压轴：一次性的临时交代，比常驻风格指令更近因，说完即焚。
+ * ⑦ 主人留言压轴：阶段性的临时交代，比常驻风格指令更近因，按剩余轮次逐轮注入、减到 0 清空。
  */
 @Component
 @RequiredArgsConstructor
@@ -33,7 +33,7 @@ public class TraderPromptAssembler {
     private static final DateTimeFormatter TIME_FMT =
             DateTimeFormatter.ofPattern("MM-dd HH:mm").withZone(ZoneId.systemDefault());
 
-    /** 只为留言的"读后即焚"而来：注入的同一处就得把列清掉，见 {@link #burnOwnerNote} */
+    /** 只为留言而来：注入的同一处就得把轮次减掉，见 {@link #consumeOwnerNote} */
     private final AiTraderMapper traderMapper;
 
     public String assemble(AiTrader trader, String accountStateJson, List<AiTraderDecision> recent) {
@@ -84,30 +84,51 @@ public class TraderPromptAssembler {
 
         String note = trader.getOwnerNote();
         if (note != null && !note.isBlank()) {
-            sb.append("\n————— 主人的留言（只在本次唤醒出现一次，之后你再也看不到它）—————\n")
+            // 正文非空才叫"有待读留言"，轮次异常一律当 1 轮：迁移时 ALTER 跑了而回填 UPDATE 漏跑，
+            // 库里就会出现"有正文、轮次是 0/null"。当 1 处理最坏只是退化回一次性留言，不炸也不吞
+            Integer raw = trader.getOwnerNoteRounds();
+            int rounds = raw == null || raw <= 0 ? 1 : raw;
+            int left = rounds - 1;
+            sb.append("\n————— 主人的留言（")
+                    .append(left == 0 ? "只在本次唤醒出现，之后你再也看不到它"
+                            : "本次之后还会出现 " + left + " 次")
+                    .append("）—————\n")
                     .append(note)
-                    .append("\n（这是主人临时交代的一句话，不是常驻规则；仓位规格与硬性规则仍由系统强制执行）\n");
-            burnOwnerNote(trader);
+                    // 明说还剩几次，是要模型把它当持续叮嘱而不是"现在就执行一次"的动作指令——
+                    // 多轮注入最大的风险就是"把 ETH 平掉"被念三次平三次，在措辞这一层掐掉
+                    .append("\n（这是主人阶段性交代的话，不是常驻规则；仓位规格与硬性规则仍由系统强制执行）\n");
+            consumeOwnerNote(trader, note, left);
         }
         return sb.toString();
     }
 
     /**
-     * 读后即焚：清空必须紧贴注入写在一起。
-     * 拆成两处（比如让唤醒回路事后清）迟早会掉进两个坑之一——注了没清，留言每轮重念、
-     * 模型把一次性交代当成长期规则；清了没注，主人的话直接蒸发且无人知晓。
+     * 消费一轮：递减必须紧贴注入写在一起。
+     * 拆成两处（比如让唤醒回路事后减）迟早会掉进两个坑之一——注了没减，留言每轮重念、
+     * 模型把阶段性交代当成长期规则；减了没注，主人的话直接蒸发且无人知晓。
      * <p>
-     * 代价是<b>注入即消费</b>：这一轮唤醒后面若失败，留言不会退回来。选它是因为反过来更糟——
-     * 留言不清就会重放，而"可能重复执行一条主人指令"比"偶发丢一条留言"危险得多。
+     * 代价是<b>注入即消费</b>：这一轮唤醒后面若失败，那一轮也算用掉了。选它是因为反过来更糟——
+     * 不减就会重放，而"可能重复执行一条主人指令"比"偶发丢一轮念诵"危险得多。
      */
-    private void burnOwnerNote(AiTrader trader) {
-        // 列级更新：唤醒回路同时在并发改 status/连败计数，整行 updateById 会把它们盖回快照旧值
+    private void consumeOwnerNote(AiTrader trader, String injected, int left) {
+        // 条件 SQL，以"库里的正文仍是我注入的这条"为前置：trader 是调度时刻的快照，
+        // 取到这里之间隔着数次 HTTP 与多条 SQL、并发满槽时还会在信号量上等几分钟，
+        // 期间主人可能已在面板改写或撤回。正文对不上就影响 0 行，只递减自己念过的那条。
+        //
+        // 两个 SET 都读旧行值（SQL 标准），CASE 判的是递减前的轮次：
+        // 旧值 <=1 即本次是最后一次，正文一并清空；GREATEST 保证轮次不落到负数。
         traderMapper.update(null, new LambdaUpdateWrapper<AiTrader>()
                 .eq(AiTrader::getId, trader.getId())
-                .set(AiTrader::getOwnerNote, null)
+                .eq(AiTrader::getOwnerNote, injected)
+                .setSql("owner_note_rounds = GREATEST(owner_note_rounds - 1, 0), "
+                        + "owner_note = CASE WHEN owner_note_rounds <= 1 THEN NULL ELSE owner_note END")
                 .set(AiTrader::getUpdatedAt, LocalDateTime.now()));
-        // 同一次唤醒里这个对象还会被别处读到，内存里的副本一并置空，别让它再露一次面
-        trader.setOwnerNote(null);
+        // 内存副本与库写保持同构：同一次唤醒里这个对象还会被别处读到，别让它再露一次面。
+        // 无条件按 left 走——就算上面因正文被改写而没更新库，这一轮也确实已经注入过了
+        if (left == 0) {
+            trader.setOwnerNote(null);
+        }
+        trader.setOwnerNoteRounds(left);
     }
 
     /** 平台系统提示词模板（身份/工具/规格/成本/分析流程/纪律）——前端预览与唤醒组装共用同一份文本。 */

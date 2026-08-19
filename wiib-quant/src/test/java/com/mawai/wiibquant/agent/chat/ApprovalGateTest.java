@@ -221,19 +221,20 @@ class ApprovalGateTest {
                 .containsExactly("c1", "c2");
     }
 
-    // ===== 闸门管辖的另外两个贵操作：唤醒 trader（会真下单）与点播复盘（烧深模型） =====
+    // ===== 授权的粒度：闸门只管深研判一个工具了，区分维度全落在标的上 =====
 
     /**
-     * 三个贵操作各自都要被拦下并登记。参数化而不是抄三遍：抄的话很容易只改工具名忘了改断言，
-     * 出现"看着覆盖了三个、其实测了三遍同一个"
+     * 未授权就得拦下并把标的登记进待批。标的写法的归一化（btc / BTCUSDT / BTCUSDC 折成同一个）
+     * 由"批了一个标的不放行另一个"那条覆盖，这里只钉拦截与登记。
      */
-    @ParameterizedTest
-    @ValueSource(strings = {"run_deep_analysis", "wake_trader", "review_trader_now"})
-    void 三个贵操作未授权时都被拦下(String tool) {
+    @Test
+    void 未授权时拦下并登记待批() {
+        String symbol = "BTCUSDT";
         AtomicBoolean toolRan = new AtomicBoolean();
 
-        Command command = gate.applyWrap("tools", stateWithToolCall(tool, "{}"), config(),
-                (s, c) -> {
+        Command command = gate.applyWrap("tools",
+                stateWithToolCall("run_deep_analysis", "{\"symbol\":\"" + symbol + "\"}"),
+                config(), (s, c) -> {
                     toolRan.set(true);
                     return CompletableFuture.completedFuture(Command.emptyCommand());
                 }).join();
@@ -242,19 +243,19 @@ class ApprovalGateTest {
         assertThat(responseOf(command).getResponses()).singleElement()
                 .satisfies(r -> assertThat(r.responseData()).contains("PENDING_APPROVAL"));
         assertThat(registry.peekPending(SESSION)).isPresent()
-                .get().satisfies(p -> assertThat(p.toolName()).isEqualTo(tool));
+                .get().satisfies(p -> assertThat(p.symbol()).isEqualTo(symbol));
     }
 
     /** 批准之后就得真放行，否则用户点了同意还是执行不了 */
-    @ParameterizedTest
-    @ValueSource(strings = {"wake_trader", "review_trader_now"})
-    void trader动作批准后放行(String tool) {
-        gate.applyWrap("tools", stateWithToolCall(tool, "{}"), config(),
+    @Test
+    void 批准后同一标的放行() {
+        String args = "{\"symbol\":\"BTCUSDT\"}";
+        gate.applyWrap("tools", stateWithToolCall("run_deep_analysis", args), config(),
                 (s, c) -> CompletableFuture.completedFuture(Command.emptyCommand())).join();
         registry.approve(SESSION, registry.peekPending(SESSION).orElseThrow().requestId());
         AtomicBoolean toolRan = new AtomicBoolean();
 
-        gate.applyWrap("tools", stateWithToolCall(tool, "{}"), config(), (s, c) -> {
+        gate.applyWrap("tools", stateWithToolCall("run_deep_analysis", args), config(), (s, c) -> {
             toolRan.set(true);
             return CompletableFuture.completedFuture(Command.emptyCommand());
         }).join();
@@ -263,18 +264,22 @@ class ApprovalGateTest {
     }
 
     /**
-     * 两个 trader 动作没有 symbol，授权键的第三格是同一个固定值——只靠工具名区分。
-     * 工具名要是没进键，"批准复盘"就会顺手把"唤醒并下单"也放行了，这是最贵的那种错。
+     * 授权是"这一件事"的票，不是"十分钟内的通用票"：批了 btc 不能顺手把 eth 也放行——
+     * 用户为一次研判点的头，模型能拿去连烧几次，这是最贵的那种错。
+     * <p>
+     * 和"批准的标的之外不放行"分工：那边走 BTCUSDT/ETHUSDT 全称，这边走 btc/eth 短写法。
+     * 隔离判断的两侧都跑过一遍归一化才算钉住——写法可以收拢，标的不行
      */
     @Test
-    void 批了复盘不能放行唤醒() {
-        gate.applyWrap("tools", stateWithToolCall("review_trader_now", "{}"), config(),
-                (s, c) -> CompletableFuture.completedFuture(Command.emptyCommand())).join();
+    void 批了一个标的不放行另一个() {
+        gate.applyWrap("tools", stateWithToolCall("run_deep_analysis", "{\"symbol\":\"btc\"}"),
+                config(), (s, c) -> CompletableFuture.completedFuture(Command.emptyCommand())).join();
         registry.approve(SESSION, registry.peekPending(SESSION).orElseThrow().requestId());
         AtomicBoolean toolRan = new AtomicBoolean();
 
-        Command command = gate.applyWrap("tools", stateWithToolCall("wake_trader", "{}"), config(),
-                (s, c) -> {
+        Command command = gate.applyWrap("tools",
+                stateWithToolCall("run_deep_analysis", "{\"symbol\":\"eth\"}"),
+                config(), (s, c) -> {
                     toolRan.set(true);
                     return CompletableFuture.completedFuture(Command.emptyCommand());
                 }).join();
@@ -282,34 +287,41 @@ class ApprovalGateTest {
         assertThat(toolRan).isFalse();
         assertThat(responseOf(command).getResponses()).singleElement()
                 .satisfies(r -> assertThat(r.responseData()).contains("PENDING_APPROVAL"));
-    }
-
-    /** 卡片上的代价说明按工具区分：三个都写"3 次深模型调用"，用户是在为看不见的东西点头 */
-    @Test
-    void 确认卡的理由按工具区分() {
-        gate.applyWrap("tools", stateWithToolCall("wake_trader", "{}"), config(),
-                (s, c) -> CompletableFuture.completedFuture(Command.emptyCommand())).join();
-        assertThat(registry.peekPending(SESSION).orElseThrow().reason()).contains("开/平仓");
-
-        registry.reject(SESSION, registry.peekPending(SESSION).orElseThrow().requestId());
-        gate.applyWrap("tools", stateWithToolCall("review_trader_now", "{}"), config(),
-                (s, c) -> CompletableFuture.completedFuture(Command.emptyCommand())).join();
-        assertThat(registry.peekPending(SESSION).orElseThrow().reason()).contains("复盘调用");
+        assertThat(registry.peekPending(SESSION).orElseThrow().symbol()).isEqualTo("ETHUSDT");
     }
 
     /**
-     * 一批里同时来了两个贵操作：只有被登记的那个拿到 PENDING_APPROVAL 说明，
-     * 另一个必须是"未执行"。按工具名认领的话两个都会拿到同一份说明，
-     * 用户批的是 A，模型会以为 B 也批了。
+     * 卡片上的代价说明得写清"贵在哪"：用户是在为看不见的东西点头，笼统一句"这很贵"等于没说。
+     * 回执里也要带同一句，模型才转述得出来
      */
     @Test
-    void 同批两个贵操作只有正主拿到说明() {
+    void 确认卡写清贵在哪() {
+        Command command = gate.applyWrap("tools",
+                stateWithToolCall("run_deep_analysis", "{\"symbol\":\"BTCUSDT\"}"),
+                config(), (s, c) -> CompletableFuture.completedFuture(Command.emptyCommand())).join();
+
+        assertThat(registry.peekPending(SESSION).orElseThrow().reason())
+                .contains("3 次深模型调用").contains("Judge");
+        assertThat(responseOf(command).getResponses()).singleElement()
+                .satisfies(r -> assertThat(r.responseData())
+                        .contains("深度研判").contains("3 次深模型调用"));
+    }
+
+    /**
+     * 一批里同时来了两个受管辖的调用（模型一口气要研判 BTC 和 ETH）：只有被登记的那个
+     * 拿到 PENDING_APPROVAL 说明，另一个必须是"未执行"。按工具名认领的话两个都会拿到
+     * 同一份说明——名字还一模一样——用户批的是 BTC，模型会以为 ETH 也批了。
+     */
+    @Test
+    void 同批两个受管辖调用只有正主拿到说明() {
         MessagesState<Message> state = new MessagesState<>(Map.of("messages", List.of(
-                new UserMessage("唤醒它，顺便复盘"),
+                new UserMessage("BTC 和 ETH 都深度研判一下"),
                 AssistantMessage.builder().content("")
                         .toolCalls(List.of(
-                                new AssistantMessage.ToolCall("c1", "function", "wake_trader", "{}"),
-                                new AssistantMessage.ToolCall("c2", "function", "review_trader_now", "{}")))
+                                new AssistantMessage.ToolCall("c1", "function",
+                                        "run_deep_analysis", "{\"symbol\":\"BTCUSDT\"}"),
+                                new AssistantMessage.ToolCall("c2", "function",
+                                        "run_deep_analysis", "{\"symbol\":\"ETHUSDT\"}")))
                         .build())));
 
         Command command = gate.applyWrap("tools", state, config(),
@@ -318,21 +330,31 @@ class ApprovalGateTest {
         assertThat(responseOf(command).getResponses()).satisfiesExactly(
                 first -> assertThat(first.responseData()).contains("PENDING_APPROVAL"),
                 second -> assertThat(second.responseData()).isEqualTo("未执行：本轮存在待确认的贵操作。"));
-        assertThat(registry.peekPending(SESSION).orElseThrow().toolName()).isEqualTo("wake_trader");
+        assertThat(registry.peekPending(SESSION).orElseThrow().symbol()).isEqualTo("BTCUSDT");
     }
 
-    /** 留言只写一行字，不烧钱也不动仓位——拦它只是平白多一次点击 */
-    @Test
-    void 留言工具不受闸门管辖() {
+    /**
+     * trader 那三个工具都不进闸门：留言只写一行字，唤醒和点播复盘现在只弹一张表单卡、
+     * 执行权在用户点击上——再拦一道就成了"先批准打开表单、再填表单"两道确认。
+     * <p>
+     * 顺带钉住"闸门不能因为没什么可管了就被摘掉"：表单卡靠 ThreadLocal 里的会话号
+     * 才知道往哪条 SSE 推，而全仓只有 {@code ApprovalGate.passThrough} 会设它
+     */
+    @ParameterizedTest
+    @ValueSource(strings = {"leave_note_to_trader", "wake_trader", "review_trader_now"})
+    void trader动作不进闸门但仍拿得到会话号(String tool) {
         AtomicBoolean toolRan = new AtomicBoolean();
+        AtomicReference<String> seen = new AtomicReference<>();
 
-        gate.applyWrap("tools", stateWithToolCall("leave_note_to_trader", "{\"note\":\"仓位轻点\"}"),
-                config(), (s, c) -> {
+        gate.applyWrap("tools", stateWithToolCall(tool, "{\"note\":\"仓位轻点\"}"), config(),
+                (s, c) -> {
                     toolRan.set(true);
+                    seen.set(ToolRunContext.sessionId());
                     return CompletableFuture.completedFuture(Command.emptyCommand());
                 }).join();
 
         assertThat(toolRan).isTrue();
+        assertThat(seen.get()).isEqualTo(SESSION);
         assertThat(registry.peekPending(SESSION)).isEmpty();
     }
 

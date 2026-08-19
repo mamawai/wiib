@@ -10,5 +10,8 @@ public interface FuturesSettlementService {
 
     void executeTriggeredOrders();
 
+    /** 限价单索引对账：DB里的PENDING挂单全部补回ZSet（纯追加、幂等） */
+    void reconcileLimitOrderIndex();
+
     void chargeFundingFeeAll();
 }

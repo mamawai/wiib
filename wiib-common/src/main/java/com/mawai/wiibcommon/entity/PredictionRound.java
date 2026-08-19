@@ -19,7 +19,7 @@ public class PredictionRound {
 
     private BigDecimal endPrice;
 
-    /** UP/DOWN/DRAW */
+    /** UP/DOWN/DRAW/VOID（VOID=取不到价作废，注单退本金） */
     private String outcome;
 
     /** OPEN/LOCKED/SETTLED */

@@ -474,16 +474,19 @@ export function ReplayPanel() {
           {/* AI 教练：从 AI 页「模型配置」的端点库里选一条（提示可能每几根点一次，评估一局一次；挑贵的慢的自己掂量） */}
           <div>
             <div className="microlabel uppercase mb-1">AI 教练</div>
-            <LlmEndpointSelect endpoints={endpoints} value={aiEndpointId} onChange={setAiEndpointId} className="max-w-[300px]" />
+            {/* 原生 select 的自然宽度由最长 option 撑，只给 max-w 压不住，窄屏会顶出横向滚动 */}
+            <LlmEndpointSelect endpoints={endpoints} value={aiEndpointId} onChange={setAiEndpointId} className="w-full max-w-[300px]" />
           </div>
         </div>
-        <div className="flex items-center gap-3">
+        {/* flex-wrap + shrink-0：右边那段说明是纯中文长文本，min-content 只有一个字宽，
+            不拦着就会把按钮一路压窄；shrink-0 保住按钮整宽，同行放不下时整体换行 */}
+        <div className="flex flex-wrap items-center gap-3">
           <button
             type="button"
             onClick={() => void handleStart()}
             disabled={loading || !cov}
             className={cn(
-              'h-10 px-5 rounded-lg font-black text-sm flex items-center gap-2 transition-all machined',
+              'h-10 px-5 rounded-lg font-black text-sm flex items-center gap-2 shrink-0 whitespace-nowrap transition-all machined',
               'bg-primary text-primary-foreground hover:brightness-105 active:scale-[.98]',
               'disabled:opacity-50 disabled:cursor-not-allowed',
             )}
@@ -619,14 +622,19 @@ export function ReplayPanel() {
                       </button>
                     ))}
                   </div>
-                  <button type="button" onClick={() => handleOpen('LONG')}
-                    className="flex-1 min-w-[110px] h-11 rounded-lg bg-gain text-white font-black text-sm flex items-center justify-center gap-1.5 hover:brightness-105 active:scale-[.98] machined">
-                    <ArrowUpRight className="w-4 h-4" /> {state.positions.LONG ? '加多' : '开多'} {leverage}x @ {fmtNum(curPrice, decimals)}
-                  </button>
-                  <button type="button" onClick={() => handleOpen('SHORT')}
-                    className="flex-1 min-w-[110px] h-11 rounded-lg bg-loss text-white font-black text-sm flex items-center justify-center gap-1.5 hover:brightness-105 active:scale-[.98] machined">
-                    <ArrowDownRight className="w-4 h-4" /> {state.positions.SHORT ? '加空' : '开空'} {leverage}x @ {fmtNum(curPrice, decimals)}
-                  </button>
+                  {/* 开多/开空成对：外层 flex-wrap 会把这两颗拆开塞进各自的空档，
+                      套一层 w-full 强制它俩自成一行左右平分；md:contents 让这层≥768px 不生成盒子，
+                      两颗按钮仍是外层 flex 的直接子项，宽屏布局不受影响 */}
+                  <div className="w-full flex items-stretch gap-2 md:contents">
+                    <button type="button" onClick={() => handleOpen('LONG')}
+                      className="flex-1 min-w-[110px] h-11 rounded-lg bg-gain text-white font-black text-[13px] md:text-sm flex items-center justify-center gap-1.5 hover:brightness-105 active:scale-[.98] machined">
+                      <ArrowUpRight className="w-4 h-4" /> {state.positions.LONG ? '加多' : '开多'} {leverage}x @ {fmtNum(curPrice, decimals)}
+                    </button>
+                    <button type="button" onClick={() => handleOpen('SHORT')}
+                      className="flex-1 min-w-[110px] h-11 rounded-lg bg-loss text-white font-black text-[13px] md:text-sm flex items-center justify-center gap-1.5 hover:brightness-105 active:scale-[.98] machined">
+                      <ArrowDownRight className="w-4 h-4" /> {state.positions.SHORT ? '加空' : '开空'} {leverage}x @ {fmtNum(curPrice, decimals)}
+                    </button>
+                  </div>
                 </div>
                 {held.length > 0 && (
                   <div className="space-y-1.5">
@@ -677,9 +685,10 @@ export function ReplayPanel() {
                 <span className="text-[11px] font-black">AI 盘面提示</span>
                 {hint.at && <span className="text-[10px] text-muted-foreground num">· {hint.at}</span>}
                 <span className="ml-auto text-[10px] text-muted-foreground truncate max-w-[160px]">{aiLabel}</span>
+                {/* p-2 -m-2：图标只有 14px，手指点不中——内边距把命中区撑到 30px，负外边距抵掉占位 */}
                 <button type="button" aria-label="关闭"
                   onClick={() => { aiAbortRef.current?.abort(); setHint(null); }}
-                  className="text-muted-foreground/60 hover:text-foreground">
+                  className="p-2 -m-2 text-muted-foreground/60 hover:text-foreground">
                   <X className="w-3.5 h-3.5" />
                 </button>
               </div>

@@ -26,7 +26,10 @@ export function useFullscreen(ref: RefObject<HTMLElement | null>) {
   useEffect(() => {
     const sync = () => {
       const d = document as WebkitDoc;
-      const ours = (d.fullscreenElement ?? d.webkitFullscreenElement) === ref.current;
+      // el 为空要单独挡掉：目标元素被卸载（如对话面板关闭）时 ref.current 与 fullscreenElement
+      // 双双为 null，直接比会得出"是我们的全屏"，把全屏态点亮在一个已经不存在的元素上
+      const el = ref.current;
+      const ours = el != null && (d.fullscreenElement ?? d.webkitFullscreenElement) === el;
       setNative(ours);
       // 手机竖屏进原生全屏顺手锁成横屏：竖屏视口会把 K 线纵向拉成细长条，横屏才是看图的形状。
       // lock 只在全屏态内被允许（Android Chrome 这条路）；iOS 没有 lock，静默落空，
@@ -72,5 +75,20 @@ export function useFullscreen(ref: RefObject<HTMLElement | null>) {
     }
   }, [ref]);
 
-  return { active: native || css, cssMode: css, toggle };
+  /**
+   * 无条件退出全屏。
+   * <p>
+   * 与 {@link toggle} 的区别：这里<b>不读 ref</b>。宿主元素被卸载时（如对话面板关闭）
+   * ref.current 已经是 null，toggle 会在开头早退，CSS 降级那条路就永远退不掉——
+   * 而降级路正是最需要主动退的一条（它只是个类名，没有浏览器帮忙收场）。
+   */
+  const exit = useCallback(() => {
+    setCss(false);
+    const d = document as WebkitDoc;
+    if (d.fullscreenElement ?? d.webkitFullscreenElement) {
+      (d.exitFullscreen ?? d.webkitExitFullscreen)?.call(d);
+    }
+  }, []);
+
+  return { active: native || css, cssMode: css, toggle, exit };
 }

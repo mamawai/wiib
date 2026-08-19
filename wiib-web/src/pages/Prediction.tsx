@@ -661,7 +661,7 @@ export function Prediction() {
                     <span className="font-mono tabular-nums">${fmtNum(r.endPrice)}</span>
                     <span className="ml-auto">
                       <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${r.outcome === 'UP' ? 'bg-green-500/12 text-green-500' : r.outcome === 'DOWN' ? 'bg-red-500/12 text-red-500' : 'bg-muted text-muted-foreground'}`}>
-                        {r.outcome || '--'}
+                        {r.outcome === 'VOID' ? '作废' : (r.outcome || '--')}
                       </span>
                     </span>
                   </div>

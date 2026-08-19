@@ -8,6 +8,7 @@ import com.mawai.wiibquant.agent.trader.TraderChatService;
 import org.bsc.langgraph4j.prebuilt.MessagesState;
 import org.bsc.langgraph4j.spring.ai.serializer.jackson.SpringAIJacksonStateSerializer;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.model.ChatModel;
@@ -59,13 +60,12 @@ class ChatYieldCoordinatorTest {
     private final ApprovalRegistry registry = new ApprovalRegistry();
     private final ChatContextStore contextStore = mock(ChatContextStore.class);
     private final ChatHistoryService historyService = mock(ChatHistoryService.class);
-    private final ChatMemoryService memoryService = mock(ChatMemoryService.class);
     private final ChatConcurrencyGate gate = new ChatConcurrencyGate(10);
     private final WorkbenchRunRegistry runRegistry = new WorkbenchRunRegistry();
 
     private final ChatTurnRunner runner = new ChatTurnRunner(contextStore, registry);
     private final ChatYieldCoordinator coordinator =
-            new ChatYieldCoordinator(gate, runRegistry, runner, historyService, memoryService);
+            new ChatYieldCoordinator(gate, runRegistry, runner, historyService);
 
     /** 会话上下文的假实现：save 真存 load 真取，补答轮读的就是让位轮存的 */
     private final Map<String, List<Message>> contextRows = new ConcurrentHashMap<>();
@@ -179,16 +179,22 @@ class ChatYieldCoordinatorTest {
 
         // 专家跑完了，但用户的新轮还占着名额：补答必须按兵不动
         expertRelease.countDown();
-        verify(historyService, after(500).never()).append(any(), anyLong(), eq("assistant"), any());
+        verify(historyService, after(500).never()).append(any(), anyLong(), eq("assistant"), any(), any());
         assertThat(coordinator.hasPending(SESSION)).as("status 轮询口径：欠着补答").isTrue();
 
-        // 新轮结束 → 补答立即跟上：带标头落展示历史 + 记记忆
+        // 新轮结束 → 补答立即跟上：带标头落展示历史
         ChatYieldCoordinator.TurnHandle newTurn = coordinator.openTurn(1L);
         gate.release(1L);
         coordinator.closeTurn(newTurn);
+        ArgumentCaptor<ChatHistoryService.TurnMeta> metaCaptor =
+                ArgumentCaptor.forClass(ChatHistoryService.TurnMeta.class);
         verify(historyService, timeout(10_000)).append(eq(SESSION), eq(1L), eq("assistant"),
-                contains("【补答「看看行情」】"));
-        verify(memoryService, timeout(10_000)).remember(eq(1L), eq("看看行情"), eq("补答答案"));
+                contains("【补答「看看行情」】"), metaCaptor.capture());
+        // 补答行也要带读数：模型名与耗时是这一段自己的；modelCalls 非空＝确实读了账本，
+        // 而不是被当成"账不干净"退化成只报耗时（那条路 runDeferred 开头的 resetUsage 就白写了）
+        assertThat(metaCaptor.getValue().modelLabel()).isNotNull();
+        assertThat(metaCaptor.getValue().latencyMs()).isNotNull();
+        assertThat(metaCaptor.getValue().modelCalls()).isNotNull();
 
         // 补答轮喂给 summarizer 的输入：专家结论 + 补答指令都得在
         assertThat(summarizerPrompts).isNotEmpty();

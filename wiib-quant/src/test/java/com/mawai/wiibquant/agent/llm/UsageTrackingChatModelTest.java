@@ -110,4 +110,42 @@ class UsageTrackingChatModelTest {
         assertThat(s.modelCalls()).isZero();
         assertThat(s.totalTokens()).isNull();
     }
+
+    /**
+     * 对话轨的实例跟着叶子图跨轮缓存，只能靠 reset 划轮边界：清完必须回到"一次没调过"的状态，
+     * token 三项要回 null 而不是 0——否则新一轮上游不报 usage 时，前端看到的是个假的 0。
+     */
+    @Test
+    void resetGoesBackToUntouchedState() {
+        ChatModel inner = mock(ChatModel.class);
+        when(inner.call(any(Prompt.class))).thenReturn(respWith(100, 20, 120));
+        UsageTrackingChatModel m = new UsageTrackingChatModel(inner);
+        m.call(new Prompt("上一轮"));
+
+        m.reset();
+
+        assertThat(m.snapshot().modelCalls()).isZero();
+        assertThat(m.snapshot().promptTokens()).isNull();
+        assertThat(m.snapshot().completionTokens()).isNull();
+        assertThat(m.snapshot().totalTokens()).isNull();
+
+        m.call(new Prompt("这一轮"));
+        assertThat(m.snapshot().totalTokens()).isEqualTo(120L);   // 只算清零之后的
+    }
+
+    /** 深浅两条端点合账：报了的相加，两边都没报才留 null */
+    @Test
+    void mergeSumsPerFieldAndKeepsNullWhenNeitherReported() {
+        UsageTrackingChatModel.UsageSnapshot deep =
+                new UsageTrackingChatModel.UsageSnapshot(2, 100L, 20L, null);
+        UsageTrackingChatModel.UsageSnapshot light =
+                new UsageTrackingChatModel.UsageSnapshot(3, 30L, null, null);
+
+        UsageTrackingChatModel.UsageSnapshot merged = deep.merge(light);
+
+        assertThat(merged.modelCalls()).isEqualTo(5);
+        assertThat(merged.promptTokens()).isEqualTo(130L);
+        assertThat(merged.completionTokens()).isEqualTo(20L);   // 一边没报，用报了的那份
+        assertThat(merged.totalTokens()).isNull();              // 两边都没报
+    }
 }

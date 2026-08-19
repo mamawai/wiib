@@ -11,6 +11,7 @@ import com.mawai.wiibcommon.entity.AiTraderRequest;
 import com.mawai.wiibcommon.entity.FuturesPosition;
 import com.mawai.wiibcommon.entity.FuturesStopLoss;
 import com.mawai.wiibcommon.entity.FuturesTakeProfit;
+import com.mawai.wiibquant.external.sim.SimOrderRetry;
 import com.mawai.wiibquant.external.sim.SimTradeClient;
 import com.mawai.wiibquant.mapper.AiTraderMapper;
 import com.mawai.wiibquant.mapper.AiTraderRequestMapper;
@@ -132,10 +133,16 @@ public class TraderRequestService {
             // 仓位可能已被部分平掉，减仓量先钳到现有量；回执照这个实际量写——
             // 这条回执会原样注入下一轮提示词当事实，虚报数字模型就按错的仓位算后面一切
             BigDecimal executedQty = isAdd ? r.getQuantity() : r.getQuantity().min(pos.getQuantity());
-            FuturesOrderResponse resp = isAdd ? doAdd(t, r, pos) : doReduce(r, t, executedQty);
+            FuturesOrderResponse resp = SimOrderRetry.send(
+                    () -> isAdd ? doAdd(t, r, pos) : doReduce(r, t, executedQty));
             writeResult(r, "已成交 " + executedQty.stripTrailingZeros().toPlainString()
                     + " @订单" + resp.getOrderId());
             revisePlan(t, r, pos);
+        } catch (SimOrderRetry.UnknownOutcome e) {
+            // 读超时后重发也问不到结果：这笔很可能已经在 sim 成交了。写"执行失败"会被原样注入
+            // 下一轮提示词当事实，模型照着一个不存在的仓位往下算；不修订计划同理，宁可留空
+            writeResult(r, "结果未知：sim 未在重试内确认，这笔可能已经成交，请在持仓里核对");
+            log.warn("[TraderRequest] 批准执行结果未知 requestId={} msg={}", requestId, e.getCause().getMessage());
         } catch (Exception e) {
             // 余额不足/步长不合规等：写进结果给主人看，不吞
             writeResult(r, "执行失败：" + e.getMessage());
@@ -170,6 +177,7 @@ public class TraderRequestService {
      */
     private FuturesOrderResponse doAdd(AiTrader t, AiTraderRequest r, FuturesPositionDTO pos) {
         FuturesOpenRequest open = new FuturesOpenRequest();
+        open.setClientRequestId(idemKey(r));
         open.setSymbol(r.getSymbol());
         open.setSide(r.getSide());
         // 与 TradeTools 一致：全仓显式声明，权益口径依赖这个事实
@@ -204,10 +212,16 @@ public class TraderRequestService {
     /** qty 是调用方已按现有仓位钳过的实际平仓量。 */
     private FuturesOrderResponse doReduce(AiTraderRequest r, AiTrader t, BigDecimal qty) {
         FuturesCloseRequest close = new FuturesCloseRequest();
+        close.setClientRequestId(idemKey(r));
         close.setPositionId(r.getPositionId());
         close.setQuantity(qty);
         close.setOrderType("MARKET");
         return simTradeClient.closePosition(t.getSimUserId(), close);
+    }
+
+    /** 幂等键绑请求行：读超时后重发是拿它去问同一笔的结果，sim 侧同键只成交一次 */
+    private static String idemKey(AiTraderRequest r) {
+        return "req-" + r.getId();
     }
 
     /** 批准执行也算对计划的修改，留痕带理由——公开修订历史里要看得出"这笔是主人点头的"。 */

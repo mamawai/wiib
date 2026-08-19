@@ -16,4 +16,8 @@ public interface MinesGameMapper extends BaseMapper<MinesGame> {
 
     @Select("SELECT COUNT(*) FROM mines_game WHERE user_id = #{userId} AND status IN ('CASHED_OUT', 'EXPLODED')")
     int countFinishedGames(@Param("userId") Long userId);
+
+    /** 进行中的那一局（同一用户至多一条，靠 bet 前置校验 + 用户锁保证） */
+    @Select("SELECT * FROM mines_game WHERE user_id = #{userId} AND status = 'PLAYING' LIMIT 1")
+    MinesGame selectPlaying(@Param("userId") Long userId);
 }

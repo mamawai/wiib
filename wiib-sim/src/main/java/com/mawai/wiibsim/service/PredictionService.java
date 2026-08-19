@@ -29,10 +29,11 @@ public interface PredictionService {
 
     void lockRound(long windowStart);
 
-    void settlePreviousRound();
+    /** 结算指定回合：缺价先查缓存再回源 REST，实在没价按作废退本金 */
+    void settleRound(long windowStart);
 
     void syncOpenPrice();
 
-    /** 卡死巡检：报出永久停在 LOCKED 的回合（只告警，不自动重试） */
+    /** 补结算巡检：把早该结算却还停在 LOCKED 的回合逐个重跑 */
     void sweepStuckRounds();
 }

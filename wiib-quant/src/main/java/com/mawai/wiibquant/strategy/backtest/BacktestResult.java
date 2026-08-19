@@ -100,18 +100,20 @@ public class BacktestResult {
     }
 
     /**
-     * 最大回撤（占峰值权益的百分比）。
+     * 最大回撤（占当时峰值权益的百分比）：逐点算 (峰值-权益)/峰值 再取最大。
+     * 逐点是要害——若先求最大绝对回撤、最后除以全局峰值，100→50→1000→900 这条曲线得出 10%，
+     * 而早期那段的真实回撤是 50%。
      */
     public double maxDrawdownPct() {
         BigDecimal peak = BigDecimal.ZERO;
-        BigDecimal maxDd = BigDecimal.ZERO;
+        BigDecimal maxDdPct = BigDecimal.ZERO;
         for (BigDecimal eq : equityCurve) {
             if (eq.compareTo(peak) > 0) peak = eq;
-            BigDecimal dd = peak.subtract(eq);
-            if (dd.compareTo(maxDd) > 0) maxDd = dd;
+            if (peak.signum() == 0) continue;
+            BigDecimal ddPct = peak.subtract(eq).divide(peak, 6, RoundingMode.HALF_UP);
+            if (ddPct.compareTo(maxDdPct) > 0) maxDdPct = ddPct;
         }
-        if (peak.signum() == 0) return 0;
-        return maxDd.divide(peak, 6, RoundingMode.HALF_UP).doubleValue();
+        return maxDdPct.doubleValue();
     }
 
     /**

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { RefreshCw, Loader2, Plus, ChevronRight } from 'lucide-react';
+import { ArrowLeftRight, RefreshCw, Loader2, Plus, ChevronRight } from 'lucide-react';
 import { futuresApi } from '../../api';
 import { useUserStore } from '../../stores/userStore';
 import { useCryptoStream } from '../../hooks/useCryptoStream';
@@ -208,6 +208,15 @@ function PositionItem({ pos, brackets, wide, onMutated }: {
   const [newLeverage, setNewLeverage] = useState<number | null>(null);
   const [slRows, setSlRows] = useState<SLTPRow[]>([]);
   const [tpRows, setTpRows] = useState<SLTPRow[]>([]);
+  const [reversing, setReversing] = useState(false);
+  const [confirmReverse, setConfirmReverse] = useState(false);
+
+  // 反手两段确认，3s 未二次点击自动还原。确认态在每张卡里各自一份，不是全局共享
+  useEffect(() => {
+    if (!confirmReverse) return;
+    const t = window.setTimeout(() => setConfirmReverse(false), 3000);
+    return () => window.clearTimeout(t);
+  }, [confirmReverse]);
 
   const isPnlUp = unrealizedPnl >= 0;
   const isLong = pos.side === 'LONG';
@@ -258,6 +267,36 @@ function PositionItem({ pos, brackets, wide, onMutated }: {
       positionId: pos.id, quantity: qty, orderType: closeOrderType,
       ...(closeOrderType === 'LIMIT' ? { limitPrice: parseFloat(closeLimitPrice) } : {}),
     }), '平仓成功', true);
+  };
+
+  /**
+   * 反手：市价全平 + 立刻反向开等量新仓。不走 submit——两步的结果要分别报，
+   * 尤其是"平了但没开成"这种半成功：那会儿原仓已经没了，不明说用户会以为什么都没发生。
+   */
+  const handleReverse = async () => {
+    setConfirmReverse(false);
+    setReversing(true);
+    try {
+      const res = await futuresApi.reverse(pos.id);
+      const pnl = res.closed.realizedPnl ?? 0;
+      const pnlText = `${pnl >= 0 ? '+' : ''}${fmtNum(pnl)} USDT`;
+      const closedText = `${isLong ? '多' : '空'}单 ${res.closed.quantity} ${cfg.name}（已实现盈亏 ${pnlText}）`;
+      if (res.opened) {
+        toast(`已反手为${isLong ? '空' : '多'}单`, 'success', {
+          description: `平掉${closedText}，反向开 ${res.opened.quantity} ${cfg.name} ${pos.leverage}x。新仓没有止损止盈，需要的话重新设`,
+        });
+      } else {
+        toast('反手只完成了一半：仓位已平，反向开仓失败', 'error', {
+          duration: 8000,
+          description: `已平掉${closedText}，反向${isLong ? '空' : '多'}单没开成：${res.openError ?? '未知原因'}。原仓已不在，要开反向仓请手动下单`,
+        });
+      }
+      onMutated(true);
+    } catch (e: unknown) {
+      toast((e as Error).message || '反手失败', 'error');
+    } finally {
+      setReversing(false);
+    }
   };
 
   const handleAddMargin = () => {
@@ -323,6 +362,23 @@ function PositionItem({ pos, brackets, wide, onMutated }: {
         )}
         <Badge variant={isLong ? 'success' : 'destructive'} className="text-[10px] px-2 py-0.5">{isLong ? '做多' : '做空'}</Badge>
         <Badge variant="outline" className="text-[10px] px-2 py-0.5">{isCrossPos ? '全仓' : '逐仓'} {pos.leverage}x</Badge>
+        {/* 反手挂在卡右上角：它跟这排徽标说的是同一件事——做多/做空、杠杆、保证金模式，正是反手要翻面的那些。
+            平时只占一格图标，确认态才展成文字。确认态写"确认"两个字而不是"确认反手"：
+            Portfolio 四格窄卡这一行只剩三十来像素余量，四个字必被 flex-wrap 甩到下一排 */}
+        <div className="ml-auto flex items-center gap-1">
+          <Button
+            size="sm"
+            variant={confirmReverse ? 'destructive' : 'outline'}
+            className={confirmReverse ? 'h-7 sm:h-6 px-2 text-[11px]' : 'h-7 w-7 sm:h-6 sm:w-6 p-0'}
+            disabled={reversing}
+            title={confirmReverse ? '确认反手（再点一次执行）' : '反手'}
+            aria-label={confirmReverse ? '确认反手' : '反手'}
+            onClick={() => confirmReverse ? void handleReverse() : setConfirmReverse(true)}
+          >
+            {reversing ? <Loader2 className="w-3 h-3 animate-spin" /> : confirmReverse ? '确认' : <ArrowLeftRight className="w-3 h-3" />}
+          </Button>
+          <HelpTip text={'反手 = 市价全平当前仓位，立刻反向开等量新仓，同杠杆、同保证金模式。\n做多一步变做空，不用自己先平再开。\n原仓的止损止盈不会带到新仓，要的话重新设。\n余额不够开反向仓时只完成平仓（亏着反手多半会这样：亏掉的那部分正是新仓保证金的缺口）。'} />
+        </div>
       </div>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className={`text-xl font-black tabular-nums leading-none ${isPnlUp ? 'text-green-500' : 'text-red-500'}`}>

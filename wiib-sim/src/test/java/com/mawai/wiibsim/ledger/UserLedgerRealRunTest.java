@@ -548,8 +548,8 @@ class UserLedgerRealRunTest {
      * 别拿这条去排查串行路径。但事务外还有一笔与并发无关的账：UPDATE 已经自动提交，
      * 紧跟的 INSERT 再失败就是余额变了账没记，事后补不回来。两条都只能靠审查看调用点在不在事务里。
      * 现状：全部 {@code atomic*} 调用点都在事务内——非游戏侧要么是 public {@code @Transactional} 入口
-     * （CryptoOrderServiceImpl.buy/sell、FuturesTradingServiceImpl.cancelOrder、
-     * UserServiceImpl.transferToGame、MarginAccountServiceImpl.addLoanPrincipal/applyCashInflow…），
+     * （CryptoOrderServiceImpl.buy/sell、UserServiceImpl.transferToGame、
+     * MarginAccountServiceImpl.addLoanPrincipal/applyCashInflow…），
      * 要么是 protected {@code @Transactional} 的 doXxx 经 getAopProxy 调进来；
      * 游戏侧走 GameLockExecutor/TransactionTemplate 的编程式事务。
      * 但这一点<b>没有任何自动化守卫</b>，只有代码审查兜着；唯一相关的真跑覆盖是

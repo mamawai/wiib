@@ -10,7 +10,6 @@ import com.mawai.wiibsim.mapper.MinesGameMapper;
 import com.mawai.wiibsim.service.MinesService;
 import com.mawai.wiibsim.service.UserService;
 import com.mawai.wiibsim.util.GameLockExecutor;
-import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -25,6 +24,11 @@ import java.util.stream.Collectors;
 import static com.mawai.wiibcommon.enums.LedgerBizType.MINES_BET;
 import static com.mawai.wiibcommon.enums.LedgerBizType.MINES_CASHOUT;
 
+/**
+ * 矿工（扫雷）。<b>进行中的那一局就是 mines_game 里 status=PLAYING 的那行</b>——
+ * 雷位、已翻格、倍率每步就写库，事实源只此一份，没有过期这回事：
+ * 扣了本金的局永远能接着玩。
+ */
 @Slf4j
 @Service
 @RequiredArgsConstructor
@@ -42,15 +46,13 @@ public class MinesServiceImpl implements MinesService {
     private static final BigDecimal HOUSE_EDGE = new BigDecimal("0.50");
     private static final double DAMPEN = 0.9;
 
-    private static final String SK = "mines:session:";
     private static final String LK = "mines:user:";
-    private static final long SESSION_TTL = 2;
 
-    private static final String PHASE_PLAYING = "PLAYING";
-    private static final String PHASE_SETTLED = "SETTLED";
     private static final String STATUS_PLAYING = "PLAYING";
     private static final String STATUS_CASHED_OUT = "CASHED_OUT";
     private static final String STATUS_EXPLODED = "EXPLODED";
+    /** 前端只认 PLAYING / SETTLED 两态：兑现和踩雷都报 SETTLED */
+    private static final String PHASE_SETTLED = "SETTLED";
 
     private static final Random RANDOM = new SecureRandom();
 
@@ -74,15 +76,6 @@ public class MinesServiceImpl implements MinesService {
         }
     }
 
-    @Data
-    public static class MinesSession implements java.io.Serializable {
-        private long gameId;
-        private BigDecimal betAmount;
-        private Set<Integer> minePositions;
-        private List<Integer> revealed;
-        private String phase;
-    }
-
     // ==================== 公开接口 ====================
 
     @Override
@@ -91,9 +84,9 @@ public class MinesServiceImpl implements MinesService {
             MinesStatusDTO dto = new MinesStatusDTO();
             dto.setBalance(userService.getGameBalance(userId));
 
-            MinesSession session = gameLock.getSession(SK, userId);
-            if (session != null) {
-                dto.setActiveGame(buildPlayingState(session, dto.getBalance()));
+            MinesGame game = minesGameMapper.selectPlaying(userId);
+            if (game != null) {
+                dto.setActiveGame(buildPlayingState(game, dto.getBalance()));
             }
             return dto;
         });
@@ -107,7 +100,7 @@ public class MinesServiceImpl implements MinesService {
                 throw new BizException(ErrorCode.MINES_INVALID_BET);
             }
 
-            if (gameLock.getSession(SK, userId) != null) {
+            if (minesGameMapper.selectPlaying(userId) != null) {
                 throw new BizException(ErrorCode.MINES_GAME_IN_PROGRESS);
             }
 
@@ -119,15 +112,11 @@ public class MinesServiceImpl implements MinesService {
             // 扣余额
             userService.updateGameBalance(userId, amount.negate());
 
-            // 生成雷位
-            Set<Integer> mines = generateMines();
-
-            // 写DB
             MinesGame game = new MinesGame();
             game.setUserId(userId);
             game.setBetAmount(amount);
             game.setFee(BigDecimal.ZERO);   // 从未真实收取(抽水内含在赔付表 HOUSE_EDGE)，列 NOT NULL 记 0 防假账
-            game.setMinePositions(mines.stream().sorted().map(String::valueOf).collect(Collectors.joining(",")));
+            game.setMinePositions(toDbString(generateMines()));
             game.setRevealedCells("");
             game.setMultiplier(BigDecimal.ONE);
             game.setPayout(BigDecimal.ZERO);
@@ -136,17 +125,8 @@ public class MinesServiceImpl implements MinesService {
             game.setUpdatedAt(LocalDateTime.now());
             minesGameMapper.insert(game);
 
-            // 写Redis session
-            MinesSession session = new MinesSession();
-            session.setGameId(game.getId());
-            session.setBetAmount(amount);
-            session.setMinePositions(mines);
-            session.setRevealed(new ArrayList<>());
-            session.setPhase(PHASE_PLAYING);
-            gameLock.saveSession(SK, userId, session, SESSION_TTL);
-
             BigDecimal newBalance = userService.getGameBalance(userId);
-            return buildPlayingState(session, newBalance);
+            return buildPlayingState(game, newBalance);
         });
     }
 
@@ -162,38 +142,31 @@ public class MinesServiceImpl implements MinesService {
                 throw new BizException(ErrorCode.MINES_INVALID_CELL);
             }
 
-            MinesSession session = gameLock.requireSession(SK, userId, ErrorCode.MINES_NO_ACTIVE_GAME);
-            requirePlaying(session);
+            MinesGame game = requirePlaying(userId);
+            List<Integer> revealed = parseCells(game.getRevealedCells());
 
-            if (session.getRevealed().contains(cell)) {
+            if (revealed.contains(cell)) {
                 throw new BizException(ErrorCode.MINES_CELL_ALREADY_REVEALED);
             }
 
-            boolean isMine = session.getMinePositions().contains(cell);
+            List<Integer> mines = parseCells(game.getMinePositions());
 
-            if (isMine) {
-                // 踩雷
-                session.setPhase(PHASE_SETTLED);
-
-                // 更新DB
-                MinesGame game = minesGameMapper.selectById(session.getGameId());
+            if (mines.contains(cell)) {
+                // 踩雷：本局作废，revealed 保持踩雷前的样子
                 game.setStatus(STATUS_EXPLODED);
                 game.setPayout(BigDecimal.ZERO);
-                game.setRevealedCells(toDbString(session.getRevealed()));
                 game.setUpdatedAt(LocalDateTime.now());
                 minesGameMapper.updateById(game);
-
-                gameLock.deleteSession(SK, userId);
 
                 BigDecimal balance = userService.getGameBalance(userId);
 
                 MinesGameStateDTO dto = new MinesGameStateDTO();
-                dto.setGameId(session.getGameId());
-                dto.setBetAmount(session.getBetAmount());
-                dto.setRevealed(session.getRevealed());
-                dto.setMinePositions(new ArrayList<>(session.getMinePositions()));
+                dto.setGameId(game.getId());
+                dto.setBetAmount(game.getBetAmount());
+                dto.setRevealed(revealed);
+                dto.setMinePositions(mines);
                 dto.setResult("MINE");
-                dto.setCurrentMultiplier(getMultiplier(session.getRevealed().size()));
+                dto.setCurrentMultiplier(getMultiplier(revealed.size()));
                 dto.setNextMultiplier(null);
                 dto.setPotentialPayout(BigDecimal.ZERO);
                 dto.setPayout(BigDecimal.ZERO);
@@ -203,26 +176,21 @@ public class MinesServiceImpl implements MinesService {
             }
 
             // 安全
-            session.getRevealed().add(cell);
-            int revealedCount = session.getRevealed().size();
-            BigDecimal multiplier = getMultiplier(revealedCount);
-
-            // 翻完所有安全格 -> 自动提现
-            if (revealedCount == SAFE_COUNT) {
-                return doCashout(userId, session, multiplier);
-            }
-
-            gameLock.saveSession(SK, userId, session, SESSION_TTL);
-
-            // 更新DB中的revealed
-            MinesGame game = minesGameMapper.selectById(session.getGameId());
-            game.setRevealedCells(toDbString(session.getRevealed()));
+            revealed.add(cell);
+            BigDecimal multiplier = getMultiplier(revealed.size());
+            game.setRevealedCells(toDbString(revealed));
             game.setMultiplier(multiplier);
             game.setUpdatedAt(LocalDateTime.now());
+
+            // 翻完所有安全格 -> 自动提现
+            if (revealed.size() == SAFE_COUNT) {
+                return doCashout(userId, game, multiplier);
+            }
+
             minesGameMapper.updateById(game);
 
             BigDecimal balance = userService.getGameBalance(userId);
-            return buildPlayingState(session, balance);
+            return buildPlayingState(game, balance);
         });
     }
 
@@ -231,15 +199,14 @@ public class MinesServiceImpl implements MinesService {
     public MinesGameStateDTO cashout(Long userId) {
         // 主动兑现入口，经 doCashout 派彩。派彩的账本语义标在这里，不是标在私有的 doCashout 上。
         return gameLock.executeInLockTx(LK, userId, () -> {
-            MinesSession session = gameLock.requireSession(SK, userId, ErrorCode.MINES_NO_ACTIVE_GAME);
-            requirePlaying(session);
+            MinesGame game = requirePlaying(userId);
+            List<Integer> revealed = parseCells(game.getRevealedCells());
 
-            if (session.getRevealed().isEmpty()) {
+            if (revealed.isEmpty()) {
                 throw new BizException(ErrorCode.MINES_MUST_REVEAL_FIRST);
             }
 
-            BigDecimal multiplier = getMultiplier(session.getRevealed().size());
-            return doCashout(userId, session, multiplier);
+            return doCashout(userId, game, getMultiplier(revealed.size()));
         });
     }
 
@@ -247,30 +214,24 @@ public class MinesServiceImpl implements MinesService {
 
     // 派彩点。靠 AOP 生效的注解不能标这里（private + 同类自调用，会静默失效），要标就标到
     // reveal / cashout 两个 public 入口上。事务不受影响：编程式事务挂在线程上，不看代理。
-    private MinesGameStateDTO doCashout(Long userId, MinesSession session, BigDecimal multiplier) {
-        BigDecimal payout = session.getBetAmount().multiply(multiplier).setScale(2, RoundingMode.HALF_UP);
+    private MinesGameStateDTO doCashout(Long userId, MinesGame game, BigDecimal multiplier) {
+        BigDecimal payout = game.getBetAmount().multiply(multiplier).setScale(2, RoundingMode.HALF_UP);
 
         userService.updateGameBalance(userId, payout);
 
-        session.setPhase(PHASE_SETTLED);
-
-        MinesGame game = minesGameMapper.selectById(session.getGameId());
         game.setStatus(STATUS_CASHED_OUT);
         game.setMultiplier(multiplier);
         game.setPayout(payout);
-        game.setRevealedCells(toDbString(session.getRevealed()));
         game.setUpdatedAt(LocalDateTime.now());
         minesGameMapper.updateById(game);
-
-        gameLock.deleteSession(SK, userId);
 
         BigDecimal balance = userService.getGameBalance(userId);
 
         MinesGameStateDTO dto = new MinesGameStateDTO();
-        dto.setGameId(session.getGameId());
-        dto.setBetAmount(session.getBetAmount());
-        dto.setRevealed(session.getRevealed());
-        dto.setMinePositions(new ArrayList<>(session.getMinePositions()));
+        dto.setGameId(game.getId());
+        dto.setBetAmount(game.getBetAmount());
+        dto.setRevealed(parseCells(game.getRevealedCells()));
+        dto.setMinePositions(parseCells(game.getMinePositions()));
         dto.setResult("CASHED_OUT");
         dto.setCurrentMultiplier(multiplier);
         dto.setNextMultiplier(null);
@@ -281,12 +242,12 @@ public class MinesServiceImpl implements MinesService {
         return dto;
     }
 
-    private Set<Integer> generateMines() {
+    private List<Integer> generateMines() {
         Set<Integer> mines = new HashSet<>();
         while (mines.size() < MINE_COUNT) {
             mines.add(RANDOM.nextInt(GRID_SIZE));
         }
-        return mines;
+        return mines.stream().sorted().toList();
     }
 
     private BigDecimal getMultiplier(int revealedCount) {
@@ -294,35 +255,46 @@ public class MinesServiceImpl implements MinesService {
         return MULTIPLIERS[revealedCount];
     }
 
-    private MinesGameStateDTO buildPlayingState(MinesSession session, BigDecimal balance) {
-        int count = session.getRevealed().size();
+    private MinesGameStateDTO buildPlayingState(MinesGame game, BigDecimal balance) {
+        List<Integer> revealed = parseCells(game.getRevealedCells());
+        int count = revealed.size();
         BigDecimal multiplier = getMultiplier(count);
         BigDecimal nextMultiplier = count < SAFE_COUNT ? getMultiplier(count + 1) : null;
 
         MinesGameStateDTO dto = new MinesGameStateDTO();
-        dto.setGameId(session.getGameId());
-        dto.setBetAmount(session.getBetAmount());
-        dto.setRevealed(new ArrayList<>(session.getRevealed()));
-        dto.setMinePositions(null);
+        dto.setGameId(game.getId());
+        dto.setBetAmount(game.getBetAmount());
+        dto.setRevealed(revealed);
+        dto.setMinePositions(null);   // 局还没结束，雷位不能下发
         dto.setResult(null);
         dto.setCurrentMultiplier(multiplier);
         dto.setNextMultiplier(nextMultiplier);
         dto.setPotentialPayout(count > 0
-                ? session.getBetAmount().multiply(multiplier).setScale(2, RoundingMode.HALF_UP)
+                ? game.getBetAmount().multiply(multiplier).setScale(2, RoundingMode.HALF_UP)
                 : BigDecimal.ZERO);
         dto.setPayout(null);
-        dto.setPhase(PHASE_PLAYING);
+        dto.setPhase(STATUS_PLAYING);
         dto.setBalance(balance);
         return dto;
     }
 
-    private String toDbString(List<Integer> list) {
-        return list.stream().map(String::valueOf).collect(Collectors.joining(","));
+    /** 逗号串 → 格子号；空串（新局的 revealed_cells）给空表。返回可变表，调用方要往里加格子 */
+    private List<Integer> parseCells(String csv) {
+        if (csv.isEmpty()) return new ArrayList<>();
+        return Arrays.stream(csv.split(","))
+                .map(Integer::parseInt)
+                .collect(Collectors.toCollection(ArrayList::new));
     }
 
-    private void requirePlaying(MinesSession session) {
-        if (!PHASE_PLAYING.equals(session.getPhase())) {
+    private String toDbString(Collection<Integer> cells) {
+        return cells.stream().map(String::valueOf).collect(Collectors.joining(","));
+    }
+
+    private MinesGame requirePlaying(Long userId) {
+        MinesGame game = minesGameMapper.selectPlaying(userId);
+        if (game == null) {
             throw new BizException(ErrorCode.MINES_NO_ACTIVE_GAME);
         }
+        return game;
     }
 }

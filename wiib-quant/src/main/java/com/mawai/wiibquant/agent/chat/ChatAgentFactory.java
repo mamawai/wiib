@@ -1,11 +1,13 @@
 package com.mawai.wiibquant.agent.chat;
 
+import com.mawai.wiibcommon.entity.UserLlmEndpoint;
 import com.mawai.wiibquant.agent.llm.ChatEndpoints;
 import com.mawai.wiibquant.agent.analysis.DeepAnalysisService;
 import com.mawai.wiibquant.agent.llm.ConversationSummarizer;
 import com.mawai.wiibquant.agent.llm.MessagesSchema;
 import com.mawai.wiibquant.agent.llm.ModelCallLimiter;
 import com.mawai.wiibquant.agent.llm.ResilientChatService;
+import com.mawai.wiibquant.agent.llm.UsageTrackingChatModel;
 import com.mawai.wiibquant.agent.toolkit.MarketToolkit;
 import com.mawai.wiibquant.agent.toolkit.NewsToolkit;
 import com.mawai.wiibquant.agent.trader.TraderChatService;
@@ -62,11 +64,29 @@ public class ChatAgentFactory {
     /**
      * 一份用户配置对应的全套叶子。
      *
-     * @param light 浅模型本体：{@link ChatTurnRunner} 的路由问答是一次性的结构化调用，
-     *              没有 ReAct 循环也没有工具执行，用不上包一层 agent
+     * @param modelLabel 这份配置的对外名字（端点名 · 模型名），随每条答案落库给前端显示
+     * @param deep       深模型（summarizer 作答与深研判走它）。透出来是为了取用量——它本身就是本轮的账本
+     * @param light      浅模型本体：{@link ChatTurnRunner} 的路由问答是一次性的结构化调用，
+     *                   没有 ReAct 循环也没有工具执行，用不上包一层 agent
      */
-    public record Leaves(ChatModel light, Map<String, Expert> experts,
-                         CompiledGraph<MessagesState<Message>> summarizer) {
+    public record Leaves(String modelLabel, UsageTrackingChatModel deep, UsageTrackingChatModel light,
+                         Map<String, Expert> experts, CompiledGraph<MessagesState<Message>> summarizer) {
+
+        /** 轮开始清零，划出本轮账本的起点 */
+        public void resetUsage() {
+            deep.reset();
+            light.reset();      // 没单独绑轻模型时与 deep 是同一个实例，重复清零无害
+        }
+
+        /** 本轮累计：深浅两条端点合账。同一个实例时只能取一遍，否则每笔都算两次 */
+        public UsageTrackingChatModel.UsageSnapshot usageSnapshot() {
+            return light == deep ? deep.snapshot() : deep.snapshot().merge(light.snapshot());
+        }
+
+        /** 账本被中断丢下的在途流写脏了，这一轮的数不能报 */
+        public boolean usageUntrusted() {
+            return deep.untrusted() || light.untrusted();
+        }
     }
 
     private final ChatModelFactory chatModelFactory;
@@ -178,8 +198,13 @@ public class ChatAgentFactory {
     // 形参不叫 config：这个包里 config 一律指 RunnableConfig，重名读起来会误导
     private Leaves build(ChatEndpoints eps) throws Exception {
         ChatModelFactory.Models models = chatModelFactory.modelsFor(eps);
-        ChatModel deep = models.deep();
-        ChatModel light = models.light();
+        // 用量装饰器包在这一层而不是 ChatModelFactory：叶子与模型同指纹、同寿命、同为每用户一份，
+        // 而闸门保证一个用户同时只有一轮在跑——于是它能当"轮级账本"使（轮开头 resetUsage 划边界）。
+        // 包在工厂里的话，复盘教练那条借模型的无关链路也要白背一层装饰
+        UsageTrackingChatModel deep = new UsageTrackingChatModel(models.deep());
+        // 没单独绑轻模型时工厂给的本就是同一个实例，装饰器也得共用一个，否则同一次调用记两遍账
+        UsageTrackingChatModel light = models.light() == models.deep()
+                ? deep : new UsageTrackingChatModel(models.light());
 
         // LinkedHashMap 保序：派发顺序、结论拼进历史的顺序都跟着它，market 在前 news 在后
         Map<String, Expert> experts = new LinkedHashMap<>();
@@ -210,7 +235,14 @@ public class ChatAgentFactory {
                 只回答这个 trader 自身的状态/持仓/决策/计划/复盘笔记，大盘行情与新闻有别的专家负责。
                 回答精炼中文。"""), null));
 
-        return new Leaves(light, experts, summarizerLeaf(deep, light, eps.userId()));
+        return new Leaves(modelLabel(eps.deep()), deep, light, experts,
+                summarizerLeaf(deep, light, eps.userId()));
+    }
+
+    /** 端点名 · 模型名：站内展示模型的统一口径（见 LlmEndpointSelect / ReplayPanel）；没起名就只报模型 */
+    private static String modelLabel(UserLlmEndpoint endpoint) {
+        String name = endpoint.getName();
+        return name == null || name.isBlank() ? endpoint.getModel() : name + " · " + endpoint.getModel();
     }
 
     /**
@@ -297,7 +329,7 @@ public class ChatAgentFactory {
                 .streaming(true) // 答案要逐字推给前端
                 .toolsFromObject(new DeepAnalysisToolkit(deep, deepAnalysisService, runRegistry))
                 // 可以多次调用：两套工具分别是"研判"与"对 trader 动手"，合成一个类只会让职责糊掉
-                .toolsFromObject(new TraderActionToolkit(traderChatService, runRegistry, userId))
+                .toolsFromObject(new TraderActionToolkit(runRegistry, userId))
                 .defaultSystem("""
                         你是加密货币研判工作台的分析师。对话里已经有专家 agent 取回的真实数据，
                         你的职责是据此写出最终回答（新闻的联网补充也归你，见原则2）。
@@ -318,9 +350,11 @@ public class ChatAgentFactory {
                            返回 PENDING_APPROVAL 时告知用户确认卡片已弹出，等确认后你会被再次唤起执行）；
                            "怎么看走势"这类普通提问不要调它、也不要主动推销，直接按专家数据作答
                         6. 对用户自己 AI 交易员动手的三个工具，同样只在用户明确要求时才调，绝不主动推销：
-                           · wake_trader（立刻唤醒它做一次决策，可能真开/平仓）与 review_trader_now（立刻复盘）
-                             都昂贵、需用户确认，PENDING_APPROVAL 的处理同上
-                           · leave_note_to_trader（给它留一句话，下次唤醒看一次就焚毁）便宜，不需要确认
+                           · wake_trader（立刻唤醒它做一次决策，可能真开/平仓）、review_trader_now（立刻复盘）、
+                             leave_note_to_trader（给它留一句话，按用户设定的轮次逐轮注入，上限24轮）
+                           · 这三个工具只会给用户打开一张表单，真正执不执行由用户点击决定：调用后如实说
+                             "表单已打开，请确认后提交"，绝不能说已经唤醒了／已经复盘了／留言已记下
+                           · 工具返回说表单没能打开时，如实告诉用户去 trader 面板手动操作，不要假装已经打开
                            查询类问题（它现在怎么样/持了什么仓/那笔为什么开）不归你，trader_agent 专家已经取回数据了
 
                         输出精炼中文。""".formatted(supplementTag, mergedTag))

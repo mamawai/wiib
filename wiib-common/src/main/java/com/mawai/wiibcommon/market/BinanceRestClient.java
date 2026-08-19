@@ -183,6 +183,33 @@ public class BinanceRestClient extends BaseRestTemplateConfig {
         }
     }
 
+    /**
+     * 按分钟数回看 1m K 线取 [periodLow, periodHigh]。
+     * 上面几个 getRecent* 是 feed 断线重连用的固定短窗（断线期间有 REST 轮询兜底，够用）；
+     * sim 自己停机时没人轮询，得按真实停机时长回看，所以走这一组。
+     * minutes 直接当 limit 传，由调用方限在 MatchPriceConsumer.RECOVER_MAX_MINUTES 内。
+     */
+    public BigDecimal[] getSpotHighLowByMinutes(String symbol, int minutes) {
+        return highLowOrNull(getKlines(symbol, "1m", minutes, null), symbol, "现货");
+    }
+
+    public BigDecimal[] getFuturesHighLowByMinutes(String symbol, int minutes) {
+        return highLowOrNull(getFuturesKlines(symbol, "1m", minutes, null), symbol, "合约");
+    }
+
+    public BigDecimal[] getMarkPriceHighLowByMinutes(String symbol, int minutes) {
+        return highLowOrNull(getMarkPriceKlines(symbol, minutes), symbol, "标记价");
+    }
+
+    private BigDecimal[] highLowOrNull(String json, String symbol, String label) {
+        try {
+            return getHighLow(json);
+        } catch (Exception e) {
+            log.error("解析{}K线高低价失败 symbol={}", label, symbol, e);
+            return null;
+        }
+    }
+
     /** 合约 exchangeInfo（全量，含各 symbol 的 LOT_SIZE/MIN_NOTIONAL 过滤器）；失败返回 null。 */
     public String getFuturesExchangeInfo() {
         String baseUrl = props.getFuturesRestBaseUrl();
@@ -220,21 +247,19 @@ public class BinanceRestClient extends BaseRestTemplateConfig {
      * 拉取最近2分钟Mark Price K线，返回 [periodLow, periodHigh]
      */
     public BigDecimal[] getRecentMarkPriceHighLow(String symbol) {
-        try {
-            String baseUrl = props.getFuturesRestBaseUrl();
-            if (baseUrl == null || baseUrl.isBlank()) return null;
-            URI uri = UriComponentsBuilder
-                    .fromUriString(baseUrl + "/fapi/v1/markPriceKlines")
-                    .queryParam("symbol", symbol)
-                    .queryParam("interval", "1m")
-                    .queryParam("limit", 2)
-                    .build().toUri();
-            String json = getGuarded(uri);
-            return getHighLow(json);
-        } catch (Exception e) {
-            log.error("获取Mark Price高低价失败 symbol={}", symbol, e);
-            return null;
-        }
+        return highLowOrNull(getMarkPriceKlines(symbol, 2), symbol, "标记价");
+    }
+
+    private String getMarkPriceKlines(String symbol, int limit) {
+        String baseUrl = props.getFuturesRestBaseUrl();
+        if (baseUrl == null || baseUrl.isBlank()) return null;
+        URI uri = UriComponentsBuilder
+                .fromUriString(baseUrl + "/fapi/v1/markPriceKlines")
+                .queryParam("symbol", symbol)
+                .queryParam("interval", "1m")
+                .queryParam("limit", Math.min(limit, 1000))
+                .build().toUri();
+        return getGuarded(uri);
     }
 
     /**

@@ -96,6 +96,15 @@ public class ConversationSummarizer implements NodeHook.BeforeCall<MessagesState
     }
 
     /** 返回空列表 = 没有新原文可压（调用方据此跳过本次压缩） */
+    /**
+     * 这条是不是压缩产出的摘要。压缩后的形状是「首问 + 摘要 + 保留窗」，
+     * 重新生成回退要靠它认出"队首那条 user 是压缩留下的首问、不是本轮提问"。
+     */
+    public static boolean isSummary(Message message) {
+        return message instanceof SystemMessage system
+                && system.getText() != null && system.getText().startsWith(SUMMARY_PREFIX);
+    }
+
     private List<Message> compress(List<Message> messages, int cutoff) {
         UserMessage firstUser = messages.stream()
                 .filter(UserMessage.class::isInstance).map(UserMessage.class::cast)
@@ -110,9 +119,8 @@ public class ConversationSummarizer implements NodeHook.BeforeCall<MessagesState
             }
             // 上次压缩留下的摘要靠固定前缀认出来，原样留着不再压第二遍——
             // 它在 index 1，不挑出来的话每次压缩都会把它再揉一遍，几轮后早期事实彻底消失且无从归因
-            if (previousSummary == null && message instanceof SystemMessage system
-                    && system.getText() != null && system.getText().startsWith(SUMMARY_PREFIX)) {
-                previousSummary = system;
+            if (previousSummary == null && isSummary(message)) {
+                previousSummary = (SystemMessage) message;
                 continue;
             }
             toSummarize.add(message);

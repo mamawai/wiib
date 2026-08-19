@@ -2,6 +2,7 @@ package com.mawai.wiibquant.agent.llm;
 
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONArray;
+import com.alibaba.fastjson2.JSONException;
 import com.alibaba.fastjson2.JSONObject;
 import lombok.extern.slf4j.Slf4j;
 import org.jspecify.annotations.NonNull;
@@ -186,7 +187,13 @@ public class ResponsesChatModel implements ChatModel {
                 .timeout(STREAM_IDLE_TIMEOUT)
                 .onErrorMap(java.util.concurrent.TimeoutException.class, _ ->
                         new TransientAiException("Responses SSE 空闲超过 " + STREAM_IDLE_TIMEOUT.toMinutes() + " 分钟，判定连接挂死"))
-                .concatMap(sse -> toFrames(sse, state));
+                .concatMap(sse -> toFrames(sse, state))
+                // 整条流一个可解析事件都没有：单帧跳过是对的，但全跳过就等于把失败咽了——
+                // 上游返回的根本不是我们认的 SSE，得当场说清楚，否则退化成静默空回答更难查
+                .switchIfEmpty(Flux.defer(() -> state.sawMalformed
+                        ? Flux.error(new NonTransientAiException(
+                                "Responses SSE 全程无可解析事件，上游返回格式不兼容"))
+                        : Flux.empty()));
         });
     }
 
@@ -194,6 +201,7 @@ public class ResponsesChatModel implements ChatModel {
     private static class StreamState {
         boolean sawText;
         boolean sawToolCall;
+        boolean sawMalformed;
     }
 
     private Flux<ChatResponse> toFrames(ServerSentEvent<String> sse, StreamState state) {
@@ -201,9 +209,22 @@ public class ResponsesChatModel implements ChatModel {
         if (data == null || data.isBlank() || "[DONE]".equals(data.trim())) {
             return Flux.empty();
         }
-        JSONObject event = JSON.parseObject(data);
+        JSONObject event;
+        try {
+            event = JSON.parseObject(data);
+        } catch (JSONException e) {
+            // 不规范的网关会把 "event: response.created" 这类行原样当 data 发（线上实测）。
+            // 解析不了就无从判断 type，跟下面 default 分支同构地忽略掉——真正的正文事件各有其行，
+            // 不该被一个我们本来就不看的事件炸掉整轮。日志只打第一条，防畸形流刷屏
+            if (!state.sawMalformed) {
+                state.sawMalformed = true;
+                log.warn("[Responses] SSE 事件非 JSON，已跳过 data={}",
+                        data.length() > 200 ? data.substring(0, 200) + "…" : data);
+            }
+            return Flux.empty();
+        }
         // 事件类型以 data.type 为准（比 event: 行更普适，CPA/OpenAI 都带）
-        String type = event.getString("type");
+        String type = event == null ? null : event.getString("type");
         if (type == null) {
             return Flux.empty();
         }

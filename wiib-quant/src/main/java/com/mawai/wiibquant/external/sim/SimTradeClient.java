@@ -9,6 +9,7 @@ import com.mawai.wiibcommon.util.Result;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
+import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.support.RestClientAdapter;
 import org.springframework.web.service.invoker.HttpServiceProxyFactory;
@@ -114,6 +115,24 @@ public class SimTradeClient {
     /** 量化子账户销户（AI Trader 过期轮次清理）：sim 侧幂等，账户不存在也算成功。 */
     public void deleteAccount(String username) {
         unwrap(api.deleteAccount(username));
+    }
+
+    /**
+     * 传输层失败（连不上/读超时）：这笔单在 sim 那边是死是活不知道，
+     * 调用方该拿同一个 clientRequestId 重发确认，而不是当失败重下。
+     */
+    public static boolean isTransportFailure(Throwable e) {
+        return e instanceof ResourceAccessException;
+    }
+
+    /**
+     * sim 幂等占位回的"处理中"：同一笔还在跑，结果同样未知，同键再来即可（错误码由 unwrap 拼进消息）。
+     * 只认 1106 不认 1105——1105 是 sim 侧抢 Redis 锁失败，那种是确定没成交，当"未知"处理
+     * 会让模型收到一句"可能已经成交、别重下"，白丢一次交易。
+     */
+    public static boolean isProcessing(Throwable e) {
+        return e.getMessage() != null
+                && e.getMessage().contains("code=" + ErrorCode.ORDER_IN_FLIGHT.getCode());
     }
 
     /** 拆 Result 壳：sim 业务失败统一转异常抛出（sim 异常一律 200+Result.fail，不靠 HTTP 状态码）。 */

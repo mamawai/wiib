@@ -32,6 +32,8 @@ public enum ErrorCode {
     FROZEN_POSITION_NOT_ENOUGH(1103, "冻结持仓不足"),
     ACQUIRE_LOCK_FAILED(1104, "获取锁失败，请稍后重试"),
     ORDER_PROCESSING(1105, "订单正在处理中，请稍后再试"),
+    // 1106 专给幂等占位：这笔单确实在跑，结果未知；1105 是抢锁失败，那是确定没成交
+    ORDER_IN_FLIGHT(1106, "同一请求正在处理中，请用同一 clientRequestId 重试"),
 
     // 交易限制错误码 1200+
     SLIPPAGE_EXCEEDED(1202, "价格波动过大，请重新下单"),
@@ -129,7 +131,8 @@ public enum ErrorCode {
     LLM_CONFIG_INVALID(2202, "LLM 配置无法建立连接"),
     CHAT_ALREADY_RUNNING(2203, "你已有一轮对话进行中"),
     CHAT_CAPACITY_FULL(2204, "当前对话人数已满，请稍后再试"),
-    REPLAY_AI_BUSY(2205, "上一次 AI 分析还在进行中");
+    REPLAY_AI_BUSY(2205, "上一次 AI 分析还在进行中"),
+    CHAT_REGENERATE_UNAVAILABLE(2206, "这条回答无法重新生成");
 
     private final int code;
     private final String msg;

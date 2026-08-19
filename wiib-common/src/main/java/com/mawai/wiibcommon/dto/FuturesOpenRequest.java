@@ -15,6 +15,8 @@ public class FuturesOpenRequest {
     private String orderType; // MARKET/LIMIT
     private BigDecimal limitPrice; // 限价时必填
     private String memo;
+    /** 请求幂等键（internal 通道用）：同键重发不会重复成交；用户端下单不传 */
+    private String clientRequestId;
     private List<StopLoss> stopLosses;
     private List<TakeProfit> takeProfits;
 

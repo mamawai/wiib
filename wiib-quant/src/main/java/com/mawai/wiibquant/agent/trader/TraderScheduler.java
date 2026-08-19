@@ -58,6 +58,9 @@ public class TraderScheduler {
     /** 警报冷静期：距该 trader 上一次任何唤醒（例行/警报）不足 5 分钟不再警报 */
     static final long ALERT_COOLDOWN_MS = 5 * 60_000L;
 
+    /** 同一 trader 不并行的拒因；预检与真占位两处共用一份措辞 */
+    private static final String WAKE_BUSY_REASON = "上一轮唤醒还在跑，本次手动唤醒跳过（同一 trader 不并行）";
+
     private final Semaphore slots = new Semaphore(MAX_CONCURRENT_WAKEUPS);
     private final Set<Long> inFlight = ConcurrentHashMap.newKeySet();
     /** 每 trader 最近已触发的边界时刻：多个 watch 币在同一刻收盘会各发一次事件，靠它去重 */
@@ -106,7 +109,7 @@ public class TraderScheduler {
      * 阶段0 全体例行唤醒照常跑完 → 【停工窗口开】→ 阶段1 全体复盘并行 →
      * 屏障（等全部复盘落库）→ 阶段2 全体学习并行 → 【停工窗口关】。
      * 屏障保证每个 learner 读到的是同侪同一天的复盘；窗口保证复盘/学习读的是定格数据。
-     * 各阶段单人超时都有硬顶（唤醒600s/复盘180s/学习300s），join 不会永久卡住。
+     * 各阶段单人超时都有硬顶（唤醒600s/复盘600s/学习300s），join 不会永久卡住。
      */
     private void startDailyHandover(long boundary) {
         // 原子抢占：日线边界的多 symbol 事件里只有一个赢家启动交接
@@ -301,18 +304,13 @@ public class TraderScheduler {
     }
 
     /**
-     * 手动唤醒（对话轨的 wake_trader 工具，已过 HITL 确认）：走与例行/警报同一套治理——
-     * 预算预检 → 每 trader 互斥 → 信号量，然后虚拟线程上异步跑。
+     * 手动唤醒的准入预检：不能唤醒时给出原因，能唤醒返回 null。
+     * 动作面板拿它决定按钮点不点得动，与 {@link #tryManualWake} 共用同一份判断——
+     * 面板显示的拒因就是真点下去会拿到的那一句。
      * <p>
-     * <b>为什么异步而不是同步等结果</b>：唤醒预算最长 600s，对话侧同步等于把 SSE 通道压死几分钟；
-     * 而且 trader 本来就是"后台醒来做完事睡去"的回路，对话只负责扣扳机，结果去竞技场看。
-     * <p>
-     * <b>不占 firedBoundary</b>：那是例行调度的去重位，手动唤醒占了它会把本边界真正的
-     * K线收盘信号顶掉——手动是额外补一次，不该顶替例行。警报路径同理。
-     *
-     * @return null=已触发；非空=没触发的原因（原样给模型转述给用户）
+     * inFlight 这条只查不占：面板是轮询刷新的，占位会把 trader 锁死。
      */
-    public String tryManualWake(AiTrader trader) {
+    public String manualWakeBlockedReason(AiTrader trader) {
         if (handoverActive) {
             return "全体复盘与学习进行中（日线交接的停工窗口），几分钟后窗口关闭再试";
         }
@@ -326,8 +324,63 @@ public class TraderScheduler {
         if (TraderWakeupRunner.wakeBudgetSeconds(boundary, intervalMs, now) < TraderWakeupRunner.MIN_WAKE_SECONDS) {
             return "距下一次例行唤醒不足" + TraderWakeupRunner.MIN_WAKE_SECONDS + "秒，本次手动唤醒省下了，稍等就有新决策";
         }
+        if (inFlight.contains(trader.getId())) {
+            return WAKE_BUSY_REASON;
+        }
+        return null;
+    }
+
+    /** 这个 trader 手上有没有活（例行唤醒 / 交接阶段 / 点播复盘共用同一个位子）。只查不占。 */
+    public boolean isBusy(long traderId) {
+        return inFlight.contains(traderId);
+    }
+
+    /**
+     * 占住这个 trader 的"正在跑"位——点播复盘走这里，与调度侧共用同一个 inFlight，
+     * 两边才不会对同一个 trader 各跑一篇复盘、把 ai_trader.memory 互相覆盖掉。
+     * 抢到必须在 finally 里 {@link #release}，否则这个 trader 从此醒不过来。
+     */
+    public boolean tryOccupy(long traderId) {
+        return inFlight.add(traderId);
+    }
+
+    public void release(long traderId) {
+        inFlight.remove(traderId);
+    }
+
+    /** 下一次例行唤醒的时刻；档位已下线返回 null。动作面板用它显示"再等多久就自动醒了" */
+    public Long nextRoutineWakeAt(AiTrader trader) {
+        Long intervalMs = INTERVAL_MS.get(trader.getIntervalCode());
+        if (intervalMs == null) {
+            return null;
+        }
+        long now = nowMs.getAsLong();
+        return now - Math.floorMod(now, intervalMs) + intervalMs;
+    }
+
+    /**
+     * 手动唤醒（动作面板的按钮扣扳机）：走与例行/警报同一套治理——
+     * 预算预检 → 每 trader 互斥 → 信号量，然后虚拟线程上异步跑。
+     * <p>
+     * <b>异步而不是同步等结果</b>：唤醒预算最长 600s，同步等于把调用方的连接压死几分钟；
+     * trader 本来就是"后台醒来做完事睡去"的回路，面板只负责扣扳机，结果去竞技场看。
+     * <p>
+     * <b>不占 firedBoundary</b>：那是例行调度的去重位，手动唤醒占了它会把本边界真正的
+     * K线收盘信号顶掉——手动是额外补一次，不该顶替例行。警报路径同理。
+     *
+     * @return null=已触发；非空=没触发的原因（原样给用户看）
+     */
+    public String tryManualWake(AiTrader trader) {
+        String blocked = manualWakeBlockedReason(trader);
+        if (blocked != null) {
+            return blocked;
+        }
+        long intervalMs = INTERVAL_MS.get(trader.getIntervalCode());
+        long now = nowMs.getAsLong();
+        long boundary = now - Math.floorMod(now, intervalMs);
+        // 预检只是"看一眼"不占位；真占位要在这里再抢一次——预检到现在之间可能有别人先进来了
         if (!inFlight.add(trader.getId())) {
-            return "上一轮唤醒还在跑，本次手动唤醒跳过（同一 trader 不并行）";
+            return WAKE_BUSY_REASON;
         }
         // 一并记进冷静期基准：刚手动醒过，紧接着的波动警报就没有增量价值了
         lastWakeAt.put(trader.getId(), now);

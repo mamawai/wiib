@@ -3,8 +3,6 @@ package com.mawai.wiibquant.agent.trader;
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.mawai.wiibcommon.dto.FuturesPositionDTO;
 import com.mawai.wiibcommon.entity.AiTrader;
 import com.mawai.wiibcommon.entity.AiTraderDecision;
@@ -12,30 +10,24 @@ import com.mawai.wiibcommon.entity.AiTraderPlan;
 import com.mawai.wiibcommon.entity.FuturesStopLoss;
 import com.mawai.wiibcommon.entity.FuturesTakeProfit;
 import com.mawai.wiibcommon.entity.UserLlmEndpoint;
-import com.mawai.wiibquant.agent.learning.ReviewRunner;
 import com.mawai.wiibquant.external.sim.SimTradeClient;
-import com.mawai.wiibquant.mapper.AiTraderDecisionMapper;
-import com.mawai.wiibquant.mapper.AiTraderMapper;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
-import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 
 /**
- * 对话轨访问 trader 的唯一入口：查询读库，动作进程内调 runner。
+ * 对话轨读 trader 的唯一入口：只查询、不动手，动作归 {@link TraderActionService}。
  * <p>
- * <b>两个 agent 的解耦纪律在这里落地</b>：chat 与 trader 从不互相对话——查询只读 trader 写下的表，
- * 动作只是"扣一次扳机"（唤醒/复盘/留言），扣完就走，不等 trader 回话、也没有任何回调。
- * trader 依旧是那个"醒来读库→决策→写库→睡去"的无状态回路，它根本不知道有人在跟它聊天。
+ * <b>两个 agent 的解耦纪律在这里落地</b>：chat 与 trader 从不互相对话，查询只读 trader
+ * 自己写下的表。trader 依旧是那个"醒来读库→决策→写库→睡去"的无状态回路，
+ * 它根本不知道有人在跟它聊天。
  * <p>
  * 所有方法按 userId 取自己的 trader，取不到就如实说"还没有"——归属判断只此一处。
  */
-@Slf4j
 @Service
 @RequiredArgsConstructor
 public class TraderChatService {
@@ -47,16 +39,10 @@ public class TraderChatService {
     static final int MAX_DECISIONS = 20;
     static final int DEFAULT_DECISIONS = 5;
     private static final int RECENT_CLOSED_PLANS = 5;
-    /** 留言长度上限：它要原样进下一轮系统提示词，太长会挤掉真正的交易上下文 */
-    static final int MAX_NOTE_CHARS = 500;
 
     private final TraderService traderService;
     private final TraderModelFactory modelFactory;
     private final TraderPlanStore planStore;
-    private final TraderScheduler scheduler;
-    private final ReviewRunner reviewRunner;
-    private final AiTraderMapper traderMapper;
-    private final AiTraderDecisionMapper decisionMapper;
     private final SimTradeClient simTradeClient;
 
     // ===== 查询（纯读库） =====
@@ -91,6 +77,8 @@ public class TraderChatService {
                 .fluentPut("learningNotesNote", "学习笔记全文：learning agent 向同侪学习写的，trader 每次唤醒都会看到")
                 .fluentPut("customPrompt", t.getCustomPrompt())
                 .fluentPut("pendingOwnerNote", t.getOwnerNote())
+                // 剩余轮次一并给：模型答"我刚留的话还剩几次"只能靠库里这个数，卡片本身不进对话历史
+                .fluentPut("pendingOwnerNoteRounds", t.getOwnerNoteRounds())
                 .toJSONString();
     }
 
@@ -177,96 +165,7 @@ public class TraderChatService {
                 .toJSONString();
     }
 
-    // ===== 动作 =====
-
-    /**
-     * 手动唤醒：治理与准入全归调度器，这里只判"能不能唤醒这个 trader"。
-     * <p>
-     * 暂停状态不放行——手动唤醒要是能绕过暂停，那"暂停"就成了摆设；连败自动暂停的
-     * trader 更不该被一句话叫起来接着亏。
-     */
-    public String wake(long userId) {
-        AiTrader t = traderService.mine(userId);
-        if (t == null) {
-            return noTrader();
-        }
-        if (AiTrader.STATUS_LIQUIDATED.equals(t.getStatus())) {
-            return outcome(false, "本局已爆仓终局，要先在配置页重置开新一局才能继续交易");
-        }
-        if (!AiTrader.STATUS_RUNNING.equals(t.getStatus())) {
-            return outcome(false, "trader 当前是暂停状态"
-                    + (t.getPausedReason() == null ? "" : "（" + t.getPausedReason() + "）")
-                    + "，手动唤醒不绕过暂停：请先去「我的 Trader」页启动它");
-        }
-        String why = scheduler.tryManualWake(t);
-        return why == null
-                ? outcome(true, "已触发一次唤醒，trader 正在后台做决策；结果稍后出现在竞技场的决策时间线上")
-                : outcome(false, why);
-    }
-
-    /**
-     * 点播复盘：同步跑完（{@link ReviewRunner#review} 内部有 180s 预算）。
-     * <p>
-     * review() 无返回值、无素材时会静默跳过，所以拿"本次时刻有没有落下 REVIEW 行"来判定——
-     * 跳过了却报"复盘完成"，用户会去时间线上找一篇根本不存在的复盘。
-     */
-    public String reviewNow(long userId) {
-        AiTrader t = traderService.mine(userId);
-        if (t == null) {
-            return noTrader();
-        }
-        // 停工窗口挡点播：三阶段交接期间旁路写复盘，会让 learner 读到"半天"的复盘（脏读进记忆）
-        if (scheduler.isHandoverActive()) {
-            return outcome(false, "全体复盘与学习进行中（日线交接），几分钟后窗口关闭再试");
-        }
-        long at = System.currentTimeMillis();
-        reviewRunner.review(t, at);
-        AiTraderDecision d = latestReview(t);
-        if (d == null || d.getWakeTime() == null || d.getWakeTime() != at) {
-            return outcome(false, "本期没有新的已了结交易可复盘，已跳过（没有消耗模型调用）");
-        }
-        if (!AiTraderDecision.STATUS_OK.equals(d.getStatus())) {
-            return outcome(false, "复盘执行失败：" + d.getError());
-        }
-        return new JSONObject()
-                .fluentPut("ok", true)
-                .fluentPut("message", "复盘已完成，记忆笔记已更新")
-                .fluentPut("review", d.getReasoning())
-                .toJSONString();
-    }
-
-    /** 留言：覆盖写（同时只有一条待读），trader 下次唤醒注入后即焚。 */
-    public String leaveNote(long userId, String note) {
-        AiTrader t = traderService.mine(userId);
-        if (t == null) {
-            return noTrader();
-        }
-        if (note == null || note.isBlank()) {
-            return outcome(false, "留言内容不能为空");
-        }
-        String text = note.strip();
-        if (text.length() > MAX_NOTE_CHARS) {
-            text = text.substring(0, MAX_NOTE_CHARS);
-        }
-        traderMapper.update(null, new LambdaUpdateWrapper<AiTrader>()
-                .eq(AiTrader::getId, t.getId())
-                .set(AiTrader::getOwnerNote, text)
-                .set(AiTrader::getUpdatedAt, LocalDateTime.now()));
-        log.info("[TraderChat] 留言已记下 traderId={} 长度={}", t.getId(), text.length());
-        return outcome(true, "留言已记下，trader 下次唤醒时会看到（只看这一次，看完就消失）"
-                + (t.getOwnerNote() == null ? "" : "；覆盖了上一条还没被读走的留言"));
-    }
-
     // ===== 内部 =====
-
-    private AiTraderDecision latestReview(AiTrader t) {
-        return decisionMapper.selectOne(new LambdaQueryWrapper<AiTraderDecision>()
-                .eq(AiTraderDecision::getTraderId, t.getId())
-                .eq(AiTraderDecision::getRoundNo, t.getRoundNo())
-                .eq(AiTraderDecision::getKind, AiTraderDecision.KIND_REVIEW)
-                .orderByDesc(AiTraderDecision::getWakeTime)
-                .last("LIMIT 1"));
-    }
 
     private static JSONObject planJson(AiTraderPlan p) {
         JSONObject row = new JSONObject()
@@ -315,7 +214,4 @@ public class TraderChatService {
                 .toJSONString();
     }
 
-    private static String outcome(boolean ok, String message) {
-        return new JSONObject().fluentPut("ok", ok).fluentPut("message", message).toJSONString();
-    }
 }

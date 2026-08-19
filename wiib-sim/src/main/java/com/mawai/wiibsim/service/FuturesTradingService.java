@@ -17,6 +17,16 @@ public interface FuturesTradingService {
     /** 一键全平结果：成功笔数 + 失败明细（"symbol#posId: 原因"）。 */
     record CloseAllResult(int closedCount, List<String> failures) {}
 
+    /** 反手：市价全平该仓位，紧接着反向开等量新仓（同杠杆、同保证金模式）。原仓的止损止盈不带过来。 */
+    ReverseResult reversePosition(Long userId, Long positionId);
+
+    /**
+     * 反手结果：closed 是平掉那笔（带 realizedPnl / 数量 / CLOSE_LONG|CLOSE_SHORT），
+     * opened 是反向开的那笔。反向开仓失败时 opened=null、openError 带原因——此时用户是空仓状态，
+     * 前端必须把这个半成功说清楚。
+     */
+    record ReverseResult(FuturesOrderResponse closed, FuturesOrderResponse opened, String openError) {}
+
     FuturesOrderResponse cancelOrder(Long userId, Long orderId);
 
     void addMargin(Long userId, FuturesAddMarginRequest request);

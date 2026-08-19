@@ -62,7 +62,7 @@ import java.util.stream.Collectors;
 /**
  * 唤醒回路核心：一次唤醒 = 一个无状态 ReactAgent 会话（BYOK 模型 + 数据工具 + 绑定子账户的交易工具），
  * 决策全文 + 动作轨迹 + 权益落 ai_trader_decision。
- * 失败语义：连续 5 次失败自动 PAUSED；权益跌破初始 1% 判 LIQUIDATED 终局。
+ * 失败语义：连续 5 次失败自动 PAUSED（key 无效是永久错误，不等连败当场停）；权益跌破初始 1% 判 LIQUIDATED 终局。
  */
 @Slf4j
 @Component
@@ -219,7 +219,10 @@ public class TraderWakeupRunner {
         TradeTools tradeTools = new TradeTools(simTradeClient, trader.getSimUserId(), whitelist, equity,
                 sym -> JSON.parseObject(binanceRestClient.getPremiumIndex(sym)).getBigDecimal("markPrice"),
                 planStore, requestService,
-                new TradeTools.WakeCtx(trader.getId(), trader.getRoundNo(), boundaryTime, risk));
+                // 截止时刻交给工具层：超时后 cancel(true) 未必立刻打断图里正在跑的工具调用，
+                // 写工具自己按这个时间点拒发，才不会在作废的一轮里继续下单
+                new TradeTools.WakeCtx(trader.getId(), trader.getRoundNo(), boundaryTime,
+                        System.currentTimeMillis() + budgetSeconds * 1000, risk));
 
         // 回注窗口只认交易决策行（白名单：例行/警报/手动）——REVIEW/LEARN 的产出已经走
         // memory/learning_notes 注入，再进最近决策就是重复占字数；ALERT/MANUAL 是真实交易
@@ -561,13 +564,26 @@ public class TraderWakeupRunner {
                 .eq(AiTrader::getId, trader.getId())
                 .set(AiTrader::getConsecutiveFailures, failures)
                 .set(AiTrader::getUpdatedAt, LocalDateTime.now());
-        if (failures >= MAX_CONSECUTIVE_FAILURES) {
+        // key 无效是永久错误：再攒够连败也只是原样重炸几轮，白烧调度还让用户多等几个周期。
+        // 能修的人只有用户自己，所以立刻停、把原因写成他看得懂的话
+        if (keyInvalid(lastError)) {
+            update.set(AiTrader::getStatus, AiTrader.STATUS_PAUSED)
+                    .set(AiTrader::getPausedReason, "API key 无效或已失效，请更新端点配置后重新启动");
+            log.warn("[Trader] key 失效自动暂停 traderId={}", trader.getId());
+        } else if (failures >= MAX_CONSECUTIVE_FAILURES) {
             update.set(AiTrader::getStatus, AiTrader.STATUS_PAUSED)
                     .set(AiTrader::getPausedReason, "连续" + failures + "次唤醒失败: "
                             + (lastError.length() > 150 ? lastError.substring(0, 150) : lastError));
             log.warn("[Trader] 连败自动暂停 traderId={} failures={}", trader.getId(), failures);
         }
         traderMapper.update(null, update);
+    }
+
+    /** 两协议的 401 文案各不同：openai 路 {@code UnauthorizedException: 401: Invalid API key}，responses 路 {@code Responses API HTTP 401} */
+    private static boolean keyInvalid(String lastError) {
+        return lastError.contains("UnauthorizedException")
+                || lastError.contains("HTTP 401")
+                || lastError.contains("Invalid API key");
     }
 
     private void clearFailures(AiTrader trader) {

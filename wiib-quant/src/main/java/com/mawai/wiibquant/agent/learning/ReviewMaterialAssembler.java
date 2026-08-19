@@ -27,6 +27,8 @@ import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * 复盘素材组装（纯代码，可单测）：战绩表/配对表/时间线摘编/价格路径四块硬事实。
@@ -40,8 +42,15 @@ public class ReviewMaterialAssembler {
 
     /** 初始资金，与 TraderService.INITIAL_BALANCE 同一口径 */
     private static final BigDecimal INITIAL_BALANCE = new BigDecimal("10000");
-    /** 时间线条目上限：5m 档一天 288 轮全文注入烧不起；有动作的行优先保全，早段 HOLD 被省略 */
+    /** 时间线条目上限：5m 档一天 288 轮全文注入烧不起；有动作的行优先保全，早段观望被省略 */
     static final int MAX_TIMELINE_ENTRIES = 80;
+    /** 动作行结论字数上限 */
+    static final int ACTION_MAX_CHARS = 300;
+    /** 等待条件字数上限：观望对账的唯一原料，与动作行同档 */
+    static final int WAIT_MAX_CHARS = 300;
+    /** "等待"段：吃到下一个小节标签或块尾。多行 + 行首锚定，分条写的条件才不会只捞到标签行 */
+    private static final Pattern WAIT_SECTION = Pattern.compile(
+            "(?ms)^\\s*等待(?:条件)?[：:]\\h*(.*?)(?=^\\s*(?:判断|动作|计划依据)[：:]|\\z)");
     /** 价格路径回看上限(小时)：窗口通常一天，首篇复盘 fromMs=0 时靠它兜住 */
     private static final int MAX_PATH_HOURS = 48;
     /** 已平仓位拉取上限：窗口通常一天，远超一天可能的成交笔数 */
@@ -282,6 +291,14 @@ public class ReviewMaterialAssembler {
         int errors = 0;
         int skipped = 0;
         int opens = 0;
+        // HOLD 段游标：连续同一等待条件压成一段，遇动作行或条件变化就结算。
+        // 15m 档一天 96 轮，行情不动时几十轮等的是同一句话，一轮一行只会把动作行的信号稀释掉
+        String holdKey = null;
+        String holdWait = null;
+        String holdKind = null;
+        long holdFrom = 0;
+        long holdTo = 0;
+        int holdRounds = 0;
         for (AiTraderDecision d : rows) {
             if (AiTraderDecision.STATUS_ERROR.equals(d.getStatus())) {
                 errors++;
@@ -292,17 +309,41 @@ public class ReviewMaterialAssembler {
                 continue;
             }
             String acts = actionSummary(d.getActionsJson());
-            boolean hasAction = !acts.isEmpty();
-            // 数开仓动作按摘要文本认工具名：actionSummary 已过滤成 tool(args) 形态，误中不了正文
-            opens += countOccurrences(acts, "open_position(");
             String tag = AiTraderDecision.KIND_ALERT.equals(d.getKind()) ? "[警报] " : "";
-            String line = "- " + TIME_FMT.format(Instant.ofEpochMilli(d.getWakeTime())) + " " + tag
-                    + (hasAction ? acts + " ｜ " : "") + conclusion(d.getReasoning(), hasAction);
-            entries.add(new TimelineEntry(line, hasAction));
+            if (!acts.isEmpty()) {
+                // 动作行逐条出、内容不动：它是复盘主菜，判断/依据/等待整块都是"为什么做这一手"的证据
+                flushHold(entries, holdKind, holdWait, holdFrom, holdTo, holdRounds);
+                holdKey = null;
+                holdRounds = 0;
+                // 数开仓动作按摘要文本认工具名：actionSummary 已过滤成 tool(args) 形态，误中不了正文
+                opens += countOccurrences(acts, "open_position(");
+                entries.add(new TimelineEntry("- " + TIME_FMT.format(Instant.ofEpochMilli(d.getWakeTime()))
+                        + " " + tag + acts + " ｜ " + conclusion(d.getReasoning()), true));
+                continue;
+            }
+            // 观望轮只留等待条件：它有对账物（价格路径能验证到没到），"判断"那段指标读数没有
+            String wait = waitSection(d.getReasoning());
+            // 警报轮与例行观望不混段：同样条件下被警报叫醒仍按兵不动，这件事本身就是复盘证据
+            String key = (tag.isEmpty() ? "N|" : "A|") + waitKey(wait);
+            if (holdKey != null && holdKey.equals(key)) {
+                holdTo = d.getWakeTime();
+                holdRounds++;
+            } else {
+                flushHold(entries, holdKind, holdWait, holdFrom, holdTo, holdRounds);
+                holdKey = key;
+                holdWait = wait;
+                holdKind = d.getKind();
+                holdFrom = d.getWakeTime();
+                holdTo = d.getWakeTime();
+                holdRounds = 1;
+            }
         }
+        flushHold(entries, holdKind, holdWait, holdFrom, holdTo, holdRounds);
 
-        StringBuilder sb = new StringBuilder("【决策时间线摘编】（时间升序；动作行含工具摘要）\n");
-        // 活动统计给保守度自检当对照物：唤醒多动作少是"没信号"还是"吓缩了"，得先有数才能问
+        StringBuilder sb = new StringBuilder(
+                "【决策时间线摘编】（时间升序；动作行含工具摘要，连续等待条件相同的观望轮已合并成段）\n");
+        // 活动统计给保守度自检当对照物：唤醒多动作少是"没信号"还是"吓缩了"，得先有数才能问。
+        // 轮数取自原始行而非合并后的段数——合并只是省字，"这期醒了多少次"不能跟着缩水
         sb.append("本期活动：唤醒 ").append(rows.size()).append(" 轮，动作轮 ")
                 .append(entries.stream().filter(TimelineEntry::hasAction).count())
                 .append("，开仓动作 ").append(opens).append(" 次\n");
@@ -318,7 +359,7 @@ public class ReviewMaterialAssembler {
                     budget--;
                 }
             }
-            sb.append("（早段已省略 ").append(entries.size() - keep.size()).append(" 条无动作 HOLD 行）\n");
+            sb.append("（早段已省略 ").append(entries.size() - keep.size()).append(" 段观望）\n");
             List<TimelineEntry> kept = new ArrayList<>();
             for (int i = 0; i < entries.size(); i++) {
                 if (keep.contains(i)) {
@@ -381,11 +422,10 @@ public class ReviewMaterialAssembler {
     }
 
     /**
-     * 提取【本轮结论】块：动作行保留整块（截断保头——块内判断在前）；
-     * HOLD 行只留"判断/等待"两行——等待条件是观望对账的原料，绝不能丢。
-     * 没有结论块（旧数据/格式失守）退化为截尾片段。
+     * 动作行的结论：【本轮结论】整块，截断保头（块内判断在前）。
+     * 没有结论块（旧数据/格式失守）退化为截尾片段——结论在末尾，保头会正好把它切掉。
      */
-    private static String conclusion(String reasoning, boolean hasAction) {
+    private static String conclusion(String reasoning) {
         if (reasoning == null || reasoning.isBlank()) {
             return "";
         }
@@ -394,19 +434,60 @@ public class ReviewMaterialAssembler {
             String tail = reasoning.strip();
             return (tail.length() > 120 ? "…" + tail.substring(tail.length() - 120) : tail).replace('\n', ' ');
         }
-        String block = reasoning.substring(idx + "【本轮结论】".length()).strip();
-        if (hasAction) {
-            String flat = block.replace('\n', ' ');
-            return flat.length() > 300 ? flat.substring(0, 300) + "…" : flat;
+        String flat = reasoning.substring(idx + "【本轮结论】".length()).strip().replace('\n', ' ');
+        return flat.length() > ACTION_MAX_CHARS ? flat.substring(0, ACTION_MAX_CHARS) + "…" : flat;
+    }
+
+    /**
+     * 观望行的原料：【本轮结论】里的"等待"段，返回完整内容不截断
+     * （截断留给输出——先截再算合并键，会把"前段相同、后段不同"的两条误并成一条）。
+     * <p>
+     * 按标签块切而不是按行取：模型有时把条件写在标签同一行、有时换行分条列，
+     * 整段吃到下一个小节标签才两种都接得住；只认标签行的话，分条写的条件会整段丢掉，
+     * 观望对账没了原料就是空转。行首锚定防正文里的"等待："被误认。
+     */
+    static String waitSection(String reasoning) {
+        if (reasoning == null || reasoning.isBlank()) {
+            return "";
         }
-        String kept = block.lines().map(String::strip)
-                .filter(l -> l.startsWith("判断") || l.startsWith("等待"))
-                .reduce((a, b) -> a + "；" + b).orElse("");
-        if (kept.isEmpty()) {
-            String flat = block.replace('\n', ' ');
-            return flat.length() > 160 ? flat.substring(0, 160) + "…" : flat;
+        int idx = reasoning.lastIndexOf("【本轮结论】");
+        if (idx < 0) {
+            // 没有结论块就没有等待条件。这里若退回正文尾巴，对账那步会拿一段行情叙述当条件去判
+            // 命中/未命中，只能编出假结论——观望对账正是复盘的核心产出
+            return "";
         }
-        return kept.length() > 200 ? kept.substring(0, 200) + "…" : kept;
+        Matcher m = WAIT_SECTION.matcher(reasoning.substring(idx + "【本轮结论】".length()).strip());
+        // 没有等待段就是没有：不拿正文冒充条件，对账时它该被当成"这轮没给条件"
+        return m.find() ? m.group(1).replaceAll("\\s+", " ").strip() : "";
+    }
+
+    /**
+     * 合并键：只抹掉纯文字注解括号与空白（"（前高）""（观望）"）。
+     * 带数字或条件词的括号一律留着——"转空（跌破 63140）"与"转空（跌破 62800）"括号外一模一样，
+     * 抹掉就并成一段，而 flushHold 只输出段首那条，后一个价位在对账素材里彻底消失。
+     * 宁可少合并几段（多占几行、早段被省略时还会明说省了几段），也不能把两个不同条件说成同一个。
+     */
+    private static String waitKey(String wait) {
+        return wait.replaceAll("[（(](?![^）)]*[且或><≥≤0-9])[^）)]*[）)]", "").replaceAll("\\s+", "");
+    }
+
+    /**
+     * 结算一个观望段。多轮的写成时间段+轮数——"这个条件挂了多久、耗了多少轮"本身就是
+     * 保守度自检的证据（该行动没行动 vs 市场真没信号），比同一句话重复 N 遍有用。
+     */
+    private static void flushHold(List<TimelineEntry> out, String kind, String wait,
+                                  long from, long to, int rounds) {
+        if (rounds == 0) {
+            return;
+        }
+        String tag = AiTraderDecision.KIND_ALERT.equals(kind) ? "[警报] " : "";
+        String head = rounds == 1
+                ? "- " + TIME_FMT.format(Instant.ofEpochMilli(from)) + " " + tag
+                : "- " + TIME_FMT.format(Instant.ofEpochMilli(from)) + "~"
+                  + TIME_FMT.format(Instant.ofEpochMilli(to)) + "（" + rounds + "轮）" + tag;
+        String w = wait.isEmpty() ? "（本轮未给等待条件）"
+                : wait.length() > WAIT_MAX_CHARS ? wait.substring(0, WAIT_MAX_CHARS) + "…" : wait;
+        out.add(new TimelineEntry(head + "等待：" + w, false));
     }
 
     // ==================== 各币价格路径 ====================
@@ -442,6 +523,9 @@ public class ReviewMaterialAssembler {
             long highAt = 0;
             long lowAt = 0;
             StringBuilder closes = new StringBuilder();
+            // 逐小时高低必须给：等待条件多是"回踩 63370–63480"这种区间触碰，只有收盘序列
+            // 判不出"这一小时探到过没有"，模型要么瞎猜要么编，观望对账就成了假账
+            StringBuilder ranges = new StringBuilder();
             for (KlineBar k : hourly) {
                 if (high == null || k.high().compareTo(high) > 0) {
                     high = k.high();
@@ -452,6 +536,8 @@ public class ReviewMaterialAssembler {
                     lowAt = k.openTime();
                 }
                 closes.append(closes.isEmpty() ? "" : "→").append(plain(k.close()));
+                ranges.append(ranges.isEmpty() ? "" : "→")
+                        .append(plain(k.high())).append('/').append(plain(k.low()));
             }
             BigDecimal pct = open.signum() > 0
                     ? close.subtract(open).multiply(BigDecimal.valueOf(100)).divide(open, 2, RoundingMode.HALF_UP)
@@ -460,7 +546,8 @@ public class ReviewMaterialAssembler {
                     .append(" → 收 ").append(plain(close)).append("（").append(signed(pct)).append("%）")
                     .append("；最高 ").append(plain(high)).append("（").append(TIME_FMT.format(Instant.ofEpochMilli(highAt)))
                     .append("）最低 ").append(plain(low)).append("（").append(TIME_FMT.format(Instant.ofEpochMilli(lowAt)))
-                    .append("）\n  1h收盘: ").append(closes).append('\n');
+                    .append("）\n  1h收盘: ").append(closes)
+                    .append("\n  1h高/低: ").append(ranges).append('\n');
         }
         return sb.toString();
     }

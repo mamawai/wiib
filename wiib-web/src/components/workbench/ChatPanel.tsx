@@ -1,190 +1,123 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import { Bot, ChevronLeft, ChevronRight, History, KeyRound, Loader2, MessageSquareText, RotateCcw, Send, ShieldQuestion, Trash2, X } from 'lucide-react';
+import { ArrowDown, Bot, ChevronsDownUp, ChevronsUpDown, History, KeyRound, Loader2, Maximize2, Minimize2, PanelLeftClose, PanelLeftOpen, RotateCcw, Square, X } from 'lucide-react';
 import { workbenchApi } from '../../api';
-import { Markdown } from '../Markdown';
-import { cn, fmtDateTime } from '../../lib/utils';
-import { chatStore, type ChatItem } from './chatStore';
+import { cn } from '../../lib/utils';
+import { chatStore } from './chatStore';
+import { AssistantAnswer, HitlCard, ProcessRail, UserBubble } from './ChatMessages';
+import { groupBlocks, HUB_NAME } from './chatView';
+import { ChatComposer } from './ChatComposer';
+import { SessionHistory } from './SessionHistory';
+import { TraderFormCard } from './TraderFormCards';
 import type { WorkbenchSessionSummary } from '../../types';
 
-/** 调度中枢的对外名字：后端事件里仍叫 supervisor，只在展示层换 */
-const HUB_NAME = 'Polaris';
+/** 会话标题截断长度：与后端 ChatHistoryService.TITLE_MAX 同口径，历史列表与面板头对得上 */
+const TITLE_MAX = 40;
 
-const AGENT_CN: Record<string, string> = {
-  market_agent: '市场专家',
-  news_agent: '新闻专家',
-  trader_agent: '交易员',
-  supervisor: HUB_NAME,
-};
-
-/** 输入区上方的快捷提问（点击直发）：行情/新闻/交易员/深研判四能力各一条 */
-const SUGGESTS = ['BTC 现在的市场结构怎么样？', '最近有什么值得注意的加密新闻？', '我的 AI 交易员最近表现如何？', '对 ETH 做一次深度研判'];
-
-/** 过程类条目（调度/专家/进度）归进工作过程轨；其余各自成块 */
-const isRailKind = (it: ChatItem) => it.kind === 'agent' || it.kind === 'expert' || it.kind === 'progress';
-
-type RailStep = { item: ChatItem; index: number };
-type Block =
-  | { kind: 'single'; item: ChatItem; index: number }
-  | { kind: 'rail'; steps: RailStep[]; key: number };
-
-/** 工作过程轨（方案A"轨道收纳"）：竖轨+节点，运行中默认展开，答案出来后默认收起 */
-function ProcessRail({ steps, active, open, onToggle }: {
-  steps: RailStep[]; active: boolean; open: boolean; onToggle: () => void;
-}) {
-  return (
-    <div className="max-w-[95%]">
-      <button
-        onClick={onToggle}
-        className="flex items-center gap-1.5 text-[11px] font-bold text-muted-foreground hover:text-foreground py-0.5"
-      >
-        <ChevronRight className={cn('w-3 h-3 transition-transform duration-200', open && 'rotate-90')} />
-        工作过程 · {steps.length} 步
-        {active && <Loader2 className="w-3 h-3 animate-spin text-primary" />}
-      </button>
-      <div className={cn(
-        'grid transition-[grid-template-rows] duration-300 ease-out',
-        open ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]',
-      )}>
-        <div className="overflow-hidden min-h-0">
-          <div className="ml-[5px] mt-1.5 border-l-2 border-border pl-3.5 space-y-2.5 py-0.5">
-            {steps.map(({ item, index }) => {
-              const hot = (item.kind === 'expert' && item.streaming) || (item.kind === 'progress' && item.active);
-              return (
-                <div key={index} className="relative text-[11.5px] leading-relaxed text-muted-foreground">
-                  <span className={cn(
-                    'absolute -left-[18.5px] top-[5px] w-[7px] h-[7px] rounded-full border-2',
-                    hot ? 'bg-primary border-primary shadow-[0_0_6px_var(--color-primary)]' : 'bg-card border-border',
-                  )} />
-                  {item.kind === 'agent' && (
-                    <span>
-                      <span className="font-bold text-foreground">{HUB_NAME}</span>
-                      {' → '}
-                      <span className="font-bold text-primary">{AGENT_CN[item.agent] || AGENT_CN[item.node] || item.agent || item.node}</span>
-                      {' 接管分析'}
-                    </span>
-                  )}
-                  {item.kind === 'expert' && (
-                    <>
-                      <span className="font-bold text-foreground">{AGENT_CN[item.agent] || item.agent}</span> 取数分析
-                      <div className="mt-1 rounded-lg border border-border bg-card-2 px-2.5 py-2 text-[11px] max-h-44 overflow-y-auto">
-                        <Markdown content={item.content} />
-                      </div>
-                    </>
-                  )}
-                  {item.kind === 'progress' && (
-                    <span className={cn(hot && 'text-foreground font-bold')}>{item.text}</span>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/** HITL 确认卡：深研判 3 次深模型调用是贵操作，人工把关后 agent 才继续。 */
-function HitlCard({ item, onDecide, busy }: {
-  item: Extract<ChatItem, { kind: 'hitl' }>;
-  onDecide: (approved: boolean) => void;
-  busy: boolean;
-}) {
-  return (
-    <div className={cn(
-      'rounded-xl border border-border border-l-[3px] p-3.5 space-y-2.5',
-      item.status === 'pending' ? 'border-l-primary bg-card' : 'border-l-muted-foreground/30 opacity-70',
-    )}>
-      <div className="flex items-center gap-2">
-        <ShieldQuestion className="w-4 h-4 text-primary shrink-0" />
-        <span className="text-xs font-black">深度研判确认</span>
-        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-primary/10 text-primary">{item.symbol}</span>
-      </div>
-      <p className="text-xs text-muted-foreground leading-relaxed">{item.reason}</p>
-      {item.status === 'pending' ? (
-        <div className="flex gap-2">
-          <button
-            disabled={busy}
-            onClick={() => onDecide(true)}
-            className="border border-border hover:bg-primary/8 flex-1 py-1.5 rounded-lg text-xs font-bold text-primary disabled:opacity-50 transition-colors"
-          >
-            批准执行
-          </button>
-          <button
-            disabled={busy}
-            onClick={() => onDecide(false)}
-            className="border border-border hover:bg-surface-hover flex-1 py-1.5 rounded-lg text-xs font-bold text-muted-foreground disabled:opacity-50 transition-colors"
-          >
-            拒绝
-          </button>
-        </div>
-      ) : (
-        <p className="text-[10px] font-bold text-muted-foreground">
-          {item.status === 'approved' ? '✓ 已批准 · 深研判继续执行' : '✗ 已拒绝 · 本次跳过深研判'}
-        </p>
-      )}
-    </div>
-  );
-}
+/** 贴底判定的容差：小于它就算"用户在看最新内容"，新内容照常跟随滚动 */
+const STICK_PX = 80;
 
 interface ChatPanelProps {
   /** 停靠壳（ChatDock）传入：点头部 X 关面板 */
   onClose?: () => void;
   /** 后端报配置缺失/不可用时，引导条按钮跳模型配置页 */
   onGoConfig?: () => void;
+  /** PC 全屏开关（铺满浏览器视口，不吃地址栏）。不传就不出这个按钮——移动端面板本来就是铺满视口的全屏层 */
+  fullscreen?: boolean;
+  onToggleFullscreen?: () => void;
 }
 
 /**
  * 对话面板：chatStore 的视图层（SSE 消费在 store，关面板/切页不中断）。
- * 布局是"轨道收纳"：过程条目收进可折叠的工作过程轨，答案卡是唯一主角。
  * 自身不带卡片外壳，由 ChatDock 决定浮窗还是全屏。
+ * <p>
+ * 版式：用户提问是右侧气泡，agent 回答是<b>无框正文</b>（署名行 + 正文 + 脚注读数），
+ * 过程条目收进可折叠的工作过程轨。答案是这一屏唯一的主角，所以它不套卡片。
  */
-export function ChatPanel({ onClose, onGoConfig }: ChatPanelProps) {
+export function ChatPanel({ onClose, onGoConfig, fullscreen, onToggleFullscreen }: ChatPanelProps) {
   const { items, loading, background, sessionId, needsConfig } = useSyncExternalStore(chatStore.subscribe, chatStore.getSnapshot);
-  const [input, setInput] = useState('');
-  const [hitlBusy, setHitlBusy] = useState(false);
+  // 在途的那张确认卡（按 requestId 认）。面板里可能同时挂着几张，用一个布尔会把别的卡一起禁掉
+  const [hitlBusy, setHitlBusy] = useState<{ requestId: string; approved: boolean } | null>(null);
   const [showHistory, setShowHistory] = useState(false);
+  // 全屏左栏的开合。跟 showHistory 各记各的：退出全屏时叠层不该跟着弹出来，反过来也一样
+  const [sideOpen, setSideOpen] = useState(true);
   const [sessions, setSessions] = useState<WorkbenchSessionSummary[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
-  // 工作过程轨的手动开合覆盖（键=轨首条目在 items 里的下标）；不覆盖时跟随默认（运行中开、答案出收）
-  const [railOverride, setRailOverride] = useState<Record<number, boolean>>({});
+  // 工作过程轨的手动开合，键是轨首条目的 rid（条目挪位置也认得回来）。默认展开：轨里全是本次
+  // 会话实时产生的条目（专家过程不落库），用户正看着专家分析时把它收起来是最恼人的一种"自作主张"
+  const [railClosed, setRailClosed] = useState<Record<string, boolean>>({});
   const scrollRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLTextAreaElement>(null);
+  // 用户往回翻时不再强行拉到底：长回答无框铺开后，往回看是常态
+  const [stuckToBottom, setStuckToBottom] = useState(true);
+  // 点了停止、还没等到收尾。收尾后 loading 落下即复位；新一轮开跑也要复位——
+  // 排队消息续发这类路径下 loading 中间不会落下，只认边沿会让按钮永远卡在"收尾中"
+  const [stopping, setStopping] = useState(false);
+  useEffect(() => { if (!loading) setStopping(false); }, [loading]);
 
-  useEffect(() => {
+  const onScroll = useCallback(() => {
+    const el = scrollRef.current;
+    if (el) setStuckToBottom(el.scrollHeight - el.scrollTop - el.clientHeight < STICK_PX);
+  }, []);
+
+  const scrollToBottom = useCallback(() => {
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [items]);
+    setStuckToBottom(true);
+  }, []);
+
+  useEffect(() => {
+    if (stuckToBottom) scrollToBottom();
+  }, [items, stuckToBottom, scrollToBottom]);
 
   // 首挂：回放历史 + 感知后台运行状态（store 级幂等；关面板再开时 store 状态还在，直接续显）
   useEffect(() => { chatStore.init(); }, []);
 
-  // 换会话后 items 整体重建，旧下标失义
-  useEffect(() => { setRailOverride({}); }, [sessionId]);
+  // 换会话后旧轨全不在了，攒着的开合状态没有对应对象；滚动位置也该回到最新一条
+  useEffect(() => { setRailClosed({}); setStuckToBottom(true); }, [sessionId]);
 
-  /** 相邻过程条目并轨：user/assistant/hitl/error 断轨 */
-  const blocks = useMemo(() => {
-    const out: Block[] = [];
-    items.forEach((item, index) => {
-      if (isRailKind(item)) {
-        const last = out[out.length - 1];
-        if (last?.kind === 'rail') last.steps.push({ item, index });
-        else out.push({ kind: 'rail', steps: [{ item, index }], key: index });
-      } else {
-        out.push({ kind: 'single', item, index });
-      }
-    });
-    return out;
+  const blocks = useMemo(() => groupBlocks(items), [items]);
+
+  /** 面板头显示当前会话标题：首条提问截断，与后端历史列表同口径 */
+  const title = useMemo(() => {
+    const first = items.find(it => it.kind === 'user');
+    if (!first || first.kind !== 'user') return null;
+    const text = first.content.replace(/\s+/g, ' ').trim();
+    return text.length > TITLE_MAX ? `${text.slice(0, TITLE_MAX)}…` : text;
   }, [items]);
 
-  const openHistory = useCallback(() => {
-    setShowHistory(true);
+  const railKeys = useMemo(
+    () => blocks.filter(b => b.kind === 'rail').map(b => b.key),
+    [blocks],
+  );
+  const anyRailOpen = railKeys.some(k => !railClosed[k]);
+  const toggleAllRails = useCallback(() => {
+    setRailClosed(Object.fromEntries(railKeys.map(k => [k, anyRailOpen])));
+  }, [railKeys, anyRailOpen]);
+
+  /** 只有会话最后一条答案能重新生成：后端回退上下文只回得到末尾那一轮 */
+  const lastAnswerIndex = useMemo(() => {
+    for (let i = items.length - 1; i >= 0; i--) {
+      if (items[i].kind === 'assistant') return i;
+      if (items[i].kind === 'user') break;   // 提问之后还没有答案，这一轮没得重生成
+    }
+    return -1;
+  }, [items]);
+
+  const loadSessions = useCallback(() => {
     setHistoryLoading(true);
     workbenchApi.sessions()
       .then(setSessions)
       .catch(() => setSessions([]))
       .finally(() => setHistoryLoading(false));
   }, []);
+
+  const openHistory = useCallback(() => {
+    setShowHistory(true);
+    loadSessions();
+  }, [loadSessions]);
+
+  // 全屏的左栏是常驻的，进全屏就得先把列表备好；叠层那条路"点开才拉"的时机搬过来的话，
+  // 左栏会一直空着，直到用户想起来去点那个开关
+  useEffect(() => { if (fullscreen) loadSessions(); }, [fullscreen, loadSessions]);
 
   /** 载入历史会话：消息回放 + sessionId 复用（续聊上下文在后端，继续聊自动带全上下文） */
   const openSession = useCallback(async (s: WorkbenchSessionSummary) => {
@@ -202,28 +135,40 @@ export function ChatPanel({ onClose, onGoConfig }: ChatPanelProps) {
     }
   }, [sessionId, loading]);
 
-  const handleSend = useCallback((text?: string) => {
-    const msg = (text ?? input).trim();
-    if (!msg) return;
-    setInput('');
-    if (inputRef.current) inputRef.current.style.height = 'auto';
+  const handleSend = useCallback((msg: string) => {
+    scrollToBottom();   // 自己刚发的话总要看见
+    setStopping(false);
     void chatStore.send(msg);
-  }, [input]);
+  }, [scrollToBottom]);
 
-  /** HITL 决策交给 store；busy 只是本地防连点。 */
-  const handleHitl = useCallback(async (idx: number, approved: boolean) => {
-    setHitlBusy(true);
+  const handleRegenerate = useCallback(() => {
+    scrollToBottom();
+    setStopping(false);
+    void chatStore.regenerate();
+  }, [scrollToBottom]);
+
+  /** 停止：后端跑到下一个检查点才收尾，所以按钮先进"收尾中"；后端说没轮在跑就恢复原状 */
+  const handleStop = useCallback(async () => {
+    setStopping(true);
+    if (!await chatStore.cancelRun()) setStopping(false);
+  }, []);
+
+  /** HITL 决策交给 store；本地只记"哪张卡在提交"用来防连点+出转圈。按 requestId 认卡，条目挪位置也不会打偏。 */
+  const handleHitl = useCallback(async (requestId: string, approved: boolean) => {
+    setHitlBusy({ requestId, approved });
     try {
-      await chatStore.hitlDecide(idx, approved);
+      await chatStore.hitlDecide(requestId, approved);
     } catch (err) {
       chatStore.pushError((err as Error).message || '确认失败，请重试');
     } finally {
-      setHitlBusy(false);
+      // 只收自己那张：同时挂两张卡时，先点那张收尾会把后点那张的转圈一起清掉
+      setHitlBusy(cur => (cur?.requestId === requestId ? null : cur));
     }
   }, []);
 
-  /** 删除会话：列表移除；删的是当前会话时 store 一并清空。 */
+  /** 删除会话：列表移除；删的是当前会话时 store 一并清空。删了不可恢复，先问一句（站内破坏性操作的既有写法） */
   const removeSession = useCallback(async (s: WorkbenchSessionSummary) => {
+    if (!window.confirm(`删除会话「${s.title}」？${s.messageCount} 条消息与它的续聊上下文会一并清掉，不可恢复。`)) return;
     try {
       await workbenchApi.deleteSession(s.sessionId);
       setSessions(prev => prev.filter(x => x.sessionId !== s.sessionId));
@@ -244,254 +189,252 @@ export function ChatPanel({ onClose, onGoConfig }: ChatPanelProps) {
     <div className="flex flex-col h-full min-h-0">
       {/* 面板头 */}
       <div className="flex items-center gap-2 px-4 py-3 border-b border-border shrink-0">
-        <Bot className="w-4.5 h-4.5 text-primary" />
-        <span className="text-sm font-black">研判对话</span>
-        <span className="text-[10px] text-muted-foreground hidden sm:inline">{HUB_NAME} 调度 · 关窗后台继续</span>
-        <button
-          onClick={() => showHistory ? setShowHistory(false) : openHistory()}
-          className={cn(
-            'ml-auto border border-border hover:bg-surface-hover w-7 h-7 rounded-lg flex items-center justify-center hover:text-primary',
-            showHistory ? 'text-primary' : 'text-muted-foreground',
-          )}
-          title="历史对话"
-        >
-          <History className="w-3.5 h-3.5" />
-        </button>
-        <button
-          onClick={handleNewSession}
-          className="border border-border hover:bg-surface-hover w-7 h-7 rounded-lg flex items-center justify-center text-muted-foreground hover:text-primary"
-          title="新会话"
-        >
-          <RotateCcw className="w-3.5 h-3.5" />
-        </button>
-        {onClose && (
-          <button
-            onClick={onClose}
-            className="border border-border hover:bg-surface-hover w-7 h-7 rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground"
-            title="关闭"
-            aria-label="关闭对话面板"
-          >
-            <X className="w-3.5 h-3.5" />
-          </button>
-        )}
-      </div>
-
-      {/* 内容区：消息流 + 输入区；历史列表是盖在上面的右滑叠层 */}
-      <div className="relative flex-1 min-h-0 flex flex-col">
-        {/* 消息流 */}
-        <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
-          {items.length === 0 && (
-            <div className="h-full flex flex-col items-center justify-center gap-3 text-center px-6">
-              <div className="w-12 h-12 rounded-full border border-border bg-background flex items-center justify-center text-muted-foreground/60">
-                <Bot className="w-6 h-6" />
-              </div>
-              <p className="text-sm text-muted-foreground">问点什么——下面的快捷提问可以直接点</p>
-              <p className="text-[10px] text-muted-foreground/70">行情 · 新闻 · 你的交易员 · 深度研判，都归 {HUB_NAME} 调度</p>
-            </div>
-          )}
-          {blocks.map(block => {
-            if (block.kind === 'rail') {
-              const active = block.steps.some(({ item }) =>
-                (item.kind === 'expert' && item.streaming) || (item.kind === 'progress' && item.active));
-              // 轨后面出现过任何条目（答案/新提问/HITL）即视为完结 → 默认收起
-              const lastIdx = block.steps[block.steps.length - 1].index;
-              const settled = !active && items.length - 1 > lastIdx;
-              const open = railOverride[block.key] ?? !settled;
-              return (
-                <ProcessRail
-                  key={block.key}
-                  steps={block.steps}
-                  active={active}
-                  open={open}
-                  onToggle={() => setRailOverride(prev => ({ ...prev, [block.key]: !open }))}
-                />
-              );
-            }
-            const { item, index } = block;
-            switch (item.kind) {
-              case 'user':
-                return (
-                  <div key={index} className="flex justify-end">
-                    <div className={cn(
-                      'max-w-[85%] rounded-2xl rounded-br-md bg-primary/10 px-3.5 py-2.5 text-sm whitespace-pre-wrap leading-relaxed',
-                      item.queued && 'opacity-60',
-                    )}>
-                      {item.content}
-                      {item.queued && (
-                        <span className="block text-right text-[9px] font-bold text-muted-foreground mt-1">排队中 · 本轮结束后发出</span>
-                      )}
-                    </div>
-                  </div>
-                );
-              case 'assistant':
-                return (
-                  <div key={index} className="max-w-[95%] rounded-xl border border-border bg-card-2 overflow-hidden">
-                    <div className="flex items-center gap-2 px-3.5 py-1.5 border-b border-border">
-                      <span className="w-5 h-5 rounded-md bg-primary/10 text-primary flex items-center justify-center">
-                        <Bot className="w-3 h-3" />
-                      </span>
-                      <span className="microlabel font-bold">{HUB_NAME}</span>
-                      {item.streaming && <Loader2 className="w-3 h-3 animate-spin text-muted-foreground ml-auto" />}
-                    </div>
-                    <div className="px-3.5 py-2.5 text-sm">
-                      <Markdown content={item.content} />
-                      {item.streaming && item.content && (
-                        <span className="inline-block w-1.5 h-3.5 bg-primary/80 rounded-[1px] ml-0.5 align-middle animate-pulse" />
-                      )}
-                    </div>
-                  </div>
-                );
-              case 'hitl':
-                return <HitlCard key={index} item={item} busy={hitlBusy} onDecide={a => void handleHitl(index, a)} />;
-              case 'error':
-                return (
-                  <p key={index} className="text-[11px] text-destructive/80 text-center py-1">{item.message}</p>
-                );
-            }
-          })}
-          {loading && !streamingNow && (
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              {background ? `${HUB_NAME} 在后台继续研判，完成后自动展示答案` : `${HUB_NAME} 分析问题中...`}
-            </div>
-          )}
-        </div>
-
-        {/* 配置引导条：后端报 2201/2202 时出现——光一行红字用户不知道去哪儿改（配置在 AI 页模型配置 Tab） */}
-        {needsConfig && (
-          <div className="mx-3 mb-2 rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 flex items-center gap-2 shrink-0">
-            <KeyRound className="w-3.5 h-3.5 text-warning shrink-0" />
-            <span className="text-[11px] font-bold flex-1 text-left">模型配置缺失或不可用</span>
+        <Bot className="w-4.5 h-4.5 text-primary shrink-0" />
+        <span className="text-sm font-black shrink-0">研判对话</span>
+        {/* 副标题吃掉剩余空间并允许截断：面板宽度可拖到 320，而 sm: 判的是视口不是面板，
+            不给它 flex-1 + truncate 的话 PC 上窄面板会被这句话把按钮挤出去 */}
+        <span className="hidden sm:block flex-1 min-w-0 truncate text-[10px] text-muted-foreground">
+          {title ?? `${HUB_NAME} 调度 · 关窗后台继续`}
+        </span>
+        {/* 按钮组自己带 ml-auto 把自己顶到右边：副标题在 <640px 是 hidden、不占 flex 位，
+            指望它撑开的话手机上整排按钮会挤到左端 */}
+        <div className="ml-auto flex items-center gap-2 shrink-0">
+          {railKeys.length > 0 && (
             <button
-              onClick={() => { chatStore.clearNeedsConfig(); onGoConfig?.(); }}
-              className="text-[11px] font-bold text-primary shrink-0 hover:underline"
+              onClick={toggleAllRails}
+              className="shrink-0 border border-border hover:bg-surface-hover w-7 h-7 rounded-lg flex items-center justify-center text-muted-foreground hover:text-primary"
+              title={anyRailOpen ? '收起全部工作过程' : '展开全部工作过程'}
+              aria-label="全部展开或收起工作过程"
             >
-              去配置
+              {anyRailOpen ? <ChevronsDownUp className="w-3.5 h-3.5" /> : <ChevronsUpDown className="w-3.5 h-3.5" />}
             </button>
+          )}
+          {/* 同一个键在两种形态下管两件事：全屏时开合左栏，浮窗/手机时开合右滑叠层。
+              对用户都是"看历史对话"，位置不变最省事 */}
+          <button
+            onClick={() => fullscreen ? setSideOpen(v => !v) : (showHistory ? setShowHistory(false) : openHistory())}
+            className={cn(
+              'shrink-0 border border-border hover:bg-surface-hover w-7 h-7 rounded-lg flex items-center justify-center hover:text-primary',
+              (fullscreen ? sideOpen : showHistory) ? 'text-primary' : 'text-muted-foreground',
+            )}
+            title={fullscreen ? (sideOpen ? '收起历史栏' : '展开历史栏') : '历史对话'}
+          >
+            {fullscreen
+              ? (sideOpen ? <PanelLeftClose className="w-3.5 h-3.5" /> : <PanelLeftOpen className="w-3.5 h-3.5" />)
+              : <History className="w-3.5 h-3.5" />}
+          </button>
+          <button
+            onClick={handleNewSession}
+            className="shrink-0 border border-border hover:bg-surface-hover w-7 h-7 rounded-lg flex items-center justify-center text-muted-foreground hover:text-primary"
+            title="新会话"
+          >
+            <RotateCcw className="w-3.5 h-3.5" />
+          </button>
+          {/* 全屏只在 PC 出：移动端面板本来就铺满视口 */}
+          {onToggleFullscreen && (
             <button
-              onClick={() => chatStore.clearNeedsConfig()}
-              aria-label="忽略"
-              className="text-muted-foreground/60 hover:text-foreground shrink-0"
+              onClick={onToggleFullscreen}
+              className="shrink-0 hidden md:flex border border-border hover:bg-surface-hover w-7 h-7 rounded-lg items-center justify-center text-muted-foreground hover:text-primary"
+              title={fullscreen ? '退出全屏（Esc）' : '全屏'}
+              aria-label={fullscreen ? '退出全屏' : '全屏显示对话面板'}
+            >
+              {fullscreen ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
+            </button>
+          )}
+          {onClose && (
+            <button
+              onClick={onClose}
+              className="shrink-0 border border-border hover:bg-surface-hover w-7 h-7 rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground"
+              title="关闭"
+              aria-label="关闭对话面板"
             >
               <X className="w-3.5 h-3.5" />
             </button>
+          )}
+        </div>
+      </div>
+
+      {/* 内容区：全屏时左边是常驻历史栏 + 右边对话；浮窗/手机没有左栏，历史是盖在对话上的右滑叠层 */}
+      <div className="relative flex-1 min-h-0 flex">
+        {/* 左栏开合做成一层宽度过渡；里面那份 SessionHistory 自己钉死 w-64（原因见它那边的注释） */}
+        {fullscreen && (
+          <div className={cn(
+            'shrink-0 overflow-hidden transition-[width] duration-300 ease-[cubic-bezier(.16,1,.3,1)]',
+            sideOpen ? 'w-64' : 'w-0',
+          )}>
+            <SessionHistory
+              sidebar
+              open
+              loading={historyLoading}
+              sessions={sessions}
+              currentId={sessionId}
+              onBack={() => setSideOpen(false)}
+              onOpen={s => void openSession(s)}
+              onRemove={s => void removeSession(s)}
+              onNew={handleNewSession}
+            />
           </div>
         )}
 
-        {/* 输入区：快捷提问 + 多行自适应输入 + 状态行 */}
-        <div className="border-t border-border px-3 pt-2 pb-2.5 shrink-0 space-y-2">
-          <div className="flex gap-1.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-            {SUGGESTS.map(q => (
-              <button
-                key={q}
-                onClick={() => handleSend(q)}
-                className="shrink-0 border border-border rounded-full px-2.5 py-1 text-[11px] font-medium text-muted-foreground hover:text-foreground hover:bg-surface-hover transition-colors"
-              >
-                {q}
-              </button>
-            ))}
-          </div>
-          <div className="flex items-end gap-2 rounded-xl border border-border bg-card-2 px-3 py-2 transition-colors focus-within:border-primary/50">
-            <textarea
-              ref={inputRef}
-              rows={1}
-              value={input}
-              onChange={e => setInput(e.target.value)}
-              onInput={e => {
-                const t = e.currentTarget;
-                t.style.height = 'auto';
-                t.style.height = `${Math.min(t.scrollHeight, 96)}px`;
-              }}
-              onKeyDown={e => {
-                if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
-                  e.preventDefault();
-                  handleSend();
-                }
-              }}
-              placeholder={loading ? `${HUB_NAME} 工作中——可继续发消息插话` : '问行情、查新闻、看你的交易员…'}
-              className="flex-1 bg-transparent text-sm leading-relaxed resize-none max-h-24 focus:outline-none placeholder:text-muted-foreground/60"
-            />
-            <button
-              onClick={() => handleSend()}
-              disabled={!input.trim()}
-              className="w-8 h-8 rounded-lg bg-primary text-primary-foreground flex items-center justify-center shrink-0 hover:brightness-105 active:scale-95 transition-all disabled:opacity-40 disabled:active:scale-100"
-              aria-label="发送"
-            >
-              <Send className="w-4 h-4" />
-            </button>
-          </div>
-          <div className="flex justify-between px-0.5 text-[10px] text-muted-foreground/60">
-            <span>Enter 发送 · Shift+Enter 换行</span>
-            <span className="num">{loading ? `${HUB_NAME} 工作中 · 可直接插话` : `${HUB_NAME} 就绪`}</span>
-          </div>
-        </div>
-
-        {/* 历史会话叠层：右滑入，常驻挂载才有出入动画 */}
-        <div className={cn(
-          'absolute inset-0 z-10 bg-card flex flex-col transition-transform duration-300 ease-[cubic-bezier(.16,1,.3,1)]',
-          showHistory ? 'translate-x-0' : 'translate-x-full pointer-events-none',
-        )}>
-          <div className="flex items-center gap-2 px-3.5 py-2.5 shrink-0">
-            <button
-              onClick={() => setShowHistory(false)}
-              className="border border-border hover:bg-surface-hover w-7 h-7 rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground"
-              aria-label="返回对话"
-            >
-              <ChevronLeft className="w-3.5 h-3.5" />
-            </button>
-            <span className="text-xs font-black">历史对话</span>
-          </div>
-          <div className="flex-1 overflow-y-auto px-3.5 pb-2 space-y-2">
-            {historyLoading ? (
-              <div className="flex items-center justify-center gap-2 py-10 text-xs text-muted-foreground">
-                <Loader2 className="w-4 h-4 animate-spin" /> 加载历史会话...
-              </div>
-            ) : sessions.length === 0 ? (
-              <div className="flex flex-col items-center justify-center gap-2 py-10 text-center">
-                <MessageSquareText className="w-8 h-8 text-muted-foreground/40" />
-                <p className="text-xs text-muted-foreground">还没有历史对话</p>
-              </div>
-            ) : (
-              sessions.map(s => (
-                <div
-                  key={s.sessionId}
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => void openSession(s)}
-                  onKeyDown={e => e.key === 'Enter' && void openSession(s)}
-                  className={cn(
-                    'w-full text-left rounded-xl border px-3.5 py-2.5 space-y-1 hover:bg-surface-hover transition-colors cursor-pointer',
-                    s.sessionId === sessionId ? 'border-primary/45 bg-card-2' : 'border-border bg-card',
-                  )}
-                >
-                  <div className="flex items-center gap-2">
-                    <div className="text-xs font-bold truncate flex-1">{s.title}</div>
-                    {s.sessionId === sessionId && (
-                      <span className="text-[9px] font-black tracking-wider text-primary shrink-0">当前</span>
-                    )}
-                    <button
-                      onClick={e => { e.stopPropagation(); void removeSession(s); }}
-                      className="shrink-0 w-6 h-6 rounded-md flex items-center justify-center text-muted-foreground/50 hover:text-loss hover:bg-loss/10 transition-colors"
-                      title="删除会话"
-                      aria-label="删除会话"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+        {/* 右边：对话本体（消息流 + 输入区）。全屏时它跟左栏并排，其余形态下它就是整个内容区 */}
+        <div className="relative flex-1 min-w-0 flex flex-col">
+          {/* 消息流自带一层定位上下文：回到底部要贴消息流的下沿，
+              挂在外层的话 bottom 量的是输入区底边，浮标会压在"Enter 发送"那行上 */}
+          <div className="relative flex-1 min-h-0 flex flex-col">
+            {/* 全屏后每个条目限宽居中：铺满整屏的正文一行能拉到一千多像素，读长回答很累。
+                限在子元素上而不是套一层容器——空态那块靠 h-full 撑满，中间多一层它就撑不起来了 */}
+            <div ref={scrollRef} onScroll={onScroll} className={cn(
+              'flex-1 overflow-y-auto px-4 py-3 space-y-3',
+              fullscreen && '[&>*]:mx-auto [&>*]:w-full [&>*]:max-w-3xl',
+            )}>
+              {items.length === 0 && (
+                <div className="h-full flex flex-col items-center justify-center gap-3 text-center px-6">
+                  <div className="w-12 h-12 rounded-full border border-border bg-background flex items-center justify-center text-muted-foreground/60">
+                    <Bot className="w-6 h-6" />
                   </div>
-                  <div className="text-[10px] text-muted-foreground flex items-center gap-2">
-                    <span>{fmtDateTime(s.lastAt)}</span>
-                    <span>· {s.messageCount} 条</span>
-                  </div>
+                  <p className="text-sm text-muted-foreground">问点什么——下面的快捷提问可以直接点</p>
+                  <p className="text-[10px] text-muted-foreground/70">行情 · 新闻 · 你的交易员 · 深度研判，都归 {HUB_NAME} 调度</p>
                 </div>
-              ))
+              )}
+              {blocks.map(block => {
+                if (block.kind === 'rail') {
+                  const active = block.steps.some(({ item }) =>
+                    (item.kind === 'expert' && item.streaming) || (item.kind === 'progress' && item.active));
+                  return (
+                    <ProcessRail
+                      key={block.key}
+                      steps={block.steps}
+                      active={active}
+                      open={!railClosed[block.key]}
+                      onToggle={() => setRailClosed(prev => ({ ...prev, [block.key]: !prev[block.key] }))}
+                    />
+                  );
+                }
+                const { item, index } = block;
+                switch (item.kind) {
+                  case 'user':
+                    return (
+                      <UserBubble
+                        key={index}
+                        item={item}
+                        onCancelQueued={item.queued && item.queuedId != null
+                          ? () => chatStore.cancelQueued(item.queuedId as number) : undefined}
+                      />
+                    );
+                  case 'assistant':
+                    return (
+                      <AssistantAnswer
+                        key={index}
+                        item={item}
+                        // background=让位后欠着补答、正靠轮询等它落库，这时候重生成会把轮询掐掉
+                        canRegenerate={index === lastAnswerIndex && !loading && !background}
+                        onRegenerate={handleRegenerate}
+                      />
+                    );
+                  case 'hitl':
+                    return (
+                      <HitlCard
+                        key={item.requestId}
+                        item={item}
+                        submitting={hitlBusy?.requestId === item.requestId
+                          ? (hitlBusy.approved ? 'approve' : 'reject') : null}
+                        onDecide={a => void handleHitl(item.requestId, a)}
+                      />
+                    );
+                  case 'form':
+                    // key 用卡自身的 id：草稿在卡的组件 state 里，按下标做 key 时列表中间插条目
+                    // 会让 React 拿错元素配对、把正在敲的留言卸载掉
+                    return (
+                      <TraderFormCard
+                        key={item.id}
+                        form={item.form}
+                        prefill={item.prefill}
+                        status={item.status}
+                        result={item.result}
+                        onSettle={r => chatStore.settleForm(item.id, r)}
+                        onCancel={() => chatStore.closeForm(item.id)}
+                      />
+                    );
+                  case 'error':
+                    return (
+                      <p key={index} className="text-[11px] text-destructive/80 text-center py-1">{item.message}</p>
+                    );
+                }
+              })}
+              {loading && (
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  {!streamingNow && (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      {background ? `${HUB_NAME} 在后台继续研判，完成后自动展示答案` : `${HUB_NAME} 分析问题中...`}
+                    </>
+                  )}
+                  {/* 后台轮询态没有可中断的本地轮：补答跑在后台，没有面板可点停止 */}
+                  {!background && (
+                    <button
+                      onClick={() => void handleStop()}
+                      disabled={stopping}
+                      className="inline-flex items-center gap-1 border border-border rounded-full px-2.5 py-0.5 text-[11px] font-bold hover:text-loss hover:border-loss/40 disabled:opacity-50 transition-colors"
+                      title="停止这一轮"
+                    >
+                      <Square className="w-2.5 h-2.5 fill-current" />
+                      {stopping ? '收尾中' : '停止'}
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* 回到底部：只在用户往回翻之后出现，贴在消息流下沿 */}
+            {!stuckToBottom && (
+              <button
+                onClick={scrollToBottom}
+                className="absolute left-1/2 -translate-x-1/2 bottom-2 z-[5] flex items-center gap-1 rounded-full pt-card shadow-lg px-2.5 py-1 text-[10px] font-bold text-muted-foreground hover:text-primary animate-in fade-in"
+              >
+                <ArrowDown className="w-3 h-3" /> 回到底部
+              </button>
             )}
           </div>
-          <button
-            onClick={handleNewSession}
-            className="mx-3.5 mb-3 shrink-0 border border-dashed border-border rounded-xl py-2 text-xs font-bold text-primary hover:bg-primary/6 transition-colors"
-          >
-            + 开新对话
-          </button>
+
+          {/* 配置引导条：后端报 2201/2202 时出现——光一行红字用户不知道去哪儿改（配置在 AI 页模型配置 Tab） */}
+          {needsConfig && (
+            <div className={cn(
+              'mx-3 mb-2 rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 flex items-center gap-2 shrink-0',
+              fullscreen && 'w-full max-w-3xl mx-auto',
+            )}>
+              <KeyRound className="w-3.5 h-3.5 text-warning shrink-0" />
+              <span className="text-[11px] font-bold flex-1 text-left">模型配置缺失或不可用</span>
+              <button
+                onClick={() => { chatStore.clearNeedsConfig(); onGoConfig?.(); }}
+                className="text-[11px] font-bold text-primary shrink-0 hover:underline"
+              >
+                去配置
+              </button>
+              <button
+                onClick={() => chatStore.clearNeedsConfig()}
+                aria-label="忽略"
+                className="text-muted-foreground/60 hover:text-foreground shrink-0"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+
+          <ChatComposer loading={loading} onSend={handleSend} fullscreen={fullscreen} />
+
+          {/* 浮窗 / 手机：历史还是盖在对话上的右滑叠层。全屏那份在左边常驻，这里不重复挂 */}
+          {!fullscreen && (
+            <SessionHistory
+              open={showHistory}
+              loading={historyLoading}
+              sessions={sessions}
+              currentId={sessionId}
+              onBack={() => setShowHistory(false)}
+              onOpen={s => void openSession(s)}
+              onRemove={s => void removeSession(s)}
+              onNew={handleNewSession}
+            />
+          )}
         </div>
       </div>
     </div>

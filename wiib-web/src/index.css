@@ -126,6 +126,9 @@ html.pwa nav a {
   @keyframes wiib-fade-in { from { opacity: 0 } to { opacity: 1 } }
   @keyframes wiib-slide-in-from-bottom-2 { from { transform: translate3d(0,.5rem,0) } to { transform: translate3d(0,0,0) } }
   @keyframes wiib-slide-in-from-top-2 { from { transform: translate3d(0,-.5rem,0) } to { transform: translate3d(0,0,0) } }
+  /* 唯一一个自带 opacity 的：trader 三项靠 animation-delay 依次登场，延迟期间必须是透明的，
+     不然三个按钮会先整整齐齐杵在那儿，再一个个抖一下 */
+  @keyframes wiib-slide-in-from-left-2 { from { opacity: 0; transform: translate3d(-.5rem,0,0) } to { opacity: 1; transform: translate3d(0,0,0) } }
   @keyframes wiib-zoom-in-95 { from { transform: scale(.95) } to { transform: scale(1) } }
   @keyframes wiib-toast-progress { from { transform: scaleX(1) } to { transform: scaleX(0) } }
 
@@ -137,8 +140,42 @@ html.pwa nav a {
   .fade-in { animation-name: wiib-fade-in }
   .slide-in-from-bottom-2 { animation-name: wiib-slide-in-from-bottom-2 }
   .slide-in-from-top-2 { animation-name: wiib-slide-in-from-top-2 }
+  .slide-in-from-left-2 { animation-name: wiib-slide-in-from-left-2 }
   .zoom-in-95 { animation-name: wiib-zoom-in-95 }
   .wiib-toast-progress { animation-name: wiib-toast-progress; animation-timing-function: linear; animation-fill-mode: both }
+
+  /* 悬浮球的两个状态层（见 ChatDock）。都是覆盖在球上的绝对定位层，只靠 opacity/transform 动，
+     不碰布局，滚动/流式期间不会引起重排 */
+
+  /* 有未读：一圈向外扩散消失。橙点是静态痕迹，这圈是余光里也能捕捉到的那一下 */
+  @keyframes wiib-ball-ping {
+    0% { transform: scale(1); opacity: .5 }
+    70%, 100% { transform: scale(1.55); opacity: 0 }
+  }
+  .wiib-ball-ping { animation: wiib-ball-ping 1.7s cubic-bezier(0, 0, .2, 1) infinite }
+
+  /* 研判中：一道扇形绕球扫。mask 把中心挖空，只在环带上显影 */
+  @keyframes wiib-ball-sweep { to { transform: rotate(360deg) } }
+  .wiib-ball-sweep {
+    background: conic-gradient(from 0deg,
+      transparent 0deg,
+      color-mix(in srgb, var(--color-primary) 55%, transparent) 70deg,
+      transparent 130deg);
+    /* closest-side 让半径跟着盒子走：写死 px 的话球一改尺寸这圈就露边或糊到图标上。
+       82%~84% 落在球的外沿，环带正好压着边框往外一点 */
+    -webkit-mask: radial-gradient(circle closest-side, transparent 82%, #000 84%);
+            mask: radial-gradient(circle closest-side, transparent 82%, #000 84%);
+    animation: wiib-ball-sweep 1.15s linear infinite;
+  }
+
+  /* 关掉动画偏好：这两层是纯装饰，停掉不丢信息（橙点与图标本身仍在）。
+     两者都要连 opacity 一起收——只停动画的话，扇形会定格成一道常驻的静止橙弧 */
+  @media (prefers-reduced-motion: reduce) {
+    .wiib-ball-ping { animation: none; opacity: 0 }
+    .wiib-ball-sweep { animation: none; opacity: 0 }
+    /* 入场动画同理：一次性位移/缩放停掉即可，元素靠 fill-mode 停在终态 */
+    .animate-in { animation: none }
+  }
 }
 
 /* ===== 页面容器 ===== */
@@ -162,6 +199,13 @@ html.dark .pt-card { box-shadow: none; }
 
 /* 数字：等宽 + 表格数字，全站行情/金额/百分比统一入口 */
 .num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+
+/* 横滚行两端的渐隐（对话输入区那排快捷提问）：滚动条是藏起来的，靠这层遮罩告诉用户"这边还有"。
+   --fade-l/--fade-r 由 JS 按滚动位置写，滚到头的那一侧自动收成 0 */
+.hscroll-fade {
+  -webkit-mask-image: linear-gradient(to right, transparent 0, #000 var(--fade-l, 0px), #000 calc(100% - var(--fade-r, 0px)), transparent 100%);
+          mask-image: linear-gradient(to right, transparent 0, #000 var(--fade-l, 0px), #000 calc(100% - var(--fade-r, 0px)), transparent 100%);
+}
 
 /* 微标签：小号宽字距灰字，卡片标题/表头用 */
 .microlabel { font-size: 0.625rem; letter-spacing: 0.1em; color: var(--color-muted-foreground); }

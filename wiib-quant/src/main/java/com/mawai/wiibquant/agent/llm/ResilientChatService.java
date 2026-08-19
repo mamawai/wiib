@@ -38,6 +38,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *   <li><b>流式 streamingExecute</b>：重试在这一层。模型层的流式路径不做重试，
  *       错误发生在订阅期只能在流水线上处理</li>
  * </ul>
+ * 两条路径共有的一层是 <b>tool_choice 降级</b>（{@link #toolChoiceRejected}）：上游拒收强制时
+ * 去掉强制重发。它不是重试——换的是请求本身，原样再发多少次都一样。
  * 流式的两个细节：
  * <ul>
  *   <li>重试：冷流重订阅=重新发起请求；仅在尚未向下游吐出任何帧时重试（吐过帧再重订阅
@@ -108,17 +110,25 @@ public class ResilientChatService implements ReactAgent.ChatService {
     @Override
     public Flux<ChatResponse> streamingExecute(List<Message> messages) {
         List<Message> withSystem = withSystem(messages);
+        ChatOptions used = optionsFor(withSystem);
         AtomicBoolean emitted = new AtomicBoolean(false);
-        return primaryModel.stream(promptOf(primaryModel, withSystem, optionsFor(withSystem)))
+        return primaryModel.stream(promptOf(primaryModel, withSystem, used))
                 .doOnNext(r -> emitted.set(true))
                 .retryWhen(Retry.backoff(maxAttempts - 1, Duration.ofMillis(initialDelayMs))
                         .maxBackoff(Duration.ofMillis(maxDelayMs))
-                        .filter(e -> !emitted.get() && !(e instanceof NonTransientAiException))
+                        // 强制被拒是配置类失败，重试多少次都一样，留给下面降级
+                        .filter(e -> !emitted.get() && !(e instanceof NonTransientAiException)
+                                && !toolChoiceRejected(e, used))
                         .doBeforeRetry(signal -> log.warn("模型流式调用失败，退避重试 {}/{}: {}",
                                 signal.totalRetries() + 2, maxAttempts, String.valueOf(signal.failure())))
                         // 耗尽时抛原始异常而非 RetryExhausted 包装，让下面的兜底拿到真实原因
                         .onRetryExhaustedThrow((spec, signal) -> signal.failure()))
                 .onErrorResume(e -> {
+                    // 强制被拒发生在请求刚落地、必然还没吐过帧，重订阅不会拼出重复文本
+                    if (toolChoiceRejected(e, used)) {
+                        log.warn("上游拒收 tool_choice 强制，本次降级为不强制重发: {}", e.toString());
+                        return primaryModel.stream(promptOf(primaryModel, withSystem, chatOptions));
+                    }
                     if (fallbackModel == null || emitted.get()) {
                         return Flux.error(e);
                     }
@@ -146,15 +156,47 @@ public class ResilientChatService implements ReactAgent.ChatService {
         }
     }
 
-    /** SDK 重试盲区的单次补救：读响应失败（类头注释的唯一豁免）再试一次，其余异常原样抛。 */
+    /**
+     * 两处就地补救，其余异常原样抛：
+     * <ul>
+     *   <li>读响应失败：SDK 重试盲区（类头注释的唯一豁免），再试一次</li>
+     *   <li>上游拒收 tool_choice 强制：去掉强制重发一次，判据见 {@link #toolChoiceRejected}</li>
+     * </ul>
+     */
     private ChatResponse callPrimary(List<Message> withSystem) {
-        Prompt prompt = promptOf(primaryModel, withSystem, optionsFor(withSystem));
+        ChatOptions used = optionsFor(withSystem);
+        Prompt prompt = promptOf(primaryModel, withSystem, used);
         try {
             return primaryModel.call(prompt);
         } catch (OpenAIInvalidDataException e) {
             log.warn("响应读取中断（SDK 不重试此类失败），单次重试: {}", e.toString());
             return primaryModel.call(prompt);
+        } catch (RuntimeException e) {
+            if (!toolChoiceRejected(e, used)) {
+                throw e;
+            }
+            log.warn("上游拒收 tool_choice 强制，本次降级为不强制重发: {}", e.toString());
+            return primaryModel.call(promptOf(primaryModel, withSystem, chatOptions));
         }
+    }
+
+    /**
+     * 上游是否拒了本次的 tool_choice 强制。真跑实证：模型开思考档位时上游直接 400
+     * （"tool_choice does not support being set to required or object in thinking mode"），
+     * 首轮必炸、整轮唤醒作废——比"首轮没强制调工具"糟得多，所以撞了就退回不强制。
+     * <p>
+     * 两个判据缺一不可：
+     * <ul>
+     *   <li>{@code used != chatOptions}：这次真加了强制（{@link #optionsFor} 加过料才是新对象），
+     *       没加过强制的失败退无可退</li>
+     *   <li>报错文案里有 {@code tool_choice}：不按异常类型判——两协议抛的类型不同
+     *       （openai 路 BadRequestException / responses 路 NonTransientAiException），
+     *       按类型判会漏。误判的代价只是多发一次请求</li>
+     * </ul>
+     * 不做能力探测表、不缓存端点支不支持：撞了才退，一次一次算。
+     */
+    private boolean toolChoiceRejected(Throwable e, ChatOptions used) {
+        return used != chatOptions && e.getMessage() != null && e.getMessage().contains(ToolChoice.PARAM);
     }
 
     private List<Message> withSystem(List<Message> messages) {

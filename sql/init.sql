@@ -118,6 +118,7 @@ CREATE TABLE IF NOT EXISTS blackjack_account (
     total_won BIGINT NOT NULL DEFAULT 0,
     total_lost BIGINT NOT NULL DEFAULT 0,
     biggest_win BIGINT NOT NULL DEFAULT 0,
+    session_json TEXT,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -133,6 +134,7 @@ COMMENT ON COLUMN blackjack_account.total_hands IS '总局数';
 COMMENT ON COLUMN blackjack_account.total_won IS '总赢额';
 COMMENT ON COLUMN blackjack_account.total_lost IS '总输额';
 COMMENT ON COLUMN blackjack_account.biggest_win IS '单局最大赢额';
+COMMENT ON COLUMN blackjack_account.session_json IS '进行中那一局的完整快照(牌靴/各手牌/庄家牌/保险)，NULL=无牌局；与筹码同行同一笔update，钱和牌不会分叉';
 COMMENT ON COLUMN blackjack_account.created_at IS '创建时间';
 COMMENT ON COLUMN blackjack_account.updated_at IS '更新时间';
 
@@ -358,6 +360,7 @@ CREATE TABLE IF NOT EXISTS video_poker_game (
     user_id BIGINT NOT NULL,
     bet_amount DECIMAL(18,2) NOT NULL,
     initial_cards VARCHAR(64) NOT NULL,
+    deck TEXT,
     held_positions VARCHAR(16) NOT NULL DEFAULT '',
     final_cards VARCHAR(64) NOT NULL DEFAULT '',
     hand_rank VARCHAR(32) NOT NULL DEFAULT '',
@@ -372,6 +375,7 @@ COMMENT ON TABLE video_poker_game IS '视频扑克游戏记录';
 COMMENT ON COLUMN video_poker_game.user_id IS '用户ID';
 COMMENT ON COLUMN video_poker_game.bet_amount IS '下注金额';
 COMMENT ON COLUMN video_poker_game.initial_cards IS '初始5张牌(逗号分隔)';
+COMMENT ON COLUMN video_poker_game.deck IS '本局洗好的整副52张(逗号分隔)，前5张即initial_cards，draw从第6张起补牌';
 COMMENT ON COLUMN video_poker_game.held_positions IS 'HOLD的位置(逗号分隔,0-4)';
 COMMENT ON COLUMN video_poker_game.final_cards IS '最终5张牌(逗号分隔)';
 COMMENT ON COLUMN video_poker_game.hand_rank IS '牌型名称';
@@ -399,7 +403,7 @@ COMMENT ON TABLE prediction_round IS 'BTC 5min涨跌预测回合';
 COMMENT ON COLUMN prediction_round.window_start IS '窗口起始时间戳(秒)';
 COMMENT ON COLUMN prediction_round.start_price IS '起始BTC价格(Chainlink)';
 COMMENT ON COLUMN prediction_round.end_price IS '结束BTC价格(Chainlink)';
-COMMENT ON COLUMN prediction_round.outcome IS '结果：UP/DOWN/DRAW';
+COMMENT ON COLUMN prediction_round.outcome IS '结果：UP/DOWN/DRAW/VOID（VOID=取不到收盘价作废，注单退本金）';
 COMMENT ON COLUMN prediction_round.status IS '状态：OPEN/LOCKED/SETTLED';
 
 -- ============================================
@@ -545,7 +549,7 @@ COMMENT ON COLUMN ai_runtime_config.config_name IS '配置名称，如 OpenAI、
 COMMENT ON COLUMN ai_runtime_config.api_key IS 'API Key';
 COMMENT ON COLUMN ai_runtime_config.base_url IS 'OpenAI Compatible Base URL（不含/v1后缀，quant/sim 均自拼 /v1/chat/completions）';
 COMMENT ON COLUMN ai_runtime_config.model IS '该LLM的模型名（功能位切到此配置即用此模型）';
-COMMENT ON COLUMN ai_runtime_config.reasoning_effort IS '思考档位 none/low/medium/high，NULL=不传走模型默认；同模型要深浅两档就建两条配置分给不同功能位';
+COMMENT ON COLUMN ai_runtime_config.reasoning_effort IS '思考档位，任意上游认的值（none/low/medium/high/xhigh…），NULL=不传走模型默认；同模型要深浅两档就建两条配置分给不同功能位';
 COMMENT ON COLUMN ai_runtime_config.api_protocol IS '上游协议：openai=/v1/chat/completions（DeepSeek等通用），responses=/v1/responses（CPA/OpenAI官方/xAI，思考模型优先）';
 COMMENT ON COLUMN ai_runtime_config.enabled IS '是否启用';
 
@@ -635,11 +639,30 @@ CREATE TABLE IF NOT EXISTS workbench_chat_message (
     user_id     BIGINT NOT NULL,
     role        VARCHAR(10) NOT NULL,
     content     TEXT NOT NULL,
+    -- 下面 6 列只有 assistant 行有值：这一轮用的端点、烧的 token、花的时间，随答案一起落库
+    -- 200 是按上界算的：端点名上限 32 + 分隔符 3 + user_llm_endpoint.model 的 128。
+    -- 装不下不是丢一列而是丢一整条答案——插入抛异常被 ChatHistoryService 的 catch 吞掉
+    model_label VARCHAR(200),
+    model_calls INT,
+    prompt_tokens BIGINT,
+    completion_tokens BIGINT,
+    total_tokens BIGINT,
+    latency_ms  INT,
     created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+-- 存量库补列（新库上面建表已含）
+ALTER TABLE workbench_chat_message ADD COLUMN IF NOT EXISTS model_label VARCHAR(200);
+ALTER TABLE workbench_chat_message ADD COLUMN IF NOT EXISTS model_calls INT;
+ALTER TABLE workbench_chat_message ADD COLUMN IF NOT EXISTS prompt_tokens BIGINT;
+ALTER TABLE workbench_chat_message ADD COLUMN IF NOT EXISTS completion_tokens BIGINT;
+ALTER TABLE workbench_chat_message ADD COLUMN IF NOT EXISTS total_tokens BIGINT;
+ALTER TABLE workbench_chat_message ADD COLUMN IF NOT EXISTS latency_ms INT;
 CREATE INDEX IF NOT EXISTS idx_wb_chat_session ON workbench_chat_message (session_id, id);
 CREATE INDEX IF NOT EXISTS idx_wb_chat_user ON workbench_chat_message (user_id, id DESC);
 COMMENT ON TABLE workbench_chat_message IS '工作台对话历史(展示用):user/assistant按会话落库,session_id与workbench_chat_context同值';
+COMMENT ON COLUMN workbench_chat_message.model_label IS '这一轮用的对话主模型:端点名 · 模型名(与LlmEndpointSelect展示口径一致)';
+COMMENT ON COLUMN workbench_chat_message.total_tokens IS '本轮全部模型调用(路由+专家+汇总+压缩+深研判)的token合计;NULL=上游端点没返回usage或本轮账不可信(有别轮的在途专家仍在记账),不是0';
+COMMENT ON COLUMN workbench_chat_message.latency_ms IS '本轮墙钟耗时:从controller接手这一轮起算,不含准入/建叶子/让位握手;比[TurnMetrics]日志多一帧session与user行落库';
 
 -- ============ workbench_chat_context：工作台会话模型侧上下文（续聊主链；一会话一行整体替换） ============
 -- 替代 langgraph4j PostgresSaver 的 lg4j* 表：那套图每走一步存一行完整快照（一轮 8 行、同一份历史重复存），
@@ -653,20 +676,8 @@ CREATE TABLE IF NOT EXISTS workbench_chat_context (
 COMMENT ON TABLE workbench_chat_context IS '工作台会话模型侧上下文:完整消息历史(含专家结论/压缩摘要/工具配对),每轮结束整体替换;删会话随展示表一并清';
 COMMENT ON COLUMN workbench_chat_context.state IS 'StateSerializer(Jackson)序列化的{"messages":[...]}:与叶子agent同一序列化器,保Spring AI Message多态与tool_call配对往返无损';
 
--- ============ workbench_memory：工作台跨会话长期记忆（规则化写入，不烧 LLM） ============
--- 每用户最多 WATCH_SYMBOLS 条，召回只按 user_id 走主键前缀，量小不另建索引
-CREATE TABLE IF NOT EXISTS workbench_memory (
-    user_id             BIGINT      NOT NULL,
-    symbol              VARCHAR(32) NOT NULL,
-    hit_count           BIGINT      NOT NULL DEFAULT 1,
-    last_question       TEXT,
-    last_answer_summary TEXT,
-    updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
-    PRIMARY KEY (user_id, symbol)
-);
-COMMENT ON TABLE workbench_memory IS '工作台跨会话记忆:用户关注过哪些symbol及次数,召回后拼进对话prompt前缀';
-COMMENT ON COLUMN workbench_memory.hit_count IS '关注次数,由 ON CONFLICT DO UPDATE 原子自增,避免先读后写丢计数';
-COMMENT ON COLUMN workbench_memory.last_answer_summary IS '只进库不出库:留作排查用,召回时不查此列';
+-- 工作台跨会话记忆表 workbench_memory 已删：召回段对答案质量没有可观测贡献，链路整条拆掉。旧库执行：
+--     DROP TABLE IF EXISTS workbench_memory;
 
 -- ============ news_event：快讯打标存档（K线新闻图标 + 事件研究数据积累） ============
 -- 采集轨独立于 NewsCache 懒加载：定时经缓存拉 BlockBeats（共享额度窗），新条目轻模型打标后落库。
@@ -818,6 +829,7 @@ CREATE TABLE IF NOT EXISTS ai_trader (
     memory          TEXT,
     learning_notes  TEXT,
     owner_note      TEXT,
+    owner_note_rounds INT NOT NULL DEFAULT 0,
     sim_user_id     BIGINT,
     round_no        INT NOT NULL DEFAULT 1,
     consecutive_failures INT NOT NULL DEFAULT 0,
@@ -840,6 +852,9 @@ CREATE TABLE IF NOT EXISTS ai_trader (
 ALTER TABLE ai_trader ADD COLUMN IF NOT EXISTS owner_note TEXT;
 ALTER TABLE ai_trader ADD COLUMN IF NOT EXISTS learning_notes TEXT;
 ALTER TABLE ai_trader ADD COLUMN IF NOT EXISTS learning_enabled BOOLEAN NOT NULL DEFAULT TRUE;
+ALTER TABLE ai_trader ADD COLUMN IF NOT EXISTS owner_note_rounds INT NOT NULL DEFAULT 0;
+-- 存量未读留言按原语义补成 1 轮（读后即焚=多轮的特例）。幂等：补过的行 rounds 已非 0，整文件重跑不会重复加轮
+UPDATE ai_trader SET owner_note_rounds = 1 WHERE owner_note IS NOT NULL AND owner_note_rounds = 0;
 COMMENT ON TABLE ai_trader IS 'AI Trader：用户BYOK自主交易代理（每用户1个，独立sim子账户，公开竞技场）';
 COMMENT ON COLUMN ai_trader.status IS 'PAUSED/RUNNING/LIQUIDATED';
 COMMENT ON COLUMN ai_trader.symbols IS '交易币种白名单子集，逗号分隔（须在binance.symbols范围内）';
@@ -851,7 +866,8 @@ COMMENT ON COLUMN ai_trader.alert_threshold_mult IS '警报灵敏度系数≥1.0
 COMMENT ON COLUMN ai_trader.use_default_prompt IS '是否使用平台系统提示词（默认true）；false=自定义提示词成为唯一指令来源（护栏仍硬校验）';
 COMMENT ON COLUMN ai_trader.memory IS '复盘笔记：reviewer每日复盘整理写入（限长文本，≤2000字覆盖写），每次唤醒注入提示词——trader侧只读只注入，本列即记忆学习的接口';
 COMMENT ON COLUMN ai_trader.learning_notes IS '学习笔记：learning agent向同侪学习后整理写入（≤2000字覆盖写），每次唤醒与复盘笔记并列注入；与memory分开存——来源分开模型才分得清"自己的教训"与"从别人学的"';
-COMMENT ON COLUMN ai_trader.owner_note IS '主人留言：对话轨leave_note_to_trader写入，下次唤醒随提示词注入并立刻清空（读后即焚，注入与清空在TraderPromptAssembler同一处）。与memory的分工：memory是复盘沉淀的长期笔记，本列是主人临时说的一句话，说完就没';
+COMMENT ON COLUMN ai_trader.owner_note IS '主人留言：trader动作面板写入，随提示词注入，每注入一次owner_note_rounds减1，减到0连同本列一起清空（注入与递减在TraderPromptAssembler同一处）。与memory的分工：memory是复盘沉淀的长期笔记，本列是主人阶段性交代的一句话';
+COMMENT ON COLUMN ai_trader.owner_note_rounds IS '留言剩余注入轮次，0=无待读留言。1即"念一次就清"，上限24（15m档≈6小时）。递减走条件SQL(正文匹配作前置+原子递减)：唤醒读的是调度时刻的快照，以正文匹配保证只递减自己注入的那条';
 COMMENT ON COLUMN ai_trader.sim_user_id IS '当前局sim子账户userId，每局独立，重置开新账户';
 COMMENT ON COLUMN ai_trader.round_no IS '局数：爆仓/手动重置+1开新局，历史留档';
 COMMENT ON COLUMN ai_trader.leverage_min IS '杠杆区间下界：模型必须从[min,max]里选，越界护栏拒（不截断——悄悄改值会让模型的止损计算失真）';
@@ -979,7 +995,7 @@ CREATE TABLE IF NOT EXISTS user_llm_endpoint (
 );
 CREATE INDEX IF NOT EXISTS idx_user_llm_endpoint_user ON user_llm_endpoint(user_id);
 COMMENT ON TABLE  user_llm_endpoint IS '用户 BYOK 端点库：一条=协议+URL+key+模型(+思考档位)，一人多条；对话/交易员/复盘教练从中选';
-COMMENT ON COLUMN user_llm_endpoint.reasoning_effort IS '思考档位 none/low/medium/high，NULL=不传走模型默认；模型支不支持查不到，由用户自选';
+COMMENT ON COLUMN user_llm_endpoint.reasoning_effort IS '思考档位，任意上游认的值（none/low/medium/high/xhigh…），NULL=不传走模型默认；模型支不支持查不到，由用户自选';
 COMMENT ON COLUMN user_llm_endpoint.api_key_enc IS 'AES-256-GCM 密文，密钥来自 WIIB_TRADER_KEY_SECRET';
 COMMENT ON COLUMN user_llm_endpoint.is_default IS '默认端点：没按用途绑定的地方都用它；一人恰一条（首条自动、删默认时最早的顶上）';
 
@@ -991,3 +1007,16 @@ CREATE TABLE IF NOT EXISTS user_llm_binding (
     UNIQUE (user_id, purpose)
 );
 COMMENT ON TABLE  user_llm_binding IS '用途→端点绑定：CHAT_MAIN 对话主模型 / CHAT_LIGHT 对话轻模型 / TRADER 交易员；无行=跟随默认端点。端点删除时其绑定连带删';
+
+-- ============ 三个游戏"进行中的那一局"落库所需的两列（2026-08） ============
+-- 事实源只有库表——mines_game 的 PLAYING 行、video_poker_game 的 DEALING 行、
+-- blackjack_account.session_json。Redis 那边只留每日积分池计数器 bj:pool:*。
+ALTER TABLE blackjack_account ADD COLUMN IF NOT EXISTS session_json TEXT;
+COMMENT ON COLUMN blackjack_account.session_json IS '进行中那一局的完整快照(牌靴/各手牌/庄家牌/保险)，NULL=无牌局；与筹码同行同一笔update，钱和牌不会分叉';
+
+ALTER TABLE video_poker_game ADD COLUMN IF NOT EXISTS deck TEXT;
+COMMENT ON COLUMN video_poker_game.deck IS '本局洗好的整副52张(逗号分隔)，前5张即initial_cards，draw从第6张起补牌';
+
+-- 切库前留下的 DEALING 行没有牌堆，补不了牌，恢复不了；它们的 Redis session 也早随 TTL 没了。
+-- 不判死这些行会永久占着"有局在进行"，那个用户从此开不了新局。切库后的行 deck 必非空，重复执行无害
+UPDATE video_poker_game SET status = 'SETTLED' WHERE status = 'DEALING' AND deck IS NULL;

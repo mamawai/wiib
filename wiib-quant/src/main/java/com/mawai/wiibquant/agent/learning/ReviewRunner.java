@@ -38,8 +38,13 @@ import java.util.concurrent.TimeoutException;
 @RequiredArgsConstructor
 public class ReviewRunner {
 
-    /** 复盘没有"下一根K线"的截止压力，固定预算即可 */
-    static final int REVIEW_TIMEOUT_SECONDS = 180;
+    /**
+     * 复盘没有"下一根K线"的截止压力、又跑在停工窗口内，所以给足，与唤醒同档。
+     * 它是全系统单次负载最重的调用：输入最大、一次性输出 3000+ 字、无工具分摊——
+     * 预算给窄了，模型还在写就被判超时，这一轮素材白烧还留一条 ERROR。
+     * 只是天花板不是配额：跑得快就早结束，停工窗口跟着早关。
+     */
+    static final int REVIEW_TIMEOUT_SECONDS = 600;
     /** 记忆总量硬约束：取舍归模型，超限截断兜底 */
     static final int MEMORY_MAX_CHARS = 2000;
     /** REVIEW 行的 interval 标记复盘节奏（wake_time=日线边界），与 trader 唤醒档位无关 */
@@ -53,8 +58,18 @@ public class ReviewRunner {
     private final AiTraderMapper traderMapper;
     private final AiTraderDecisionMapper decisionMapper;
 
-    /** 超时注入点：测试把 180s 缩短 */
+    /** 超时注入点：测试把默认预算缩短 */
     int timeoutSeconds = REVIEW_TIMEOUT_SECONDS;
+
+    /**
+     * 点播入口的准入预检：review() 无素材时是静默跳过的，而点播是异步跑的，
+     * 跳过的话用户等半天再去时间线上扑空。烧不烧钱这件事必须当场答复。
+     */
+    public boolean hasMaterial(AiTrader trader, long toMs) {
+        AiTraderDecision last = assembler.lastReview(trader.getId(), trader.getRoundNo());
+        return assembler.hasNewMaterial(trader.getId(), trader.getRoundNo(),
+                last == null ? 0 : last.getWakeTime(), toMs);
+    }
 
     /** 日线边界复盘入口：素材窗口=(上次成功REVIEW, 本边界]；无新交易素材静默跳过不白烧钱。 */
     public void review(AiTrader trader, long boundaryMs) {
@@ -196,8 +211,10 @@ public class ReviewRunner {
                 挤不下就说明旧的那条已经不如新的重要了
                 - 先找错误再找亮点；每条教训必须引用具体交易与数字，不引用数字的教训视为没有教训
                 - 观望对账：把时间线里每条"等待"条件与价格路径逐条对照，判命中/未命中必须引用具体价格，\
-                再判该行动没行动/该等没等。只认价格路径块头标注的覆盖范围内的价格——\
-                范围外（尤其开局前）的行情不构成"当时该不该动"的证据
+                再判该行动没行动/该等没等。条件依赖价格路径给不出的东西（均线、指标值、比 1h 更细的\
+                周期）时直接判"无法判定"——编一个看起来像样的证据，比承认判不了更糟。\
+                只认价格路径块头标注的覆盖范围内的价格——范围外（尤其开局前）的行情\
+                不构成"当时该不该动"的证据
                 - 所有输出使用中文，严格按以下两段格式，两段标题都必须出现：
 
                 【本期复盘】
@@ -206,7 +223,7 @@ public class ReviewRunner {
                 本局首篇写"无上期纪律"
                 逐笔教训：≤5 条，每条开头标【决策错】或【运气差】，先错误后亮点，\
                 每条引用具体交易与数字；上一期里仍然成立的教训继承进来接着算条数
-                观望对账：逐条等待条件 → 命中/未命中 + 价格证据 → 该行动没行动/该等没等；\
+                观望对账：逐条等待条件 → 命中/未命中/无法判定 + 价格证据 → 该行动没行动/该等没等；\
                 最后按活动统计给保守度自检一句话
                 下期纪律：≤3 条，可执行的具体改动；上期没做到但仍该守的原样留下，别偷偷换掉
 

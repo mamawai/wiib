@@ -3,6 +3,7 @@ package com.mawai.wiibquant.agent.chat;
 import com.mawai.wiibquant.agent.llm.SseChannel;
 import com.mawai.wiibquant.agent.llm.ChatEndpoints;
 import com.mawai.wiibquant.agent.llm.LlmEndpointService;
+import com.mawai.wiibquant.agent.llm.UsageTrackingChatModel;
 import com.mawai.wiibquant.agent.analysis.DeepAnalysisService;
 import com.mawai.wiibquant.agent.toolkit.MarketToolkit;
 import com.mawai.wiibquant.agent.toolkit.NewsToolkit;
@@ -23,6 +24,7 @@ import reactor.core.publisher.Flux;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -121,8 +123,6 @@ class LlmErrorSurfaceTest {
                 });
             }
         };
-        ChatMemoryService memory = mock(ChatMemoryService.class);
-        when(memory.recall(anyLong())).thenReturn("");
         ChatTurnRunner turnRunner = mock(ChatTurnRunner.class);
         doThrow(new RuntimeException(RAW)).when(turnRunner)
                 .run(any(), anyLong(), any(), any(), any(), any(), any());
@@ -130,14 +130,19 @@ class LlmErrorSurfaceTest {
         WorkbenchRunRegistry runRegistry = mock(WorkbenchRunRegistry.class);
         ChatHistoryService history = mock(ChatHistoryService.class);
         ChatYieldCoordinator coordinator =
-                new ChatYieldCoordinator(gate, runRegistry, turnRunner, history, memory);
+                new ChatYieldCoordinator(gate, runRegistry, turnRunner, history);
         ChatWorkbenchController controller = new ChatWorkbenchController(mock(ChatAgentFactory.class),
-                mock(LlmEndpointService.class), new ApprovalRegistry(), memory,
+                mock(LlmEndpointService.class), new ApprovalRegistry(),
                 history, mock(ChatContextStore.class), turnRunner,
                 runRegistry, gate, coordinator);
 
-        controller.run(new SseChannel(emitter), 1L, "wb-1-boom", "看看行情", null,
-                coordinator.openTurn(1L));
+        // run() 要拿叶子清账本，给不了 null；否则 NPE 会先于 runner 抛的那条上游异常，测的就不是这件事了
+        UsageTrackingChatModel model = new UsageTrackingChatModel(mock(ChatModel.class));
+        ChatAgentFactory.Leaves leaves =
+                new ChatAgentFactory.Leaves("test", model, model, Map.of(), null);
+
+        controller.run(new SseChannel(emitter), 1L, "wb-1-boom", "看看行情", leaves,
+                coordinator.openTurn(1L), null);
 
         String errorEvent = sent.stream().filter(text -> text.startsWith("{") && text.contains("message"))
                 .reduce((first, second) -> second).orElseThrow();

@@ -75,12 +75,13 @@ public class ScheduledTasks {
         });
     }
 
-    /** crypto每小时：孤儿TRIGGERED执行 */
+    /** crypto每小时：孤儿TRIGGERED执行 + 限价单索引对账 */
     @Scheduled(cron = "0 0 * * * *")
     public void cryptoHourlyMaintenance() {
         Thread.startVirtualThread(() -> {
             try {
                 cryptoOrderService.executeTriggeredOrders();
+                cryptoOrderService.reconcileLimitOrderIndex();
             } catch (Exception e) {
                 log.error("crypto小时维护失败", e);
             }
@@ -99,12 +100,13 @@ public class ScheduledTasks {
         });
     }
 
-    /** futures每小时：孤儿TRIGGERED执行 */
+    /** futures每小时：孤儿TRIGGERED执行 + 限价单索引对账 */
     @Scheduled(cron = "0 0 * * * *")
     public void futuresHourlyMaintenance() {
         Thread.startVirtualThread(() -> {
             try {
                 futuresSettlementService.executeTriggeredOrders();
+                futuresSettlementService.reconcileLimitOrderIndex();
             } catch (Exception e) {
                 log.error("futures小时维护失败", e);
             }
@@ -112,9 +114,8 @@ public class ScheduledTasks {
     }
 
     /**
-     * 预测回合卡死巡检（每5分钟，错开窗口边界30秒）。
-     * 结算靠 Redis Stream 事件单次触发，没有重投也没有补偿：结算事务一失败回合就永久停在 LOCKED，
-     * 用户买入时扣的钱既卖不掉也退不了。这里只负责让它可见，不自动重试（部分派彩的幂等是另一件事）。
+     * 预测回合补结算巡检（每5分钟，错开窗口边界30秒让正常结算先走）。
+     * 捞的是窗口早该结束、却还停在 OPEN / LOCKED 的回合，补锁重跑，口径见 sweepStuckRounds。
      */
     @Scheduled(cron = "30 */5 * * * *")
     public void sweepStuckPredictionRounds() {

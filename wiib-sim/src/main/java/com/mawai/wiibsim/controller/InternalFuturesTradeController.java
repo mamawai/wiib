@@ -13,6 +13,7 @@ import com.mawai.wiibcommon.util.Result;
 import com.mawai.wiibsim.service.AccountResetService;
 import com.mawai.wiibsim.service.FuturesRiskService;
 import com.mawai.wiibsim.service.FuturesTradingService;
+import com.mawai.wiibsim.service.InternalOrderIdempotency;
 import com.mawai.wiibsim.service.UserService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -44,15 +45,19 @@ public class InternalFuturesTradeController {
     private final FuturesRiskService riskService;
     private final UserService userService;
     private final AccountResetService accountResetService;
+    private final InternalOrderIdempotency idempotency;
 
+    /** 带 clientRequestId 就走幂等（调用方超时重发不会双仓），不带＝原样直发 */
     @PostMapping("/{userId}/open")
     public Result<FuturesOrderResponse> open(@PathVariable Long userId, @RequestBody FuturesOpenRequest request) {
-        return Result.ok(tradingService.openPosition(userId, request));
+        return idempotency.execute(userId, request.getClientRequestId(),
+                () -> tradingService.openPosition(userId, request));
     }
 
     @PostMapping("/{userId}/close")
     public Result<FuturesOrderResponse> close(@PathVariable Long userId, @RequestBody FuturesCloseRequest request) {
-        return Result.ok(tradingService.closePosition(userId, request));
+        return idempotency.execute(userId, request.getClientRequestId(),
+                () -> tradingService.closePosition(userId, request));
     }
 
     /** 修改止损（quant 持仓管理：TURTLE 2R 保本等）。 */

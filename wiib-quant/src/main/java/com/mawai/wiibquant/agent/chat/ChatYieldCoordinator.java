@@ -48,7 +48,6 @@ public class ChatYieldCoordinator {
     private final WorkbenchRunRegistry runRegistry;
     private final ChatTurnRunner turnRunner;
     private final ChatHistoryService chatHistoryService;
-    private final ChatMemoryService chatMemoryService;
 
     /** 补答跑在虚拟线程上：全程阻塞在 LLM 上游 IO */
     private final ExecutorService deferredExecutor = Executors.newVirtualThreadPerTaskExecutor();
@@ -70,19 +69,26 @@ public class ChatYieldCoordinator {
      */
     public static final class TurnHandle implements ChatTurnRunner.TurnYield {
         private final long userId;
+        /** false=这一轮不开让位窗口，新消息只能按占线拒、回落前端排队 */
+        private final boolean preemptible;
         private final CompletableFuture<Void> yieldSignal = new CompletableFuture<>();
         /** 本轮完全结束（名额已还）：让位等待者以它为"可以抢名额了"的发令枪 */
         private final CompletableFuture<Void> turnDone = new CompletableFuture<>();
         /** 让位窗口开关（写：runner 线程；读：新消息的请求线程） */
         private volatile boolean yieldable = false;
+        /** 用户点了停止（写：请求线程；读：runner 线程）。粘滞，跑到下一个检查点就收尾 */
+        private volatile boolean cancelled = false;
+        /** 中断信号：专家等待期阻塞在 anyOf 上，只有 future 能把它叫醒，光有布尔叫不醒 */
+        private final CompletableFuture<Void> cancelSignal = new CompletableFuture<>();
 
-        private TurnHandle(long userId) {
+        private TurnHandle(long userId, boolean preemptible) {
             this.userId = userId;
+            this.preemptible = preemptible;
         }
 
         @Override
         public CompletableFuture<Void> enterExpertWait() {
-            yieldable = true;
+            yieldable = preemptible;
             return yieldSignal;
         }
 
@@ -95,11 +101,46 @@ public class ChatYieldCoordinator {
         public boolean yieldRequested() {
             return yieldSignal.isDone();
         }
+
+        @Override
+        public boolean cancelRequested() {
+            return cancelled;
+        }
+
+        @Override
+        public CompletableFuture<Void> cancelSignal() {
+            return cancelSignal;
+        }
+    }
+
+    /**
+     * 用户请求中断在跑的那一轮。没有轮在跑（已经结束了）返回 false，让调用方如实告诉用户按钮点晚了。
+     * <p>
+     * 与 {@link #requestYield} 的区别：让位是"这个问题稍后补答"，中断是"到此为止不补"，
+     * 所以这里不动 yieldSignal、也不排补答队列。
+     */
+    public boolean requestCancel(long userId) {
+        TurnHandle handle = activeTurns.get(userId);
+        if (handle == null) {
+            return false;
+        }
+        handle.cancelled = true;
+        handle.cancelSignal.complete(null);   // 布尔叫不醒专家等待期那一等，得靠它
+        return true;
     }
 
     /** 一轮开跑前登记（拿到名额之后、提交执行之前）。 */
     public TurnHandle openTurn(long userId) {
-        TurnHandle handle = new TurnHandle(userId);
+        return openTurn(userId, true);
+    }
+
+    /**
+     * @param preemptible false=这一轮不许被新消息挤走。重新生成轮要的就是它：
+     *                    它把旧答案的位置腾了出来，被挤掉的话新答案只能由补答轮
+     *                    以【补答】标头追加到会话末尾，位置错、还再也不能重新生成
+     */
+    public TurnHandle openTurn(long userId, boolean preemptible) {
+        TurnHandle handle = new TurnHandle(userId, preemptible);
         activeTurns.put(userId, handle);
         return handle;
     }
@@ -150,6 +191,21 @@ public class ChatYieldCoordinator {
     }
 
     /**
+     * 这个用户还有没有跑不完的在途专家批次——有的话，用量账本上就混着不属于当前这一轮的 token。
+     * <p>
+     * 让位交出去的那批专家<b>没人取消</b>（{@link ChatTurnRunner} 的 dispatchAsync 是虚拟线程 fire-and-forget），
+     * 它能跨过好几轮继续往同一份账本上记账。所以"这一轮的用量可不可信"要看它，
+     * 而不是看"这一轮的名额是不是从谁手里抢来的"——后者只盖得住紧邻的那一轮。
+     * <p>
+     * 批次 {@code isDone()} 为真时账已经写完：专家走的是阻塞 invoke，模型调用在 future 完成前就返回了。
+     */
+    public boolean hasInFlightExperts(long userId) {
+        return pendingBySession.values().stream()
+                .flatMap(Queue::stream)
+                .anyMatch(work -> work.userId() == userId && !work.experts().isDone());
+    }
+
+    /**
      * 试跑一单补答。名额每用户 1 个，一次只跑一单，跑完的 finally 里链式再试；
      * 并发调用靠闸门天然串行——第二个进来的拿到 USER_BUSY 直接退。
      */
@@ -177,24 +233,32 @@ public class ChatYieldCoordinator {
         }
     }
 
-    /** 一单补答：summarizer 收尾 → 落展示历史（带补答标头）→ 记记忆。 */
+    /** 一单补答：summarizer 收尾 → 落展示历史（带补答标头）。 */
     private void runDeferred(DeferredWork work, Queue<DeferredWork> queue) {
+        // 账本清零划出这一段的边界。自己这单的专家早已完成（tryDrain 只挑 isDone 的），
+        // 但同一用户名下可能还排着别的在途批次（别的会话/后一单），那些专家仍在往同一份账本上记账
+        boolean dirtyBook = hasInFlightExperts(work.userId());
+        work.leaves().resetUsage();
+        long startedAt = System.currentTimeMillis();
         try {
             // 先登记运行中再出队：status = isRunning || hasPending，顺序反了会闪出两者皆 false 的空窗，
-            // 轮询端会误判"已结束"，拉走没有补答的历史并停表
-            runRegistry.start(work.sessionId(), text -> { });
+            // 轮询端会误判"已结束"，拉走没有补答的历史并停表。
+            // 登记的是空出口：补答轮是后台跑的，没有 SSE 通道可推——这里只借"运行中"这个标记。
+            // 后果要清楚：补答轮里 summarizer 仍带着动作类工具，它调 publishForm 一律返回 false，
+            // 工具据此如实告诉模型"卡没弹出去"，别让模型宣称已弹卡（用户根本看不到）
+            runRegistry.start(work.sessionId(), WorkbenchRunRegistry.NO_EMITTER);
             queue.remove(work);
             String answer = turnRunner.runDeferredSummary(work.leaves(), work.userId(), work.sessionId(),
                     work.question(), work.experts().join());
             chatHistoryService.append(work.sessionId(), work.userId(), "assistant",
-                    deferredHeader(work.question()) + answer);
-            chatMemoryService.remember(work.userId(), work.question(), answer);
+                    deferredHeader(work.question()) + answer, deferredMeta(work, startedAt, dirtyBook));
             log.info("[Yield] 补答完成 session={} chars={}", work.sessionId(), answer.length());
         } catch (Exception e) {
             log.warn("[Yield] 补答失败 session={}", work.sessionId(), e);
             // 失败也要给一行交代：不落的话轮询一停，用户看到的是问题永远没有下文
             chatHistoryService.append(work.sessionId(), work.userId(), "assistant",
-                    deferredHeader(work.question()) + "（补答失败：" + LlmErrorMessages.classify(e) + "，可重新提问）");
+                    deferredHeader(work.question()) + "（补答失败：" + LlmErrorMessages.classify(e) + "，可重新提问）",
+                    deferredMeta(work, startedAt, dirtyBook));   // 失败也照记：token 是真烧掉了
         } finally {
             runRegistry.finish(work.sessionId());
             concurrencyGate.release(work.userId());
@@ -203,12 +267,30 @@ public class ChatYieldCoordinator {
         }
     }
 
+    /**
+     * 补答这一段自己的读数：被让位那轮已经花掉的不算在这里（那轮没落 assistant 行，也就没处可记）。
+     * 账本被别的在途批次写脏（dirtyBook）、或被中断丢下的在途流写脏（usageUntrusted）时只报耗时
+     * ——两个判据同 {@code ChatWorkbenchController.turnMeta}，少判一个报出来的就是两轮混在一起的数。
+     */
+    private static ChatHistoryService.TurnMeta deferredMeta(DeferredWork work, long startedAt, boolean dirtyBook) {
+        int latencyMs = (int) (System.currentTimeMillis() - startedAt);
+        return dirtyBook || work.leaves().usageUntrusted()
+                ? ChatHistoryService.TurnMeta.latencyOnly(work.leaves().modelLabel(), latencyMs)
+                : ChatHistoryService.TurnMeta.of(work.leaves().modelLabel(), work.leaves().usageSnapshot(), latencyMs);
+    }
+
+    /**
+     * 补答行的标头前缀。对外可见是因为"这条能不能重新生成"要认它：
+     * 补答行对应的提问不在会话末尾，中间夹着别的问答，回退会误伤那些轮次。
+     */
+    static final String DEFERRED_PREFIX = "【补答「";
+
     /** 补答的标头：时间线上它离原问题隔着别的对话，得自己说明在答哪个问题 */
     private static String deferredHeader(String question) {
         String q = question.strip().replaceAll("\\s+", " ");
         if (q.length() > 40) {
             q = q.substring(0, 40) + "…";
         }
-        return "【补答「" + q + "」】\n\n";
+        return DEFERRED_PREFIX + q + "」】\n\n";
     }
 }

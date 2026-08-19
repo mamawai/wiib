@@ -48,9 +48,10 @@ class PredictionRoundConsumerTest {
     }
 
     @Test
-    void settleTriggersSettlePreviousRound() {
+    void settleUsesWindowStartFromEvent() {
+        // settle 结算的是事件里那个旧窗口，不是消费时刻算出来的上一窗口
         consumer().onMessage(record(Map.of("type", "settle", "windowStart", "1700000000")));
-        verify(predictionService).settlePreviousRound();
+        verify(predictionService).settleRound(1700000000L);
     }
 
     @Test

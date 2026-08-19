@@ -2,6 +2,8 @@ package com.mawai.wiibquant.agent.trader;
 
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
+import com.mawai.wiibcommon.dto.FuturesOpenRequest;
+import com.mawai.wiibcommon.dto.FuturesOrderResponse;
 import com.mawai.wiibcommon.dto.FuturesPositionDTO;
 import com.mawai.wiibcommon.dto.FuturesStopLossRequest;
 import com.mawai.wiibcommon.dto.FuturesTakeProfitRequest;
@@ -14,9 +16,11 @@ import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.web.client.ResourceAccessException;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 
@@ -28,7 +32,9 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
@@ -42,6 +48,9 @@ class TradeToolsTest {
         TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""), AiTraderPlan.class);
     }
 
+    /** 本轮截止时间：默认给足，只有专门验"超时后拒发"的用例才把它设到过去 */
+    private static final long DEADLINE = System.currentTimeMillis() + 600_000;
+
     private final SimTradeClient simTradeClient = mock(SimTradeClient.class);
     private final AiTraderPlanMapper planMapper = mock(AiTraderPlanMapper.class);
     private final TraderRequestService requestService = mock(TraderRequestService.class);
@@ -49,7 +58,7 @@ class TradeToolsTest {
     private final TradeTools tools = new TradeTools(simTradeClient, 99L, Set.of("BTCUSDT"),
             new BigDecimal("10000"), sym -> new BigDecimal("100000"),
             new TraderPlanStore(planMapper), requestService,
-            new TradeTools.WakeCtx(7L, 1, 1785171600000L,
+            new TradeTools.WakeCtx(7L, 1, 1785171600000L, DEADLINE,
                     new TraderRiskConfig(1, 20, new BigDecimal("1"), new BigDecimal("50"),
                             true, true, true, true)));
 
@@ -295,6 +304,99 @@ class TradeToolsTest {
         assertThat(p.getRevisionsJson()).contains("补立");
     }
 
+    // ---------- 下单结果未知：幂等键 + 同键重发 ----------
+
+    /** 常规开仓参数（护栏全过），下单链路的用例都用它 */
+    private String openOnce(TradeTools t) {
+        return t.openPosition("BTCUSDT", "LONG", "MARKET", 0.01, 10,
+                null, 95000.0, null, "BREAKOUT", "突破前高", "1h收盘跌回箱体内");
+    }
+
+    /**
+     * 读超时和 sim 回的"处理中"都只说明结果未知——sim 那边很可能已经成交了。
+     * 必须拿同一个 clientRequestId 重发去问结果（sim 侧幂等，重发不会多成交），
+     * 而不是当失败回给模型让它重下一单。
+     */
+    @Test
+    void timeoutResentWithSameRequestIdUntilResultKnown() {
+        List<String> keys = new ArrayList<>();
+        when(simTradeClient.openPosition(eq(99L), any())).thenAnswer(inv -> {
+            keys.add(((FuturesOpenRequest) inv.getArgument(1)).getClientRequestId());
+            if (keys.size() == 1) {
+                throw new ResourceAccessException("I/O error on POST request: 读超时");
+            }
+            if (keys.size() == 2) {
+                throw new IllegalStateException("sim api 业务失败 code=1106 msg=请求处理中，请稍后用同一 clientRequestId 重试");
+            }
+            FuturesOrderResponse resp = new FuturesOrderResponse();
+            resp.setOrderId(888L);
+            return resp;
+        });
+
+        String r = openOnce(tools);
+
+        assertThat(r).contains("888");
+        assertThat(keys).hasSize(3).doesNotContainNull();
+        // 三次同一个键：sim 侧幂等据此判定是同一笔，只会成交一次
+        assertThat(Set.copyOf(keys)).hasSize(1);
+        assertThat(tools.actions()).singleElement()
+                .satisfies(a -> assertThat(a.getString("status")).isEqualTo("ok"));
+    }
+
+    /**
+     * 重发到头仍问不到结果：不能回 ERROR——模型看见失败会重下一单，那就是双仓。
+     * 必须明说结果未知并让它先去核对账户。
+     */
+    @Test
+    void unknownOutcomeTellsModelToCheckAccountInsteadOfRetrying() {
+        when(simTradeClient.openPosition(eq(99L), any()))
+                .thenThrow(new ResourceAccessException("I/O error on POST request: 读超时"));
+
+        String r = openOnce(tools);
+
+        assertThat(r).startsWith("UNKNOWN").contains("可能已经成交")
+                .contains("get_account").contains("切勿直接重复下单");
+        verify(simTradeClient, times(3)).openPosition(eq(99L), any());
+        assertThat(tools.actions()).singleElement()
+                .satisfies(a -> assertThat(a.getString("status")).isEqualTo("unknown"));
+        // 结果未知就不落计划：没确认成交的仓位不该有事前承诺记录，模型要补走 write_plan
+        verify(planMapper, never()).insert(any(AiTraderPlan.class));
+    }
+
+    /** 明确的业务失败（没成交）不重发，原样回给模型 */
+    @Test
+    void businessFailureNotResent() {
+        when(simTradeClient.openPosition(eq(99L), any()))
+                .thenThrow(new IllegalStateException("sim api 业务失败 code=1751 msg=余额不足"));
+
+        String r = openOnce(tools);
+
+        assertThat(r).startsWith("ERROR").contains("余额不足");
+        verify(simTradeClient, times(1)).openPosition(eq(99L), any());
+    }
+
+    /**
+     * 本轮预算已耗尽：唤醒回路那边正在超时作废，cancel(true) 未必立刻停住图里的工具调用，
+     * 写工具必须自己拒发——否则作废的一轮还会往 sim 塞单，下一轮开局就是没人认领的仓位。
+     */
+    @Test
+    void expiredRoundRejectsAllWriteTools() {
+        TradeTools late = new TradeTools(simTradeClient, 99L, Set.of("BTCUSDT"),
+                new BigDecimal("10000"), sym -> new BigDecimal("100000"),
+                new TraderPlanStore(planMapper), requestService,
+                new TradeTools.WakeCtx(7L, 1, 1785171600000L, System.currentTimeMillis() - 1,
+                        new TraderRiskConfig(1, 20, new BigDecimal("1"), new BigDecimal("50"),
+                                true, true, true, true)));
+
+        assertThat(openOnce(late)).startsWith("REJECTED").contains("本轮已超时");
+        assertThat(late.closePosition(5L, 0.01, "失效条件触发")).contains("本轮已超时");
+        assertThat(late.setStopLoss(5L, 98000, "上移锁保本")).contains("本轮已超时");
+        assertThat(late.setTakeProfit(5L, 120000, "趋势加速")).contains("本轮已超时");
+        assertThat(late.cancelOrder(11L)).contains("本轮已超时");
+        // 连持仓查询都不该发出：超时后一次 sim 调用都不欠
+        verifyNoInteractions(simTradeClient);
+    }
+
     /**
      * 真跑事故复现：模型重试时丢了 symbol 参数，空 symbol 打到上游拉回全市场数组炸掉解析。
      * 白名单必须挡在行情查询之前——模型要收到的是可修正的拒因，不是解析异常。
@@ -305,7 +407,7 @@ class TradeToolsTest {
                 new BigDecimal("10000"),
                 sym -> { throw new IllegalStateException("不该发起行情查询"); },
                 new TraderPlanStore(planMapper), requestService,
-                new TradeTools.WakeCtx(7L, 1, 1785171600000L,
+                new TradeTools.WakeCtx(7L, 1, 1785171600000L, DEADLINE,
                         new TraderRiskConfig(1, 20, new BigDecimal("1"), new BigDecimal("50"),
                                 true, true, true, true)));
 
@@ -342,7 +444,7 @@ class TradeToolsTest {
         TradeTools noSelfReduce = new TradeTools(simTradeClient, 99L, Set.of("BTCUSDT"),
                 new BigDecimal("10000"), sym -> new BigDecimal("100000"),
                 new TraderPlanStore(planMapper), requestService,
-                new TradeTools.WakeCtx(7L, 1, 1785171600000L,
+                new TradeTools.WakeCtx(7L, 1, 1785171600000L, DEADLINE,
                         new TraderRiskConfig(1, 20, new BigDecimal("1"), new BigDecimal("50"),
                                 true, true, true, false)));
 
@@ -363,7 +465,7 @@ class TradeToolsTest {
         TradeTools noSelfAdd = new TradeTools(simTradeClient, 99L, Set.of("BTCUSDT"),
                 new BigDecimal("10000"), sym -> new BigDecimal("100000"),
                 new TraderPlanStore(planMapper), requestService,
-                new TradeTools.WakeCtx(7L, 1, 1785171600000L,
+                new TradeTools.WakeCtx(7L, 1, 1785171600000L, DEADLINE,
                         new TraderRiskConfig(1, 20, new BigDecimal("1"), new BigDecimal("50"),
                                 true, true, false, true)));
 

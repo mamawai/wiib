@@ -26,7 +26,9 @@ export function Backtest() {
         <div className="w-11 h-11 rounded-lg pt-card flex items-center justify-center bg-primary/10">
           <FlaskConical className="w-5.5 h-5.5 text-primary" />
         </div>
-        <div className="min-w-0">
+        {/* flex-1 把 basis 归零、只按剩余空间伸缩：副标题不归零就带着 max-content 参与换行判定，
+            独占窄屏一行把标题挤下去（truncate 只管渲染，不参与换行判定） */}
+        <div className="min-w-0 flex-1">
           <h1 className="text-xl font-black tracking-tight">回测</h1>
           <p className="text-[11px] text-muted-foreground truncate">
             {mode === 'strategy'
@@ -34,14 +36,16 @@ export function Backtest() {
               : '逐根揭示历史行情 · 按收盘价开多开空、加减仓 · 练自己的盘感'}
           </p>
         </div>
-        <div className="ml-auto flex rounded-lg border border-border overflow-hidden">
+        {/* 切换器窄屏独占第二行、两颗平分（w-full + flex-1），标题行整行留给图标与副标题；
+            sm 起收回自然宽度靠右 */}
+        <div className="w-full sm:w-auto sm:ml-auto flex rounded-lg border border-border overflow-hidden">
           <button type="button" onClick={() => switchMode('strategy')}
-            className={cn('px-3.5 h-10 text-xs font-black flex items-center gap-1.5 transition-colors',
+            className={cn('flex-1 sm:flex-none px-3.5 h-10 text-xs font-black flex items-center gap-1.5 transition-colors',
               mode === 'strategy' ? 'bg-primary text-primary-foreground' : 'bg-card-2 text-muted-foreground hover:bg-surface-hover')}>
             <Bot className="w-4 h-4" /> 策略回测
           </button>
           <button type="button" onClick={() => switchMode('replay')}
-            className={cn('px-3.5 h-10 text-xs font-black flex items-center gap-1.5 transition-colors',
+            className={cn('flex-1 sm:flex-none px-3.5 h-10 text-xs font-black flex items-center gap-1.5 transition-colors',
               mode === 'replay' ? 'bg-primary text-primary-foreground' : 'bg-card-2 text-muted-foreground hover:bg-surface-hover')}>
             <MousePointerClick className="w-4 h-4" /> 手动复盘
           </button>

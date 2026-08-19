@@ -2,6 +2,7 @@ package com.mawai.wiibquant.agent.chat;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.mawai.wiibcommon.entity.WorkbenchChatMessage;
+import com.mawai.wiibquant.agent.llm.UsageTrackingChatModel;
 import com.mawai.wiibquant.mapper.WorkbenchChatMessageMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -28,21 +29,58 @@ public class ChatHistoryService {
     /** 会话摘要：标题=首条用户消息截断。 */
     public record SessionSummary(String sessionId, String title, int messageCount, long lastAt) {}
 
-    public record ChatMessage(String role, String content, long createdAt) {}
+    /**
+     * 一轮的读数，只挂在 assistant 行上（user 行与历史老数据为 null）。
+     * token 三项 null = 上游端点没报 usage 或本轮账不可信，<b>不是 0</b>——展示层必须区分这两者。
+     */
+    public record TurnMeta(String modelLabel, Integer modelCalls, Long promptTokens,
+                           Long completionTokens, Long totalTokens, Integer latencyMs) {
+
+        /** 正常轮：账本快照直接入账 */
+        public static TurnMeta of(String modelLabel, UsageTrackingChatModel.UsageSnapshot usage, int latencyMs) {
+            return new TurnMeta(modelLabel, usage.modelCalls(), usage.promptTokens(),
+                    usage.completionTokens(), usage.totalTokens(), latencyMs);
+        }
+
+        /** 只报耗时：账本里混着别轮的账时用它，判据见 {@code ChatYieldCoordinator.hasInFlightExperts} */
+        public static TurnMeta latencyOnly(String modelLabel, int latencyMs) {
+            return new TurnMeta(modelLabel, null, null, null, null, latencyMs);
+        }
+    }
+
+    public record ChatMessage(long id, String role, String content, long createdAt, TurnMeta meta) {}
 
     /** 追加一条消息。历史是增益不是主链，失败只记日志不打断对话。 */
-    public void append(String sessionId, long userId, String role, String content) {
-        if (content == null || content.isBlank()) return;
+    public boolean append(String sessionId, long userId, String role, String content) {
+        return append(sessionId, userId, role, content, null);
+    }
+
+    /**
+     * 带本轮读数的追加（assistant 行专用；meta 为空即退化成普通追加）。
+     * 返回是否真落了库：重新生成靠它决定敢不敢删旧答案——没落上还删，这个提问就一条答案都不剩了。
+     */
+    public boolean append(String sessionId, long userId, String role, String content, TurnMeta meta) {
+        if (content == null || content.isBlank()) return false;
         try {
             WorkbenchChatMessage row = new WorkbenchChatMessage();
             row.setSessionId(sessionId);
             row.setUserId(userId);
             row.setRole(role);
             row.setContent(content);
+            if (meta != null) {
+                row.setModelLabel(meta.modelLabel());
+                row.setModelCalls(meta.modelCalls());
+                row.setPromptTokens(meta.promptTokens());
+                row.setCompletionTokens(meta.completionTokens());
+                row.setTotalTokens(meta.totalTokens());
+                row.setLatencyMs(meta.latencyMs());
+            }
             // createdAt 由全局 MetaObjectHandler 填，不手塞
             messageMapper.insert(row);
+            return true;
         } catch (Exception e) {
             log.warn("[ChatHistory] 写入失败 sessionId={}", sessionId, e);
+            return false;
         }
     }
 
@@ -63,14 +101,29 @@ public class ChatHistoryService {
                 .eq(WorkbenchChatMessage::getSessionId, sessionId));
     }
 
+    /** 删一条消息（重新生成时抹掉旧答案那行）。调用方已做归属校验。 */
+    public void deleteMessage(long id) {
+        messageMapper.deleteById(id);
+    }
+
     /** 单会话全部消息（按 id 升序＝发生顺序），调用方已做归属校验。 */
     public List<ChatMessage> messages(String sessionId) {
         return messageMapper.selectList(new LambdaQueryWrapper<WorkbenchChatMessage>()
                         .eq(WorkbenchChatMessage::getSessionId, sessionId)
                         .orderByAsc(WorkbenchChatMessage::getId))
                 .stream()
-                .map(row -> new ChatMessage(row.getRole(), row.getContent(), toEpochMillis(row.getCreatedAt())))
+                .map(row -> new ChatMessage(row.getId(), row.getRole(), row.getContent(),
+                        toEpochMillis(row.getCreatedAt()), metaOf(row)))
                 .toList();
+    }
+
+    /** 没落过读数的行（user 行、老数据）给 null 而不是空壳，省得前端再判一层"有对象但全空" */
+    private static TurnMeta metaOf(WorkbenchChatMessage row) {
+        if (row.getModelLabel() == null && row.getLatencyMs() == null) {
+            return null;
+        }
+        return new TurnMeta(row.getModelLabel(), row.getModelCalls(), row.getPromptTokens(),
+                row.getCompletionTokens(), row.getTotalTokens(), row.getLatencyMs());
     }
 
     private static String truncate(String s) {

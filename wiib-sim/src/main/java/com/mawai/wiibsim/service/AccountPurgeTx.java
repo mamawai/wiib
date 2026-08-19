@@ -50,6 +50,7 @@ public class AccountPurgeTx {
      */
     @Transactional(rollbackFor = Exception.class)
     public void purge(long userId, boolean chargeExtraReset) {
+        lockUserRow(userId);
         // 活动遗留积分：删表前先把已达成次数固化进 campaign_carryover。
         // 必须同一事务：删表回滚则快照也回滚，否则下次算分双算。无活动时是空操作
         campaignCarryoverService.carryOver(userId);
@@ -60,7 +61,7 @@ public class AccountPurgeTx {
         clearUserData(userId);
         userMapper.resetToInitial(userId, initialBalance);
         // 账本刚清空、resetToInitial 又是整体覆写（切面抓不到），补一条初始资金让不变量重新成立。
-        // 这儿不需要 selectByIdForUpdate 读旧值：旧账本整张删了，新账本从这一笔起算
+        // 开头那次 FOR UPDATE 只为取锁不读旧值：旧账本整张删了，新账本从这一笔起算
         userService.recordInitialGrant(userId, initialBalance);
     }
 
@@ -70,8 +71,21 @@ public class AccountPurgeTx {
      */
     @Transactional(rollbackFor = Exception.class)
     public void deleteAccount(long userId) {
+        lockUserRow(userId);
         clearUserData(userId);
         userMapper.deleteById(userId);
+    }
+
+    /**
+     * 清表前先锁 user 行（那个 7 天键只是限频，不是互斥）：动钱的 UPDATE...RETURNING 都打这一行，
+     * 并发中的下单/成交/派彩会排到本事务提交后再动，动的已是复位后的余额。
+     * <p>
+     * 两处边界要知道：不涉资金的挂单插入（全仓限价开/平仓单只读快照再 insert）不打 user 行，
+     * 不受这把锁保护；交易侧的加锁顺序是"先订单行后 user 行"、这里反过来，同一用户重置与交易
+     * 真撞上时靠 PG 死锁检测打回其中一个（重置或那笔交易失败，都可重试）。
+     */
+    private void lockUserRow(long userId) {
+        userMapper.selectByIdForUpdate(userId);
     }
 
     private void clearUserData(long userId) {

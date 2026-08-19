@@ -2,12 +2,15 @@ package com.mawai.wiibquant.agent.chat;
 
 import com.mawai.wiibquant.agent.llm.LlmEndpointService;
 import com.mawai.wiibquant.agent.llm.SseChannel;
+import com.mawai.wiibquant.agent.llm.UsageTrackingChatModel;
 import org.junit.jupiter.api.Test;
 import org.mockito.stubbing.Answer;
+import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.function.Consumer;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -17,7 +20,6 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
 
 /**
  * 断连之后这一轮怎么收场。
@@ -47,8 +49,6 @@ class ChatWorkbenchStreamTest {
     @Test
     void 断连后答案照样攒起来落进历史但不再发帧() {
         ChatHistoryService historyService = mock(ChatHistoryService.class);
-        ChatMemoryService memory = mock(ChatMemoryService.class);
-        when(memory.recall(anyLong())).thenReturn("");
         ChatTurnRunner turnRunner = mock(ChatTurnRunner.class);
         // runner 分两帧把答案交出来，controller 的 sink 得把它们攒全
         doAnswer((Answer<ChatTurnRunner.TurnResult>) inv -> {
@@ -60,9 +60,9 @@ class ChatWorkbenchStreamTest {
         ChatConcurrencyGate gate = new ChatConcurrencyGate(10);
         WorkbenchRunRegistry runRegistry = mock(WorkbenchRunRegistry.class);
         ChatYieldCoordinator coordinator =
-                new ChatYieldCoordinator(gate, runRegistry, turnRunner, historyService, memory);
+                new ChatYieldCoordinator(gate, runRegistry, turnRunner, historyService);
         ChatWorkbenchController controller = new ChatWorkbenchController(mock(ChatAgentFactory.class),
-                mock(LlmEndpointService.class), new ApprovalRegistry(), memory,
+                mock(LlmEndpointService.class), new ApprovalRegistry(),
                 historyService, mock(ChatContextStore.class), turnRunner,
                 runRegistry, gate, coordinator);
 
@@ -70,11 +70,15 @@ class ChatWorkbenchStreamTest {
         SseChannel channel = new SseChannel(emitter);
         channel.markClosed();   // 用户切页：连接已经断了，这一轮才刚开始
 
-        controller.run(channel, 1L, SESSION, "看看行情", null, coordinator.openTurn(1L));
+        // run() 要拿叶子清账本、取模型名落库，给不了 null；这条用例不看模型本身，深浅共用一个装饰器
+        UsageTrackingChatModel model = new UsageTrackingChatModel(mock(ChatModel.class));
+        ChatAgentFactory.Leaves leaves =
+                new ChatAgentFactory.Leaves("test", model, model, Map.of(), null);
 
-        // 答案完整进历史（也进记忆）——这是断连用户唯一还拿得到东西的途径
-        verify(historyService).append(eq(SESSION), eq(1L), eq("assistant"), eq("前半段后半段"));
-        verify(memory).remember(1L, "看看行情", "前半段后半段");
+        controller.run(channel, 1L, SESSION, "看看行情", leaves, coordinator.openTurn(1L), null);
+
+        // 答案完整进历史——这是断连用户唯一还拿得到东西的途径
+        verify(historyService).append(eq(SESSION), eq(1L), eq("assistant"), eq("前半段后半段"), any());
         // 但一帧都没往断掉的通道里写
         assertThat(emitter.raw).isEmpty();
     }

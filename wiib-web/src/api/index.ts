@@ -4,7 +4,7 @@ import type { BacktestStrategyMeta, BacktestTaskStatus, BacktestEventsPage, Back
 import type { LedgerEntry, LedgerBizTypeOption, PublicTrade, UserProfile, PositionHistoryItem, RankingSort } from '../types';
 import type { CampaignInfo, CampaignReward, CampaignScore, MyCampaignView } from '../types';
 import type { LlmEndpointView, LlmEndpointSaveRequest, LlmBindings, LlmPurpose } from '../types';
-import type { User, PageResult, RankingItem, CommentItem, NotificationItem, BuffStatus, UserBuff, BlackjackStatus, GameState, ConvertResult, MinesStatus, MinesGameState, VideoPokerStatus, VideoPokerGameState, CryptoPrice, CryptoOrderRequest, CryptoOrder, CryptoPosition, BStock, FuturesOpenRequest, FuturesCloseRequest, FuturesAddMarginRequest, FuturesReduceMarginRequest, FuturesStopLossRequest, FuturesTakeProfitRequest, FuturesAdjustLeverageRequest, FuturesCrossAccount, WalletTransferPreview, FuturesPosition, FuturesOrder, FuturesBracket, TradeFilterMap, PredictionRound, PredictionBet, PredictionBuyRequest, PredictionBetLive, PredictionPnl, AssetSnapshot, CategoryAverages, BehaviorAnalysisReport, ForceOrder, AiKeyConfig, AiModelAssignment, InviteCode, WorkbenchEvent, StrategyAccountView, TraderPublicView, TraderOwnerView, TraderDetailView, AiTraderDecisionView, TraderEquityPoint, TraderUpsertRequest, TraderSpec, TraderRequestView, StrategySignalState, FeedStreamHealth, WorkbenchSessionSummary, WorkbenchChatMessage, NewsFlashItem } from '../types';
+import type { User, PageResult, RankingItem, CommentItem, NotificationItem, BuffStatus, UserBuff, BlackjackStatus, GameState, ConvertResult, MinesStatus, MinesGameState, VideoPokerStatus, VideoPokerGameState, CryptoPrice, CryptoOrderRequest, CryptoOrder, CryptoPosition, BStock, FuturesOpenRequest, FuturesCloseRequest, FuturesAddMarginRequest, FuturesReduceMarginRequest, FuturesStopLossRequest, FuturesTakeProfitRequest, FuturesAdjustLeverageRequest, FuturesCrossAccount, WalletTransferPreview, FuturesPosition, FuturesOrder, FuturesReverseResult, FuturesBracket, TradeFilterMap, PredictionRound, PredictionBet, PredictionBuyRequest, PredictionBetLive, PredictionPnl, AssetSnapshot, CategoryAverages, BehaviorAnalysisReport, ForceOrder, AiKeyConfig, AiModelAssignment, InviteCode, WorkbenchEvent, StrategyAccountView, TraderPublicView, TraderOwnerView, TraderDetailView, AiTraderDecisionView, TraderEquityPoint, TraderUpsertRequest, TraderSpec, TraderRequestView, StrategySignalState, FeedStreamHealth, WorkbenchSessionSummary, WorkbenchChatMessage, NewsFlashItem, TraderActionPanel, TraderActionResult } from '../types';
 
 const api = axios.create({
   baseURL: '/api',
@@ -327,6 +327,8 @@ export const futuresApi = {
   open: (data: FuturesOpenRequest) => api.post<unknown, FuturesOrder>('/futures/open', data),
   close: (data: FuturesCloseRequest) => api.post<unknown, FuturesOrder>('/futures/close', data),
   closeAll: () => api.post<unknown, { closedCount: number; failures: string[] }>('/futures/close-all'),
+  // 反手：市价全平该仓位并立刻反向开等量新仓；反向开仓失败不报错，结果里带 openError（此时已空仓）
+  reverse: (positionId: number) => api.post<unknown, FuturesReverseResult>(`/futures/reverse/${positionId}`),
   cancel: (orderId: number) => api.post<unknown, FuturesOrder>(`/futures/cancel/${orderId}`),
   addMargin: (data: FuturesAddMarginRequest) => api.post<unknown, void>('/futures/margin', data),
   reduceMargin: (data: FuturesReduceMarginRequest) => api.post<unknown, void>('/futures/margin/reduce', data),
@@ -444,6 +446,18 @@ export const workbenchApi = {
   /** 工作台 SSE：POST /ai/workbench/chat，事件 session/agent_start/token/hitl_request/done/error */
   chat: (sessionId: string | null, message: string, onEvent: (e: WorkbenchEvent) => void, signal?: AbortSignal) =>
     postSse<WorkbenchEvent>('/api/ai/workbench/chat', { sessionId, message }, onEvent, signal),
+  /**
+   * 重新生成会话最后一条回答：后端把模型侧上下文回退到那条提问之前，再用原提问重跑，
+   * 事件协议与 chat 完全一致。回不去的会话（末尾不是答案/补答行/本轮压缩过）返回 2206。
+   */
+  regenerate: (sessionId: string, onEvent: (e: WorkbenchEvent) => void, signal?: AbortSignal) =>
+    postSse<WorkbenchEvent>('/api/ai/workbench/regenerate', { sessionId }, onEvent, signal),
+  /**
+   * 中断在跑的这一轮：后端跑到下一个检查点收尾，半截答案照落库。
+   * 返回 false=没有轮在跑（按钮点晚了），前端据此把按钮恢复原状。
+   */
+  cancel: (sessionId: string) =>
+    api.post<unknown, boolean>('/ai/workbench/cancel', { sessionId }),
   /** requestId 从 hitl_request 事件原样回传：卡片被新请求覆盖后点它，服务端会拒掉 */
   approve: (sessionId: string, approved: boolean, requestId: string) =>
     api.post<unknown, void>('/ai/workbench/approve', { sessionId, approved, requestId }),
@@ -522,6 +536,18 @@ export const traderApi = {
     api.get<unknown, AiTraderDecisionView[]>(`/ai/trader/${id}/decisions`, { params: { limit, before, round } }),
   equityCurve: (id: number, round?: number) =>
     api.get<unknown, TraderEquityPoint[]>(`/ai/trader/${id}/equity-curve`, { params: { round } }),
+
+  // ---- 动作面板：三个动作的唯一执行入口，对话轨只负责把表单卡弹出来 ----
+  /** 三张卡的状态一次取齐；每张卡挂载且未落地时拉一次 */
+  actionPanel: () => api.get<unknown, TraderActionPanel>('/ai/trader/action-panel'),
+  /** 留言：覆盖未读的那条；rounds 空=1 轮，越界由后端钳到 1~24 */
+  saveNote: (note: string, rounds?: number) =>
+    api.post<unknown, TraderActionResult>('/ai/trader/note', { note, rounds }),
+  clearNote: () => api.delete<unknown, TraderActionResult>('/ai/trader/note'),
+  /** 手动唤醒：真实执行一次决策，可能开/平仓 */
+  wake: () => api.post<unknown, TraderActionResult>('/ai/trader/wake'),
+  /** 点播复盘：异步跑；无新素材时后端跳过且不消耗模型调用（仍返回 ok） */
+  review: () => api.post<unknown, TraderActionResult>('/ai/trader/review'),
 };
 
 // ========== 策略账户监控 ==========

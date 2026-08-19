@@ -1,5 +1,6 @@
 package com.mawai.wiibsim.service.impl;
 
+import com.mawai.wiibcommon.dto.CryptoOrderRequest;
 import com.mawai.wiibcommon.dto.FuturesAddMarginRequest;
 import com.mawai.wiibcommon.entity.CryptoOrder;
 import com.mawai.wiibcommon.entity.FuturesPosition;
@@ -230,11 +231,8 @@ class LedgerProxyRealRunTest {
             FuturesRiskServiceImpl.class, CryptoOrderServiceImpl.class,
             MarginAccountServiceImpl.class, BuffServiceImpl.class);
 
-    /**
-     * 现存 13 个「protected + @Transactional + @Ledger」入口。只作"清单别悄悄缩水"的下限，不是精确台账。
-     * （原为 14，现货卖出取消 5min 延迟后 CryptoOrderServiceImpl.doSettle 随整套延迟结算一并删除。）
-     */
-    private static final int MIN_PROTECTED_TX_LEDGER = 13;
+    /** 现存 14 个「protected + @Transactional + @Ledger」入口。只作"清单别悄悄缩水"的下限，不是精确台账。 */
+    private static final int MIN_PROTECTED_TX_LEDGER = 14;
 
     /**
      * 本次 28 处标注里有 14 处是 {@code protected @Transactional @Ledger doXxx}，全靠 getAopProxy 调进来。
@@ -290,11 +288,12 @@ class LedgerProxyRealRunTest {
                 .as("这些 protected @Transactional 方法拿不到事务属性 = 根本没有事务边界")
                 .isEmpty();
 
-        // 公共方法当对照：它必须拿得到，否则说明是本用例问错了对象而不是 protected 的问题
+        // 公共方法当对照：它必须拿得到，否则说明是本用例问错了对象而不是 protected 的问题。
+        // 对照组要挑事务边界真在自己身上的 public 方法（拆成"壳 + protected 实现"的那些不行）
         TransactionAttribute publicAttr = transactionAttributeSource.getTransactionAttribute(
-                FuturesTradingServiceImpl.class.getDeclaredMethod("cancelOrder", Long.class, Long.class),
-                FuturesTradingServiceImpl.class);
-        assertThat(publicAttr).as("对照组：public 的 cancelOrder 必须拿得到事务属性").isNotNull();
+                CryptoOrderServiceImpl.class.getDeclaredMethod("buy", Long.class, CryptoOrderRequest.class),
+                CryptoOrderServiceImpl.class);
+        assertThat(publicAttr).as("对照组：public 的 buy 必须拿得到事务属性").isNotNull();
     }
 
     /**

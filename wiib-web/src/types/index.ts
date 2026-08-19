@@ -426,6 +426,13 @@ export interface FuturesOrder {
   isAiTrader?: boolean;
 }
 
+/** 反手结果：closed=平掉那笔（带已实现盈亏），opened=反向开的那笔；反向开仓失败时 opened 为 null、openError 带原因（此时已空仓） */
+export interface FuturesReverseResult {
+  closed: FuturesOrder;
+  opened: FuturesOrder | null;
+  openError: string | null;
+}
+
 // ========== BTC 5min 涨跌预测 ==========
 
 export interface PredictionRound {
@@ -558,7 +565,7 @@ export interface AiKeyConfig {
   apiKey: string;
   baseUrl: string;
   model?: string;
-  /** 思考档位 none/low/medium/high；空=不传走模型默认 */
+  /** 思考档位，任意上游认的值（none/low/medium/high/xhigh…）；空=不传走模型默认 */
   reasoningEffort?: string;
   /** 上游协议 openai=/v1/chat/completions，responses=/v1/responses；空=openai */
   apiProtocol?: string;
@@ -613,10 +620,46 @@ export type WorkbenchEvent =
   | { type: 'progress'; text: string }
   // requestId：这张卡的唯一标识，点同意/拒绝时原样回传，服务端据此确认"点的是哪张卡"
   | { type: 'hitl_request'; sessionId: string; symbol: string; reason: string; requestId: string; resumeMessage: string }
+  // 模型请求给用户弹一张待填的表单卡；执行权在用户点击，模型只能开卡不能动手。
+  // prefill 是模型草拟的初值（留言正文与轮次），可能整个缺席
+  | { type: 'form_request'; form: TraderFormKind; prefill?: Record<string, unknown> }
   // deferred=true：让位收尾（专家还在取数就来了新消息），answer 只是过渡话术；
   // 真答案由后端补答轮落历史，前端靠 status 轮询等它落库后整体回放补显
-  | { type: 'done'; sessionId: string; answer: string; deferred?: boolean }
+  // meta 是本轮读数，让位收尾那条 done 不带（答案还没出，无账可报）。
+  // cancelled=用户中断，answer 是"半截 + （已中断）"的定稿，前端要整段用它覆盖屏上那半截
+  | { type: 'done'; sessionId: string; answer: string; deferred?: boolean; cancelled?: boolean; meta?: TurnMeta }
   | { type: 'error'; message: string };
+
+/** trader 动作面板的三张卡 */
+export type TraderFormKind = 'note' | 'wake' | 'review';
+
+/** 动作面板一次取齐的状态：三张卡显示什么、按钮点不点得动，全看它 */
+export interface TraderActionPanel {
+  hasTrader: boolean;
+  name: string | null;
+  status: string | null;
+  pausedReason: string | null;
+  /** 上次唤醒的真实时刻（决策行落库时间，不是 K 线边界） */
+  lastWakeAt: number | null;
+  nextWakeAt: number | null;
+  /** null=可唤醒，否则是不能唤醒的原话，直接显示给用户 */
+  wakeBlockedReason: string | null;
+  lastReviewAt: number | null;
+  lastReviewStatus: string | null;
+  hasReviewMaterial: boolean;
+  reviewBlockedReason: string | null;
+  /** 当前待读留言正文，null=没有 */
+  note: string | null;
+  noteRounds: number;
+  noteMaxRounds: number;
+  noteMaxChars: number;
+}
+
+/** 动作执行结果：ok 只表示这次请求被正常处理，message 一律要显示 */
+export interface TraderActionResult {
+  ok: boolean;
+  message: string;
+}
 
 // ========== 策略账户监控 ==========
 /** 已平仓历史（静态字段快照，无实时价字段） */
@@ -649,11 +692,31 @@ export interface WorkbenchSessionSummary {
   lastAt: number;
 }
 
+/**
+ * 一轮的读数：用的哪个端点、烧了多少 token、花了多久。
+ * <p>
+ * 每一项都可能取不到值 —— 那是"上游端点没报 usage / 这一轮的账不可信"，<b>不是 0</b>，展示层必须区分。
+ * 两条来路的空值形状还不一样：SSE 走 fastjson2，默认不输出 null，字段直接<b>缺席</b>；
+ * 历史接口走 Jackson，会老老实实输出 null。所以一律按 `!= null` 判，别判 0、也别只判 undefined。
+ */
+export interface TurnMeta {
+  /** 端点名 · 模型名 */
+  modelLabel?: string | null;
+  modelCalls?: number | null;
+  promptTokens?: number | null;
+  completionTokens?: number | null;
+  totalTokens?: number | null;
+  latencyMs?: number | null;
+}
+
 /** 工作台历史消息（/ai/workbench/sessions/{id}/messages） */
 export interface WorkbenchChatMessage {
+  id: number;
   role: 'user' | 'assistant' | string;
   content: string;
   createdAt: number;
+  /** 只有 assistant 行有；user 行与加列之前的老数据是 null */
+  meta?: TurnMeta | null;
 }
 
 /** 我的对话端点配置（BYOK）。key 只回尾 4 位，明文不出服务端 */
@@ -667,7 +730,7 @@ export interface LlmEndpointView {
   apiProtocol: string;
   baseUrl: string;
   model: string;
-  /** none/low/medium/high，null=不传给上游走模型默认 */
+  /** 任意上游认的档位值（none/low/medium/high/xhigh…），null=不传给上游走模型默认 */
   reasoningEffort: string | null;
   apiKeyTail: string;
   /** 默认端点：没按用途绑定的地方都用它 */
@@ -818,7 +881,7 @@ export interface AiTraderDecisionView {
   status: 'OK' | 'ERROR' | 'SKIPPED';
   equity: number | null;
   reasoning: string | null;
-  /** [{tool,args,status,result/rejected/error}...] */
+  /** [{tool,args,status,result/rejected/error}...]；status=unknown 表示重发也没问到结果，可能已成交 */
   actionsJson: string | null;
   toolCalls: number;
   /** 本轮模型调用次数：ReAct 是循环，一次唤醒会调很多次 */

@@ -434,6 +434,51 @@ public class FuturesTradingServiceImpl implements FuturesTradingService {
         return new CloseAllResult(closed, failures);
     }
 
+    /**
+     * 反手：市价全平 → 立刻反向开等量新仓。
+     * <p>
+     * 不加 @Transactional/@Ledger：平仓与开仓各自复用 closePosition/openPosition 的独立锁+独立事务+
+     * 独立记账（同 closeAllPositions 的组合方式），这层再套一层只会嵌套事务、重复记账。
+     * 锁是<b>顺序</b>不是嵌套——平仓返回时 pos 锁已释放，开仓才去拿 sym 锁，不引入新的锁序。
+     * <p>
+     * 双向持仓下必须先平再开：同向下单会并入现有仓位，只开反向仓等于多空对冲同时挂着，不是反手。
+     * 该币反方向本来就有仓的话，新开这笔按既定语义并入那个仓，不特殊处理。
+     */
+    @Override
+    public ReverseResult reversePosition(Long userId, Long positionId) {
+        FuturesCloseRequest closeReq = new FuturesCloseRequest();
+        closeReq.setPositionId(positionId);
+        closeReq.setOrderType("MARKET");   // quantity 不设=锁内取实时持仓量全平
+        // 这步失败正常抛：什么都还没发生。属主与状态校验由 doClosePosition 在仓位锁内做
+        FuturesOrderResponse closed = closePosition(userId, closeReq);
+
+        // 新仓参数一律取自平仓回执：那份是 doClosePosition 在仓位锁内读到的快照。
+        // 自己在锁外先查一遍的话，这中间 adjustLeverage 跑完就会拿旧杠杆去开新仓——
+        // 该币还有别的仓位就撞杠杆一致性校验变半成功，没有则静默把用户刚改的杠杆顶回去。
+        // 数量同理，锁外那份可能已被 SL/TP 吃掉一部分
+        FuturesOpenRequest openReq = new FuturesOpenRequest();
+        openReq.setSymbol(closed.getSymbol());
+        openReq.setSide("CLOSE_LONG".equals(closed.getOrderSide()) ? "SHORT" : "LONG");
+        openReq.setMarginMode(closed.getMarginMode());
+        openReq.setQuantity(closed.getQuantity());
+        openReq.setLeverage(closed.getLeverage());
+        openReq.setOrderType("MARKET");
+
+        try {
+            FuturesOrderResponse opened = openPosition(userId, openReq);
+            log.info("futures反手 userId={} posId={} symbol={} {}→{} qty={} pnl={}", userId, positionId,
+                    closed.getSymbol(), closed.getOrderSide(), openReq.getSide(),
+                    closed.getQuantity(), closed.getRealizedPnl());
+            return new ReverseResult(closed, opened, null);
+        } catch (Exception e) {
+            // 不回滚也不外抛：仓位是真平了、盈亏是真结算了，硬"回滚"等于凭空造一个仓位出来。
+            // 抛出去前端只看到一句失败，用户不知道自己其实已经空仓——带着已平信息返回让前端说清楚
+            log.warn("反手的反向开仓失败 userId={} posId={} symbol={} qty={}",
+                    userId, positionId, closed.getSymbol(), closed.getQuantity(), e);
+            return new ReverseResult(closed, null, e.getMessage());
+        }
+    }
+
     private FuturesOrderResponse executeMarketClose(Long userId, FuturesPosition position, BigDecimal closeQty) {
         BigDecimal currentPrice = getPrice(position.getSymbol());
         BigDecimal pnl = calculatePnl(position.getSide(), position.getEntryPrice(), currentPrice, closeQty);
@@ -540,9 +585,17 @@ public class FuturesTradingServiceImpl implements FuturesTradingService {
     // ==================== 取消限价单 ====================
 
     @Override
+    public FuturesOrderResponse cancelOrder(Long userId, Long orderId) {
+        FuturesOrder order = SpringUtils.getAopProxy(this).doCancelOrder(userId, orderId);
+        // 索引跟着DB走：事务提交后才摘索引。搁事务里解冻一失败回滚，单子退回PENDING而索引已没了=悬空
+        removeFromLimitZSet(order, cacheService);
+        return buildOrderResponse(order);
+    }
+
+    // 标这一层：protected 且经 getAopProxy 走代理调进来，AOP 拦得到（cancelOrder() 只负责摘索引）
     @Transactional(rollbackFor = Exception.class)
     @Ledger(FUTURES_LIMIT_UNFREEZE)
-    public FuturesOrderResponse cancelOrder(Long userId, Long orderId) {
+    protected FuturesOrder doCancelOrder(Long userId, Long orderId) {
         FuturesOrder order = orderMapper.selectById(orderId);
         if (order == null || !order.getUserId().equals(userId)) {
             throw new BizException(ErrorCode.ORDER_NOT_FOUND);
@@ -555,8 +608,6 @@ public class FuturesTradingServiceImpl implements FuturesTradingService {
         int affected = orderMapper.casUpdateStatus(orderId, "PENDING", "CANCELLED");
         if (affected == 0) throw new BizException(ErrorCode.ORDER_CANNOT_CANCEL);
 
-        removeFromLimitZSet(order, cacheService);
-
         // 逐仓开/加仓单解冻资金；全仓单没冻结过钱，状态一改挂单占用自动消失
         if (!order.getOrderSide().startsWith("CLOSE") && !FuturesPosition.CROSS.equals(order.getMarginMode())) {
             userMapper.atomicUnfreezeBalance(userId, order.getFrozenAmount());
@@ -564,7 +615,7 @@ public class FuturesTradingServiceImpl implements FuturesTradingService {
 
         order.setStatus("CANCELLED");
         log.info("futures取消限价单 userId={} orderId={}", userId, orderId);
-        return buildOrderResponse(order);
+        return order;
     }
 
     // ==================== 追加保证金 ====================

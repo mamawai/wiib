@@ -22,8 +22,8 @@ export const useUserStore = create<UserState>()(
       loading: false,
 
       setUser: (user: User | null) => set({ user }),
-      // token 变了必须重连 WS：连接的身份是握手时用 token 定的，不重连就还挂着旧身份，
-      // 表现为登录后通知角标永远 0 且不报错。persist 是同步写，重连读到的已是新值
+      // token 变了必须重连 WS：身份是建连时 STOMP CONNECT 帧里的 token 认的，不重连就还挂着
+      // 旧身份，表现为登录后通知角标永远 0 且不报错。persist 是同步写，重连读到的已是新值
       setToken: (token: string | null) => {
         set({ token });
         reconnectWithIdentity();
