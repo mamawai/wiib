@@ -36,6 +36,9 @@ public final class ToolChoice {
     /** {@link ResponsesChatModel} 读的 toolContext 键：值 required/auto/具体工具名；缺省按 auto */
     public static final String CONTEXT_KEY = "wiib_tool_choice";
 
+    /** 两协议共用的参数名。上游拒收强制时报错文案里带它，是 ResilientChatService 判降级的抓手 */
+    public static final String PARAM = "tool_choice";
+
     private ToolChoice() {
     }
 
