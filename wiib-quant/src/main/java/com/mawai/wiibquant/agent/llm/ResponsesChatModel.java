@@ -59,6 +59,9 @@ public class ResponsesChatModel implements ChatModel {
     /** SSE 相邻事件最大间隔：防半开连接把消费方永久挂死（behavior 的 blockLast 会占死信号量）。
      *  取 5 分钟是给 high 档长思考的静默期留余量——多数服务端思考期间也会发 reasoning 事件/keepalive 注释行，都算心跳 */
     private static final Duration STREAM_IDLE_TIMEOUT = Duration.ofMinutes(5);
+    /** SSE 首事件超时：正常渠道 response.created 秒级就到，首帧不涉及思考静默，60s 已是极宽松的界；
+     *  挂死＝零字节永远不来（grok 经 CPA 实测 10 分钟静默，唯一终止条件是我们掐线），这一层专拦它 */
+    private static final Duration FIRST_EVENT_TIMEOUT = Duration.ofSeconds(60);
 
     private final WebClient webClient;
     private final String model;
@@ -138,22 +141,44 @@ public class ResponsesChatModel implements ChatModel {
         }
     }
 
+    /**
+     * 阻塞路径也走 SSE，收帧后合并——不用 stream=false 有两个原因：
+     * ① 非流式下 CPA 这类网关读完上游才回包，连响应头都最后才到，"上游挂死"与"长思考"在
+     *    字节层不可区分（grok 经 CPA 实测偶发 10 分钟零字节，只能干等 block 超时）；
+     *    SSE 有首帧和帧间隔，挂死在 {@link #FIRST_EVENT_TIMEOUT} 内就能判定并进重试。
+     * ② 与 stream() 共用 streamOnce 一条协议解析路：各类 BYOK 渠道的事件怪癖（畸形事件、
+     *    无增量服务端、工具只在 output_item.done 发）只在 toFrames 一处处理，不因协议形态分叉。
+     */
     private ChatResponse doCall(Prompt prompt) {
-        JSONObject body = buildRequestBody(prompt, false);
-        String raw = webClient.post()
-                .uri("/v1/responses")
-                .contentType(MediaType.APPLICATION_JSON)
-                .bodyValue(body.toString())
-                .retrieve()
-                .onStatus(org.springframework.http.HttpStatusCode::isError, resp ->
-                        resp.bodyToMono(String.class).defaultIfEmpty("")
-                                .flatMap(errBody -> Mono.error(toApiException(resp.statusCode().value(), errBody))))
-                .bodyToMono(String.class)
-                .block(CALL_TIMEOUT);
-        if (raw == null || raw.isBlank()) {
-            throw new NonTransientAiException("Responses API 返回空响应");
+        List<ChatResponse> frames = streamOnce(prompt).collectList().block(CALL_TIMEOUT);
+        return mergeFrames(frames);
+    }
+
+    /** 帧合并：拼文本、收工具调用，finishReason/usage 取收尾帧；没等到收尾帧＝上游断流，判瞬时可重试 */
+    private ChatResponse mergeFrames(List<ChatResponse> frames) {
+        ChatResponse last = frames == null || frames.isEmpty() ? null : frames.getLast();
+        String finishReason = last == null ? null : last.getResult().getMetadata().getFinishReason();
+        if (finishReason == null || finishReason.isBlank()) {
+            // completed 没到流就终了（CPA 侧对应 408 stream disconnected）：连接级偶发，
+            // 换个连接大概率就好，交给 callWithRetry；判 NonTransient 会让 trader 整轮唤醒白跑
+            throw new TransientAiException("Responses SSE 断流：未收到 response.completed 就结束了");
         }
-        return parseResponse(JSON.parseObject(raw));
+        StringBuilder text = new StringBuilder();
+        List<AssistantMessage.ToolCall> toolCalls = new ArrayList<>();
+        for (ChatResponse frame : frames) {
+            AssistantMessage output = frame.getResult().getOutput();
+            if (output.getText() != null) {
+                text.append(output.getText());
+            }
+            toolCalls.addAll(output.getToolCalls());
+        }
+        // 工具是否真被调用：toolCalls 空=模型自己答的（内置搜索/记忆），没走我们挂上去的工具
+        log.info("[Responses] {} toolCalls={} 文本{}字", model,
+                toolCalls.stream().map(AssistantMessage.ToolCall::name).toList(), text.length());
+        AssistantMessage message = AssistantMessage.builder().content(text.toString()).toolCalls(toolCalls).build();
+        Generation generation = new Generation(message, ChatGenerationMetadata.builder()
+                .finishReason(finishReason).build());
+        return new ChatResponse(List.of(generation), last.getMetadata());
     }
 
     // ========== 流式调用 ==========
@@ -184,9 +209,11 @@ public class ResponsesChatModel implements ChatModel {
                                 .flatMap(errBody -> Mono.error(toApiException(resp.statusCode().value(), errBody))))
                 .bodyToFlux(new ParameterizedTypeReference<ServerSentEvent<String>>() {
                 })
-                .timeout(STREAM_IDLE_TIMEOUT)
+                // 两段式超时：首帧管挂死（零字节永远不来），帧间管半开连接；都判瞬时进重试
+                .timeout(Mono.delay(FIRST_EVENT_TIMEOUT), _ -> Mono.delay(STREAM_IDLE_TIMEOUT))
                 .onErrorMap(java.util.concurrent.TimeoutException.class, _ ->
-                        new TransientAiException("Responses SSE 空闲超过 " + STREAM_IDLE_TIMEOUT.toMinutes() + " 分钟，判定连接挂死"))
+                        new TransientAiException("Responses SSE 首帧 " + FIRST_EVENT_TIMEOUT.toSeconds()
+                                + "s 未到或相邻事件间隔超 " + STREAM_IDLE_TIMEOUT.toMinutes() + " 分钟，判定连接挂死"))
                 .concatMap(sse -> toFrames(sse, state))
                 // 整条流一个可解析事件都没有：单帧跳过是对的，但全跳过就等于把失败咽了——
                 // 上游返回的根本不是我们认的 SSE，得当场说清楚，否则退化成静默空回答更难查
@@ -247,12 +274,31 @@ public class ResponsesChatModel implements ChatModel {
             }
             case "response.completed" -> {
                 JSONObject response = event.getJSONObject("response");
+                // 简易网关会把非流式响应原样包成 completed 事件发出，payload 里的 status 可能
+                // 仍是 failed/incomplete——事件类型说完成、payload 说截断时信 payload，
+                // 别让半截【本轮结论】带着 STOP 落库（与独立 failed/incomplete 事件同口径）
+                String status = response == null ? null : response.getString("status");
+                if ("failed".equals(status) || "incomplete".equals(status)) {
+                    return Flux.error(new NonTransientAiException(
+                            "Responses 流式失败: " + extractErrorMessage(response)));
+                }
                 List<ChatResponse> frames = new ArrayList<>();
-                // 兜底：不发增量事件的服务端，从完整响应里补全文（正常流式两标志必有其一，不会走到）
+                // 兜底：不发增量事件的服务端，正文和工具调用都只在完整响应的 output 里
+                // （正常流式两标志必有其一，不会走到）
                 if (!state.sawText && !state.sawToolCall && response != null) {
-                    String fullText = extractOutputText(response.getJSONArray("output"));
+                    JSONArray output = response.getJSONArray("output");
+                    String fullText = extractOutputText(output);
                     if (!fullText.isEmpty()) {
                         frames.add(textFrame(fullText));
+                    }
+                    if (output != null) {
+                        for (int i = 0; i < output.size(); i++) {
+                            JSONObject item = output.getJSONObject(i);
+                            if ("function_call".equals(item.getString("type"))) {
+                                state.sawToolCall = true;   // finalFrame 据此标 TOOL_CALLS
+                                frames.add(toolCallFrame(parseToolCall(item)));
+                            }
+                        }
                     }
                 }
                 frames.add(finalFrame(state.sawToolCall, response));
@@ -290,14 +336,15 @@ public class ResponsesChatModel implements ChatModel {
         Generation generation = new Generation(message, ChatGenerationMetadata.builder()
                 .finishReason(sawToolCall ? "TOOL_CALLS" : "STOP").build());
         ChatResponseMetadata.Builder metadata = ChatResponseMetadata.builder().model(model);
-        if (response != null && response.getJSONObject("usage") != null) {
-            metadata.usage(parseUsage(response.getJSONObject("usage")));
+        if (response != null) {
+            metadata.id(response.getString("id"));
+            if (response.getJSONObject("usage") != null) {
+                metadata.usage(parseUsage(response.getJSONObject("usage")));
+            }
         }
         return new ChatResponse(List.of(generation), metadata.build());
     }
 
-
-    /** 帧合并（仅内部工具执行分支用）：拼文本、收工具调用，成一个完整 ChatResponse 供 executeToolCalls */
 
     // ========== 请求构建 ==========
 
@@ -396,45 +443,6 @@ public class ResponsesChatModel implements ChatModel {
     }
 
     // ========== 响应解析 ==========
-
-    ChatResponse parseResponse(JSONObject response) {
-        String status = response.getString("status");
-        if ("failed".equals(status)) {
-            throw new NonTransientAiException("Responses API 失败: " + extractErrorMessage(response));
-        }
-        // incomplete = 服务端截断（多为 max_output_tokens 到顶），output 里只有半截正文。
-        // 当正常收尾发 STOP 的话，被腰斩的【本轮结论】会以 status=OK 落库，下一轮还被当
-        // "上一轮的承诺"回注给模型做检验基准。与流式路径（response.incomplete）同口径判失败
-        if ("incomplete".equals(status)) {
-            throw new NonTransientAiException("Responses API 截断: " + extractErrorMessage(response));
-        }
-        JSONArray output = response.getJSONArray("output");
-        String text = extractOutputText(output);
-        List<AssistantMessage.ToolCall> toolCalls = new ArrayList<>();
-        if (output != null) {
-            for (int i = 0; i < output.size(); i++) {
-                JSONObject item = output.getJSONObject(i);
-                if ("function_call".equals(item.getString("type"))) {
-                    toolCalls.add(parseToolCall(item));
-                }
-            }
-        }
-
-        // 工具是否真被调用：toolCalls 空=模型自己答的（内置搜索/记忆），没走我们挂上去的工具
-        log.info("[Responses] {} toolCalls={} 文本{}字", model,
-                toolCalls.stream().map(AssistantMessage.ToolCall::name).toList(), text.length());
-
-        AssistantMessage message = AssistantMessage.builder().content(text).toolCalls(toolCalls).build();
-        Generation generation = new Generation(message, ChatGenerationMetadata.builder()
-                .finishReason(toolCalls.isEmpty() ? "STOP" : "TOOL_CALLS").build());
-        ChatResponseMetadata.Builder metadata = ChatResponseMetadata.builder()
-                .id(response.getString("id"))
-                .model(response.getString("model") != null ? response.getString("model") : model);
-        if (response.getJSONObject("usage") != null) {
-            metadata.usage(parseUsage(response.getJSONObject("usage")));
-        }
-        return new ChatResponse(List.of(generation), metadata.build());
-    }
 
     private String extractOutputText(JSONArray output) {
         if (output == null) {
