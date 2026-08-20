@@ -1,5 +1,6 @@
 package com.mawai.wiibquant.agent.chat;
 
+import com.mawai.wiibquant.agent.llm.AgentGraphs;
 import com.mawai.wiibquant.agent.llm.ChatEndpoints;
 import com.mawai.wiibquant.agent.analysis.DeepAnalysisService;
 import com.mawai.wiibquant.agent.toolkit.MarketToolkit;
@@ -7,8 +8,6 @@ import com.mawai.wiibquant.agent.toolkit.NewsToolkit;
 import com.mawai.wiibquant.agent.trader.TraderChatService;
 import org.bsc.langgraph4j.StateGraph;
 import org.bsc.langgraph4j.prebuilt.MessagesState;
-import org.bsc.langgraph4j.serializer.StateSerializer;
-import org.bsc.langgraph4j.spring.ai.serializer.jackson.SpringAIJacksonStateSerializer;
 import org.bsc.langgraph4j.state.AppenderChannel;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.messages.AssistantMessage;
@@ -36,8 +35,6 @@ import static org.mockito.Mockito.when;
 class ChatAgentFactoryTest {
 
     private final ChatModelFactory chatModelFactory = mock(ChatModelFactory.class);
-    private final StateSerializer<MessagesState<Message>> serializer =
-            new SpringAIJacksonStateSerializer<>(MessagesState::new);
 
     private ChatAgentFactory factory() {
         ChatModel model = mock(ChatModel.class);
@@ -48,7 +45,7 @@ class ChatAgentFactoryTest {
                 mock(MarketToolkit.class), mock(NewsToolkit.class),
                 mock(DeepAnalysisService.class), mock(TraderChatService.class),
                 mock(WorkbenchRunRegistry.class),
-                new ApprovalRegistry(), serializer, 12, 32000, 6, "X");
+                new ApprovalRegistry(), 12, 32000, 6, "X");
     }
 
     private static ChatEndpoints config(String model) {
@@ -103,7 +100,7 @@ class ChatAgentFactoryTest {
                 .isInstanceOf(NotSerializableException.class);
     }
 
-    /** 叶子拿到的确实是注入进来那个序列化器（漏传的话它会自己兜一个默认的，落库当场炸） */
+    /** 叶子拿到的确实是 {@link AgentGraphs#STATE_SERIALIZER}——与会话上下文表同一份，两边不一致就写得进读不出 */
     @Test
     void leafSerializerCanCloneStateWithSpringAiMessages() throws Exception {
         ChatAgentFactory.Leaves leaves = factory().leavesFor(config("gpt-5"));
@@ -114,7 +111,7 @@ class ChatAgentFactoryTest {
 
         assertThat(cloned.messages()).hasSize(2);
         assertThat(cloned.messages().getFirst().getText()).isEqualTo("我只关注 ETH");
-        assertThat(leaves.summarizer().stateGraph.getStateSerializer()).isSameAs(serializer);
+        assertThat(leaves.summarizer().stateGraph.getStateSerializer()).isSameAs(AgentGraphs.STATE_SERIALIZER);
     }
 
     // ===== 长对话压缩：压缩结果必须活着进 state，否则每次调用都要重压 =====

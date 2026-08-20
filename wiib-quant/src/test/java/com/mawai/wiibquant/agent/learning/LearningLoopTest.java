@@ -13,8 +13,6 @@ import com.mawai.wiibquant.mapper.AiTraderDecisionMapper;
 import com.mawai.wiibquant.mapper.AiTraderMapper;
 import com.mawai.wiibquant.mapper.AiTraderPlanMapper;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
-import org.bsc.langgraph4j.prebuilt.MessagesState;
-import org.bsc.langgraph4j.spring.ai.serializer.jackson.SpringAIJacksonStateSerializer;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -69,8 +67,7 @@ class LearningLoopTest {
 
     private final LearningRunner runner = new LearningRunner(
             new PeerInsightService(traderMapper, decisionMapper, planMapper, simTradeClient, assembler),
-            modelFactory, traderMapper, decisionMapper,
-            new SpringAIJacksonStateSerializer<>(MessagesState::new));
+            modelFactory, traderMapper, decisionMapper);
 
     private static AiTrader trader(long id, String name) {
         AiTrader t = new AiTrader();

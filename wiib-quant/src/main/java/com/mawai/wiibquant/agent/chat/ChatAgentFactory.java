@@ -1,6 +1,7 @@
 package com.mawai.wiibquant.agent.chat;
 
 import com.mawai.wiibcommon.entity.UserLlmEndpoint;
+import com.mawai.wiibquant.agent.llm.AgentGraphs;
 import com.mawai.wiibquant.agent.llm.ChatEndpoints;
 import com.mawai.wiibquant.agent.analysis.DeepAnalysisService;
 import com.mawai.wiibquant.agent.llm.ConversationSummarizer;
@@ -18,7 +19,6 @@ import org.bsc.langgraph4j.CompiledGraph;
 import org.bsc.langgraph4j.hook.EdgeHook;
 import org.bsc.langgraph4j.hook.NodeHook;
 import org.bsc.langgraph4j.prebuilt.MessagesState;
-import org.bsc.langgraph4j.serializer.StateSerializer;
 import org.bsc.langgraph4j.spring.ai.agent.ReactAgent;
 import org.bsc.langgraph4j.state.AgentState;
 import org.bsc.langgraph4j.state.AppenderChannel;
@@ -97,8 +97,6 @@ public class ChatAgentFactory {
     private final TraderChatService traderChatService;
     private final WorkbenchRunRegistry runRegistry;
     private final ApprovalRegistry approvalRegistry;
-    /** 叶子与 {@link ChatContextStore} 共用同一个：会话历史存进去读出来要靠它，两边不一致就写得进读不出 */
-    private final StateSerializer<MessagesState<Message>> stateSerializer;
     private final int runModelCallLimit;
     private final int summarizeThresholdTokens;
     private final int summarizeKeepMessages;
@@ -137,7 +135,6 @@ public class ChatAgentFactory {
                             TraderChatService traderChatService,
                             WorkbenchRunRegistry runRegistry,
                             ApprovalRegistry approvalRegistry,
-                            StateSerializer<MessagesState<Message>> stateSerializer,
                             @Value("${quant.workbench.run-model-call-limit:8}") int runModelCallLimit,
                             @Value("${quant.workbench.summarize-threshold-tokens:32000}") int summarizeThresholdTokens,
                             @Value("${quant.workbench.summarize-keep-messages:6}") int summarizeKeepMessages,
@@ -149,7 +146,6 @@ public class ChatAgentFactory {
         this.traderChatService = traderChatService;
         this.runRegistry = runRegistry;
         this.approvalRegistry = approvalRegistry;
-        this.stateSerializer = stateSerializer;
         this.runModelCallLimit = runModelCallLimit;
         this.summarizeThresholdTokens = summarizeThresholdTokens;
         this.summarizeKeepMessages = summarizeKeepMessages;
@@ -286,11 +282,7 @@ public class ChatAgentFactory {
     CompiledGraph<MessagesState<Message>> expertGraph(ChatModel model, Object toolkit,
                                                       String forceFirstToolChoice, String instruction)
             throws Exception {
-        ReactAgent.Builder<MessagesState<Message>> builder = ReactAgent.builder()
-                .chatModel(model)
-                .stateSerializer(stateSerializer)
-                .schema(MessagesSchema.SCHEMA)
-                .defaultSystem(instruction);
+        ReactAgent.Builder<MessagesState<Message>> builder = AgentGraphs.reactAgent(model, instruction);
         if (toolkit != null) {
             builder.toolsFromObject(toolkit);
             // 有工具才有 ReAct 循环，没保险丝就一路顶到框架 25 次迭代硬顶抛异常；而 market 的工具
@@ -322,15 +314,7 @@ public class ChatAgentFactory {
     private CompiledGraph<MessagesState<Message>> summarizerLeaf(ChatModel deep, ChatModel light,
                                                                  long userId) throws Exception {
         // 工具的模型在这一层绑死："当前用的是谁的 key"只有这里知道
-        ReactAgent.Builder<MessagesState<Message>> builder = ReactAgent.builder()
-                .chatModel(deep)
-                .stateSerializer(stateSerializer)
-                .schema(MessagesSchema.SCHEMA)
-                .streaming(true) // 答案要逐字推给前端
-                .toolsFromObject(new DeepAnalysisToolkit(deep, deepAnalysisService, runRegistry))
-                // 可以多次调用：两套工具分别是"研判"与"对 trader 动手"，合成一个类只会让职责糊掉
-                .toolsFromObject(new TraderActionToolkit(runRegistry, userId))
-                .defaultSystem("""
+        ReactAgent.Builder<MessagesState<Message>> builder = AgentGraphs.reactAgent(deep, """
                         你是加密货币研判工作台的分析师。对话里已经有专家 agent 取回的真实数据，
                         你的职责是据此写出最终回答（新闻的联网补充也归你，见原则2）。
                         不要提及调度、专家名或内部流程。
@@ -358,6 +342,10 @@ public class ChatAgentFactory {
                            查询类问题（它现在怎么样/持了什么仓/那笔为什么开）不归你，trader_agent 专家已经取回数据了
 
                         输出精炼中文。""".formatted(supplementTag, mergedTag))
+                .streaming(true) // 答案要逐字推给前端
+                .toolsFromObject(new DeepAnalysisToolkit(deep, deepAnalysisService, runRegistry))
+                // 可以多次调用：两套工具分别是"研判"与"对 trader 动手"，合成一个类只会让职责糊掉
+                .toolsFromObject(new TraderActionToolkit(runRegistry, userId))
                 .addCallModelHook(wrapBefore(
                         new ConversationSummarizer(light, summarizeThresholdTokens, summarizeKeepMessages)));
         for (EdgeHook.WrapCall<MessagesState<Message>> hook :

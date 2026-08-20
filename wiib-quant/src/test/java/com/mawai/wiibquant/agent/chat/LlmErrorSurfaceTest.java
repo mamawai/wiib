@@ -8,8 +8,6 @@ import com.mawai.wiibquant.agent.analysis.DeepAnalysisService;
 import com.mawai.wiibquant.agent.toolkit.MarketToolkit;
 import com.mawai.wiibquant.agent.toolkit.NewsToolkit;
 import com.mawai.wiibquant.agent.trader.TraderChatService;
-import org.bsc.langgraph4j.prebuilt.MessagesState;
-import org.bsc.langgraph4j.spring.ai.serializer.jackson.SpringAIJacksonStateSerializer;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.ai.chat.messages.AssistantMessage;
@@ -85,8 +83,7 @@ class LlmErrorSurfaceTest {
                 mock(MarketToolkit.class), mock(NewsToolkit.class),
                 mock(DeepAnalysisService.class), mock(TraderChatService.class),
                 mock(WorkbenchRunRegistry.class),
-                new ApprovalRegistry(),
-                new SpringAIJacksonStateSerializer<>(MessagesState::new), 8, 999_999, 6, "X")
+                new ApprovalRegistry(), 8, 999_999, 6, "X")
                 .leavesFor(llmConfig);
 
         ChatContextStore contextStore = mock(ChatContextStore.class);

@@ -148,7 +148,7 @@ class ApprovalGateOrderTest {
                 mock(DeepAnalysisService.class), mock(TraderChatService.class),
                 mock(WorkbenchRunRegistry.class), registry,
                 // summarizeThresholdTokens 给足，别让历史压缩掺进来干扰
-                new SpringAIJacksonStateSerializer<>(MessagesState::new), 12, 999_999, 6, "X");
+                12, 999_999, 6, "X");
     }
 
     /** 叶子指纹含 userId（trader 工具按它认人），配置里不能缺 */

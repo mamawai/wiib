@@ -22,8 +22,6 @@ import com.mawai.wiibquant.mapper.AiTraderMapper;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
-import org.bsc.langgraph4j.prebuilt.MessagesState;
-import org.bsc.langgraph4j.spring.ai.serializer.jackson.SpringAIJacksonStateSerializer;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -79,8 +77,7 @@ class TraderWakeupLoopTest {
             new IndicatorToolkit(new KlineFetcher(binanceRestClient, 60_000)),
             new MarketToolkit(mock(MarketDataService.class)),
             new NewsToolkit(mock(NewsCache.class)),
-            traderMapper, decisionMapper, new TraderPlanStore(planMapper), requestService,
-            new SpringAIJacksonStateSerializer<>(MessagesState::new));
+            traderMapper, decisionMapper, new TraderPlanStore(planMapper), requestService);
 
     {
         // 测试边界是固定历史时刻，墙钟钉在边界后 1s——预算充足，各用例不受真实时间影响

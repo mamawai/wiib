@@ -6,8 +6,6 @@ import com.mawai.wiibquant.agent.llm.UsageTrackingChatModel;
 import com.mawai.wiibquant.agent.toolkit.MarketToolkit;
 import com.mawai.wiibquant.agent.toolkit.NewsToolkit;
 import com.mawai.wiibquant.agent.trader.TraderChatService;
-import org.bsc.langgraph4j.prebuilt.MessagesState;
-import org.bsc.langgraph4j.spring.ai.serializer.jackson.SpringAIJacksonStateSerializer;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.ai.chat.messages.AssistantMessage;
@@ -77,7 +75,6 @@ class ChatCancelTest {
         return new ChatAgentFactory(chatModelFactory, mock(MarketToolkit.class), mock(NewsToolkit.class),
                 mock(DeepAnalysisService.class), mock(TraderChatService.class),
                 mock(WorkbenchRunRegistry.class), registry,
-                new SpringAIJacksonStateSerializer<>(MessagesState::new),
                 LIMIT, NO_COMPRESSION, 6, "X")
                 .leavesFor(eps);
     }

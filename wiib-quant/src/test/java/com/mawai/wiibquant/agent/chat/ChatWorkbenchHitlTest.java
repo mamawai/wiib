@@ -12,7 +12,6 @@ import com.mawai.wiibquant.agent.toolkit.NewsToolkit;
 import com.mawai.wiibquant.agent.trader.TraderChatService;
 import com.mawai.wiibquant.mapper.WorkbenchChatContextMapper;
 import org.bsc.langgraph4j.prebuilt.MessagesState;
-import org.bsc.langgraph4j.spring.ai.serializer.jackson.SpringAIJacksonStateSerializer;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.model.ChatModel;
@@ -146,8 +145,7 @@ class ChatWorkbenchHitlTest {
         ChatEndpoints llmConfig = ChatTestEndpoints.eps(1L, "gpt-5");   // 叶子指纹含 userId（trader 工具按它认人）
         return new ChatAgentFactory(chatModelFactory, mock(MarketToolkit.class), mock(NewsToolkit.class),
                 deepAnalysisService, mock(TraderChatService.class), mock(WorkbenchRunRegistry.class),
-                registry, new SpringAIJacksonStateSerializer<>(MessagesState::new),
-                PRODUCTION_LIMIT, NO_COMPRESSION, 6, "X")
+                registry, PRODUCTION_LIMIT, NO_COMPRESSION, 6, "X")
                 .leavesFor(llmConfig);
     }
 
@@ -162,8 +160,7 @@ class ChatWorkbenchHitlTest {
             contextRows.put(inv.getArgument(0), inv.getArgument(2));
             return 1;
         });
-        ChatContextStore contextStore = new ChatContextStore(
-                contextMapper, new SpringAIJacksonStateSerializer<>(MessagesState::new));
+        ChatContextStore contextStore = new ChatContextStore(contextMapper);
         ChatTurnRunner turnRunner = new ChatTurnRunner(contextStore, registry);
         ChatConcurrencyGate gate = new ChatConcurrencyGate(10);
         WorkbenchRunRegistry runRegistry = mock(WorkbenchRunRegistry.class);

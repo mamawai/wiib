@@ -9,7 +9,6 @@ import com.mawai.wiibquant.agent.trader.TraderChatService;
 import org.bsc.langgraph4j.NodeOutput;
 import org.bsc.langgraph4j.RunnableConfig;
 import org.bsc.langgraph4j.prebuilt.MessagesState;
-import org.bsc.langgraph4j.spring.ai.serializer.jackson.SpringAIJacksonStateSerializer;
 import org.bsc.langgraph4j.streaming.StreamingOutput;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.messages.AssistantMessage;
@@ -88,8 +87,7 @@ class SummarizerLeafTest {
         ChatEndpoints llmConfig = ChatTestEndpoints.eps(1L, "gpt-5");   // 叶子指纹含 userId（trader 工具按它认人）
         return new ChatAgentFactory(chatModelFactory, mock(MarketToolkit.class), mock(NewsToolkit.class),
                 deepAnalysisService, mock(TraderChatService.class), mock(WorkbenchRunRegistry.class),
-                registry, new SpringAIJacksonStateSerializer<>(MessagesState::new),
-                limit, threshold, keep, "X")
+                registry, limit, threshold, keep, "X")
                 .leavesFor(llmConfig);
     }
 

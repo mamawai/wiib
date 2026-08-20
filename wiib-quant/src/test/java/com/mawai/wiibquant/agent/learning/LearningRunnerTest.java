@@ -9,8 +9,6 @@ import com.mawai.wiibquant.agent.trader.TraderModelFactory;
 import com.mawai.wiibquant.mapper.AiTraderDecisionMapper;
 import com.mawai.wiibquant.mapper.AiTraderMapper;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
-import org.bsc.langgraph4j.prebuilt.MessagesState;
-import org.bsc.langgraph4j.spring.ai.serializer.jackson.SpringAIJacksonStateSerializer;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -59,7 +57,7 @@ class LearningRunnerTest {
     private final AiTraderDecisionMapper decisionMapper = mock(AiTraderDecisionMapper.class);
 
     private final LearningRunner runner = new LearningRunner(peerInsightService, modelFactory,
-            traderMapper, decisionMapper, new SpringAIJacksonStateSerializer<>(MessagesState::new));
+            traderMapper, decisionMapper);
 
     private AiTrader trader() {
         AiTrader t = new AiTrader();

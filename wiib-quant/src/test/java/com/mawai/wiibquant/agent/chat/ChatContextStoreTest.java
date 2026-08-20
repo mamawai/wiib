@@ -1,8 +1,6 @@
 package com.mawai.wiibquant.agent.chat;
 
 import com.mawai.wiibquant.mapper.WorkbenchChatContextMapper;
-import org.bsc.langgraph4j.prebuilt.MessagesState;
-import org.bsc.langgraph4j.spring.ai.serializer.jackson.SpringAIJacksonStateSerializer;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.ai.chat.messages.AssistantMessage;
@@ -32,8 +30,7 @@ class ChatContextStoreTest {
     private static final String SESSION = "wb-1-ctx";
 
     private final WorkbenchChatContextMapper mapper = mock(WorkbenchChatContextMapper.class);
-    private final ChatContextStore store = new ChatContextStore(
-            mapper, new SpringAIJacksonStateSerializer<>(MessagesState::new));
+    private final ChatContextStore store = new ChatContextStore(mapper);
 
     /** 生产会存的四种消息形态一个不少：用户原文、带 tool_call 的助手消息、配对回执、压缩摘要 */
     private static List<Message> fullShapedHistory() {

@@ -5,8 +5,6 @@ import com.mawai.wiibquant.agent.analysis.DeepAnalysisService;
 import com.mawai.wiibquant.agent.toolkit.MarketToolkit;
 import com.mawai.wiibquant.agent.toolkit.NewsToolkit;
 import com.mawai.wiibquant.agent.trader.TraderChatService;
-import org.bsc.langgraph4j.prebuilt.MessagesState;
-import org.bsc.langgraph4j.spring.ai.serializer.jackson.SpringAIJacksonStateSerializer;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.ai.chat.messages.AssistantMessage;
@@ -118,8 +116,7 @@ class ChatTurnRunnerTest {
         return new ChatAgentFactory(chatModelFactory, mock(MarketToolkit.class), newsToolkit,
                 mock(DeepAnalysisService.class), traderChatService,
                 mock(WorkbenchRunRegistry.class),
-                registry, new SpringAIJacksonStateSerializer<>(MessagesState::new),
-                LIMIT, NO_COMPRESSION, 6, "X")
+                registry, LIMIT, NO_COMPRESSION, 6, "X")
                 .leavesFor(llmConfig);
     }
 

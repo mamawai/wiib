@@ -6,7 +6,6 @@ import com.mawai.wiibquant.agent.toolkit.NewsToolkit;
 import com.mawai.wiibquant.agent.trader.TraderChatService;
 import org.bsc.langgraph4j.CompiledGraph;
 import org.bsc.langgraph4j.prebuilt.MessagesState;
-import org.bsc.langgraph4j.spring.ai.serializer.jackson.SpringAIJacksonStateSerializer;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
@@ -64,8 +63,7 @@ class ExpertCallLimitTest {
                 mock(MarketToolkit.class), mock(NewsToolkit.class),
                 mock(DeepAnalysisService.class), mock(TraderChatService.class),
                 mock(WorkbenchRunRegistry.class),
-                new ApprovalRegistry(),
-                new SpringAIJacksonStateSerializer<>(MessagesState::new), LIMIT, 32000, 6, "X");
+                new ApprovalRegistry(), LIMIT, 32000, 6, "X");
     }
 
     /** 模型永不收尾（每轮都只想再调一次工具）时，必须被保险丝按配置的上限收束，而不是撞框架硬顶 */

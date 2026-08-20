@@ -13,8 +13,6 @@ import com.mawai.wiibquant.mapper.AiTraderDecisionMapper;
 import com.mawai.wiibquant.mapper.AiTraderMapper;
 import com.mawai.wiibquant.mapper.AiTraderPlanMapper;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
-import org.bsc.langgraph4j.prebuilt.MessagesState;
-import org.bsc.langgraph4j.spring.ai.serializer.jackson.SpringAIJacksonStateSerializer;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -129,7 +127,7 @@ class LearningHandoverLoopTest {
         PeerInsightService peers = new PeerInsightService(
                 traderMapper, decisionMapper, planMapper, simTradeClient, assembler);
         LearningRunner learningRunner = new LearningRunner(peers, modelFactory, traderMapper,
-                decisionMapper, new SpringAIJacksonStateSerializer<>(MessagesState::new));
+                decisionMapper);
         TraderScheduler scheduler = new TraderScheduler(traderMapper, wakeupRunner, reviewRunner, learningRunner);
 
         scheduler.onKlineClosed(new KlineClosedEvent(this, "BTCUSDT", "5m", DAY_BOUNDARY - 1));

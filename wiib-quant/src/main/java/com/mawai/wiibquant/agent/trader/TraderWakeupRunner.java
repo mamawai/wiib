@@ -15,7 +15,7 @@ import com.mawai.wiibcommon.entity.FuturesPosition;
 import com.mawai.wiibcommon.entity.FuturesStopLoss;
 import com.mawai.wiibcommon.entity.FuturesTakeProfit;
 import com.mawai.wiibcommon.market.BinanceRestClient;
-import com.mawai.wiibquant.agent.llm.MessagesSchema;
+import com.mawai.wiibquant.agent.llm.AgentGraphs;
 import com.mawai.wiibquant.agent.llm.ModelCallLimiter;
 import com.mawai.wiibquant.agent.llm.ResilientChatService;
 import com.mawai.wiibquant.agent.llm.ToolCallTraceHook;
@@ -31,8 +31,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.bsc.langgraph4j.CompiledGraph;
 import org.bsc.langgraph4j.RunnableConfig;
 import org.bsc.langgraph4j.prebuilt.MessagesState;
-import org.bsc.langgraph4j.serializer.StateSerializer;
-import org.bsc.langgraph4j.spring.ai.agent.ReactAgent;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.UserMessage;
@@ -99,7 +97,6 @@ public class TraderWakeupRunner {
     private final AiTraderDecisionMapper decisionMapper;
     private final TraderPlanStore planStore;
     private final TraderRequestService requestService;
-    private final StateSerializer<MessagesState<Message>> stateSerializer;
 
     /** 墙钟注入点：预算计算要可测（测试里把"现在"钉在边界附近） */
     java.util.function.LongSupplier nowMs = System::currentTimeMillis;
@@ -260,11 +257,7 @@ public class TraderWakeupRunner {
 
         // 全量工具轨迹（含数据工具）：收集器在本方法手里，超时 cancel 也保得住已发生的记录
         ToolCallTraceHook trace = new ToolCallTraceHook();
-        CompiledGraph<MessagesState<Message>> graph = ReactAgent.<MessagesState<Message>>builder()
-                .chatModel(model)
-                .stateSerializer(stateSerializer)
-                .schema(MessagesSchema.SCHEMA)
-                .defaultSystem(prompt)
+        CompiledGraph<MessagesState<Message>> graph = AgentGraphs.reactAgent(model, prompt)
                 .toolsFromObject(tradeTools)
                 .toolsFromObject(indicatorToolkit)
                 .toolsFromObject(marketToolkit)

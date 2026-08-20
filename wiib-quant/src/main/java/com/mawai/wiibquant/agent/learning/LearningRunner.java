@@ -5,7 +5,7 @@ import com.alibaba.fastjson2.JSONObject;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.mawai.wiibcommon.entity.AiTrader;
 import com.mawai.wiibcommon.entity.AiTraderDecision;
-import com.mawai.wiibquant.agent.llm.MessagesSchema;
+import com.mawai.wiibquant.agent.llm.AgentGraphs;
 import com.mawai.wiibquant.agent.llm.ModelCallLimiter;
 import com.mawai.wiibquant.agent.llm.ResilientChatService;
 import com.mawai.wiibquant.agent.llm.ToolCallTraceHook;
@@ -18,8 +18,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.bsc.langgraph4j.CompiledGraph;
 import org.bsc.langgraph4j.RunnableConfig;
 import org.bsc.langgraph4j.prebuilt.MessagesState;
-import org.bsc.langgraph4j.serializer.StateSerializer;
-import org.bsc.langgraph4j.spring.ai.agent.ReactAgent;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.UserMessage;
@@ -81,7 +79,6 @@ public class LearningRunner {
     private final TraderModelFactory modelFactory;
     private final AiTraderMapper traderMapper;
     private final AiTraderDecisionMapper decisionMapper;
-    private final StateSerializer<MessagesState<Message>> stateSerializer;
 
     /** 超时注入点：测试把 300s 缩短 */
     int timeoutSeconds = LEARN_TIMEOUT_SECONDS;
@@ -167,11 +164,7 @@ public class LearningRunner {
         UsageTrackingChatModel model = new UsageTrackingChatModel(modelFactory.modelFor(trader));
         // "它看了谁"是 LEARN 行在公开时间线上的观赏点，全靠这个 hook 记
         ToolCallTraceHook trace = new ToolCallTraceHook();
-        CompiledGraph<MessagesState<Message>> graph = ReactAgent.<MessagesState<Message>>builder()
-                .chatModel(model)
-                .stateSerializer(stateSerializer)
-                .schema(MessagesSchema.SCHEMA)
-                .defaultSystem(systemPrompt())
+        CompiledGraph<MessagesState<Message>> graph = AgentGraphs.reactAgent(model, systemPrompt())
                 .toolsFromObject(new PeerInsightToolkit(peerInsightService, trader.getId()))
                 .addExecuteToolsHook(new ModelCallLimiter(MAX_MODEL_CALLS))
                 .addExecuteToolsHook(trace)
