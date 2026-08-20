@@ -4,10 +4,12 @@ import com.sun.net.httpserver.HttpServer;
 import org.bsc.langgraph4j.spring.ai.agent.ReactAgent;
 import org.bsc.langgraph4j.spring.ai.agent.ReactAgentBuilder;
 import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.ai.chat.prompt.ChatOptions;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.model.tool.ToolCallingChatOptions;
 import org.springframework.ai.model.tool.ToolCallingManager;
@@ -19,6 +21,7 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
 
@@ -42,6 +45,8 @@ class ResponsesChatModelTest {
     private static HttpServer server;
     /** 各用例各自设定要回放的事件序列；handler 无状态，重试的每次请求拿到同样的流 */
     private static volatile String[] events = new String[0];
+    /** 挂死模拟：发完 events 后挂住这么久再关流（0=立即关）。心跳挂死＝发心跳后既不出结果也不断流 */
+    private static volatile long holdMs = 0;
 
     @BeforeAll
     static void startServer() throws IOException {
@@ -56,9 +61,23 @@ class ResponsesChatModelTest {
                     os.write(("data: " + line + "\n\n").getBytes(StandardCharsets.UTF_8));
                     os.flush();
                 }
+                if (holdMs > 0) {
+                    try {
+                        Thread.sleep(holdMs);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                }
             }
         });
+        // 挂死用例的重试会并发压着多个 hold 中的请求，默认单 dispatcher 线程会让后续用例排队
+        server.setExecutor(java.util.concurrent.Executors.newCachedThreadPool());
         server.start();
+    }
+
+    @AfterEach
+    void resetHold() {
+        holdMs = 0;
     }
 
     @AfterAll
@@ -218,5 +237,39 @@ class ResponsesChatModelTest {
         assertThatThrownBy(() -> model().call(new Prompt("问题")))
                 .isInstanceOf(TransientAiException.class)
                 .hasMessageContaining("断流");
+    }
+
+    @Test
+    void 阻塞路径_心跳不断但不完成_整体超时判瞬时挂死() {
+        // 生产实测的挂死真身：流上 keepalive 心跳不断（首帧/帧间超时全被骗过），但结果永远不来。
+        // 唯一有效判据是整体时长；必须判瞬时才能进重试换连接（实测掐线重发 3s 内即成功）
+        events = new String[]{"""
+                {"type":"response.in_progress"}"""};
+        holdMs = 10_000;
+        ChatOptions options = ResponsesChatModel.withCallTimeout(model().getOptions(), Duration.ofSeconds(2));
+        long startedAt = System.nanoTime();
+        assertThatThrownBy(() -> model().call(new Prompt("问题", options)))
+                .isInstanceOf(TransientAiException.class)
+                .hasMessageContaining("挂死");
+        // 3 次重试＋退避应在 10s 内收场；上限断言同时钉住"捎带的超时真被读到了"（否则等满默认 10 分钟）
+        assertThat(Duration.ofNanos(System.nanoTime() - startedAt)).isLessThan(Duration.ofSeconds(15));
+    }
+
+    @Test
+    void 阻塞路径_陌生事件类型_跳过不炸流() {
+        // 协议随时会添新事件类型；陌生类型只记日志跳过，不许把整条流炸掉
+        events = new String[]{
+                """
+                {"type":"response.brand_new_event","foo":"bar"}""",
+                """
+                {"type":"response.output_text.delta","delta":"正文"}""",
+                """
+                {"type":"response.completed","response":{"id":"resp_u","status":"completed",
+                 "model":"grok-test","output":[]}}"""
+        };
+        ChatResponse response = model().call(new Prompt("问题"));
+
+        assertThat(response.getResult().getOutput().getText()).isEqualTo("正文");
+        assertThat(response.getResult().getMetadata().getFinishReason()).isEqualTo("STOP");
     }
 }

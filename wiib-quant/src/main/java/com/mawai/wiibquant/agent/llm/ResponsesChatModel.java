@@ -33,7 +33,11 @@ import reactor.core.publisher.Mono;
 
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 /**
  * OpenAI Responses API（/v1/responses）协议的 ChatModel 实现。
@@ -59,9 +63,13 @@ public class ResponsesChatModel implements ChatModel {
     /** SSE 相邻事件最大间隔：防半开连接把消费方永久挂死（behavior 的 blockLast 会占死信号量）。
      *  取 5 分钟是给 high 档长思考的静默期留余量——多数服务端思考期间也会发 reasoning 事件/keepalive 注释行，都算心跳 */
     private static final Duration STREAM_IDLE_TIMEOUT = Duration.ofMinutes(5);
-    /** SSE 首事件超时：正常渠道 response.created 秒级就到，首帧不涉及思考静默，60s 已是极宽松的界；
-     *  挂死＝零字节永远不来（grok 经 CPA 实测 10 分钟静默，唯一终止条件是我们掐线），这一层专拦它 */
+    /** SSE 首事件超时：正常渠道 response.created 秒级就到，首帧不涉及思考静默，60s 已是极宽松的界。
+     *  只防"上游完全无响应"（过载/宕死）——真实的挂死带 keepalive 心跳，字节级超时拦不住
+     *  （生产实测：挂死 10 分钟流上心跳不断，此闸全程未触发），那种病由 doCall 的整体超时兜 */
     private static final Duration FIRST_EVENT_TIMEOUT = Duration.ofSeconds(60);
+
+    /** toolContext 键：本次调用整体超时（Duration）。路由这类轻调用传短值快速失败进重试，缺省 {@link #CALL_TIMEOUT} */
+    public static final String TIMEOUT_KEY = "wiib_call_timeout";
 
     private final WebClient webClient;
     private final String model;
@@ -124,6 +132,8 @@ public class ResponsesChatModel implements ChatModel {
                 return doCall(prompt);
             } catch (TransientAiException e) {
                 last = e;
+                // 必须落日志：这次挂死事故里"到底重试没重试"只能靠线程 dump 反推，不能再是盲区
+                log.warn("[Responses] {} 第 {}/{} 次调用瞬时失败：{}", model, attempt, MAX_ATTEMPTS, e.getMessage());
                 if (attempt < MAX_ATTEMPTS) {
                     sleepBackoff(attempt);
                 }
@@ -150,8 +160,38 @@ public class ResponsesChatModel implements ChatModel {
      *    无增量服务端、工具只在 output_item.done 发）只在 toFrames 一处处理，不因协议形态分叉。
      */
     private ChatResponse doCall(Prompt prompt) {
-        List<ChatResponse> frames = streamOnce(prompt).collectList().block(CALL_TIMEOUT);
+        Duration timeout = callTimeout(prompt);
+        List<ChatResponse> frames;
+        try {
+            frames = streamOnce(prompt).collectList().block(timeout);
+        } catch (IllegalStateException e) {
+            // block 到点＝上游挂死的最终判据：字节级超时（首帧/帧间）会被 keepalive 心跳骗过，
+            // 生产实测挂死 10 分钟流上心跳不断、两层超时全程没触发，只有这道闸拦得住。
+            // 判瞬时进重试——实测掐线换连接后 3s 内即成功；原来抛 IllegalStateException
+            // 进不了 callWithRetry，挂死满 10 分钟后零重试直接炸穿，整轮白跑
+            throw new TransientAiException("Responses 调用 " + timeout.toSeconds() + "s 未完成，判定上游挂死", e);
+        }
         return mergeFrames(frames);
+    }
+
+    /** 给单次调用捎整体超时。仅 responses 协议认这个键；openai 协议路走 SDK 全局超时，捎了也无害 */
+    public static ChatOptions withCallTimeout(ChatOptions options, Duration timeout) {
+        if (options instanceof ToolCallingChatOptions tool) {
+            Map<String, Object> context = tool.getToolContext() == null
+                    ? new HashMap<>() : new HashMap<>(tool.getToolContext());
+            context.put(TIMEOUT_KEY, timeout);
+            return tool.mutate().toolContext(context).build();
+        }
+        return options;
+    }
+
+    /** 读回本次调用的整体超时；没捎就是 {@link #CALL_TIMEOUT} */
+    private static Duration callTimeout(Prompt prompt) {
+        if (prompt.getOptions() instanceof ToolCallingChatOptions tool && tool.getToolContext() != null
+                && tool.getToolContext().get(TIMEOUT_KEY) instanceof Duration timeout) {
+            return timeout;
+        }
+        return CALL_TIMEOUT;
     }
 
     /** 帧合并：拼文本、收工具调用，finishReason/usage 取收尾帧；没等到收尾帧＝上游断流，判瞬时可重试 */
@@ -229,6 +269,8 @@ public class ResponsesChatModel implements ChatModel {
         boolean sawText;
         boolean sawToolCall;
         boolean sawMalformed;
+        /** 陌生事件类型每种只记一条日志：挂死排查时"流上到底在发什么"不能是盲区，又不许刷屏 */
+        final Set<String> unknownTypes = new HashSet<>();
     }
 
     private Flux<ChatResponse> toFrames(ServerSentEvent<String> sse, StreamState state) {
@@ -314,8 +356,23 @@ public class ResponsesChatModel implements ChatModel {
                 return Flux.error(new NonTransientAiException(
                         "Responses 流式错误: " + event.getString("message")));
             }
-            // reasoning 摘要、arguments 增量等事件不进正文流，忽略
+            // 已知且无需处理的事件：进度心跳、reasoning 摘要、arguments 增量（工具整只收在 output_item.done）、
+            // 文本/分段的 added/done（正文只认 delta）。显式列出＝确认过可安全忽略，安静跳过
+            case "response.created", "response.in_progress",
+                 "response.output_item.added",
+                 "response.content_part.added", "response.content_part.done",
+                 "response.output_text.done",
+                 "response.reasoning_summary_text.delta", "response.reasoning_summary_text.done",
+                 "response.reasoning_summary_part.added", "response.reasoning_summary_part.done",
+                 "response.function_call_arguments.delta", "response.function_call_arguments.done" -> {
+                return Flux.empty();
+            }
+            // 真正陌生的类型才出声（每种一条）：这次挂死事故里"10 分钟流上在发什么"全靠抓包才看清，
+            // 观测不能再有盲区
             default -> {
+                if (state.unknownTypes.add(type)) {
+                    log.info("[Responses] 跳过陌生事件类型 {}", type);
+                }
                 return Flux.empty();
             }
         }

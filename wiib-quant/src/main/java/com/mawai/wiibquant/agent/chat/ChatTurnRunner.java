@@ -5,6 +5,7 @@ import com.alibaba.fastjson2.JSONArray;
 import com.mawai.wiibquant.agent.llm.ConversationSummarizer;
 import com.mawai.wiibquant.agent.llm.LlmErrorMessages;
 import com.mawai.wiibquant.agent.llm.ModelCallLimiter;
+import com.mawai.wiibquant.agent.llm.ResponsesChatModel;
 import com.mawai.wiibquant.agent.llm.ToolChoice;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -26,6 +27,7 @@ import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.ai.tool.method.MethodToolCallbackProvider;
 import org.springframework.stereotype.Component;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -216,6 +218,9 @@ public class ChatTurnRunner {
     /** 路由工具的 callback：常量化，避免每轮重新反射扫描 */
     private static final List<ToolCallback> ROUTER_TOOLS = List.of(
             MethodToolCallbackProvider.builder().toolObjects(new RouterTool()).build().getToolCallbacks());
+
+    /** 路由是轻决策，正常 3s 内返回；90s 判挂死进重试、仍失败降级 FINISH——实测上游挂死曾拖它满 10 分钟 */
+    private static final Duration ROUTER_TIMEOUT = Duration.ofSeconds(90);
 
     /**
      * 跑完一轮对话。
@@ -516,7 +521,8 @@ public class ChatTurnRunner {
         messages.addAll(history);
         long startedAt = System.currentTimeMillis();
         try {
-            ChatOptions options = ToolChoice.apply(ToolChoice.withTools(model, ROUTER_TOOLS), ToolChoice.REQUIRED);
+            ChatOptions options = ResponsesChatModel.withCallTimeout(
+                    ToolChoice.apply(ToolChoice.withTools(model, ROUTER_TOOLS), ToolChoice.REQUIRED), ROUTER_TIMEOUT);
             ChatResponse response = model.call(new Prompt(messages, options));
             List<String> next = parseRouteCall(Objects.requireNonNull(response.getResult()).getOutput());
             // openai 协议路没有 [Responses] 那样的请求日志，路由慢在模型还是慢在别处只能靠这行分辨
