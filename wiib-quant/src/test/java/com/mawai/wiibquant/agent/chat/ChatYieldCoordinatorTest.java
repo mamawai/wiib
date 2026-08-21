@@ -126,7 +126,7 @@ class ChatYieldCoordinatorTest {
                              AtomicReference<ChatTurnRunner.TurnResult> resultRef) {
         Thread thread = new Thread(() -> {
             try {
-                ChatTurnRunner.TurnResult result = runner.run(leaves, 1L, SESSION, "看看行情",
+                ChatTurnRunner.TurnResult result = runner.run(leaves, 1L, SESSION, "看看行情", null,
                         chunk -> { }, event -> { }, turn);
                 resultRef.set(result);
                 if (result.yielded()) {

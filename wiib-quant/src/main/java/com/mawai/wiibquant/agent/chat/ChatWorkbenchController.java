@@ -103,6 +103,8 @@ public class ChatWorkbenchController {
     public static class WorkbenchChatRequest {
         private String sessionId; // 空=新会话
         private String message;
+        /** 功能按钮直发时带上；用户自己打字为空，走正常派发 */
+        private ChatIntent intent;
     }
 
     @Data
@@ -164,7 +166,7 @@ public class ChatWorkbenchController {
                 ? request.getSessionId()
                 : "wb-" + userId + "-" + UUID.randomUUID();
 
-        return streamTurn(userId, sessionId, request.getMessage(), leaves, null);
+        return streamTurn(userId, sessionId, request.getMessage(), leaves, null, request.getIntent());
     }
 
     @PostMapping(value = "/regenerate", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
@@ -202,7 +204,9 @@ public class ChatWorkbenchController {
             concurrencyGate.release(userId);
             throw e;
         }
-        return streamTurn(userId, sessionId, rollback.question(), leaves, rollback.answerId());
+        // 重新生成不带意图：库里存的是提问原文，按钮意图是请求级的、没落库。
+        // 行为分析这类提问原文本身就够明确，路由与汇总的成文规则接得住
+        return streamTurn(userId, sessionId, rollback.question(), leaves, rollback.answerId(), null);
     }
 
     /** 回退的产物：要重问的原文，以及那条等着被顶替的旧答案行 */
@@ -270,7 +274,7 @@ public class ChatWorkbenchController {
      *                         （旧答案的位置已经腾出来了，被挤掉就没处放新答案）
      */
     private SseEmitter streamTurn(long userId, String sessionId, String message,
-                                  ChatAgentFactory.Leaves leaves, Long replacedAnswerId) {
+                                  ChatAgentFactory.Leaves leaves, Long replacedAnswerId, ChatIntent intent) {
         // 深研判轮次要跑 Bull∥Bear+Judge 共3次深模型调用，180s 会掐断回答流，给足 10 分钟
         SseEmitter emitter = new SseEmitter(600_000L);
         SseChannel channel = new SseChannel(emitter);
@@ -288,7 +292,7 @@ public class ChatWorkbenchController {
                 // heartbeatScheduler.scheduleWithFixedDelay 在它自己的 try 之外，
                 // scheduler 关闭时它抛出去，run() 的 finally 根本不执行，名额就永久漏了
                 try {
-                    run(channel, userId, sessionId, message, leaves, turn, replacedAnswerId);
+                    run(channel, userId, sessionId, message, leaves, turn, replacedAnswerId, intent);
                 } catch (Throwable e) {
                     // submit 返回的 Future 没人 get()，不自己记一笔的话异常被完全吞掉
                     log.error("[Workbench] 对话任务异常退出 sessionId={}", sessionId, e);
@@ -400,7 +404,8 @@ public class ChatWorkbenchController {
      * 而 {@link #chat} 自己 new emitter、事件出不来。
      */
     void run(SseChannel channel, long userId, String sessionId, String message,
-             ChatAgentFactory.Leaves leaves, ChatYieldCoordinator.TurnHandle turn, Long replacedAnswerId) {
+             ChatAgentFactory.Leaves leaves, ChatYieldCoordinator.TurnHandle turn, Long replacedAnswerId,
+             ChatIntent intent) {
         // 本轮开跑的时刻：结尾只发"这一轮新登记"的确认卡（见下面 hitl_request 那段），
         // 同时也是落库耗时的起点。不含准入/建叶子/让位握手；比 [TurnMetrics] 日志早一点，
         // 那条是从 ChatTurnRunner 里起算的，这里还多了一帧 session 和 user 行落库
@@ -438,7 +443,7 @@ public class ChatWorkbenchController {
             // 只在开工时查一次就够：新批次只由本用户自己的让位产生，而同一用户同时只有一轮在跑
             boolean dirtyBook = yieldCoordinator.hasInFlightExperts(userId);
             leaves.resetUsage();
-            ChatTurnRunner.TurnResult result = turnRunner.run(leaves, userId, sessionId, enriched,
+            ChatTurnRunner.TurnResult result = turnRunner.run(leaves, userId, sessionId, enriched, intent,
                     chunk -> {
                         // 攒答案在断连判断之外：断连后这轮照跑完，答案仍要进历史，
                         // 只是不再往已经断掉的通道里写帧

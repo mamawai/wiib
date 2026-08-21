@@ -93,7 +93,7 @@ class LlmErrorSurfaceTest {
         ChatContextStore contextStore = mock(ChatContextStore.class);
         List<ChatTurnRunner.ExpertProgress> progress = new CopyOnWriteArrayList<>();
         new ChatTurnRunner(contextStore, new ApprovalRegistry(), ChatTestEndpoints.PROMPTS, ChatTestEndpoints.TOOLS)
-                .run(leaves, 1L, "wb-1-expert-fail", "看看行情", chunk -> { }, progress::add,
+                .run(leaves, 1L, "wb-1-expert-fail", "看看行情", null, chunk -> { }, progress::add,
                         ChatTurnRunner.TurnYield.NONE);
 
         String pushedToUser = progress.stream()
@@ -126,7 +126,7 @@ class LlmErrorSurfaceTest {
         };
         ChatTurnRunner turnRunner = mock(ChatTurnRunner.class);
         doThrow(new RuntimeException(RAW)).when(turnRunner)
-                .run(any(), anyLong(), any(), any(), any(), any(), any());
+                .run(any(), anyLong(), any(), any(), any(), any(), any(), any());
         ChatConcurrencyGate gate = new ChatConcurrencyGate(10);
         WorkbenchRunRegistry runRegistry = mock(WorkbenchRunRegistry.class);
         ChatHistoryService history = mock(ChatHistoryService.class);
@@ -143,7 +143,7 @@ class LlmErrorSurfaceTest {
                 new ChatAgentFactory.Leaves("test", model, model, Map.of(), null, AgentLang.ZH);
 
         controller.run(new SseChannel(emitter), 1L, "wb-1-boom", "看看行情", leaves,
-                coordinator.openTurn(1L), null);
+                coordinator.openTurn(1L), null, null);
 
         String errorEvent = sent.stream().filter(text -> text.startsWith("{") && text.contains("message"))
                 .reduce((first, second) -> second).orElseThrow();

@@ -104,10 +104,10 @@ class ChatTurnMetaTest {
         ChatTurnRunner turnRunner = mock(ChatTurnRunner.class);
         doAnswer((Answer<ChatTurnRunner.TurnResult>) inv -> {
             burn.run();
-            Consumer<String> sink = inv.getArgument(4);
+            Consumer<String> sink = inv.getArgument(5);   // leaves/userId/session/message/intent 之后才是答案 sink
             sink.accept("答案正文");
             return ChatTurnRunner.TurnResult.COMPLETED;
-        }).when(turnRunner).run(any(), anyLong(), any(), any(), any(), any(), any());
+        }).when(turnRunner).run(any(), anyLong(), any(), any(), any(), any(), any(), any());
 
         ChatConcurrencyGate gate = new ChatConcurrencyGate(10);
         WorkbenchRunRegistry runRegistry = mock(WorkbenchRunRegistry.class);
@@ -140,7 +140,7 @@ class ChatTurnMetaTest {
 
         RecordingEmitter emitter = new RecordingEmitter();
         h.controller().run(new SseChannel(emitter), 1L, SESSION, "看看行情",
-                leaves(deep, light), h.coordinator().openTurn(1L), null);
+                leaves(deep, light), h.coordinator().openTurn(1L), null, null);
 
         ChatHistoryService.TurnMeta meta = capturedMeta(h.history());
         assertThat(meta.modelLabel()).isEqualTo(LABEL);
@@ -163,7 +163,7 @@ class ChatTurnMetaTest {
         Harness h = harness(() -> shared.call(new Prompt("one")));
 
         h.controller().run(new SseChannel(new RecordingEmitter()), 1L, SESSION, "看看行情",
-                leaves(shared, shared), h.coordinator().openTurn(1L), null);
+                leaves(shared, shared), h.coordinator().openTurn(1L), null, null);
 
         ChatHistoryService.TurnMeta meta = capturedMeta(h.history());
         assertThat(meta.modelCalls()).isEqualTo(1);
@@ -181,9 +181,9 @@ class ChatTurnMetaTest {
         ChatAgentFactory.Leaves leaves = leaves(deep, light);
 
         h.controller().run(new SseChannel(new RecordingEmitter()), 1L, SESSION, "第一问",
-                leaves, h.coordinator().openTurn(1L), null);
+                leaves, h.coordinator().openTurn(1L), null, null);
         h.controller().run(new SseChannel(new RecordingEmitter()), 1L, SESSION, "第二问",
-                leaves, h.coordinator().openTurn(1L), null);
+                leaves, h.coordinator().openTurn(1L), null, null);
 
         ArgumentCaptor<ChatHistoryService.TurnMeta> captor =
                 ArgumentCaptor.forClass(ChatHistoryService.TurnMeta.class);
@@ -211,7 +211,7 @@ class ChatTurnMetaTest {
         h.coordinator().registerDeferred(1L, SESSION, leaves, "上一个问题", new CompletableFuture<>());
 
         h.controller().run(new SseChannel(new RecordingEmitter()), 1L, SESSION, "插话",
-                leaves, h.coordinator().openTurn(1L), null);
+                leaves, h.coordinator().openTurn(1L), null, null);
 
         ChatHistoryService.TurnMeta meta = capturedMeta(h.history());
         // 端点名与耗时是这一轮自己的，照报；用量混着别轮的账，一律不报

@@ -10,7 +10,7 @@ import { ChatComposer } from './ChatComposer';
 import { SessionHistory } from './SessionHistory';
 import { TraderFormCard } from './TraderFormCards';
 import { BehaviorReportCard } from './BehaviorReportCard';
-import type { WorkbenchSessionSummary } from '../../types';
+import type { ChatIntent, WorkbenchSessionSummary } from '../../types';
 
 /** 会话标题截断长度：与后端 ChatHistoryService.TITLE_MAX 同口径，历史列表与面板头对得上 */
 const TITLE_MAX = 40;
@@ -138,10 +138,10 @@ export function ChatPanel({ onClose, onGoConfig, fullscreen, onToggleFullscreen 
     }
   }, [sessionId, loading]);
 
-  const handleSend = useCallback((msg: string) => {
+  const handleSend = useCallback((msg: string, intent?: ChatIntent) => {
     scrollToBottom();   // 自己刚发的话总要看见
     setStopping(false);
-    void chatStore.send(msg);
+    void chatStore.send(msg, { intent });
   }, [scrollToBottom]);
 
   const handleRegenerate = useCallback(() => {

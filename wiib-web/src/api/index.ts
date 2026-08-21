@@ -5,7 +5,7 @@ import type { BacktestStrategyMeta, BacktestTaskStatus, BacktestEventsPage, Back
 import type { LedgerEntry, LedgerBizTypeOption, PublicTrade, UserProfile, PositionHistoryItem, RankingSort } from '../types';
 import type { CampaignInfo, CampaignReward, CampaignScore, MyCampaignView } from '../types';
 import type { LlmEndpointView, LlmEndpointSaveRequest, LlmBindings, LlmPurpose } from '../types';
-import type { User, PageResult, RankingItem, CommentItem, NotificationItem, BuffStatus, UserBuff, BlackjackStatus, GameState, ConvertResult, MinesStatus, MinesGameState, VideoPokerStatus, VideoPokerGameState, CryptoPrice, CryptoOrderRequest, CryptoOrder, CryptoPosition, BStock, FuturesOpenRequest, FuturesCloseRequest, FuturesAddMarginRequest, FuturesReduceMarginRequest, FuturesStopLossRequest, FuturesTakeProfitRequest, FuturesAdjustLeverageRequest, FuturesCrossAccount, WalletTransferPreview, FuturesPosition, FuturesOrder, FuturesReverseResult, FuturesBracket, TradeFilterMap, PredictionRound, PredictionBet, PredictionBuyRequest, PredictionBetLive, PredictionPnl, AssetSnapshot, CategoryAverages, ForceOrder, AiKeyConfig, AiModelAssignment, InviteCode, WorkbenchEvent, StrategyAccountView, TraderPublicView, TraderOwnerView, TraderDetailView, AiTraderDecisionView, TraderEquityPoint, TraderUpsertRequest, TraderSpec, TraderRequestView, StrategySignalState, FeedStreamHealth, WorkbenchSessionSummary, WorkbenchChatMessage, NewsFlashItem, TraderActionPanel, TraderActionResult, TradeRecordView } from '../types';
+import type { User, PageResult, RankingItem, CommentItem, NotificationItem, BuffStatus, UserBuff, BlackjackStatus, GameState, ConvertResult, MinesStatus, MinesGameState, VideoPokerStatus, VideoPokerGameState, CryptoPrice, CryptoOrderRequest, CryptoOrder, CryptoPosition, BStock, FuturesOpenRequest, FuturesCloseRequest, FuturesAddMarginRequest, FuturesReduceMarginRequest, FuturesStopLossRequest, FuturesTakeProfitRequest, FuturesAdjustLeverageRequest, FuturesCrossAccount, WalletTransferPreview, FuturesPosition, FuturesOrder, FuturesReverseResult, FuturesBracket, TradeFilterMap, PredictionRound, PredictionBet, PredictionBuyRequest, PredictionBetLive, PredictionPnl, AssetSnapshot, CategoryAverages, ForceOrder, AiKeyConfig, AiModelAssignment, InviteCode, ChatIntent, WorkbenchEvent, StrategyAccountView, TraderPublicView, TraderOwnerView, TraderDetailView, AiTraderDecisionView, TraderEquityPoint, TraderUpsertRequest, TraderSpec, TraderRequestView, StrategySignalState, FeedStreamHealth, WorkbenchSessionSummary, WorkbenchChatMessage, NewsFlashItem, TraderActionPanel, TraderActionResult, TradeRecordView } from '../types';
 
 const api = axios.create({
   baseURL: '/api',
@@ -441,9 +441,13 @@ const postSse = async <E,>(url: string, body: unknown, onEvent: (e: E) => void, 
 };
 
 export const workbenchApi = {
-  /** 工作台 SSE：POST /ai/workbench/chat，事件 session/agent_start/token/hitl_request/done/error */
-  chat: (sessionId: string | null, message: string, onEvent: (e: WorkbenchEvent) => void, signal?: AbortSignal) =>
-    postSse<WorkbenchEvent>('/api/ai/workbench/chat', { sessionId, message }, onEvent, signal),
+  /**
+   * 工作台 SSE：POST /ai/workbench/chat，事件 session/agent_start/token/hitl_request/done/error。
+   * intent 只有功能按钮直发时带（后端据此跳过专家派发直奔对应工具）
+   */
+  chat: (sessionId: string | null, message: string, onEvent: (e: WorkbenchEvent) => void,
+         signal?: AbortSignal, intent?: ChatIntent) =>
+    postSse<WorkbenchEvent>('/api/ai/workbench/chat', { sessionId, message, intent }, onEvent, signal),
   /**
    * 重新生成会话最后一条回答：后端把模型侧上下文回退到那条提问之前，再用原提问重跑，
    * 事件协议与 chat 完全一致。回不去的会话（末尾不是答案/补答行/本轮压缩过）返回 2206。

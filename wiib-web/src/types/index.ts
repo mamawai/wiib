@@ -633,6 +633,12 @@ export type WorkbenchEvent =
   | { type: 'done'; sessionId: string; answer: string; deferred?: boolean; cancelled?: boolean; meta?: TurnMeta }
   | { type: 'error'; message: string };
 
+/**
+ * 功能按钮直发的一轮带的意图（与后端 ChatIntent 同名同值）。
+ * 带它的一轮后端不派专家，直接让汇总者调对应工具——按钮已经说明了要什么，不必再让路由猜。
+ */
+export type ChatIntent = 'BEHAVIOR';
+
 /** trader 动作面板的三张卡 */
 export type TraderFormKind = 'note' | 'wake' | 'review';
 

@@ -1,5 +1,5 @@
 import { ApiError, workbenchApi } from '../../api';
-import type { BehaviorAnalysisReport, TraderFormKind, TurnMeta, WorkbenchChatMessage, WorkbenchEvent } from '../../types';
+import type { BehaviorAnalysisReport, ChatIntent, TraderFormKind, TurnMeta, WorkbenchChatMessage, WorkbenchEvent } from '../../types';
 
 /** 与后端 ErrorCode 对齐：2200 段是研判工作台（1600 段是 Crypto，别复用） */
 export const CHAT_ERROR = {
@@ -90,7 +90,8 @@ let initialized = false;
  * bubbled=屏幕上有没有对应的排队气泡——HITL 续跑那种自动补发的指令没有气泡，
  * 续发时不能跟着去解别人气泡的排队标记。
  */
-type QueuedMessage = { id: number; text: string; bubbled: boolean };
+// intent 跟着排队条目走：功能按钮那一发被后端占线拒掉后，续发时意图不能丢
+type QueuedMessage = { id: number; text: string; bubbled: boolean; intent?: ChatIntent };
 let sendQueue: QueuedMessage[] = [];
 let queueSeq = 0;
 /** 有被让位的问题还没补答：流一收尾就转后台轮询，等补答落历史后整体回放补显 */
@@ -324,8 +325,9 @@ function startPolling(sid: string) {
  * @param opts.noBubble   不上气泡：HITL 批准后自动补发的续跑指令（不是用户打的字），
  *                        以及气泡已在屏上的排队续发
  * @param opts.requeueAs  被拒时塞回队头用的原样条目（排队续发专用），不传就按新消息入队尾
+ * @param opts.intent     功能按钮直发的意图：后端据此跳过专家派发，直奔对应工具
  */
-async function send(message: string, opts?: { noBubble?: boolean; requeueAs?: QueuedMessage }) {
+async function send(message: string, opts?: { noBubble?: boolean; requeueAs?: QueuedMessage; intent?: ChatIntent }) {
   const msg = message.trim();
   if (!msg) return;
   // 有轮在跑也直接真发：后端专家等待期会让位（用户消息优先，专家结果转入补答队列）；
@@ -343,7 +345,7 @@ async function send(message: string, opts?: { noBubble?: boolean; requeueAs?: Qu
   abortCtrl = abort;
   let fellBack = false;
   try {
-    await workbenchApi.chat(state.sessionId, msg, handleEvent, abort.signal);
+    await workbenchApi.chat(state.sessionId, msg, handleEvent, abort.signal, opts?.intent);
   } catch (err) {
     if (!abort.signal.aborted) {
       const code = err instanceof ApiError ? err.code : 0;
@@ -354,9 +356,9 @@ async function send(message: string, opts?: { noBubble?: boolean; requeueAs?: Qu
         if (opts?.requeueAs) {
           sendQueue.unshift(opts.requeueAs);
         } else if (opts?.noBubble) {
-          sendQueue.unshift({ id: queuedId, text: msg, bubbled: false });
+          sendQueue.unshift({ id: queuedId, text: msg, bubbled: false, intent: opts?.intent });
         } else {
-          sendQueue.push({ id: queuedId, text: msg, bubbled: true });
+          sendQueue.push({ id: queuedId, text: msg, bubbled: true, intent: opts?.intent });
           updateItems(prev => prev.map(it =>
             it.kind === 'user' && it.queuedId === queuedId ? { ...it, queued: true } : it));
         }
@@ -512,7 +514,7 @@ function drainQueue() {
     updateItems(prev => prev.map(it =>
       it.kind === 'user' && it.queuedId === next.id ? { ...it, queued: false } : it));
   }
-  void send(next.text, { noBubble: true, requeueAs: next });
+  void send(next.text, { noBubble: true, requeueAs: next, intent: next.intent });
 }
 
 /** 载入会话：消息回放 + 运行状态感知（还在跑→轮询等结果，新消息照常可排队） */

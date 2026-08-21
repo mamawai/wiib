@@ -124,8 +124,12 @@ class ChatTurnRunnerTest {
     }
 
     private void turn(String message) {
+        turn(message, null);
+    }
+
+    private void turn(String message, ChatIntent intent) {
         new ChatTurnRunner(contextStore, registry, ChatTestEndpoints.PROMPTS, ChatTestEndpoints.TOOLS)
-                .run(leaves(), 1L, SESSION, message, answer::append, progress::add,
+                .run(leaves(), 1L, SESSION, message, intent, answer::append, progress::add,
                         ChatTurnRunner.TurnYield.NONE);
     }
 
@@ -309,6 +313,21 @@ class ChatTurnRunnerTest {
         assertThat(answer.toString()).isEqualTo("这是答案");
     }
 
+    /**
+     * 功能按钮直发的一轮：同样直通汇总，且末尾带上"本轮必须调这个工具"的动作指令。
+     * 真跑实证过按钮那句话交给路由会先派 trader_agent 取一堆无关数据。
+     */
+    @Test
+    void 按钮意图轮不问路由且垫动作指令() {
+        summarizerAnswers("这是答案");
+
+        turn("帮我做一次用户行为分析", ChatIntent.BEHAVIOR);
+
+        verify(light, never()).call(any(Prompt.class));
+        String tail = summarizerPrompts.getFirst().getInstructions().getLast().getText();
+        assertThat(tail).contains("analyze_my_behavior");
+    }
+
     // ===== 并行执行：一个专家挂了不许拖垮整轮 =====
 
     /**
@@ -482,12 +501,16 @@ class ChatTurnRunnerTest {
                 new ChatTurnRunner(contextStore, registry, ChatTestEndpoints.PROMPTS, ChatTestEndpoints.TOOLS);
         for (AgentLang lang : AgentLang.values()) {
             String tail = ChatTestEndpoints.PROMPTS.get(lang, "chat.outputLanguage");
-            assertThat(runner.summaryTail(lang, true)).as("%s 派过专家", lang.code()).endsWith(tail);
-            assertThat(runner.summaryTail(lang, false)).as("%s 没派专家", lang.code()).isEqualTo(tail);
+            assertThat(runner.summaryTail(lang, true, null)).as("%s 派过专家", lang.code()).endsWith(tail);
+            assertThat(runner.summaryTail(lang, false, null)).as("%s 没派专家", lang.code()).isEqualTo(tail);
+            // 按钮意图那句垫在中间，语言指令照样是最后一句
+            assertThat(runner.summaryTail(lang, false, ChatIntent.BEHAVIOR))
+                    .as("%s 按钮意图轮", lang.code()).endsWith(tail)
+                    .contains(ChatTestEndpoints.PROMPTS.get(lang, ChatIntent.BEHAVIOR.promptKey()));
             // 另一门语言的那条一个字都不许混进来
             for (AgentLang other : AgentLang.values()) {
                 if (other != lang) {
-                    assertThat(runner.summaryTail(lang, true))
+                    assertThat(runner.summaryTail(lang, true, null))
                             .doesNotContain(ChatTestEndpoints.PROMPTS.get(other, "chat.outputLanguage"));
                 }
             }
@@ -509,7 +532,7 @@ class ChatTurnRunnerTest {
         when(light.getOptions()).thenReturn(OpenAiChatOptions.builder().model("deepseek-chat").build());
 
         new ChatTurnRunner(contextStore, registry, ChatTestEndpoints.PROMPTS, ChatTestEndpoints.TOOLS)
-                .run(leaves, 1L, SESSION, "BTC 怎么样", answer::append, progress::add,
+                .run(leaves, 1L, SESSION, "BTC 怎么样", null, answer::append, progress::add,
                         ChatTurnRunner.TurnYield.NONE);
 
         ArgumentCaptor<Prompt> prompt = ArgumentCaptor.forClass(Prompt.class);

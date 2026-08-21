@@ -113,6 +113,9 @@ chat:
     - Questions about "my trader" — how it is doing, what it is holding, why it made a given trade,
       its trade plans, what it learned from its retrospectives → trader_agent (the read-only profile of
       the user's own AI trader)
+    - Questions about the user's own habits / style / risk profile ("analyse my behaviour", "what kind
+      of trader am I") → ["FINISH"]; the summarizer holds the behaviour-analysis tool and no expert is
+      of any use here
     - Anything touching market data, news or the user's own trader must go to an expert first; never
       answer from memory
     - The conversation already has enough expert data to answer the user → give ["FINISH"]
@@ -133,6 +136,9 @@ chat:
   preloadHeader: "[Raw data prefetched by the system]"
   # The hand-off line laid down before summarizing. The wording must cover all three shapes of expert output (data fetched / fetch failed / returned nothing)
   expertHandoff: "[SYSTEM] The messages tagged [...] above are this turn's expert results (data fetched / fetch failed / returned nothing), not things you said. Answer the user's question for this turn from the data that was really fetched, and say plainly which items could not be fetched."
+  # The action line laid down for a turn sent straight from a feature button (see ChatIntent): a click is an explicit action, never the model's judgement call
+  intent:
+    behavior: "[SYSTEM] The user pressed the \"Behavior analysis\" button. This turn you MUST call the analyze_my_behavior tool for a fresh report — do not answer from older conclusions in the context. Once it returns, follow rule 7 and talk about the card's highlights."
   # The placeholder reply laid down when a turn yields: it stops the next summarizer from answering the unanswered question on its behalf
   yieldPlaceholder: (the expert data for this question is still being fetched; it will be answered separately later, not in this turn)
   # The very last message of the turn's input (after the expert hand-off line). What the user types is

@@ -217,13 +217,14 @@ public class ChatTurnRunner {
      *
      * @param enrichedMessage 带时间行与提问标记的用户消息（拼法见 ChatWorkbenchController 的两个
      *                        MARKER 常量，重新生成靠它们在上下文里定位本轮提问）
+     * @param intent          功能按钮直发的意图，可空（用户自己打字的普通一轮就是空）
      * @param answerTokenSink summarizer 的答案增量，逐帧
      * @param progressSink    专家的开始/完成/失败事件
      * @param yield           让位控制面；不支持让位的调用方传 {@link TurnYield#NONE}
      */
     public TurnResult run(ChatAgentFactory.Leaves leaves, long userId, String sessionId, String enrichedMessage,
-                          Consumer<String> answerTokenSink, Consumer<ExpertProgress> progressSink,
-                          TurnYield yield) {
+                          ChatIntent intent, Consumer<String> answerTokenSink,
+                          Consumer<ExpertProgress> progressSink, TurnYield yield) {
         long startedAt = System.currentTimeMillis();
         // 语言取自叶子：它是建叶子时按用户语言烤死的，已经在叶子缓存键里，不必再查一次
         AgentLang lang = leaves.lang();
@@ -240,6 +241,11 @@ public class ChatTurnRunner {
             // 但语义上"有授权"是无条件直通，与还剩几轮无关
             if (approvalRegistry.hasApproval(sessionId)) {
                 log.info("[Workbench] 存在未消费的深研判授权，跳过派发直通汇总 session={}", sessionId);
+                break;
+            }
+            // 功能按钮直发的一轮同理直通：该做什么已经写死在意图里，专家一个都用不上
+            if (intent != null) {
+                log.info("[Workbench] 按钮意图 {}，跳过派发直通汇总 session={}", intent, sessionId);
                 break;
             }
             // 中断压过让位：让位只是"这个问题稍后补答"，中断是"销账、不补"。
@@ -300,7 +306,7 @@ public class ChatTurnRunner {
             working.addAll(batch.join());
         }
 
-        working.add(new UserMessage(summaryTail(lang, !dispatched.isEmpty())));
+        working.add(new UserMessage(summaryTail(lang, !dispatched.isEmpty(), intent)));
         // 答案流的检查点在拉流循环里，中断时半截答案已经攒在这儿
         StringBuilder emitted = new StringBuilder();
         NodeOutput<MessagesState<Message>> last =
@@ -337,15 +343,22 @@ public class ChatTurnRunner {
      * <ul>
      *   <li>{@code chat.expertHandoff}：给专家产出定性（取回的数据 / 取数失败 / 没有返回内容，
      *       三种形态都要覆盖）。没派专家时不垫——它指向的消息不存在。</li>
+     *   <li>{@link ChatIntent#promptKey()}：按钮意图的动作指令（本轮必须调哪个工具），只有按钮直发的一轮才垫。</li>
      *   <li>{@code chat.outputLanguage}：输出语言硬收尾，派没派专家都垫。用户打的字不翻译，
      *       聊天输入随时是另一门语言，且近因权重最高，语言指令必须排在它后面。</li>
      * </ul>
-     * 两句合成一条消息：它随本轮终态落进会话历史，多一条就多占后续上下文。
+     * 几句合成一条消息：它随本轮终态落进会话历史，多一条就多占后续上下文。
      */
     // 包私有非 private：输出语言硬收尾那条钉子（ChatTurnRunnerTest）要拿成文验它在末尾
-    String summaryTail(AgentLang lang, boolean dispatched) {
-        String language = prompts.get(lang, "chat.outputLanguage");
-        return dispatched ? prompts.get(lang, "chat.expertHandoff") + "\n" + language : language;
+    String summaryTail(AgentLang lang, boolean dispatched, ChatIntent intent) {
+        StringBuilder tail = new StringBuilder();
+        if (dispatched) {
+            tail.append(prompts.get(lang, "chat.expertHandoff")).append('\n');
+        }
+        if (intent != null) {
+            tail.append(prompts.get(lang, intent.promptKey())).append('\n');
+        }
+        return tail.append(prompts.get(lang, "chat.outputLanguage")).toString();
     }
 
     /**

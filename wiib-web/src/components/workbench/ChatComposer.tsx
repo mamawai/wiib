@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { BookOpenCheck, CornerDownLeft, Cpu, MessageSquarePlus, Pencil, Plus, Trash2, Zap } from 'lucide-react';
+import { BookOpenCheck, CornerDownLeft, Cpu, MessageSquarePlus, Pencil, Plus, Trash2, UserSearch, Zap } from 'lucide-react';
 import { useClickOutside } from '../../hooks/useClickOutside';
 import { cn } from '../../lib/utils';
 import { chatStore } from './chatStore';
 import { HUB_NAME } from './chatView';
-import type { TraderFormKind } from '../../types';
+import type { ChatIntent, TraderFormKind } from '../../types';
 
 /**
  * 出厂的四条快捷提问：行情 / 新闻 / 交易员 / 深研判 四种能力各一条。
@@ -47,10 +47,13 @@ function loadSuggests(): string[] | null {
  * <p>
  * 快捷提问可改可删（最多四条，存 localStorage）；trader 那三个动作从按钮右侧滑出、
  * 顶掉提示词的位置——两边都是"点一下就走"的入口，轮流用同一段横向空间比各占一行省。
+ * <p>
+ * 行为分析是这一行里唯一一个"点了就真发消息"的按钮：它发的那句话带 BEHAVIOR 意图，
+ * 后端据此跳过专家派发直奔 analyze_my_behavior——不带意图的同一句话会被路由猜成 trader 问题。
  */
 export function ChatComposer({ loading, onSend, fullscreen }: {
   loading: boolean;
-  onSend: (text: string) => void;
+  onSend: (text: string, intent?: ChatIntent) => void;
   /** 全屏时输入区跟正文共用一条限宽线，不然输入框会横跨整个屏幕 */
   fullscreen?: boolean;
 }) {
@@ -120,6 +123,14 @@ export function ChatComposer({ loading, onSend, fullscreen }: {
             aria-expanded={traderOpen}
           >
             <Cpu className="w-3 h-3 shrink-0" /> trader
+          </button>
+
+          <button
+            onClick={() => { setTraderOpen(false); setEditing(false); onSend(t('composer.behaviorAsk'), 'BEHAVIOR'); }}
+            className="shrink-0 inline-flex items-center gap-1 rounded-full border border-border px-2.5 py-1 text-[11px] font-bold text-muted-foreground hover:text-foreground hover:bg-surface-hover transition-colors"
+            title={t('composer.behaviorTitle')}
+          >
+            <UserSearch className="w-3 h-3 shrink-0" /> {t('composer.behaviorLabel')}
           </button>
 
           <ScrollRow contentKey={traderOpen ? 'trader' : suggests.join('|')}>
