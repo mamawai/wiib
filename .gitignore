@@ -46,8 +46,10 @@ dumps/
 ### 本地部署脚本（含服务器信息）###
 deploy_script.txt
 
- ### 个人计划 / 调试笔记 ###
+ ### 个人计划 / 调试笔记（公开文档白名单例外）###
 docs/*.md
+!docs/architecture.md
+!docs/deploy.md
 docs/superpowers/plans/*.md
 docs/superpowers/specs/*.md
 ###
