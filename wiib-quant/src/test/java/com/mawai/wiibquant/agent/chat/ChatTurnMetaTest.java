@@ -1,5 +1,6 @@
 package com.mawai.wiibquant.agent.chat;
 
+import com.mawai.wiibcommon.enums.AgentLang;
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONObject;
 import com.mawai.wiibquant.agent.llm.LlmEndpointService;
@@ -87,7 +88,7 @@ class ChatTurnMetaTest {
 
     /** 只有账本是真的：图用不上（runner 被替身顶了），所以 experts/summarizer 给空 */
     private static ChatAgentFactory.Leaves leaves(UsageTrackingChatModel deep, UsageTrackingChatModel light) {
-        return new ChatAgentFactory.Leaves(LABEL, deep, light, Map.of(), null);
+        return new ChatAgentFactory.Leaves(LABEL, deep, light, Map.of(), null, AgentLang.ZH);
     }
 
     /** 一套能真跑 {@code controller.run} 的最小装配 */
@@ -110,11 +111,11 @@ class ChatTurnMetaTest {
 
         ChatConcurrencyGate gate = new ChatConcurrencyGate(10);
         WorkbenchRunRegistry runRegistry = mock(WorkbenchRunRegistry.class);
-        ChatYieldCoordinator coordinator = new ChatYieldCoordinator(gate, runRegistry, turnRunner, history);
+        ChatYieldCoordinator coordinator = new ChatYieldCoordinator(gate, runRegistry, turnRunner, history, ChatTestEndpoints.PROMPTS);
         ChatWorkbenchController controller = new ChatWorkbenchController(mock(ChatAgentFactory.class),
                 mock(LlmEndpointService.class), new ApprovalRegistry(),
                 history, mock(ChatContextStore.class), turnRunner,
-                runRegistry, gate, coordinator);
+                runRegistry, gate, coordinator, ChatTestEndpoints.PROMPTS, ChatTestEndpoints.zhLang());
         return new Harness(controller, history, coordinator);
     }
 

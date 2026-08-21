@@ -14,7 +14,9 @@ import com.mawai.wiibcommon.entity.AiTraderRequest;
 import com.mawai.wiibcommon.entity.FuturesPosition;
 import com.mawai.wiibcommon.entity.FuturesStopLoss;
 import com.mawai.wiibcommon.entity.FuturesTakeProfit;
+import com.mawai.wiibcommon.enums.AgentLang;
 import com.mawai.wiibcommon.market.BinanceRestClient;
+import com.mawai.wiibquant.agent.i18n.PromptCatalog;
 import com.mawai.wiibquant.agent.i18n.UserLangResolver;
 import com.mawai.wiibquant.agent.llm.AgentGraphs;
 import com.mawai.wiibquant.agent.llm.ModelCallLimiter;
@@ -99,6 +101,7 @@ public class TraderWakeupRunner {
     private final TraderPlanStore planStore;
     private final TraderRequestService requestService;
     private final UserLangResolver userLangResolver;
+    private final PromptCatalog prompts;
 
     /** 墙钟注入点：预算计算要可测（测试里把"现在"钉在边界附近） */
     java.util.function.LongSupplier nowMs = System::currentTimeMillis;
@@ -121,17 +124,20 @@ public class TraderWakeupRunner {
     private void wake(AiTrader trader, long boundaryTime, String kind) {
         long intervalMs = TraderScheduler.INTERVAL_MS.getOrDefault(trader.getIntervalCode(), 300_000L);
         long budgetSeconds = wakeBudgetSeconds(boundaryTime, intervalMs, nowMs.getAsLong());
+        // 语言查一次用到底：系统提示、开场白、落库的 error 文案必须是同一门，混着来模型立刻跟着混
+        AgentLang lang = userLangResolver.of(trader.getUserId());
         AiTraderDecision decision = baseDecision(trader, boundaryTime);
         decision.setKind(kind);
         if (budgetSeconds < MIN_WAKE_SECONDS) {
             // 事件迟到太多：与其用残余时间仓促决策，不如放弃等下一根新鲜K线（不算失败不计连败）
             decision.setStatus(AiTraderDecision.STATUS_SKIPPED);
-            decision.setError("触发过晚（K线信号迟到），距下一边界不足" + MIN_WAKE_SECONDS + "s，放弃本轮");
+            decision.setError(prompts.get(lang, "trader.error.lateTrigger",
+                    Map.of("seconds", MIN_WAKE_SECONDS)));
             decisionMapper.insert(decision);
             log.warn("[Trader] 触发过晚放弃 traderId={} boundary={} budget={}s", trader.getId(), boundaryTime, budgetSeconds);
             return;
         }
-        doWake(trader, boundaryTime, budgetSeconds, decision, null);
+        doWake(trader, boundaryTime, budgetSeconds, decision, null, lang);
     }
 
     /**
@@ -150,11 +156,12 @@ public class TraderWakeupRunner {
         }
         AiTraderDecision decision = baseDecision(trader, trigger.triggeredAt());
         decision.setKind(AiTraderDecision.KIND_ALERT);
-        doWake(trader, trigger.triggeredAt(), budgetSeconds, decision, trigger);
+        doWake(trader, trigger.triggeredAt(), budgetSeconds, decision, trigger,
+                userLangResolver.of(trader.getUserId()));
     }
 
     private void doWake(AiTrader trader, long boundaryTime, long budgetSeconds,
-                        AiTraderDecision decision, AlertTrigger trigger) {
+                        AiTraderDecision decision, AlertTrigger trigger, AgentLang lang) {
         long start = System.currentTimeMillis();
         try {
             List<FuturesPositionDTO> positions = simTradeClient.getAllPositions(trader.getSimUserId());
@@ -162,11 +169,11 @@ public class TraderWakeupRunner {
             decision.setEquity(equity);
 
             if (equity.compareTo(LIQUIDATION_FLOOR) < 0) {
-                markLiquidated(trader, decision);
+                markLiquidated(trader, decision, lang);
                 return;
             }
 
-            String reasoning = runAgentSession(trader, boundaryTime, budgetSeconds, positions, equity, decision, trigger);
+            String reasoning = runAgentSession(trader, boundaryTime, budgetSeconds, positions, equity, decision, trigger, lang);
             decision.setStatus(AiTraderDecision.STATUS_OK);
             decision.setReasoning(reasoning);
             // 动作都落地了再记权益：本轮开平仓立刻体现在净值曲线，否则要等下一根K线才现形。
@@ -183,7 +190,8 @@ public class TraderWakeupRunner {
             decisionMapper.insert(decision);
             clearFailures(trader);
         } catch (Exception e) {
-            String msg = e instanceof TimeoutException ? "唤醒超时(" + budgetSeconds + "s)"
+            String msg = e instanceof TimeoutException
+                    ? prompts.get(lang, "trader.error.wakeTimeout", Map.of("seconds", budgetSeconds))
                     : e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
             log.warn("[Trader] 唤醒失败 traderId={} boundary={} msg={}", trader.getId(), boundaryTime, msg);
             // 决策行已经落库了（异常出在 insert 之后的收尾，如 clearFailures/markLiquidated 的列级更新）：
@@ -197,7 +205,7 @@ public class TraderWakeupRunner {
             decision.setError(msg.length() > 500 ? msg.substring(0, 500) : msg);
             decision.setLatencyMs((int) (System.currentTimeMillis() - start));
             decisionMapper.insert(decision);
-            recordFailure(trader, msg);
+            recordFailure(trader, msg, lang);
         }
     }
 
@@ -205,14 +213,15 @@ public class TraderWakeupRunner {
     public void recordSkipped(AiTrader trader, long boundaryTime) {
         AiTraderDecision d = baseDecision(trader, boundaryTime);
         d.setStatus(AiTraderDecision.STATUS_SKIPPED);
-        d.setError("上一轮唤醒尚未结束，本轮跳过");
+        d.setError(prompts.get(userLangResolver.of(trader.getUserId()), "trader.error.skipped"));
         decisionMapper.insert(d);
     }
 
     /** ReactAgent 会话：返回模型最终文本；动作轨迹随 decision 一并写入。trigger 非空=警报唤醒（只换开场白）。 */
     private String runAgentSession(AiTrader trader, long boundaryTime, long budgetSeconds,
                                    List<FuturesPositionDTO> positions, BigDecimal equity,
-                                   AiTraderDecision decision, AlertTrigger trigger) throws Exception {
+                                   AiTraderDecision decision, AlertTrigger trigger,
+                                   AgentLang lang) throws Exception {
         // 包一层用量统计：ReAct 一轮要调模型很多次，包在最外层才收得全。
         // 工厂里的实例是跨唤醒缓存的，装饰器必须每轮新建，否则用量会跨轮累加
         UsageTrackingChatModel model = new UsageTrackingChatModel(modelFactory.modelFor(trader));
@@ -253,9 +262,8 @@ public class TraderWakeupRunner {
         List<AiTraderRequest> decided = requestService.decidedUnnotified(trader.getId(), trader.getRoundNo());
         // 系统提示词跟着 trader 主人的语言走：ai_trader.user_id → user.lang（取不到回落中文）
         String prompt = promptAssembler.assemble(trader,
-                accountStateJson(equity, positions, pendingOrders, plans, boundaryTime,
-                        requestService.pendingOf(trader.getId(), trader.getRoundNo()), decided), recent,
-                userLangResolver.of(trader.getUserId()));
+                accountStateJson(prompts, lang, equity, positions, pendingOrders, plans, boundaryTime,
+                        requestService.pendingOf(trader.getId(), trader.getRoundNo()), decided), recent, lang);
         // 结果说一次就够：注入本轮后置已通知，防同一条回执每轮反复出现
         requestService.markNotified(decided);
 
@@ -273,8 +281,8 @@ public class TraderWakeupRunner {
                 .compile();
 
         String instruction = trigger != null
-                ? alertInstruction(trader, trigger, recent)
-                : routineInstruction(trader, boundaryTime, marketSnapshot(whitelist));
+                ? alertInstruction(trader, trigger, recent, lang)
+                : routineInstruction(trader, boundaryTime, marketSnapshot(whitelist, lang), lang);
         RunnableConfig config = RunnableConfig.builder()
                 .threadId("trader-" + trader.getId() + "-" + boundaryTime).build();
 
@@ -285,7 +293,7 @@ public class TraderWakeupRunner {
             MessagesState<Message> state = graph
                     .invoke(Map.of("messages", List.of(new UserMessage(instruction))), config)
                     .orElseThrow(() -> new IllegalStateException("图执行无返回状态"));
-            return new SessionOutcome(finalReasoning(state.messages()),
+            return new SessionOutcome(finalReasoning(prompts, lang, state.messages()),
                     state.<Number>value(ModelCallLimiter.CALL_COUNT_KEY).map(Number::intValue).orElse(0));
         });
         Thread.startVirtualThread(task);
@@ -307,7 +315,7 @@ public class TraderWakeupRunner {
         }
         if (outcome.modelCalls() >= MAX_MODEL_CALLS) {
             // 保险丝收束不算失败（已有动作真实生效），但必须留痕——否则时间线上像正常决策
-            decision.setError("达单轮模型调用上限(" + MAX_MODEL_CALLS + ")，提前收束");
+            decision.setError(prompts.get(lang, "trader.error.callLimit", Map.of("limit", MAX_MODEL_CALLS)));
         }
         return outcome.reasoning();
     }
@@ -317,27 +325,34 @@ public class TraderWakeupRunner {
      * 保险丝在工具边收束时，末尾是纯 tool_call 的助手消息 + 未执行占位回执，正文都是空的——
      * 死盯最后一条就会写出 status=OK 却一个字没有的决策行，时间线上与正常决策无从区分。
      */
-    private static String finalReasoning(List<Message> messages) {
+    private static String finalReasoning(PromptCatalog prompts, AgentLang lang, List<Message> messages) {
         for (int i = messages.size() - 1; i >= 0; i--) {
             if (messages.get(i) instanceof AssistantMessage assistant
                     && assistant.getText() != null && !assistant.getText().isBlank()) {
                 return assistant.getText();
             }
         }
-        return "本轮模型全程只在调用工具，没有产出决策正文。";
+        return prompts.get(lang, "trader.wake.noReasoning");
     }
 
-    /** 例行唤醒开场白：单问题框架 + 行情快照锚定价格水平。 */
-    private String routineInstruction(AiTrader trader, long boundaryTime, String snapshot) {
-        return "新一根 " + trader.getIntervalCode() + " K线已收盘（"
-                + TIME_FMT.format(Instant.ofEpochMilli(boundaryTime)) + "）。"
-                + (snapshot.isEmpty() ? "" : "\n行情快照（细节自己用工具查证）：\n" + snapshot)
+    /**
+     * 例行唤醒开场白：单问题框架 + 行情快照锚定价格水平。
+     * <p>
+     * 收尾标记取 {@code trader.mark.conclusion}，与系统提示词同一条 key——两处必须同源。
+     * <p>
+     * 包私有非 private：标记同源那条钉子（{@code WakeInstructionI18nTest}）要拿它的成文比对。
+     */
+    String routineInstruction(AiTrader trader, long boundaryTime, String snapshot, AgentLang lang) {
+        return prompts.get(lang, "trader.wake.routineHeader", Map.of(
+                "interval", trader.getIntervalCode(),
+                "time", TIME_FMT.format(Instant.ofEpochMilli(boundaryTime))))
+                + (snapshot.isEmpty() ? ""
+                        : "\n" + prompts.get(lang, "trader.wake.snapshotHeader") + "\n" + snapshot)
                 // 休眠提示放快照之后（事实区）、单问题框架之前：不让"要睡了"成为模型读到的第一件事
-                + sleepNotice(WakeWindow.of(trader), boundaryTime,
+                + sleepNotice(prompts, lang, WakeWindow.of(trader), boundaryTime,
                         TraderScheduler.INTERVAL_MS.getOrDefault(trader.getIntervalCode(), 300_000L), nowMs.getAsLong())
-                + "本轮只需回答一个问题：这根K线收盘后，你的计划需要改变吗？"
-                + "先检验上一轮【本轮结论】里的等待条件与各持仓的失效条件，再考虑新机会；"
-                + "最后按纪律用【本轮结论】固定格式收尾。";
+                + prompts.get(lang, "trader.wake.routineQuestion",
+                        Map.of("mark", prompts.get(lang, "trader.mark.conclusion")));
     }
 
     /**
@@ -347,19 +362,19 @@ public class TraderWakeupRunner {
      * 措辞不说"本轮是末次"：手动唤醒也走这条开场白（boundary 是当前边界），"到 X 那根为止"对两种轮次都成立；
      * 小时数从 now 算，手动轮晚于边界几十分钟也不会说错。不是末次或全天 → 空串。
      */
-    static String sleepNotice(WakeWindow window, long boundaryTime, long intervalMs, long now) {
+    static String sleepNotice(PromptCatalog prompts, AgentLang lang, WakeWindow window,
+                              long boundaryTime, long intervalMs, long now) {
         if (window == null || !window.isLastBoundary(boundaryTime, intervalMs)) {
             return "";
         }
         // 末次唤醒⇒下一天同一时刻仍在时段内，一天之内必有下一根，不会 -1
         long next = window.nextBoundaryFrom(boundaryTime + intervalMs, intervalMs);
         double hours = (next - now) / 3_600_000.0;
-        return "\n本唤醒时段（" + window.text() + "）内的例行唤醒到 " + BJ_FMT.format(Instant.ofEpochMilli(boundaryTime))
-                + " 这根K线为止，下次例行唤醒在 " + BJ_FMT.format(Instant.ofEpochMilli(next))
-                + "（北京时间，约 " + String.format(Locale.ROOT, "%.1f", hours) + " 小时后），"
-                + "期间不会有例行唤醒和波动警报，止损止盈单照常自动触发。"
-                + "这只是时间跨度的事实：休眠本身既不是平仓或收紧止损的理由，也不是赶在休眠前多开一笔的理由；"
-                + "失效条件没被触发就不需要为休眠做任何动作。\n";
+        return "\n" + prompts.get(lang, "trader.wake.sleepNotice", Map.of(
+                "window", window.text(),
+                "lastBar", BJ_FMT.format(Instant.ofEpochMilli(boundaryTime)),
+                "next", BJ_FMT.format(Instant.ofEpochMilli(next)),
+                "hours", String.format(Locale.ROOT, "%.1f", hours))) + "\n";
     }
 
     /**
@@ -367,20 +382,26 @@ public class TraderWakeupRunner {
      * 反锚定是灵魂——被波动惊醒正是恐慌平仓的高发场景，必须明说"未收盘不作数、
      * 止损在岗、不因被叫醒而必须动作"。
      */
-    private String alertInstruction(AiTrader trader, AlertTrigger trig, List<AiTraderDecision> recent) {
+    String alertInstruction(AiTrader trader, AlertTrigger trig, List<AiTraderDecision> recent,
+                            AgentLang lang) {
         long intervalMs = TraderScheduler.INTERVAL_MS.getOrDefault(trader.getIntervalCode(), 3_600_000L);
         long toNextMin = Math.max(1, (intervalMs - Math.floorMod(trig.triggeredAt(), intervalMs)) / 60_000);
-        String lastWake = recent.isEmpty() ? "本局还没有过唤醒"
-                : "在 " + TIME_FMT.format(Instant.ofEpochMilli(recent.get(0).getWakeTime()))
-                        + "（约 " + Math.max(1, (trig.triggeredAt() - recent.get(0).getWakeTime()) / 60_000) + " 分钟前）";
-        return "⚠️ 行情波动警报（非例行唤醒）：" + trig.symbol() + " 5分钟内波动 "
-                + trig.amplitudePct().stripTrailingZeros().toPlainString() + "%（方向：" + trig.direction()
-                + "，现价 " + trig.price().stripTrailingZeros().toPlainString() + "）。\n"
-                + "你上次唤醒" + lastWake + "，距下一次例行唤醒还有约 " + toNextMin + " 分钟。\n"
-                + "注意：当前 " + trader.getIntervalCode() + " K线尚未收盘——你的收盘制失效条件此刻不作数，"
-                + "求证请用已收盘的 5m/15m K线。你的止损单仍在自动保护你。\n"
-                + "本次只需回答一个问题：这次波动是否动摇了你的持仓计划？计划未被动摇 → HOLD 并说明理由；"
-                + "不因为被叫醒而必须动作。最后仍用【本轮结论】固定格式收尾。";
+        String lastWake = recent.isEmpty() ? prompts.get(lang, "trader.wake.alertNoWake")
+                : prompts.get(lang, "trader.wake.alertWakeAt", Map.of(
+                        "time", TIME_FMT.format(Instant.ofEpochMilli(recent.get(0).getWakeTime())),
+                        "minutes", Math.max(1, (trig.triggeredAt() - recent.get(0).getWakeTime()) / 60_000)));
+        return prompts.get(lang, "trader.wake.alertHeader", Map.of(
+                "symbol", trig.symbol(),
+                "amplitude", trig.amplitudePct().stripTrailingZeros().toPlainString(),
+                "direction", prompts.get(lang,
+                        "trader.wake.direction." + trig.direction().toLowerCase(Locale.ROOT)),
+                "price", trig.price().stripTrailingZeros().toPlainString())) + "\n"
+                + prompts.get(lang, "trader.wake.alertLastWake",
+                        Map.of("lastWake", lastWake, "minutes", toNextMin)) + "\n"
+                + prompts.get(lang, "trader.wake.alertNotice",
+                        Map.of("interval", trader.getIntervalCode())) + "\n"
+                + prompts.get(lang, "trader.wake.alertQuestion",
+                        Map.of("mark", prompts.get(lang, "trader.mark.conclusion")));
     }
 
     /**
@@ -388,14 +409,15 @@ public class TraderWakeupRunner {
      * 省下"查户口"的工具轮次；细节与多周期确认仍由模型自己用工具求证。
      * 单币快照拉取失败就跳过，不挡唤醒。
      */
-    private String marketSnapshot(Set<String> whitelist) {
+    private String marketSnapshot(Set<String> whitelist, AgentLang lang) {
         StringBuilder snap = new StringBuilder();
         for (String sym : whitelist.stream().sorted().toList()) {
             try {
                 JSONObject p = JSON.parseObject(binanceRestClient.getPremiumIndex(sym));
-                snap.append("- ").append(sym).append(" 标记价 ")
-                        .append(p.getBigDecimal("markPrice").stripTrailingZeros().toPlainString())
-                        .append("，资金费率 ").append(p.getString("lastFundingRate")).append('\n');
+                snap.append(prompts.get(lang, "trader.wake.snapshotRow", Map.of(
+                        "symbol", sym,
+                        "price", p.getBigDecimal("markPrice").stripTrailingZeros().toPlainString(),
+                        "funding", p.getString("lastFundingRate")))).append('\n');
             } catch (Exception e) {
                 log.debug("[Trader] 行情快照拉取失败 {} msg={}", sym, e.getMessage());
             }
@@ -446,7 +468,8 @@ public class TraderWakeupRunner {
      * 预算留给行情求证。持仓携带交易计划与当前止损止盈——让模型一眼看到
      * "浮亏离止损还远/计划没被证伪"，掐灭恐慌平仓。
      */
-    private static String accountStateJson(BigDecimal equity, List<FuturesPositionDTO> positions,
+    private static String accountStateJson(PromptCatalog prompts, AgentLang lang,
+                                           BigDecimal equity, List<FuturesPositionDTO> positions,
                                            List<FuturesOrderResponse> pendingOrders,
                                            List<AiTraderPlan> plans, long boundaryTime,
                                            List<AiTraderRequest> pendingRequests,
@@ -480,7 +503,7 @@ public class TraderWakeupRunner {
                         .fluentPut("originalStop", plan.getStopLossPrice())
                         .fluentPut("target", plan.getTakeProfitPrice())
                         .fluentPut("openedAt", TIME_FMT.format(Instant.ofEpochMilli(plan.getOpenedWakeTime())))
-                        .fluentPut("heldFor", humanizeHeld(boundaryTime - plan.getOpenedWakeTime()));
+                        .fluentPut("heldFor", humanizeHeld(prompts, lang, boundaryTime - plan.getOpenedWakeTime()));
                 // 修订历史也回注：无记忆的模型必须看到"上轮为什么动了止损/目标"
                 if (plan.getRevisionsJson() != null && !plan.getRevisionsJson().isBlank()) {
                     planJson.put("revisions", JSON.parse(plan.getRevisionsJson()));
@@ -522,12 +545,13 @@ public class TraderWakeupRunner {
                         .fluentPut("type", r.getType())
                         .fluentPut("symbol", r.getSymbol())
                         .fluentPut("quantity", r.getQuantity())
-                        .fluentPut("decision", AiTraderRequest.STATUS_APPROVED.equals(r.getStatus())
-                                ? "主人已同意" : "主人已拒绝")
+                        .fluentPut("decision", prompts.get(lang,
+                                AiTraderRequest.STATUS_APPROVED.equals(r.getStatus())
+                                        ? "trader.wake.request.approved" : "trader.wake.request.rejected"))
                         .fluentPut("result", r.getExecutedResult()));
             }
             out.put("requestResults", rr);
-            out.put("requestResultsNote", "你此前请求的处理结果，只通知这一次；仓位变化已反映在 positions 里");
+            out.put("requestResultsNote", prompts.get(lang, "trader.wake.requestResultsNote"));
         }
         // 待确认请求必须回注：不然模型看仓位没动，下一轮还会提同一个请求，卡片越堆越多
         if (pendingRequests != null && !pendingRequests.isEmpty()) {
@@ -544,18 +568,20 @@ public class TraderWakeupRunner {
                         .fluentPut("reason", r.getReason()));
             }
             out.put("pendingRequests", rs);
-            out.put("pendingRequestsNote", "以上请求已提交给主人、尚未处理，不要重复提交");
+            out.put("pendingRequestsNote", prompts.get(lang, "trader.wake.pendingRequestsNote"));
         }
         return out.toJSONString();
     }
 
-    private static String humanizeHeld(long ms) {
+    private static String humanizeHeld(PromptCatalog prompts, AgentLang lang, long ms) {
         long min = Math.max(0, ms / 60_000);
         if (min < 120) {
-            return min + "分钟";
+            return prompts.get(lang, "trader.wake.held.minutes", Map.of("n", min));
         }
         long hours = min / 60;
-        return hours < 48 ? hours + "小时" : (hours / 24) + "天";
+        return hours < 48
+                ? prompts.get(lang, "trader.wake.held.hours", Map.of("n", hours))
+                : prompts.get(lang, "trader.wake.held.days", Map.of("n", hours / 24));
     }
 
     private static AiTraderDecision baseDecision(AiTrader trader, long boundaryTime) {
@@ -572,19 +598,19 @@ public class TraderWakeupRunner {
     // 状态回写一律列级更新：runner 手里的 trader 是调度时刻的快照，整行 updateById 会把
     // 用户并发修改的配置（提示词/模型等）覆盖回旧值
 
-    private void markLiquidated(AiTrader trader, AiTraderDecision decision) {
+    private void markLiquidated(AiTrader trader, AiTraderDecision decision, AgentLang lang) {
         decision.setStatus(AiTraderDecision.STATUS_OK);
-        decision.setReasoning("账户权益已低于爆仓终局线，本局结束。可在配置页重置开新一局。");
+        decision.setReasoning(prompts.get(lang, "trader.error.liquidatedReasoning"));
         decisionMapper.insert(decision);
         traderMapper.update(null, new LambdaUpdateWrapper<AiTrader>()
                 .eq(AiTrader::getId, trader.getId())
                 .set(AiTrader::getStatus, AiTrader.STATUS_LIQUIDATED)
-                .set(AiTrader::getPausedReason, "爆仓终局：权益低于初始资金1%")
+                .set(AiTrader::getPausedReason, prompts.get(lang, "trader.error.liquidatedReason"))
                 .set(AiTrader::getUpdatedAt, LocalDateTime.now()));
         log.info("[Trader] 爆仓终局 traderId={} round={}", trader.getId(), trader.getRoundNo());
     }
 
-    private void recordFailure(AiTrader trader, String lastError) {
+    private void recordFailure(AiTrader trader, String lastError, AgentLang lang) {
         int failures = (trader.getConsecutiveFailures() == null ? 0 : trader.getConsecutiveFailures()) + 1;
         LambdaUpdateWrapper<AiTrader> update = new LambdaUpdateWrapper<AiTrader>()
                 .eq(AiTrader::getId, trader.getId())
@@ -594,12 +620,13 @@ public class TraderWakeupRunner {
         // 能修的人只有用户自己，所以立刻停、把原因写成他看得懂的话
         if (keyInvalid(lastError)) {
             update.set(AiTrader::getStatus, AiTrader.STATUS_PAUSED)
-                    .set(AiTrader::getPausedReason, "API key 无效或已失效，请更新端点配置后重新启动");
+                    .set(AiTrader::getPausedReason, prompts.get(lang, "trader.error.keyInvalid"));
             log.warn("[Trader] key 失效自动暂停 traderId={}", trader.getId());
         } else if (failures >= MAX_CONSECUTIVE_FAILURES) {
             update.set(AiTrader::getStatus, AiTrader.STATUS_PAUSED)
-                    .set(AiTrader::getPausedReason, "连续" + failures + "次唤醒失败: "
-                            + (lastError.length() > 150 ? lastError.substring(0, 150) : lastError));
+                    .set(AiTrader::getPausedReason, prompts.get(lang, "trader.error.consecutiveFailures",
+                            Map.of("n", failures, "error",
+                                    lastError.length() > 150 ? lastError.substring(0, 150) : lastError)));
             log.warn("[Trader] 连败自动暂停 traderId={} failures={}", trader.getId(), failures);
         }
         traderMapper.update(null, update);

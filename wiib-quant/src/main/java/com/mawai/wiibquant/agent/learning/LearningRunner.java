@@ -73,8 +73,6 @@ public class LearningRunner {
      * 代价是跳过几根 5m K 线，每天只有一次，可接受。
      */
     static final int LEARN_TIMEOUT_SECONDS = 300;
-    /** 学习笔记总量硬约束（与 memory 同口径）：取舍归模型，超限截断兜底 */
-    static final int NOTES_MAX_CHARS = 2000;
     /** 单次学习模型调用上限（ReAct 保险丝，挡住"再看一个再看一个"烧用户的钱）：预期 2~5 次，8 留足余量 */
     static final int MAX_MODEL_CALLS = 8;
     /** LEARN 行的 interval 标记学习节奏（wake_time=日线边界），与 trader 唤醒档位无关 */
@@ -127,7 +125,8 @@ public class LearningRunner {
                 // 降级安全：一次格式失守不许污染笔记——ERROR 行存原文留痕，learning_notes 一个字不动
                 d.setStatus(AiTraderDecision.STATUS_ERROR);
                 d.setReasoning(output);
-                d.setError("学习输出格式失守，缺" + String.join("与", missing) + "段，学习笔记不更新");
+                d.setError(prompts.get(lang, "learning.error.missingMarks", Map.of(
+                        "marks", String.join(prompts.get(lang, "learning.error.markJoin"), missing))));
                 decisionMapper.insert(d);
                 log.warn("[Learn] 输出缺段 traderId={} missing={}", trader.getId(), missing);
                 return;
@@ -135,8 +134,9 @@ public class LearningRunner {
             d.setStatus(AiTraderDecision.STATUS_OK);
             d.setReasoning(output);
             decisionMapper.insert(d);
-            // 笔记就是这份产出的全文（不像复盘要切两段）；超限截断兜底
-            String notes = output.length() > NOTES_MAX_CHARS ? output.substring(0, NOTES_MAX_CHARS) : output;
+            // 笔记就是这份产出的全文（不像复盘要切两段）；超限截断兜底，上限见 NoteBudget
+            int maxChars = NoteBudget.maxChars(lang);
+            String notes = output.length() > maxChars ? output.substring(0, maxChars) : output;
             // 覆盖写 + 列级更新：并发唤醒回路正在改同一行的其它列，整行 updateById 会把它们打回旧值
             traderMapper.update(null, new LambdaUpdateWrapper<AiTrader>()
                     .eq(AiTrader::getId, trader.getId())
@@ -146,7 +146,8 @@ public class LearningRunner {
                     trader.getId(), d.getToolCalls(), notes.length());
         } catch (Exception e) {
             Throwable t = e instanceof ExecutionException && e.getCause() != null ? e.getCause() : e;
-            String msg = t instanceof TimeoutException ? "学习超时(" + timeoutSeconds + "s)"
+            String msg = t instanceof TimeoutException
+                    ? prompts.get(lang, "learning.error.timeout", Map.of("seconds", timeoutSeconds))
                     : t.getMessage() == null ? t.getClass().getSimpleName() : t.getMessage();
             // LEARN 行已落库（异常出在之后写笔记那步）：这一轮学习本身是成功的，不该改写成 ERROR；
             // 而且 MP insert 已把自增 id 回填进 d，再 insert 必撞主键、异常直接逃出学习回路——
@@ -190,8 +191,10 @@ public class LearningRunner {
         UsageTrackingChatModel model = new UsageTrackingChatModel(modelFactory.modelFor(trader));
         // "它看了谁"是 LEARN 行在公开时间线上的观赏点，全靠这个 hook 记
         ToolCallTraceHook trace = new ToolCallTraceHook();
+        // 提示词里那句"≤N"与写库时的截断值同源，都取 NoteBudget
         CompiledGraph<MessagesState<Message>> graph = AgentGraphs
-                .reactAgent(model, prompts.get(lang, "learning.system"))
+                .reactAgent(model, prompts.get(lang, "learning.system",
+                        Map.of("maxChars", NoteBudget.maxChars(lang))))
                 // 工具描述也得跟语言走：@Tool 的 description 是编译期常量，这一层替它换
                 .tools(localizedTools.of(lang,
                         new PeerInsightToolkit(peerInsightService, trader.getId(), lang)))
@@ -244,7 +247,8 @@ public class LearningRunner {
     }
 
     /** 开场白：三样注入齐活（排行榜/自己的复盘笔记/上一份学习笔记），然后把挑人这一步交回给模型。 */
-    private String userPrompt(AiTrader trader, long boundaryMs, String leaderboard, AgentLang lang) {
+    // 包私有非 private：输出语言硬收尾那条钉子（PromptMarkParsingTest）要拿成文验它在末尾
+    String userPrompt(AiTrader trader, long boundaryMs, String leaderboard, AgentLang lang) {
         StringBuilder sb = new StringBuilder();
         sb.append(prompts.get(lang, "learning.label.opening",
                 Map.of("time", TIME_FMT.format(Instant.ofEpochMilli(boundaryMs))))).append("\n\n");
@@ -261,6 +265,9 @@ public class LearningRunner {
                         : trader.getLearningNotes().strip())
                 .append("\n\n");
         sb.append(prompts.get(lang, "learning.label.closing"));
+        // 输出语言硬收尾：用户消息最末一行，排在同侪材料（含别人给 trader 起的名字，不翻译）
+        // 与旧笔记之后——它们可能是另一门语言
+        sb.append('\n').append(prompts.get(lang, "learning.label.outputLanguage"));
         return sb.toString();
     }
 

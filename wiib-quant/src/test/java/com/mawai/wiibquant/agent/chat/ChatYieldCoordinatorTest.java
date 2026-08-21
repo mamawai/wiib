@@ -1,5 +1,6 @@
 package com.mawai.wiibquant.agent.chat;
 
+import com.mawai.wiibcommon.enums.AgentLang;
 import com.mawai.wiibquant.agent.llm.ChatEndpoints;
 import com.mawai.wiibquant.agent.analysis.DeepAnalysisService;
 import com.mawai.wiibquant.agent.toolkit.MarketToolkit;
@@ -61,9 +62,9 @@ class ChatYieldCoordinatorTest {
     private final ChatConcurrencyGate gate = new ChatConcurrencyGate(10);
     private final WorkbenchRunRegistry runRegistry = new WorkbenchRunRegistry();
 
-    private final ChatTurnRunner runner = new ChatTurnRunner(contextStore, registry);
+    private final ChatTurnRunner runner = new ChatTurnRunner(contextStore, registry, ChatTestEndpoints.PROMPTS, ChatTestEndpoints.TOOLS);
     private final ChatYieldCoordinator coordinator =
-            new ChatYieldCoordinator(gate, runRegistry, runner, historyService);
+            new ChatYieldCoordinator(gate, runRegistry, runner, historyService, ChatTestEndpoints.PROMPTS);
 
     /** 会话上下文的假实现：save 真存 load 真取，补答轮读的就是让位轮存的 */
     private final Map<String, List<Message>> contextRows = new ConcurrentHashMap<>();
@@ -114,8 +115,8 @@ class ChatYieldCoordinatorTest {
         return new ChatAgentFactory(chatModelFactory, mock(MarketToolkit.class), mock(NewsToolkit.class),
                 mock(DeepAnalysisService.class), mock(TraderChatService.class),
                 mock(WorkbenchRunRegistry.class),
-                registry, 8, 999_999, 6, "X")
-                .leavesFor(llmConfig);
+                registry, ChatTestEndpoints.PROMPTS, ChatTestEndpoints.TOOLS, 8, 999_999, 6, "X")
+                .leavesFor(llmConfig, AgentLang.ZH);
     }
 
     /** 照 controller 的时序把一轮跑在后台线程上：run → yielded 则记账 → 还名额 → closeTurn */
@@ -172,7 +173,7 @@ class ChatYieldCoordinatorTest {
 
         // 让位存档里必须有占位答复：新轮的 summarizer 不该替这个问题代答
         assertThat(contextRows.get(SESSION).stream().map(Message::getText).toList())
-                .contains(ChatTurnRunner.YIELD_PLACEHOLDER);
+                .contains(ChatTestEndpoints.PROMPTS.get(AgentLang.ZH, "chat.yieldPlaceholder"));
 
         // 专家跑完了，但用户的新轮还占着名额：补答必须按兵不动
         expertRelease.countDown();

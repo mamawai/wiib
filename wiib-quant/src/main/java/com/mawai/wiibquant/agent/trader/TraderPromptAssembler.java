@@ -33,6 +33,9 @@ import java.util.Map;
  * ⑥ 用户风格指令放最后（近因权重最高）且明示优先级：风格冲突听主人的，硬规格不可覆盖；
  * ⑦ 主人留言压轴：阶段性的临时交代，比常驻风格指令更近因，按剩余轮次逐轮注入、减到 0 清空。
  * 这七条是 agent 行为的决定因素，不是文案——加语言时逐条对照着写，不是逐字翻译。
+ * <p>
+ * ⑧ 输出语言硬收尾排在⑦之后：⑥⑦是主人亲笔、不翻译，可能与平台模板不同语言，且近因权重最高。
+ * 语言指令因此说两次——模板正文一次，整篇最末一行再一次。
  */
 @Component
 @RequiredArgsConstructor
@@ -94,9 +97,11 @@ public class TraderPromptAssembler {
                     .append(trader.getLearningNotes()).append('\n');
         }
 
-        // 用户自己写的字：原样注入不过词表
+        // 用户自己写的字：原样注入不过词表。紧跟一句 ownerWritten 交代"这段是主人亲笔、
+        // 可能是另一门语言、照意思做但输出语言不变"，位置要在他的字之前
         if (trader.getCustomPrompt() != null && !trader.getCustomPrompt().isBlank()) {
             sb.append('\n').append(prompts.get(lang, "trader.label.customPrompt")).append('\n')
+                    .append(prompts.get(lang, "trader.label.ownerWritten")).append('\n')
                     .append(trader.getCustomPrompt()).append('\n');
         }
 
@@ -110,12 +115,16 @@ public class TraderPromptAssembler {
             String roundsText = left == 0 ? prompts.get(lang, "trader.label.ownerNoteOnce")
                     : prompts.get(lang, "trader.label.ownerNoteMore", Map.of("left", left));
             sb.append('\n').append(prompts.get(lang, "trader.label.ownerNote", Map.of("rounds", roundsText)))
-                    .append('\n').append(note).append('\n')
+                    .append('\n').append(prompts.get(lang, "trader.label.ownerWritten")).append('\n')
+                    .append(note).append('\n')
                     // 明说还剩几次，是要模型把它当持续叮嘱而不是"现在就执行一次"的动作指令——
                     // 多轮注入最大的风险就是"把 ETH 平掉"被念三次平三次，在措辞这一层掐掉
                     .append(prompts.get(lang, "trader.label.ownerNoteFooter")).append('\n');
             consumeOwnerNote(trader, note, left);
         }
+        // 输出语言硬收尾：整篇最末一行，排在自定义指令与主人留言之后。
+        // 退出平台模板时模板正文那次不在了，只剩这一行
+        sb.append('\n').append(prompts.get(lang, "trader.label.outputLanguage")).append('\n');
         return sb.toString();
     }
 

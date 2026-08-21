@@ -3,6 +3,8 @@ package com.mawai.wiibquant.agent.chat;
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONObject;
 import com.mawai.wiibcommon.constant.QuantConstants;
+import com.mawai.wiibcommon.enums.AgentLang;
+import com.mawai.wiibquant.agent.i18n.PromptCatalog;
 import lombok.extern.slf4j.Slf4j;
 import org.bsc.langgraph4j.RunnableConfig;
 import org.bsc.langgraph4j.action.AsyncCommandAction;
@@ -60,16 +62,25 @@ public class ApprovalGate implements EdgeHook.WrapCall<MessagesState<Message>> {
      */
     static final Set<String> GUARDED_TOOLS = Set.of(DEEP_ANALYSIS_TOOL);
 
-    /** 确认卡与回执上的中文名。 */
-    private static final String LABEL = "深度研判";
-
-    /** 卡片上给用户看的代价说明——用户要为"贵在哪"点头，笼统说一句"这很贵"等于没说。 */
-    private static final String REASON = "深度研判需 3 次深模型调用（Bull/Bear 辩论 + Judge 裁决）";
-
     private final ApprovalRegistry registry;
+    private final PromptCatalog prompts;
+    /** 确认卡与回执的语言：闸门是建叶子时挂上去的，语言跟着叶子走（见 ChatAgentFactory.leafKey） */
+    private final AgentLang lang;
 
-    public ApprovalGate(ApprovalRegistry registry) {
+    public ApprovalGate(ApprovalRegistry registry, PromptCatalog prompts, AgentLang lang) {
         this.registry = registry;
+        this.prompts = prompts;
+        this.lang = lang;
+    }
+
+    /** 确认卡与回执上的操作名 */
+    private String label() {
+        return prompts.get(lang, "chat.hitl.label");
+    }
+
+    /** 卡片上给用户看的代价说明——用户要为"贵在哪"点头，笼统说一句"这很贵"等于没说 */
+    private String reason() {
+        return prompts.get(lang, "chat.hitl.reason");
     }
 
     @Override
@@ -91,7 +102,7 @@ public class ApprovalGate implements EdgeHook.WrapCall<MessagesState<Message>> {
             log.info("[HITL] 用户已拒绝，回执告知模型 session={} tool={} symbol={}",
                     sessionId, call.name(), symbol);
             return CompletableFuture.completedFuture(shortCircuit(state, call.id(),
-                    "用户已拒绝本次" + LABEL + "，请如实告知并用现有数据作答，不要再次请求。"));
+                    prompts.get(lang, "chat.hitl.rejectedReply", Map.of("label", label()))));
         }
 
         if (registry.consumeApproval(sessionId, call.name(), symbol)) {
@@ -103,12 +114,12 @@ public class ApprovalGate implements EdgeHook.WrapCall<MessagesState<Message>> {
         // ChatTurnRunner 会在 TTL 内一直跳过专家派发，用户之后每问一句都拿不到真数据，
         // 且没有任何日志说明原因
         registry.discardApprovals(sessionId);
-        registry.requestApproval(sessionId, call.name(), symbol, REASON);
+        registry.requestApproval(sessionId, call.name(), symbol, reason());
         log.info("[HITL] 未授权，登记待确认 session={} tool={} symbol={}", sessionId, call.name(), symbol);
         JSONObject out = new JSONObject();
         out.put("status", "PENDING_APPROVAL");
-        out.put("message", LABEL + "是昂贵操作（" + REASON
-                + "），已向用户请求确认。请告知用户等待确认卡片，确认后你会被再次调用。");
+        out.put("message", prompts.get(lang, "chat.hitl.pendingMessage",
+                Map.of("label", label(), "reason", reason())));
         return CompletableFuture.completedFuture(shortCircuit(state, call.id(), out.toJSONString()));
     }
 
@@ -122,7 +133,7 @@ public class ApprovalGate implements EdgeHook.WrapCall<MessagesState<Message>> {
      * 短路后要让模型看到回执并转述给用户。action 节点的 EdgeMappings 只有这两个合法值
      *（{@code Agent.Builder.build()}：{@code .to("agent").toEND("end")}）。
      */
-    private static Command shortCircuit(MessagesState<Message> state, String guardedCallId, String body) {
+    private Command shortCircuit(MessagesState<Message> state, String guardedCallId, String body) {
         return new Command(Agent.AGENT_LABEL,
                 Map.of("messages", List.of(reply(state, guardedCallId, body))));
     }
@@ -211,8 +222,8 @@ public class ApprovalGate implements EdgeHook.WrapCall<MessagesState<Message>> {
      * BTC 和 ETH），按名字匹配会把只针对其中一个的说明同时发给两个——工具名一样，
      * 用户批的是 BTC，模型会以为 ETH 也批了。
      */
-    private static ToolResponseMessage reply(MessagesState<Message> state, String guardedCallId,
-                                             String body) {
+    private ToolResponseMessage reply(MessagesState<Message> state, String guardedCallId,
+                                      String body) {
         List<ToolResponseMessage.ToolResponse> responses = new ArrayList<>();
         state.lastMessage()
                 .filter(AssistantMessage.class::isInstance)
@@ -222,7 +233,7 @@ public class ApprovalGate implements EdgeHook.WrapCall<MessagesState<Message>> {
                     for (AssistantMessage.ToolCall c : a.getToolCalls()) {
                         responses.add(new ToolResponseMessage.ToolResponse(c.id(), c.name(),
                                 c.id().equals(guardedCallId) ? body
-                                        : "未执行：本轮存在待确认的贵操作。"));
+                                        : prompts.get(lang, "chat.hitl.notExecuted")));
                     }
                 });
         return ToolResponseMessage.builder().responses(responses).build();

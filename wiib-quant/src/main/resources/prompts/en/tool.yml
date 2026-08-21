@@ -9,3 +9,18 @@ tool:
     - Pass traderId: look closely at that one trader — their latest review in full, their learning notes, the thesis and invalidation condition of their live plans, and the "thesis → outcome" pairing of their last few closed trades.
     - Omit traderId: returns a snapshot of this round's leaderboard (per trader: name / status / return this round / closed-trade count / one line of their latest review). You were already given one in the opening message; call this when you want to re-check it.
     The N in the [id=N] at the start of every leaderboard row is the traderId to pass here.
+
+  # Router tool: it exists only so the model can say "who goes next" structurally; the method body never runs
+  route: Decide what comes next. Name the experts when real data is still needed; give ["FINISH"] once the expert data is enough to answer.
+
+  # Deep analysis: one call = 3 deep-model calls; the description nails down "expensive" and "needs the user's nod".
+  # Word for word the same as the zh entry apart from the trigger phrases: the description is read by the
+  # model, the trigger phrases have to match what the user actually types, so only those follow the language.
+  run_deep_analysis: |-
+    Run a full deep market analysis (Bull vs Bear adversarial debate + Judge verdict) for a symbol.
+    ONLY call when the user EXPLICITLY asks with words like "deep dive"/"full analysis"; for ordinary
+    trend/outlook questions answer from expert data directly - never call this uninvited.
+    EXPENSIVE: costs 3 deep-model LLM calls. Requires user approval per session.
+    If the result status is PENDING_APPROVAL, tell the user approval is needed and why - the UI
+    will show a confirmation card; after they approve, call this tool again to execute.
+    Returns: narrative, bull/range/bear scenario distribution, invalidation condition, noDirection flag.

@@ -1,5 +1,8 @@
 package com.mawai.wiibquant.agent.i18n;
 
+import java.util.Map;
+import com.mawai.wiibquant.agent.analysis.ReplayCoachRequest;
+import com.mawai.wiibquant.agent.analysis.ReplayCoachPrompts;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.mawai.wiibcommon.dto.FuturesPositionDTO;
@@ -60,20 +63,15 @@ class PromptI18nTest {
     }
 
     private final PromptCatalog prompts = new PromptCatalog();
+    private final ReplayCoachPrompts coach = new ReplayCoachPrompts(prompts);
 
-    /** 逐码点扫 CJK：汉字、全角标点、中文书名号/引号一个都不许漏进英文提示词 */
+    /** 笔记上限按语言给（见 NoteBudget）；提示词里那句"≤N"就是这个数注进去的 */
+    private static final Map<String, Object> NOTE_CAP_ZH = Map.of("maxChars", 2000);
+    private static final Map<String, Object> NOTE_CAP_EN = Map.of("maxChars", 4000);
+
+    /** 逐码点扫 CJK 的实现在 {@link PromptI18nAssertions}：唤醒开场白那条钉子在 trader 包，两边共用一份 */
     private static void assertNoCjk(String label, String text) {
-        for (int i = 0; i < text.length(); ) {
-            int cp = text.codePointAt(i);
-            i += Character.charCount(cp);
-            boolean cjk = (cp >= 0x4E00 && cp <= 0x9FFF)      // 基本汉字
-                    || (cp >= 0x3400 && cp <= 0x4DBF)          // 扩展A
-                    || (cp >= 0x3000 && cp <= 0x303F)          // 中日韩符号（【】、。等）
-                    || (cp >= 0xFF00 && cp <= 0xFFEF);         // 全角形式（％｜（）等）
-            assertThat(cjk)
-                    .as("%s 里混进了中日韩字符 U+%04X（%s）", label, cp, new String(Character.toChars(cp)))
-                    .isFalse();
-        }
+        PromptI18nAssertions.assertNoCjk(label, text);
     }
 
     // ==================== ① 英文用户拿到的提示词零中文 ====================
@@ -107,7 +105,10 @@ class PromptI18nTest {
 
     @Test
     void 英文reviewer提示词与素材块全文无中文() {
-        assertNoCjk("英文 reviewer 系统提示词", prompts.get(AgentLang.EN, "reviewer.system"));
+        assertNoCjk("英文 reviewer 系统提示词", prompts.get(AgentLang.EN, "reviewer.system", NOTE_CAP_EN));
+        assertNoCjk("英文 reviewer 收尾指令", prompts.get(AgentLang.EN, "reviewer.label.closing"));
+        assertNoCjk("英文 reviewer 输出语言硬收尾",
+                prompts.get(AgentLang.EN, "reviewer.label.outputLanguage"));
 
         ReviewMaterialAssembler.ReviewMaterial m = enMaterial();
         assertNoCjk("英文战绩表", m.statsBlock());
@@ -118,13 +119,75 @@ class PromptI18nTest {
 
     @Test
     void 英文learning提示词与同侪块全文无中文() {
-        assertNoCjk("英文 learning 系统提示词", prompts.get(AgentLang.EN, "learning.system"));
+        assertNoCjk("英文 learning 系统提示词", prompts.get(AgentLang.EN, "learning.system", NOTE_CAP_EN));
         assertNoCjk("英文 peer_insights 工具描述", prompts.get(AgentLang.EN, "tool.peer_insights"));
+        assertNoCjk("英文 learning 收尾指令", prompts.get(AgentLang.EN, "learning.label.closing"));
+        assertNoCjk("英文 learning 输出语言硬收尾",
+                prompts.get(AgentLang.EN, "learning.label.outputLanguage"));
 
         PeerInsightService peers = enPeers();
         assertNoCjk("英文同侪排行榜", peers.leaderboard(7L, AgentLang.EN));
         assertNoCjk("英文同侪详情", peers.detail(8L, AgentLang.EN));
         assertNoCjk("英文查无此人", peers.detail(404L, AgentLang.EN));
+    }
+
+    @Test
+    void 英文chat全链路提示词与过程文案全文无中文() {
+        for (String key : List.of("chat.expert.market", "chat.expert.news", "chat.expert.trader",
+                "chat.router", "chat.expertHandoff", "chat.yieldPlaceholder", "chat.cancelledNote",
+                "chat.cancelledEmpty", "chat.yieldDoneAnswer", "chat.preloadHeader",
+                "chat.expertStatus.data", "chat.expertStatus.failed", "chat.expertStatus.noContent",
+                "chat.expertNoContentBody", "chat.expertNoContentReason", "chat.deferred.empty",
+                "chat.deferred.prefix", "chat.hitl.label", "chat.hitl.reason", "chat.hitl.notExecuted",
+                "chat.hitl.resumeMessage", "chat.form.wake", "chat.form.review", "chat.form.note",
+                "chat.compress.summaryPrefix", "chat.compress.role.user", "chat.compress.role.assistant",
+                "chat.compress.role.system", "chat.compress.role.tool", "chat.compress.role.other",
+                "chat.compress.clipped", "chat.deepAnalysis.noNews", "chat.deepAnalysis.bullStance",
+                "chat.deepAnalysis.bearStance", "chat.deepAnalysis.judgeFailed",
+                "chat.deepAnalysis.progress.bullDone", "chat.deepAnalysis.progress.judging",
+                "chat.deepAnalysis.progress.judged", "chat.outputLanguage",
+                "tool.route", "tool.run_deep_analysis")) {
+            assertNoCjk("英文 " + key, prompts.get(AgentLang.EN, key));
+        }
+        // 带占位符的那些：真填一遍再扫，模板里的中文标点藏在占位符两边
+        assertNoCjk("英文 summarizer", prompts.get(AgentLang.EN, "chat.summarizer",
+                Map.of("supplementTag", "[X]", "mergedTag", "[BlockBeats+X]")));
+        assertNoCjk("英文历史压缩提示词",
+                prompts.get(AgentLang.EN, "chat.compress.prompt", Map.of("history", "u: hi")));
+        assertNoCjk("英文专家出处标注", prompts.get(AgentLang.EN, "chat.expertTag",
+                Map.of("agent", "market_agent", "status", prompts.get(AgentLang.EN, "chat.expertStatus.data"))));
+        assertNoCjk("英文补答标头",
+                prompts.get(AgentLang.EN, "chat.deferred.header", Map.of("question", "btc?")));
+        assertNoCjk("英文补答指令",
+                prompts.get(AgentLang.EN, "chat.deferred.instruction", Map.of("question", "btc?")));
+        assertNoCjk("英文补答失败", prompts.get(AgentLang.EN, "chat.deferred.failed", Map.of("reason", "timeout")));
+        assertNoCjk("英文专家失败进度", prompts.get(AgentLang.EN, "chat.progress.expertFailed",
+                Map.of("agent", "market_agent", "reason", "timeout")));
+        assertNoCjk("英文 HITL 待确认", prompts.get(AgentLang.EN, "chat.hitl.pendingMessage",
+                Map.of("label", "deep analysis", "reason", "3 calls")));
+        assertNoCjk("英文 HITL 已拒绝", prompts.get(AgentLang.EN, "chat.hitl.rejectedReply",
+                Map.of("label", "deep analysis")));
+        assertNoCjk("英文表单回执", prompts.get(AgentLang.EN, "chat.form.opened", Map.of("label", "wake-up")));
+        assertNoCjk("英文表单回执（失败）",
+                prompts.get(AgentLang.EN, "chat.form.failed", Map.of("label", "wake-up")));
+        assertNoCjk("英文深研判辩论提示词", prompts.get(AgentLang.EN, "chat.deepAnalysis.arguePrompt",
+                Map.of("stance", "bull", "data", "d")));
+        assertNoCjk("英文深研判裁决提示词", prompts.get(AgentLang.EN, "chat.deepAnalysis.judgePrompt",
+                Map.of("data", "d", "bull", "b", "bear", "b", "format", "{}")));
+        assertNoCjk("英文深研判数据块", prompts.get(AgentLang.EN, "chat.deepAnalysis.dataContext",
+                Map.of("symbol", "BTCUSDT", "price", "1", "micro", "m", "iv", "i", "news", "n")));
+    }
+
+    @Test
+    void 英文coach系统提示词与成文全文无中文() {
+        assertNoCjk("英文 coach 盘面提示", coach.system(hintRequest(), AgentLang.EN));
+        assertNoCjk("英文 coach 整局评估", coach.system(reviewRequest(), AgentLang.EN));
+        assertNoCjk("英文 coach 盘面成文", coach.user(hintRequest(), AgentLang.EN));
+        assertNoCjk("英文 coach 评估成文", coach.user(reviewRequest(), AgentLang.EN));
+        assertNoCjk("英文 coach 校验文案",
+                coach.validate(new ReplayCoachRequest("CHAT", null, "BTCUSDT", 60, false, null,
+                        List.of(new ReplayCoachRequest.Bar("x", 1, 2, 0.5, 1.5, 10)),
+                        null, null, null, null), AgentLang.EN));
     }
 
     // ==================== ② 中文侧的关键约束一条不丢 ====================
@@ -162,7 +225,7 @@ class PromptI18nTest {
     /** reviewer 的防自夸三件套 */
     @Test
     void 中文reviewer保住防自夸三条() {
-        String p = prompts.get(AgentLang.ZH, "reviewer.system");
+        String p = prompts.get(AgentLang.ZH, "reviewer.system", NOTE_CAP_ZH);
         assertThat(p)
                 .as("① 战绩数字只许复述").contains("只许原样复述，禁止自行计算或美化")
                 .as("② 先找错误再找亮点").contains("先找错误再找亮点")
@@ -174,7 +237,7 @@ class PromptI18nTest {
     /** learning 的反照抄三件套 */
     @Test
     void 中文learning保住反照抄三条() {
-        String p = prompts.get(AgentLang.ZH, "learning.system");
+        String p = prompts.get(AgentLang.ZH, "learning.system", NOTE_CAP_ZH);
         assertThat(p)
                 .as("①【不学什么】必填").contains("【不学什么】是必填段").contains("你就只是在抄")
                 .as("② 每条学习带证据与差距数字").contains("每条学习必须落在证据与差距上")
@@ -188,10 +251,10 @@ class PromptI18nTest {
         assertThat(new TraderPromptAssembler(mock(AiTraderMapper.class), prompts)
                 .platformTemplate(AgentLang.ZH, "1h", "BTCUSDT", TraderRiskConfig.of(new AiTrader()), null))
                 .contains("可能是另一门语言写的").contains("本轮输出一律用中文");
-        assertThat(prompts.get(AgentLang.ZH, "reviewer.system")).contains("可能是另一门语言写的");
-        assertThat(prompts.get(AgentLang.ZH, "learning.system")).contains("可能是另一门语言写的");
+        assertThat(prompts.get(AgentLang.ZH, "reviewer.system", NOTE_CAP_ZH)).contains("可能是另一门语言写的");
+        assertThat(prompts.get(AgentLang.ZH, "learning.system", NOTE_CAP_ZH)).contains("可能是另一门语言写的");
         for (String key : List.of("reviewer.system", "learning.system")) {
-            assertThat(prompts.get(AgentLang.EN, key)).contains("another language");
+            assertThat(prompts.get(AgentLang.EN, key, NOTE_CAP_EN)).contains("another language");
         }
     }
 
@@ -201,14 +264,161 @@ class PromptI18nTest {
         for (String key : List.of("trader.template", "trader.label.memory", "trader.mark.conclusion",
                 "reviewer.system", "reviewer.mark.memory", "reviewer.label.statsHeader",
                 "learning.system", "learning.mark.skip", "learning.label.peer.leaderboardHeader",
-                "tool.peer_insights")) {
+                "tool.peer_insights", "tool.route", "tool.run_deep_analysis",
+                "chat.summarizer", "chat.router", "chat.expert.market", "chat.expert.news",
+                "chat.expert.trader", "chat.compress.prompt", "chat.deepAnalysis.judgePrompt",
+                "chat.hitl.reason", "chat.deferred.prefix",
+                "coach.hint.system", "coach.review.system", "coach.label.barsHeader",
+                "trader.wake.routineQuestion", "trader.wake.sleepNotice", "trader.error.wakeTimeout",
+                // 任务 5 的两条缓解：回落成中文＝英文用户被一行中文指令要求"输出中文"，正好反了
+                "trader.label.ownerWritten", "trader.label.outputLanguage",
+                "reviewer.label.outputLanguage", "learning.label.outputLanguage",
+                "chat.outputLanguage", "coach.label.outputLanguage",
+                // 上游异常归类后的那一句：chat 与 coach 共用，既上屏也喂回模型
+                "llm.error.unauthorized", "llm.error.quota", "llm.error.modelNotFound",
+                "llm.error.unreachable", "llm.error.fallback")) {
             assertThat(prompts.find(AgentLang.EN, key))
                     .as("英文词表缺 %s，回落成中文了", key)
                     .isNotEqualTo(prompts.find(AgentLang.ZH, key));
         }
     }
 
+    /** chat：汇总者的六条回答原则 + news/summarizer 的分工红线，搬家时丢哪条都在这里红 */
+    @Test
+    void 中文chat保住汇总者六原则与新闻分工() {
+        String p = prompts.get(AgentLang.ZH, "chat.summarizer",
+                Map.of("supplementTag", "[X]", "mergedTag", "[BlockBeats+X]"));
+        assertThat(p)
+                .as("① 结论可追溯").contains("结论必须可追溯到专家给的数据，不编造")
+                .as("② 新闻分工").contains("news_agent 只管 BlockBeats，联网补充归你")
+                .as("③ 鼓励表态").contains("鼓励表态")
+                .as("④ 看不清是例外").contains("不是回避表态的出口")
+                .as("⑤ 深研判要明说才调").contains("仅当用户明确说出").contains("run_deep_analysis")
+                .as("⑥ 动手三工具只弹表单").contains("绝不能说已经唤醒了／已经复盘了／留言已记下");
+        // 另一半分工写在 news 专家那边，两处必须同时在
+        assertThat(prompts.get(AgentLang.ZH, "chat.expert.news"))
+                .contains("严禁把你联网搜索到的任何内容写进回答");
+        assertThat(prompts.get(AgentLang.ZH, "chat.router")).contains("只调用 route 工具，不要输出任何文字");
+    }
+
+    /** coach：只依据给定数据 + 中性不下单 */
+    @Test
+    void 中文coach保住盲测与中性两条() {
+        assertThat(coach.system(hintRequest(), AgentLang.ZH))
+                .as("① 盲测不许猜日期").contains("绝不要猜测这是哪一天").contains("不引用外部信息")
+                .as("② 中性不下单").contains("不给买卖指令，不做确定性预测");
+        assertThat(coach.system(reviewRequest(), AgentLang.ZH))
+                .contains("只依据给定数据，不引用外部行情记忆");
+    }
+
+    /**
+     * run_deep_analysis 的描述<b>两门语言只差触发词</b>：描述是给模型读的，触发词要匹配用户
+     * 实际会说的话，只有后者跟语言走。中文侧保持注解原文不译——误触发一次烧 3 次深模型调用，
+     * "仅在用户明说时才调"这条约束不拿译文去换。
+     */
+    @Test
+    void 深研判工具描述两门语言只差触发词() {
+        String zhTrigger = "\"深度研判\"/\"全面分析\"";
+        String enTrigger = "\"deep dive\"/\"full analysis\"";
+        String zh = prompts.get(AgentLang.ZH, "tool.run_deep_analysis");
+        String en = prompts.get(AgentLang.EN, "tool.run_deep_analysis");
+
+        assertThat(zh).as("中文侧的触发词").contains(zhTrigger);
+        assertThat(en).as("英文侧的触发词").contains(enTrigger);
+        assertThat(zh.replace(zhTrigger, enTrigger))
+                .as("除触发词外两侧必须逐字相同").isEqualTo(en);
+    }
+
+    /** 任务 4：笔记上限按语言给，且提示词里那句"≤N"就是代码真截断的那个数 */
+    @Test
+    void 笔记上限按语言注入提示词() {
+        assertThat(prompts.get(AgentLang.ZH, "reviewer.system", NOTE_CAP_ZH)).contains("≤2000字");
+        assertThat(prompts.get(AgentLang.EN, "reviewer.system", NOTE_CAP_EN)).contains("≤4000 characters");
+        assertThat(prompts.get(AgentLang.ZH, "learning.system", NOTE_CAP_ZH)).contains("2000 字以内");
+        assertThat(prompts.get(AgentLang.EN, "learning.system", NOTE_CAP_EN)).contains("under 4000 characters");
+    }
+
+    // ==================== ③ 混语言提示词的缓解（任务 5）====================
+
+    /**
+     * 混语言提示词的两条缓解，两门语言各钉一遍（自定义段一律拿另一门语言造）：
+     * <ul>
+     *   <li>输出语言硬收尾是整篇的最后一行，排在自定义指令与主人留言之后；</li>
+     *   <li>每段主人亲笔的字之前都有 ownerWritten——"这段是主人写的、可能是另一门语言、
+     *       照意思做但输出语言不变"。</li>
+     * </ul>
+     */
+    @Test
+    void 主人指令是另一门语言时输出语言指令仍压在末尾() {
+        for (AgentLang lang : AgentLang.values()) {
+            AiTrader t = enTrader();
+            // 故意反着来：中文用户写英文指令、英文用户写中文指令
+            t.setCustomPrompt(lang == AgentLang.ZH
+                    ? "Only trade breakouts. Answer everything in English."
+                    : "只做突破，全部用中文回答。");
+            t.setOwnerNote(lang == AgentLang.ZH ? "Close ETH today." : "今天把 ETH 平掉。");
+            t.setOwnerNoteRounds(2);
+
+            String prompt = new TraderPromptAssembler(mock(AiTraderMapper.class), prompts)
+                    .assemble(t, "{}", List.of(), lang);
+            String tail = prompts.get(lang, "trader.label.outputLanguage");
+            String note = prompts.get(lang, "trader.label.ownerWritten");
+
+            // 末尾那行要完整且真在末尾：只 contains 的话，它被写在模板中间也照样绿
+            assertThat(prompt.stripTrailing())
+                    .as("%s 输出语言指令必须是整篇最后一行", lang.code()).endsWith(tail);
+            // 自定义指令与主人留言各配一句交代，全篇出现两次
+            assertThat(prompt.split(java.util.regex.Pattern.quote(note), -1).length - 1)
+                    .as("%s 自定义指令与主人留言各要一句「这段是主人写的」", lang.code()).isEqualTo(2);
+            // 交代排在主人的字之前
+            assertThat(prompt.indexOf(note)).isLessThan(prompt.indexOf(t.getCustomPrompt()));
+            assertThat(prompt.lastIndexOf(note)).isLessThan(prompt.indexOf(t.getOwnerNote()));
+            // 主人的字一个都不许被改写
+            assertThat(prompt).contains(t.getCustomPrompt()).contains(t.getOwnerNote());
+        }
+    }
+
+    /** 退出平台模板时模板里那次语言指令没了，末尾这行是唯一还站着的一条 */
+    @Test
+    void 退出平台模板后输出语言指令仍在() {
+        for (AgentLang lang : AgentLang.values()) {
+            AiTrader t = enTrader();
+            t.setUseDefaultPrompt(false);
+            t.setCustomPrompt("Do whatever you want.");
+            assertThat(new TraderPromptAssembler(mock(AiTraderMapper.class), prompts)
+                    .assemble(t, "{}", List.of(), lang).stripTrailing())
+                    .as("%s 退出平台模板后仍要有输出语言硬收尾", lang.code())
+                    .endsWith(prompts.get(lang, "trader.label.outputLanguage"));
+        }
+    }
+
+    /** 教练的用户消息（局中提示与整局评估两条路）同样以输出语言指令收尾 */
+    @Test
+    void 教练用户消息以输出语言指令收尾() {
+        for (AgentLang lang : AgentLang.values()) {
+            String tail = prompts.get(lang, "coach.label.outputLanguage");
+            assertThat(coach.user(hintRequest(), lang).stripTrailing())
+                    .as("%s 教练盘面提示", lang.code()).endsWith(tail);
+            assertThat(coach.user(reviewRequest(), lang).stripTrailing())
+                    .as("%s 教练整局评估", lang.code()).endsWith(tail);
+        }
+    }
+
     // ==================== 造数 ====================
+
+    private static ReplayCoachRequest hintRequest() {
+        return new ReplayCoachRequest(ReplayCoachRequest.MODE_HINT, null, "ETHUSDT", 15, true, "D1 00:00",
+                List.of(new ReplayCoachRequest.Bar("D1 09:00", 1, 2, 0.5, 1.5, 10)), 10000.0,
+                List.of(new ReplayCoachRequest.Position("LONG", 1.5, 3400.5, 7.5, 123.456)), null, null);
+    }
+
+    private static ReplayCoachRequest reviewRequest() {
+        return new ReplayCoachRequest(ReplayCoachRequest.MODE_REVIEW, 7L, "BTCUSDT", 60, false, null,
+                List.of(new ReplayCoachRequest.Bar("D1 09:00", 1, 2, 0.5, 1.5, 10)), null, null,
+                List.of(new ReplayCoachRequest.Trade("SHORT", 0.5, 10, 60100, 59800, 148.2,
+                        "D1 08:00", "D1 12:00", "LIQUIDATION", false)),
+                new ReplayCoachRequest.Stats(3, 2, 1, 520.4, 0.0052, 0.031, 12.3, 100000, 100520.4));
+    }
 
     private static AiTrader enTrader() {
         AiTrader t = new AiTrader();

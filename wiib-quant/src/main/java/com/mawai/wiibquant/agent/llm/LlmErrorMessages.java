@@ -1,8 +1,11 @@
 package com.mawai.wiibquant.agent.llm;
 
+import com.mawai.wiibcommon.enums.AgentLang;
+import com.mawai.wiibquant.agent.i18n.PromptCatalog;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.Locale;
+import java.util.Map;
 
 /**
  * 异常 → 用户看得懂、也能据此动手解决的一句话。
@@ -10,12 +13,15 @@ import java.util.Locale;
  * BYOK 之后最高频的故障就是 key 相关，而 SDK 原始异常常是几百字符、带 URL 和请求片段的东西，
  * 所以认得出的那四类（401/429/模型不存在/连不上）各给一句能照着做的话。
  * <p>
- * <b>认不出来的就不替用户判病因。</b> 两个调用方的 catch 罩的范围都比 LLM 大得多——
+ * <b>认不出来的就不替用户判病因。</b> 调用方的 catch 罩的范围都比 LLM 大得多——
  * 落历史、写记忆、上下文落库全在里面，数据库挂了也走这条路。
  * 兜底要是说"请检查端点与模型配置"，用户会去乱改一把本来没问题的 key。
  * <p>
  * 硬约束：<b>任何分支都不许把 API key 带出去</b>。这段文本不只给用户看——
  * 专家失败时它会被拼进 AssistantMessage 喂回模型，并随会话上下文落库。
+ * <p>
+ * 文案在 {@link PromptCatalog} 的 {@code llm.error.*}，按当前用户的 {@link AgentLang} 取；
+ * 归类判据（401/429/404 model/超时那几组关键字）只认上游英文原文，与语言无关。
  */
 @Slf4j
 public final class LlmErrorMessages {
@@ -26,37 +32,38 @@ public final class LlmErrorMessages {
     private LlmErrorMessages() {
     }
 
-    public static String classify(Throwable t) {
+    public static String classify(Throwable t, PromptCatalog prompts, AgentLang lang) {
         if (t == null) {
-            return "处理失败，请稍后重试";
+            return prompts.get(lang, "llm.error.fallback");
         }
         String lower = chain(t).toLowerCase(Locale.ROOT);
         if (lower.contains("401") || lower.contains("403")
                 || lower.contains("unauthorized") || lower.contains("invalid api key")) {
-            return "API key 无效或无权限，请到配置里检查";
+            return prompts.get(lang, "llm.error.unauthorized");
         }
         if (lower.contains("429") || lower.contains("quota") || lower.contains("rate limit")) {
-            return "你的 API 额度已用尽或触发限流，请稍后再试";
+            return prompts.get(lang, "llm.error.quota");
         }
         if (lower.contains("404") && lower.contains("model")) {
-            return "端点不支持该模型，请重新选择模型";
+            return prompts.get(lang, "llm.error.modelNotFound");
         }
         if (hasCause(t, java.net.SocketTimeoutException.class)
                 || hasCause(t, java.net.ConnectException.class)
                 || hasCause(t, java.net.UnknownHostException.class)
                 || lower.contains("timeout") || lower.contains("timed out")
                 || lower.contains("connection refused") || lower.contains("unknownhost")) {
-            return "端点无响应，请检查 Base URL 是否正确";
+            return prompts.get(lang, "llm.error.unreachable");
         }
         // 类名取最深层 cause：最外层几乎总是 CompletionException 之类的包装（实测），拿它查不到病因
         Throwable root = root(t);
         // 归类不到的形态要能被发现，否则它永远只以兜底文案示人；但不重复打栈——
-        // 两个调用方（Controller 的 catch、专家节点的 catch）都已经把整条异常记下来了。
+        // 调用方的 catch 都已经把整条异常记下来了。
         // 不写 [LLM]：这里也会收到 DB 之类的服务端故障，贴错标签会把真跑验收的观察点搅浑
         log.warn("[ErrorClassify] 归类不到 {}", root.getClass().getName());
         // 兜底不回显上游原文：中转网关的异常里经常带完整请求 URL（?api_key=…）、自定义 header，
         // key 的形态正则永远追不全。上面四个分支返的是固定文案，天然不含 key
-        return "处理失败（" + root.getClass().getSimpleName() + "），请稍后重试";
+        return prompts.get(lang, "llm.error.unknown",
+                Map.of("type", root.getClass().getSimpleName()));
     }
 
     private static Throwable root(Throwable t) {

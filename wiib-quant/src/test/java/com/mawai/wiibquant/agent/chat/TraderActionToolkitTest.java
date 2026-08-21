@@ -1,5 +1,6 @@
 package com.mawai.wiibquant.agent.chat;
 
+import com.mawai.wiibcommon.enums.AgentLang;
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONObject;
 import org.junit.jupiter.api.AfterEach;
@@ -29,7 +30,7 @@ class TraderActionToolkitTest {
     /** 推出去的每一张卡的 data（form + prefill） */
     private final List<JSONObject> pushed = new ArrayList<>();
     private final WorkbenchRunRegistry runRegistry = spy(new WorkbenchRunRegistry());
-    private final TraderActionToolkit toolkit = new TraderActionToolkit(runRegistry, 42L);
+    private final TraderActionToolkit toolkit = new TraderActionToolkit(runRegistry, 42L, ChatTestEndpoints.PROMPTS, AgentLang.ZH);
 
     /** 常态：这一轮有 SSE 通道，会话号已由闸门设进 ToolRunContext */
     @BeforeEach

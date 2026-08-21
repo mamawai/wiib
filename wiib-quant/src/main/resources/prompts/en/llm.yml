@@ -1,0 +1,20 @@
+# llm domain catalog (English). Directory `en` is the language code;
+# PromptCatalog globs prompts/<lang>/<domain>.yml.
+#
+# Holds the one-liner an upstream exception is classified into (LlmErrorMessages), shared by chat and
+# coach: it is shown to the user AND stitched into an AssistantMessage fed back to the model and
+# persisted with the conversation context.
+# Hard rule: none of these may echo the upstream text — it often carries the full request URL
+# (?api_key=…) and custom headers.
+llm:
+
+  error:
+    # Unrecognised causes are not diagnosed for the user: both callers' catch blocks cover far more
+    # than the LLM call, a database outage lands here too
+    fallback: Something went wrong, please try again later
+    unauthorized: The API key is invalid or lacks permission - check it in the settings
+    quota: Your API quota is used up or you have hit a rate limit, please try again later
+    modelNotFound: This endpoint does not support that model, pick another one
+    unreachable: The endpoint is not responding - check that the Base URL is correct
+    # type is the class name of the deepest cause, language-independent; it is how unclassified shapes get spotted
+    unknown: Something went wrong ({{type}}), please try again later

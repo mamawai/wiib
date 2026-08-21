@@ -2,6 +2,9 @@ package com.mawai.wiibquant.agent.chat;
 
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONArray;
+import com.mawai.wiibcommon.enums.AgentLang;
+import com.mawai.wiibquant.agent.i18n.LocalizedToolCallbacks;
+import com.mawai.wiibquant.agent.i18n.PromptCatalog;
 import com.mawai.wiibquant.agent.llm.ConversationSummarizer;
 import com.mawai.wiibquant.agent.llm.LlmErrorMessages;
 import com.mawai.wiibquant.agent.llm.ModelCallLimiter;
@@ -24,11 +27,11 @@ import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
-import org.springframework.ai.tool.method.MethodToolCallbackProvider;
 import org.springframework.stereotype.Component;
 
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -67,6 +70,8 @@ public class ChatTurnRunner {
 
     private final ChatContextStore contextStore;
     private final ApprovalRegistry approvalRegistry;
+    private final PromptCatalog prompts;
+    private final LocalizedToolCallbacks localizedTools;
     /** 专家并行用。虚拟线程：专家全程阻塞在上游 HTTP 上，池大小不该成为约束 */
     private final ExecutorService expertExecutor = Executors.newVirtualThreadPerTaskExecutor();
 
@@ -160,29 +165,13 @@ public class ChatTurnRunner {
         }
     }
 
-    /** 让位时垫进模型上下文的占位答复：拦住新一轮 summarizer 替这个未回答的问题代答 */
-    static final String YIELD_PLACEHOLDER = "（该问题的专家数据仍在获取中，稍后单独补答，本轮暂不回答）";
-
-    /** 中断收尾的措辞：展示历史与模型上下文用同一份，两边不打架 */
-    static final String CANCELLED_NOTE = "（已中断）";
-    private static final String CANCELLED_EMPTY = "（本轮已被用户中断，未作答）";
-
-    /** 中断这一轮的最终文本：半截答案照留（token 已经烧掉了），一个字都没出就立块牌子 */
-    static String cancelledAnswer(String partial) {
-        return partial == null || partial.isBlank() ? CANCELLED_EMPTY : partial + "\n\n" + CANCELLED_NOTE;
+    /** 中断这一轮的最终文本：半截答案照留（token 已经烧掉了），一个字都没出就立块牌子。
+     *  展示历史与模型上下文用同一份措辞，两边不打架 */
+    static String cancelledAnswer(PromptCatalog prompts, AgentLang lang, String partial) {
+        return partial == null || partial.isBlank()
+                ? prompts.get(lang, "chat.cancelledEmpty")
+                : partial + "\n\n" + prompts.get(lang, "chat.cancelledNote");
     }
-
-    /**
-     * 派发结束、进汇总前垫的收尾指令：<b>整段输入必须以用户侧消息结尾</b>。
-     * 以 assistant 结尾等于让模型在"我刚说完"之后再补一句，产出多半是"没什么可补充的"。
-     * 补答轮（{@link #runDeferredSummary}）垫的那句同一用途。
-     */
-    // 措辞必须覆盖专家的三种产出形态（取回的数据/取数失败/没有返回内容）：
-    // 只说"取回的数据"的话，专家全失败时这句指向的消息不存在，模型可能把失败说明当数据引用
-    static final String EXPERT_HANDOFF =
-            "【系统】上面带【…】标注的消息是本轮专家的执行结果（取回的数据 / 取数失败 / 没有返回内容），"
-                    + "不是你说过的话。现在只依据其中真正取回的数据回答用户本轮的问题；"
-                    + "取数失败或没取到的项就如实说没取到。";
 
     /**
      * 路由工具：只用来让模型**结构化地**表达"下一步给谁"，方法体永远不会被执行。
@@ -194,8 +183,10 @@ public class ChatTurnRunner {
      * 走 function calling 后参数天然结构化，且 tool_call 不进文本 token 流。
      */
     public static class RouterTool {
+        // description 只是编译期兜底：真正发给模型的那份按语言取自词表 tool.route（见 LocalizedToolCallbacks）
         @Tool(name = "route", description = """
-                决定下一步。需要真实数据时给出专家名；专家数据已够、可以作答时给 ["FINISH"]。""")
+                Decide what comes next. Name the experts when real data is still needed; \
+                give ["FINISH"] once the expert data is enough to answer.""")
         public String route(@ToolParam(description = """
                 Where to go next: market_agent (prices/positions/liquidations/options),
                 news_agent (crypto news flashes), trader_agent (the user's own AI trader:
@@ -205,20 +196,15 @@ public class ChatTurnRunner {
         }
     }
 
-    private static final String ROUTER_INSTRUCTION = """
-            你是研判工作台的调度器。看完对话后，用 route 工具给出下一步：
-            - 还需要真实数据 → 给专家名：market_agent(实时行情/持仓/清算/期权)、
-              news_agent(加密新闻快讯，BlockBeats 快讯源)
-            - 问"我的 trader/我的交易员"怎么样、持了什么仓、某笔为什么这么做、交易计划、
-              复盘学到了什么 → trader_agent（用户自己那个 AI 交易员的档案，只读）
-            - 涉及行情、新闻、用户自己 trader 的问题必须先派专家取数，不要凭记忆判断
-            - 对话里已有专家返回的数据、足够回答用户了 → 给 ["FINISH"]
-            - 同一批专家已经取过数就不要重复派，改给 ["FINISH"]
-            只调用 route 工具，不要输出任何文字。""";
+    /**
+     * 路由工具的 callback，按语言各存一份：{@link LocalizedToolCallbacks} 拼一次要反射扫一遍工具类，
+     * 一门语言建一次存着，不每轮重扫。
+     */
+    private final Map<AgentLang, List<ToolCallback>> routerTools = new EnumMap<>(AgentLang.class);
 
-    /** 路由工具的 callback：常量化，避免每轮重新反射扫描 */
-    private static final List<ToolCallback> ROUTER_TOOLS = List.of(
-            MethodToolCallbackProvider.builder().toolObjects(new RouterTool()).build().getToolCallbacks());
+    private List<ToolCallback> routerTools(AgentLang lang) {
+        return routerTools.computeIfAbsent(lang, l -> localizedTools.of(l, new RouterTool()));
+    }
 
     /** 路由是轻决策，正常 3s 内返回；90s 判挂死进重试、仍失败降级 FINISH——实测上游挂死曾拖它满 10 分钟 */
     private static final Duration ROUTER_TIMEOUT = Duration.ofSeconds(90);
@@ -239,6 +225,8 @@ public class ChatTurnRunner {
                           Consumer<String> answerTokenSink, Consumer<ExpertProgress> progressSink,
                           TurnYield yield) {
         long startedAt = System.currentTimeMillis();
+        // 语言取自叶子：它是建叶子时按用户语言烤死的，已经在叶子缓存键里，不必再查一次
+        AgentLang lang = leaves.lang();
         List<Message> history = contextStore.load(sessionId);
         List<Message> working = new ArrayList<>(history);
         working.add(new UserMessage(enrichedMessage));
@@ -257,18 +245,19 @@ public class ChatTurnRunner {
             // 中断压过让位：让位只是"这个问题稍后补答"，中断是"销账、不补"。
             // 顺序反了的话，点完停止再发一条消息就会让让位赢，被停掉的问题照样被补答轮跑完
             if (yield.cancelRequested()) {
-                return cancelTurn(userId, sessionId, working, "");
+                return cancelTurn(userId, sessionId, working, "", lang);
             }
             // 信号粘滞的兜底：等待期的 anyOf 竞争恰好被批次赢了，但用户消息已在门口等——
             // 结论已并入 working，不再烧新一轮派发，直接让位（空批次），欠的账交给补答轮
             if (yield.yieldRequested()) {
-                return yieldTurn(userId, sessionId, working, CompletableFuture.completedFuture(List.of()));
+                return yieldTurn(userId, sessionId, working,
+                        CompletableFuture.completedFuture(List.of()), lang);
             }
             if (round >= MAX_DISPATCH_ROUNDS) {
                 log.warn("[Workbench] 派发轮次达上限 {}，转汇总", MAX_DISPATCH_ROUNDS);
                 break;
             }
-            List<String> next = askRouter(leaves.light(), working);
+            List<String> next = askRouter(leaves.light(), working, lang);
             if (next.isEmpty() || next.contains(FINISH)) {
                 // FINISH 与"解析不出专家名"（空）同型不同因，事后排查靠这行分辨；路由调用失败 askRouter 已有 warn
                 log.info("[Workbench] 路由结束派发 next={}（第 {} 轮后转汇总）", next, round);
@@ -287,7 +276,7 @@ public class ChatTurnRunner {
             log.info("[Workbench] 派发 {}（第 {} 轮）", fresh, round);
             // 快照传入：让位路径会往 working 里垫占位答复，专家线程不能共享读一个正被改的列表
             CompletableFuture<List<Message>> batch =
-                    dispatchAsync(leaves, fresh, List.copyOf(working), progressSink);
+                    dispatchAsync(leaves, fresh, List.copyOf(working), progressSink, lang);
             CompletableFuture<Void> signal = yield.enterExpertWait();
             CompletableFuture<Void> stop = yield.cancelSignal();
             try {
@@ -302,19 +291,16 @@ public class ChatTurnRunner {
                 // 但账本被它们写脏了，见 markAbandoned
                 leaves.deep().markAbandoned();
                 leaves.light().markAbandoned();
-                return cancelTurn(userId, sessionId, working, "");
+                return cancelTurn(userId, sessionId, working, "", lang);
             }
             if (signal.isDone()) {
                 // 让位优先于批次：批次恰好同刻完成也让——用户的新消息不该等一整段汇总流
-                return yieldTurn(userId, sessionId, working, batch);
+                return yieldTurn(userId, sessionId, working, batch, lang);
             }
             working.addAll(batch.join());
         }
 
-        // 没派专家时 working 已经以用户消息结尾，再垫"依据上面的专家数据"就是捏造不存在的数据
-        if (!dispatched.isEmpty()) {
-            working.add(new UserMessage(EXPERT_HANDOFF));
-        }
+        working.add(new UserMessage(summaryTail(lang, !dispatched.isEmpty())));
         // 答案流的检查点在拉流循环里，中断时半截答案已经攒在这儿
         StringBuilder emitted = new StringBuilder();
         NodeOutput<MessagesState<Message>> last =
@@ -328,7 +314,7 @@ public class ChatTurnRunner {
             // 而且会落在读数之后——账本就此不可信，标记让它退化成只报耗时
             leaves.deep().markAbandoned();
             leaves.light().markAbandoned();
-            return cancelTurn(userId, sessionId, working, emitted.toString());
+            return cancelTurn(userId, sessionId, working, emitted.toString(), lang);
         }
 
         // 终态含压缩替换 + 本轮全部新消息，整体覆盖会话历史（下一轮从这里起跑）
@@ -347,12 +333,29 @@ public class ChatTurnRunner {
     }
 
     /**
+     * 进汇总前垫的最后一条消息，恒为用户侧——整段输入以 assistant 结尾，模型只会补一句"没什么可补充的"。
+     * <ul>
+     *   <li>{@code chat.expertHandoff}：给专家产出定性（取回的数据 / 取数失败 / 没有返回内容，
+     *       三种形态都要覆盖）。没派专家时不垫——它指向的消息不存在。</li>
+     *   <li>{@code chat.outputLanguage}：输出语言硬收尾，派没派专家都垫。用户打的字不翻译，
+     *       聊天输入随时是另一门语言，且近因权重最高，语言指令必须排在它后面。</li>
+     * </ul>
+     * 两句合成一条消息：它随本轮终态落进会话历史，多一条就多占后续上下文。
+     */
+    // 包私有非 private：输出语言硬收尾那条钉子（ChatTurnRunnerTest）要拿成文验它在末尾
+    String summaryTail(AgentLang lang, boolean dispatched) {
+        String language = prompts.get(lang, "chat.outputLanguage");
+        return dispatched ? prompts.get(lang, "chat.expertHandoff") + "\n" + language : language;
+    }
+
+    /**
      * 让位收尾：给原问题垫占位答复并存档 working（用户消息与已到手的专家结论都是花钱换的），
      * 在途批次原样交回——排队补答是 {@link ChatYieldCoordinator} 的事，这里只管把账记清。
      */
     private TurnResult yieldTurn(long userId, String sessionId, List<Message> working,
-                                 CompletableFuture<List<Message>> inFlight) {
-        working.add(new AssistantMessage(YIELD_PLACEHOLDER));
+                                 CompletableFuture<List<Message>> inFlight, AgentLang lang) {
+        // 让位时垫进模型上下文的占位答复：拦住新一轮 summarizer 替这个未回答的问题代答
+        working.add(new AssistantMessage(prompts.get(lang, "chat.yieldPlaceholder")));
         contextStore.save(sessionId, userId, working);
         log.info("[Workbench] 专家等待期让位 session={}", sessionId);
         return new TurnResult(inFlight, false);
@@ -362,8 +365,9 @@ public class ChatTurnRunner {
      * 用户中断收尾：把已产出的半截当这一轮的答复存档，续聊接得上。
      * 与让位的区别是<b>不欠补答</b>——这个问题就到此为止，用户要么接着问、要么点重新生成。
      */
-    private TurnResult cancelTurn(long userId, String sessionId, List<Message> working, String partial) {
-        working.add(new AssistantMessage(cancelledAnswer(partial)));
+    private TurnResult cancelTurn(long userId, String sessionId, List<Message> working, String partial,
+                                  AgentLang lang) {
+        working.add(new AssistantMessage(cancelledAnswer(prompts, lang, partial)));
         contextStore.save(sessionId, userId, working);
         log.info("[Workbench] 用户中断 session={} 已产出={}字", sessionId, partial.length());
         return TurnResult.CANCELLED;
@@ -377,10 +381,11 @@ public class ChatTurnRunner {
     public String runDeferredSummary(ChatAgentFactory.Leaves leaves, long userId, String sessionId,
                                      String question, List<Message> expertReplies) {
         long startedAt = System.currentTimeMillis();
+        AgentLang lang = leaves.lang();
         List<Message> working = new ArrayList<>(contextStore.load(sessionId));
         working.addAll(expertReplies);
-        working.add(new UserMessage("【系统】此前问题「" + question + "」派出的专家已返回数据（见上方专家结论）。"
-                + "现在基于全部上下文回答该问题。"));
+        working.add(new UserMessage(prompts.get(lang, "chat.deferred.instruction",
+                Map.of("question", question)) + "\n" + prompts.get(lang, "chat.outputLanguage")));
 
         NodeOutput<MessagesState<Message>> last;
         StringBuilder answer = new StringBuilder();
@@ -397,7 +402,7 @@ public class ChatTurnRunner {
         String fallback = expertReplies.stream().map(Message::getText)
                 .filter(Objects::nonNull).map(ChatTurnRunner::stripExpertTag)
                 .collect(Collectors.joining("\n")).strip();
-        return fallback.isEmpty() ? "（补答未能生成内容，可重新提问）" : fallback;
+        return fallback.isEmpty() ? prompts.get(lang, "chat.deferred.empty") : fallback;
     }
 
     /**
@@ -447,10 +452,11 @@ public class ChatTurnRunner {
      */
     private CompletableFuture<List<Message>> dispatchAsync(ChatAgentFactory.Leaves leaves, List<String> names,
                                                            List<Message> input,
-                                                           Consumer<ExpertProgress> progressSink) {
+                                                           Consumer<ExpertProgress> progressSink,
+                                                           AgentLang lang) {
         List<CompletableFuture<Message>> futures = names.stream()
                 .map(name -> CompletableFuture.supplyAsync(
-                        () -> runExpert(name, leaves.experts().get(name), input, progressSink),
+                        () -> runExpert(name, leaves.experts().get(name), input, progressSink, lang),
                         expertExecutor))
                 .toList();
         return CompletableFuture.allOf(futures.toArray(CompletableFuture[]::new))
@@ -460,13 +466,14 @@ public class ChatTurnRunner {
 
     /** 单个专家：推进度 → （可选预取）→ 阻塞跑 → 交回带出处标注的产出。 */
     private Message runExpert(String name, ChatAgentFactory.Expert expert, List<Message> input,
-                              Consumer<ExpertProgress> progressSink) {
+                              Consumer<ExpertProgress> progressSink, AgentLang lang) {
         progressSink.accept(new ExpertProgress(name, ExpertProgress.START, null));
         try {
             List<Message> messages = new ArrayList<>(input);
             // 包装文案保持中性：怎么用这份数据（独占还是与搜索合并）由各专家的 instruction 定
             if (expert.preload() != null) {
-                messages.add(new UserMessage("【以下是系统预取的原始数据】\n" + expert.preload().get()));
+                messages.add(new UserMessage(
+                        prompts.get(lang, "chat.preloadHeader") + "\n" + expert.preload().get()));
             }
             // 专家叶子没有 saver，每次 invoke 都从 schema 起算，不需要 threadId 隔离
             Message reply = expert.graph()
@@ -477,19 +484,21 @@ public class ChatTurnRunner {
             if (text == null || text.isBlank()) {
                 // 空结论不当数据接：接了 summarizer 只会答"没有数据"，且无处排查
                 log.warn("[Workbench] 专家 {} 没有产出任何内容", name);
-                progressSink.accept(new ExpertProgress(name, ExpertProgress.ERROR, "没有返回任何内容"));
-                return expertMessage(name, "本轮没有返回内容", "（这一路没有数据）");
+                progressSink.accept(new ExpertProgress(name, ExpertProgress.ERROR,
+                        prompts.get(lang, "chat.expertNoContentReason")));
+                return expertMessage(prompts, lang, name, "chat.expertStatus.noContent",
+                        prompts.get(lang, "chat.expertNoContentBody"));
             }
             progressSink.accept(new ExpertProgress(name, ExpertProgress.DONE, text));
-            return expertMessage(name, "取回的数据", text);
+            return expertMessage(prompts, lang, name, "chat.expertStatus.data", text);
         } catch (Exception e) {
             // 单个专家失败不该拖垮整轮：把失败作为一条消息交回，summarizer 自行判断要不要绕开。
             // 两个出口都过归类：原始 SDK 异常可能几百字符，喂回模型既白烧 token，
             // 又把上游细节（可能含 key）连同答案一起写进会话历史持久化
             log.warn("[Workbench] 专家 {} 执行失败", name, e);
-            String reason = LlmErrorMessages.classify(e);
+            String reason = LlmErrorMessages.classify(e, prompts, lang);
             progressSink.accept(new ExpertProgress(name, ExpertProgress.ERROR, reason));
-            return expertMessage(name, "本轮取数失败", reason);
+            return expertMessage(prompts, lang, name, "chat.expertStatus.failed", reason);
         }
     }
 
@@ -501,13 +510,18 @@ public class ChatTurnRunner {
      * 标注同时让这些消息在后续轮次里不冒充"助手以前给过的答案"。
      */
     // 包私有非 private：兜底剥标注的钉子要拿真实格式验往返
-    static Message expertMessage(String agent, String status, String body) {
-        return new UserMessage("【" + agent + " " + status + "】\n" + body);
+    static Message expertMessage(PromptCatalog prompts, AgentLang lang, String agent,
+                                 String statusKey, String body) {
+        return new UserMessage(prompts.get(lang, "chat.expertTag",
+                Map.of("agent", agent, "status", prompts.get(lang, statusKey))) + "\n" + body);
     }
 
-    /** 剥掉 {@link #expertMessage} 的出处标注行，格式与它配对维护 */
+    /**
+     * 剥掉 {@link #expertMessage} 的出处标注行，格式与它配对维护。
+     * 两套括号都认（中文【】/英文 []）：标注是写入时那门语言拼的。
+     */
     static String stripExpertTag(String text) {
-        return text.replaceFirst("^【[^】]*】\n", "");
+        return text.replaceFirst("^(【[^】]*】|\\[[^\\]]*])\n", "");
     }
 
     /**
@@ -516,14 +530,15 @@ public class ChatTurnRunner {
      * ToolResponseMessage 就会被首轮判据误判成非首轮）。options 从模型自己的派生、tool_choice 按协议落地，
      * 都归 {@link ToolChoice}：openai 协议下泛型 builder 造的 options 会被 OpenAiChatModel 硬转失败（真跑实证）
      */
-    private static List<String> askRouter(ChatModel model, List<Message> history) {
+    private List<String> askRouter(ChatModel model, List<Message> history, AgentLang lang) {
         List<Message> messages = new ArrayList<>(history.size() + 1);
-        messages.add(new SystemMessage(ROUTER_INSTRUCTION));
+        messages.add(new SystemMessage(prompts.get(lang, "chat.router")));
         messages.addAll(history);
         long startedAt = System.currentTimeMillis();
         try {
             ChatOptions options = ResponsesChatModel.withCallTimeout(
-                    ToolChoice.apply(ToolChoice.withTools(model, ROUTER_TOOLS), ToolChoice.REQUIRED), ROUTER_TIMEOUT);
+                    ToolChoice.apply(ToolChoice.withTools(model, routerTools(lang)), ToolChoice.REQUIRED),
+                    ROUTER_TIMEOUT);
             ChatResponse response = model.call(new Prompt(messages, options));
             List<String> next = parseRouteCall(Objects.requireNonNull(response.getResult()).getOutput());
             // openai 协议路没有 [Responses] 那样的请求日志，路由慢在模型还是慢在别处只能靠这行分辨

@@ -240,7 +240,7 @@ class LearningRunnerTest {
     @Test
     void notesTruncatedAtLimit() {
         stubLeaderboard();
-        String longOutput = QUALIFIED_OUTPUT + "\n" + "补".repeat(LearningRunner.NOTES_MAX_CHARS);
+        String longOutput = QUALIFIED_OUTPUT + "\n" + "补".repeat(NoteBudget.maxChars(AgentLang.ZH));
         ChatModel model = modelReturning(longOutput);
         when(modelFactory.modelFor(any())).thenReturn(model);
 
@@ -253,7 +253,7 @@ class LearningRunnerTest {
         String written = up.getValue().getParamNameValuePairs().values().stream()
                 .filter(v -> v instanceof String s && s.startsWith("【本期学习】"))
                 .map(String.class::cast).findFirst().orElseThrow();
-        assertThat(written).hasSize(LearningRunner.NOTES_MAX_CHARS);
+        assertThat(written).hasSize(NoteBudget.maxChars(AgentLang.ZH));
         // 决策行留全文：公开时间线不该被这条兜底规则裁掉
         ArgumentCaptor<AiTraderDecision> dec = ArgumentCaptor.forClass(AiTraderDecision.class);
         verify(decisionMapper).insert(dec.capture());

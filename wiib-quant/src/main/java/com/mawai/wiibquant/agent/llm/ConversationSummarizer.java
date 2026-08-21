@@ -1,5 +1,7 @@
 package com.mawai.wiibquant.agent.llm;
 
+import com.mawai.wiibcommon.enums.AgentLang;
+import com.mawai.wiibquant.agent.i18n.PromptCatalog;
 import lombok.extern.slf4j.Slf4j;
 import org.bsc.langgraph4j.RunnableConfig;
 import org.bsc.langgraph4j.hook.NodeHook;
@@ -34,22 +36,15 @@ import java.util.concurrent.CompletableFuture;
  * [最近 N 条消息] ← 原文保留
  * </pre>
  * 三处针对本项目的改动：token 估算按中英文分别校准（框架一律 charCount/4，中文会低估约 4 倍）；
- * 摘要提示词改中文（对话本身是中文，英文指令压缩中文效果差）；摘要按段落追加而不是被反复重压
- * （摘要套摘要几轮下来早期事实就没了，且除首条用户消息外再无原文锚点可归因）。
+ * 摘要提示词与角色名跟用户语言走（{@code chat.compress.*}，英文指令压缩中文效果差，反过来也一样）；
+ * 摘要按段落追加而不是被反复重压（摘要套摘要几轮下来早期事实就没了，且除首条用户消息外再无原文锚点可归因）。
+ * <p>
+ * 写按当前语言、认按全部语言：旧摘要是写入时那门语言落库的，所以 {@link #isSummary} 与
+ * {@link #countSegments} 逐语言各认一遍。
  */
 @Slf4j
 public class ConversationSummarizer implements NodeHook.BeforeCall<MessagesState<Message>> {
 
-    private static final String SUMMARY_PREFIX = "## 早前对话摘要：";
-    private static final String SUMMARY_PROMPT = """
-            请把下面的对话历史压缩成一段要点记录。它将替换原文进入后续对话，因此必须保留：
-            用户的诉求与偏好、已确认的结论与关键数字、尚未解决的问题。
-            只输出要点本身，不要加任何开场白或说明。
-
-            对话历史：
-            %s""";
-    /** 摘要段落分隔标记，同时充当"这条是摘要"的段数计数依据 */
-    private static final String SEGMENT_MARK = "── 第";
     /** 切点前后各扫这么多条，找是否有跨越切点的工具调用配对 */
     private static final int TOOL_PAIR_SEARCH_RANGE = 5;
     /** 单段工具内容进摘要输入的字数上限：深研判一次回包几百KB，不截断的话摘要输入自己就先爆了 */
@@ -58,11 +53,17 @@ public class ConversationSummarizer implements NodeHook.BeforeCall<MessagesState
     private final ChatModel summaryModel;
     private final int thresholdTokens;
     private final int messagesToKeep;
+    private final PromptCatalog prompts;
+    /** 摘要正文、段头、角色名都按它写；压缩钩子是建叶子时挂上去的，语言跟着叶子走 */
+    private final AgentLang lang;
 
-    public ConversationSummarizer(ChatModel summaryModel, int thresholdTokens, int messagesToKeep) {
+    public ConversationSummarizer(ChatModel summaryModel, int thresholdTokens, int messagesToKeep,
+                                  PromptCatalog prompts, AgentLang lang) {
         this.summaryModel = summaryModel;
         this.thresholdTokens = thresholdTokens;
         this.messagesToKeep = messagesToKeep;
+        this.prompts = prompts;
+        this.lang = lang;
     }
 
     @Override
@@ -100,9 +101,17 @@ public class ConversationSummarizer implements NodeHook.BeforeCall<MessagesState
      * 这条是不是压缩产出的摘要。压缩后的形状是「首问 + 摘要 + 保留窗」，
      * 重新生成回退要靠它认出"队首那条 user 是压缩留下的首问、不是本轮提问"。
      */
-    public static boolean isSummary(Message message) {
-        return message instanceof SystemMessage system
-                && system.getText() != null && system.getText().startsWith(SUMMARY_PREFIX);
+    public static boolean isSummary(Message message, PromptCatalog prompts) {
+        if (!(message instanceof SystemMessage system) || system.getText() == null) {
+            return false;
+        }
+        // 认全部语言的前缀：认不出的旧摘要会被当普通历史再揉一遍，早期事实当场丢失
+        for (AgentLang candidate : AgentLang.values()) {
+            if (system.getText().startsWith(prompts.get(candidate, "chat.compress.summaryPrefix"))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private List<Message> compress(List<Message> messages, int cutoff) {
@@ -119,7 +128,7 @@ public class ConversationSummarizer implements NodeHook.BeforeCall<MessagesState
             }
             // 上次压缩留下的摘要靠固定前缀认出来，原样留着不再压第二遍——
             // 它在 index 1，不挑出来的话每次压缩都会把它再揉一遍，几轮后早期事实彻底消失且无从归因
-            if (previousSummary == null && isSummary(message)) {
+            if (previousSummary == null && isSummary(message, prompts)) {
                 previousSummary = (SystemMessage) message;
                 continue;
             }
@@ -139,16 +148,23 @@ public class ConversationSummarizer implements NodeHook.BeforeCall<MessagesState
     }
 
     /** 老摘要整段原样留下，新的一段接在后面并标号——分段是为了归因（第1段最早），不是把历史越揉越糊 */
-    private static String appendSegment(SystemMessage previousSummary, String freshSummary) {
-        String head = previousSummary == null ? SUMMARY_PREFIX : previousSummary.getText();
-        return head + "\n" + SEGMENT_MARK + (countSegments(head) + 1) + "段 ──\n" + freshSummary;
+    private String appendSegment(SystemMessage previousSummary, String freshSummary) {
+        String head = previousSummary == null
+                ? prompts.get(lang, "chat.compress.summaryPrefix") : previousSummary.getText();
+        return head + "\n" + prompts.get(lang, "chat.compress.segmentMark",
+                Map.of("n", countSegments(head) + 1)) + "\n" + freshSummary;
     }
 
-    private static int countSegments(String summaryText) {
+    /**
+     * 已有几段。段头可能是另一门语言写的（中途切过语言），逐语言各数一遍再相加，段号才连得上。
+     */
+    private int countSegments(String summaryText) {
         int count = 0;
-        for (int i = summaryText.indexOf(SEGMENT_MARK); i >= 0;
-             i = summaryText.indexOf(SEGMENT_MARK, i + SEGMENT_MARK.length())) {
-            count++;
+        for (AgentLang candidate : AgentLang.values()) {
+            String mark = prompts.get(candidate, "chat.compress.segmentPrefix");
+            for (int i = summaryText.indexOf(mark); i >= 0; i = summaryText.indexOf(mark, i + mark.length())) {
+                count++;
+            }
         }
         return count;
     }
@@ -156,9 +172,11 @@ public class ConversationSummarizer implements NodeHook.BeforeCall<MessagesState
     private String summarize(List<Message> messages) {
         StringBuilder text = new StringBuilder();
         for (Message message : messages) {
-            text.append(roleOf(message)).append("：").append(textOf(message)).append("\n");
+            text.append(prompts.get(lang, "chat.compress.roleLine",
+                    Map.of("role", roleOf(message), "text", textOf(message)))).append("\n");
         }
-        return summaryModel.call(new Prompt(SUMMARY_PROMPT.formatted(text))).getResult().getOutput().getText();
+        return summaryModel.call(new Prompt(prompts.get(lang, "chat.compress.prompt",
+                Map.of("history", text)))).getResult().getOutput().getText();
     }
 
     /**
@@ -166,7 +184,7 @@ public class ConversationSummarizer implements NodeHook.BeforeCall<MessagesState
      * responseData()；AssistantMessage 的工具参数也不在正文里。阈值估算本就把这两样算进去了——
      * 压缩是被工具结果的体积撑触发的，只读 getText() 等于把行情数字和研判结论正好全扔掉。
      */
-    static String textOf(Message message) {
+    String textOf(Message message) {
         if (message instanceof ToolResponseMessage toolResponse) {
             StringBuilder text = new StringBuilder();
             for (ToolResponseMessage.ToolResponse response : toolResponse.getResponses()) {
@@ -183,26 +201,28 @@ public class ConversationSummarizer implements NodeHook.BeforeCall<MessagesState
                 if (!text.isEmpty()) {
                     text.append('\n');
                 }
-                text.append("调用 ").append(toolCall.name()).append(' ').append(clip(toolCall.arguments()));
+                text.append(prompts.get(lang, "chat.compress.toolCall",
+                        Map.of("name", toolCall.name(), "args", clip(toolCall.arguments()))));
             }
             return text.toString();
         }
         return message.getText() == null ? "" : message.getText();
     }
 
-    private static String clip(String text) {
+    private String clip(String text) {
         if (text == null) {
             return "";
         }
-        return text.length() <= TOOL_TEXT_LIMIT ? text : text.substring(0, TOOL_TEXT_LIMIT) + "…（已截断）";
+        return text.length() <= TOOL_TEXT_LIMIT
+                ? text : text.substring(0, TOOL_TEXT_LIMIT) + prompts.get(lang, "chat.compress.clipped");
     }
 
-    private static String roleOf(Message message) {
-        if (message instanceof UserMessage) return "用户";
-        if (message instanceof AssistantMessage) return "助手";
-        if (message instanceof SystemMessage) return "系统";
-        if (message instanceof ToolResponseMessage) return "工具结果";
-        return "其他";
+    private String roleOf(Message message) {
+        if (message instanceof UserMessage) return prompts.get(lang, "chat.compress.role.user");
+        if (message instanceof AssistantMessage) return prompts.get(lang, "chat.compress.role.assistant");
+        if (message instanceof SystemMessage) return prompts.get(lang, "chat.compress.role.system");
+        if (message instanceof ToolResponseMessage) return prompts.get(lang, "chat.compress.role.tool");
+        return prompts.get(lang, "chat.compress.role.other");
     }
 
     /**

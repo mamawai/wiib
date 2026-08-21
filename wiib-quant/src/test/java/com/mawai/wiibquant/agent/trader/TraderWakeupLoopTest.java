@@ -78,13 +78,16 @@ class TraderWakeupLoopTest {
     /** 语言解析走真实词表的中文侧：本类钉的是唤醒回路行为，不是文案 */
     private final UserLangResolver langResolver = mock(UserLangResolver.class);
 
+    private final PromptCatalog prompts = new PromptCatalog();
+
     private final TraderWakeupRunner runner = new TraderWakeupRunner(
-            modelFactory, new TraderPromptAssembler(traderMapper, new PromptCatalog()),
+            modelFactory, new TraderPromptAssembler(traderMapper, prompts),
             simTradeClient, binanceRestClient,
             new IndicatorToolkit(new KlineFetcher(binanceRestClient, 60_000)),
             new MarketToolkit(mock(MarketDataService.class)),
             new NewsToolkit(mock(NewsCache.class)),
-            traderMapper, decisionMapper, new TraderPlanStore(planMapper), requestService, langResolver);
+            traderMapper, decisionMapper, new TraderPlanStore(planMapper), requestService, langResolver,
+            prompts);
 
     {
         // 测试边界是固定历史时刻，墙钟钉在边界后 1s——预算充足，各用例不受真实时间影响
@@ -665,7 +668,7 @@ class TraderWakeupLoopTest {
         runner.nowMs = () -> triggeredAt;
 
         runner.wakeAlert(trader(), new AlertTrigger("BTCUSDT", new BigDecimal("1.2"),
-                new BigDecimal("63120"), "下跌", triggeredAt));
+                new BigDecimal("63120"), AlertTrigger.DOWN, triggeredAt));
 
         ArgumentCaptor<AiTraderDecision> dec = ArgumentCaptor.forClass(AiTraderDecision.class);
         verify(decisionMapper).insert(dec.capture());

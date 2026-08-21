@@ -174,3 +174,56 @@ trader:
     # Spelling out how many times are left, plus "not a standing rule": the big risk of multi-round
     # injection is "close ETH" being read three times and acted on three times — killed here, in the wording.
     ownerNoteFooter: (This is something your owner is saying for the time being, not a standing rule; the position spec and the hard rules are still enforced by the system.)
+    # Sits right before each section the owner wrote themselves (custom instructions, notes). Those are
+    # never translated and may be in a different language from the platform template
+    ownerWritten: (The section below was written by your owner and may be in another language; do what it means, and keep your own output language unchanged.)
+    # The very last line of the whole prompt, after the custom instructions and the owner's note
+    outputLanguage: "Output language: English."
+
+  # Wake-up opening (a user-side message, not the system prompt). The skeleton lives in TraderWakeupRunner.
+  # The closing marker is always injected as {{mark}} from trader.mark.conclusion, the same source the
+  # system prompt uses.
+  wake:
+    routineHeader: A new {{interval}} candle has closed ({{time}}).
+    snapshotHeader: "Market snapshot (check the details yourself with the tools):"
+    snapshotRow: "- {{symbol}} mark price {{price}}, funding rate {{funding}}"
+    routineQuestion: This round you only have to answer one question - now that this candle has closed, does your plan need to change? Test the waiting condition from last round's {{mark}} and every position's invalidation condition first, then look at new opportunities; close with the fixed {{mark}} format, as discipline requires.
+    # Sleep notice on the last wake-up inside the window: facts only, and it says outright that the sleep itself is no reason to act in any direction
+    sleepNotice: "Routine wake-ups inside this window ({{window}}) end with the {{lastBar}} candle; the next routine wake-up is at {{next}} (Beijing time, about {{hours}} hours from now). In between there are no routine wake-ups and no volatility alerts, while stop-loss and take-profit orders keep firing automatically. This is nothing but a fact about elapsed time: the sleep itself is not a reason to close or tighten a stop, nor a reason to squeeze in one more trade before it; with no invalidation condition triggered, the sleep calls for no action at all."
+    # Alert opening: the anti-anchoring is the whole point — being woken by a spike is exactly when panic closing happens
+    alertHeader: "⚠️ Volatility alert (not a routine wake-up): {{symbol}} moved {{amplitude}}% within 5 minutes (direction: {{direction}}, last price {{price}})."
+    alertLastWake: You last woke {{lastWake}}, and the next routine wake-up is about {{minutes}} minutes away.
+    # 方向码 → 文案：AlertTrigger 里存的是 UP/DOWN/FLAT，语言无关
+    direction:
+      up: up
+      down: down
+      flat: choppy
+    alertNoWake: nowhere yet this round
+    alertWakeAt: at {{time}} (about {{minutes}} minutes ago)
+    alertNotice: "Note: the current {{interval}} candle has NOT closed — your close-based invalidation conditions do not count right now, so verify on closed 5m/15m candles. Your stop-loss order is still protecting you automatically."
+    alertQuestion: You only have to answer one question here - has this move shaken your plan for the open positions? If the plan stands → HOLD and say why; being woken does not oblige you to act. Close with the fixed {{mark}} format as before.
+    # Self-produced values inside the account-state JSON; they follow the language
+    request:
+      approved: your owner approved it
+      rejected: your owner declined it
+    requestResultsNote: The outcome of the requests you made earlier, told to you this once only; the position changes are already reflected in positions
+    pendingRequestsNote: The requests above have been sent to your owner and are still pending - do not submit the same thing again
+    held:
+      minutes: "{{n}} minutes"
+      hours: "{{n}} hours"
+      days: "{{n}} days"
+    # Placeholder for when the fuse cuts the loop at the tool edge and the model wrote no prose at all (this goes on public display)
+    noReasoning: This round the model only ever called tools and produced no decision text.
+
+  # Text that gets persisted: ai_trader_decision.error / reasoning and ai_trader.paused_reason.
+  # All of it is on public display in the arena timeline and on the trader panel, so it is written in
+  # the language of the trader's owner
+  error:
+    lateTrigger: Triggered too late (the candle signal arrived late) - less than {{seconds}}s to the next boundary, this round is skipped
+    skipped: The previous wake-up had not finished, this round is skipped
+    wakeTimeout: Wake-up timed out ({{seconds}}s)
+    callLimit: Hit the per-round model-call limit ({{limit}}), cut short
+    liquidatedReasoning: Account equity has fallen below the liquidation floor; this round is over. You can reset and start a new round on the config page.
+    liquidatedReason: "Liquidated: equity below 1% of the initial balance"
+    keyInvalid: The API key is invalid or has expired - update the endpoint config and start it again
+    consecutiveFailures: "{{n}} consecutive wake-up failures: {{error}}"

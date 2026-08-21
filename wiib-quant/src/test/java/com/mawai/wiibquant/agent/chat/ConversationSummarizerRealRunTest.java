@@ -1,5 +1,6 @@
 package com.mawai.wiibquant.agent.chat;
 
+import com.mawai.wiibcommon.enums.AgentLang;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
@@ -193,7 +194,7 @@ class ConversationSummarizerRealRunTest {
         ChatEndpoints llmConfig = endpointService.chatEndpoints(ADMIN_USER_ID);
         assertThat(llmConfig).as("先用管理员账号在 AI 页「模型配置」加一条 BYOK 端点再跑").isNotNull();
 
-        ChatAgentFactory.Leaves leaves = chatAgentFactory.leavesFor(llmConfig);
+        ChatAgentFactory.Leaves leaves = chatAgentFactory.leavesFor(llmConfig, AgentLang.ZH);
         // sessionId 跨轮不变：历史靠 ChatContextStore 累积，这才是生产形态
         String sessionId = "wb-1-summarize-realrun-" + UUID.randomUUID();
 

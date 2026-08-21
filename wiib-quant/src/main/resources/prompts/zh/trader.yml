@@ -134,3 +134,53 @@ trader:
     ownerNoteMore: 本次之后还会出现 {{left}} 次
     # 明说还剩几次＋"不是常驻规则"：多轮注入最大的风险是"把 ETH 平掉"被念三次平三次，在措辞这层掐掉
     ownerNoteFooter: （这是主人阶段性交代的话，不是常驻规则；仓位规格与硬性规则仍由系统强制执行）
+    # 贴在每段主人亲笔的字（自定义指令/留言）之前。那些字不翻译，可能与平台模板不同语言
+    ownerWritten: （下面这段是你主人亲笔写的，可能是另一门语言；照它的意思做，但你的输出语言不变。）
+    # 整篇提示词的最末一行，排在自定义指令与主人留言之后
+    outputLanguage: 输出语言：中文。
+
+  # 唤醒开场白（用户消息侧，不是系统提示词）。骨架在 TraderWakeupRunner。
+  # 收尾标记一律用 {{mark}} 注入 trader.mark.conclusion，与系统提示词同源
+  wake:
+    routineHeader: 新一根 {{interval}} K线已收盘（{{time}}）。
+    snapshotHeader: 行情快照（细节自己用工具查证）：
+    snapshotRow: "- {{symbol}} 标记价 {{price}}，资金费率 {{funding}}"
+    routineQuestion: 本轮只需回答一个问题：这根K线收盘后，你的计划需要改变吗？先检验上一轮{{mark}}里的等待条件与各持仓的失效条件，再考虑新机会；最后按纪律用{{mark}}固定格式收尾。
+    # 时段内末次唤醒的休眠提示：只给事实，并明说休眠本身不是任何方向动作的理由
+    sleepNotice: 本唤醒时段（{{window}}）内的例行唤醒到 {{lastBar}} 这根K线为止，下次例行唤醒在 {{next}}（北京时间，约 {{hours}} 小时后），期间不会有例行唤醒和波动警报，止损止盈单照常自动触发。这只是时间跨度的事实：休眠本身既不是平仓或收紧止损的理由，也不是赶在休眠前多开一笔的理由；失效条件没被触发就不需要为休眠做任何动作。
+    # 警报开场白：反锚定是灵魂——被波动惊醒正是恐慌平仓的高发场景
+    alertHeader: ⚠️ 行情波动警报（非例行唤醒）：{{symbol}} 5分钟内波动 {{amplitude}}%（方向：{{direction}}，现价 {{price}}）。
+    alertLastWake: 你上次唤醒{{lastWake}}，距下一次例行唤醒还有约 {{minutes}} 分钟。
+    # 方向码 → 文案：AlertTrigger 里存的是 UP/DOWN/FLAT，语言无关
+    direction:
+      up: 上涨
+      down: 下跌
+      flat: 波动
+    alertNoWake: 本局还没有过唤醒
+    alertWakeAt: 在 {{time}}（约 {{minutes}} 分钟前）
+    alertNotice: 注意：当前 {{interval}} K线尚未收盘——你的收盘制失效条件此刻不作数，求证请用已收盘的 5m/15m K线。你的止损单仍在自动保护你。
+    alertQuestion: 本次只需回答一个问题：这次波动是否动摇了你的持仓计划？计划未被动摇 → HOLD 并说明理由；不因为被叫醒而必须动作。最后仍用{{mark}}固定格式收尾。
+    # 账户状态 JSON 里的自产字段值，跟语言走
+    request:
+      approved: 主人已同意
+      rejected: 主人已拒绝
+    requestResultsNote: 你此前请求的处理结果，只通知这一次；仓位变化已反映在 positions 里
+    pendingRequestsNote: 以上请求已提交给主人、尚未处理，不要重复提交
+    held:
+      minutes: "{{n}}分钟"
+      hours: "{{n}}小时"
+      days: "{{n}}天"
+    # 保险丝在工具边收束、模型一句正文都没写时的占位（公开在时间线上）
+    noReasoning: 本轮模型全程只在调用工具，没有产出决策正文。
+
+  # 落库文案：写进 ai_trader_decision.error / reasoning 与 ai_trader.paused_reason，
+  # 全部公开展示在竞技场时间线与 trader 面板上，所以按 trader 主人的语言写入
+  error:
+    lateTrigger: 触发过晚（K线信号迟到），距下一边界不足{{seconds}}s，放弃本轮
+    skipped: 上一轮唤醒尚未结束，本轮跳过
+    wakeTimeout: 唤醒超时({{seconds}}s)
+    callLimit: 达单轮模型调用上限({{limit}})，提前收束
+    liquidatedReasoning: 账户权益已低于爆仓终局线，本局结束。可在配置页重置开新一局。
+    liquidatedReason: 爆仓终局：权益低于初始资金1%
+    keyInvalid: API key 无效或已失效，请更新端点配置后重新启动
+    consecutiveFailures: "连续{{n}}次唤醒失败: {{error}}"

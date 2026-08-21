@@ -60,8 +60,6 @@ public class ReviewRunner {
      * 只是天花板不是配额：跑得快就早结束，停工窗口跟着早关。
      */
     static final int REVIEW_TIMEOUT_SECONDS = 600;
-    /** 记忆总量硬约束：取舍归模型，超限截断兜底 */
-    static final int MEMORY_MAX_CHARS = 2000;
     /** REVIEW 行的 interval 标记复盘节奏（wake_time=日线边界），与 trader 唤醒档位无关 */
     static final String REVIEW_INTERVAL_CODE = "1d";
     private static final DateTimeFormatter TIME_FMT =
@@ -113,9 +111,9 @@ public class ReviewRunner {
             String output = callWithTimeout(model,
                     userPrompt(trader, material, fromMs, boundaryMs, last, lang), lang, d);
             if (output == null || output.isBlank()) {
-                throw new IllegalStateException("模型输出为空");
+                throw new IllegalStateException(prompts.get(lang, "reviewer.error.emptyOutput"));
             }
-            Parsed parsed = parse(output, memoryMark);
+            Parsed parsed = parse(output, memoryMark, NoteBudget.maxChars(lang));
             d.setStatus(AiTraderDecision.STATUS_OK);
             d.setReasoning(parsed.review());
             // 学习快照随 REVIEW 行存档：memory 是滚动覆盖的，历史版本只活在这一列（学习演进史）
@@ -137,7 +135,8 @@ public class ReviewRunner {
             }
         } catch (Exception e) {
             Throwable t = e instanceof ExecutionException && e.getCause() != null ? e.getCause() : e;
-            String msg = t instanceof TimeoutException ? "复盘超时(" + timeoutSeconds + "s)"
+            String msg = t instanceof TimeoutException
+                    ? prompts.get(lang, "reviewer.error.timeout", Map.of("seconds", timeoutSeconds))
                     : t.getMessage() == null ? t.getClass().getSimpleName() : t.getMessage();
             d.setStatus(AiTraderDecision.STATUS_ERROR);
             d.setError(msg.length() > 500 ? msg.substring(0, 500) : msg);
@@ -151,8 +150,10 @@ public class ReviewRunner {
     /** 虚拟线程承载超时；用量落 finally——超时作废的调用 token 也真烧了，不能不记。 */
     private String callWithTimeout(UsageTrackingChatModel model, String user, AgentLang lang,
                                    AiTraderDecision d) throws Exception {
+        // 提示词里那句"≤N"与 parse 的截断值同源，都取 NoteBudget
         Prompt prompt = new Prompt(List.of(
-                new SystemMessage(prompts.get(lang, "reviewer.system")), new UserMessage(user)));
+                new SystemMessage(prompts.get(lang, "reviewer.system",
+                        Map.of("maxChars", NoteBudget.maxChars(lang)))), new UserMessage(user)));
         FutureTask<String> task = new FutureTask<>(() -> {
             ChatResponse resp;
             try {
@@ -182,12 +183,12 @@ public class ReviewRunner {
 
     /**
      * 两段解析：按最后一个记忆更新标记切分。缺分隔符 → REVIEW 照存、memory 返回 null 不动
-     * （降级安全）；记忆段超限截断。复盘段意外为空时整篇当复盘存——公开留痕优先。
+     * （降级安全）；记忆段超 {@code memoryMaxChars}（{@link NoteBudget}，按语言给）截断。复盘段意外为空时整篇当复盘存——公开留痕优先。
      * <p>
      * 标记<b>只认本轮提示词那一门语言</b>的那条：提示词刚让它用英文标记，它交回中文标记就是没照格式
      * 走，按格式失守降级才对。这里若两门都认，"英文提示词却输出中文"这种真失守会被悄悄放过。
      */
-    static Parsed parse(String output, String memoryMark) {
+    static Parsed parse(String output, String memoryMark, int memoryMaxChars) {
         int idx = output.lastIndexOf(memoryMark);
         if (idx < 0) {
             return new Parsed(output.strip(), null);
@@ -197,8 +198,8 @@ public class ReviewRunner {
         if (memory.isEmpty()) {
             return new Parsed(review.isEmpty() ? output.strip() : review, null);
         }
-        if (memory.length() > MEMORY_MAX_CHARS) {
-            memory = memory.substring(0, MEMORY_MAX_CHARS);
+        if (memory.length() > memoryMaxChars) {
+            memory = memory.substring(0, memoryMaxChars);
         }
         return new Parsed(review.isEmpty() ? output.strip() : review, memory);
     }
@@ -209,7 +210,8 @@ public class ReviewRunner {
      * 只回注上一期全文（不是全部历史）：每篇复盘都已经把它的上一篇吸收进去了，所以
      * 给最近这一篇＝给了全部历史的滚动浓缩。把每期都堆进来只会越喂越长，模型抓不住重点。
      */
-    private String userPrompt(AiTrader trader, ReviewMaterialAssembler.ReviewMaterial m,
+    // 包私有非 private：输出语言硬收尾那条钉子（PromptMarkParsingTest）要拿成文验它在末尾
+    String userPrompt(AiTrader trader, ReviewMaterialAssembler.ReviewMaterial m,
                               long fromMs, long toMs, AiTraderDecision lastReview, AgentLang lang) {
         String from = fromMs == 0 ? prompts.get(lang, "reviewer.label.windowStart")
                 : TIME_FMT.format(Instant.ofEpochMilli(fromMs));
@@ -230,6 +232,8 @@ public class ReviewRunner {
         sb.append(trader.getMemory() == null || trader.getMemory().isBlank()
                 ? prompts.get(lang, "reviewer.label.memoryEmpty") : trader.getMemory()).append('\n');
         sb.append('\n').append(prompts.get(lang, "reviewer.label.closing"));
+        // 输出语言硬收尾：用户消息最末一行，排在素材/上一期复盘/记忆笔记之后——它们可能是另一门语言
+        sb.append('\n').append(prompts.get(lang, "reviewer.label.outputLanguage"));
         return sb.toString();
     }
 }

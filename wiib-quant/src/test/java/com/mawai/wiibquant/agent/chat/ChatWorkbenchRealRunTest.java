@@ -1,5 +1,6 @@
 package com.mawai.wiibquant.agent.chat;
 
+import com.mawai.wiibcommon.enums.AgentLang;
 import com.alibaba.fastjson2.JSON;
 import com.mawai.wiibquant.agent.llm.ChatEndpoints;
 import com.mawai.wiibquant.agent.llm.LlmEndpointService;
@@ -65,7 +66,7 @@ class ChatWorkbenchRealRunTest {
         ChatEndpoints llmConfig = endpointService.chatEndpoints(ADMIN_USER_ID);
         assertThat(llmConfig).as("先用管理员账号在 AI 页「模型配置」加一条 BYOK 端点再跑").isNotNull();
 
-        ChatAgentFactory.Leaves leaves = chatAgentFactory.leavesFor(llmConfig);
+        ChatAgentFactory.Leaves leaves = chatAgentFactory.leavesFor(llmConfig, AgentLang.ZH);
         String sessionId = "wb-1-realrun-" + UUID.randomUUID();
         List<ChatTurnRunner.ExpertProgress> events = new CopyOnWriteArrayList<>();
         StringBuilder answer = new StringBuilder();
@@ -111,7 +112,7 @@ class ChatWorkbenchRealRunTest {
         assertThat(overview).as("这一跑要有一个真 trader 才有意义").contains("\"hasTrader\":true");
         String equityBefore = equityDigits(overview);
 
-        ChatAgentFactory.Leaves leaves = chatAgentFactory.leavesFor(llmConfig);
+        ChatAgentFactory.Leaves leaves = chatAgentFactory.leavesFor(llmConfig, AgentLang.ZH);
         String sessionId = "wb-1-realrun-" + UUID.randomUUID();
         List<ChatTurnRunner.ExpertProgress> events = new CopyOnWriteArrayList<>();
         StringBuilder answer = new StringBuilder();

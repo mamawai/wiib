@@ -1,5 +1,7 @@
 package com.mawai.wiibquant.agent.analysis;
 
+import com.mawai.wiibquant.agent.i18n.PromptCatalog;
+import com.mawai.wiibcommon.enums.AgentLang;
 import com.alibaba.fastjson2.JSONObject;
 import com.mawai.wiibcommon.entity.QuantDeepAnalysis;
 import com.mawai.wiibquant.market.service.MarketAssembly;
@@ -25,6 +27,8 @@ import static org.mockito.Mockito.when;
 
 class DeepAnalysisServiceTest {
 
+    private static final PromptCatalog PROMPTS = new PromptCatalog();
+
     /**
      * 模型是调用方传进来的（BYOK 后每个用户一套），服务自己不去 runtimeManager 现取——
      * 现取就不知道"当前是谁在用"了。所以这里直接 mock ChatModel。
@@ -35,7 +39,7 @@ class DeepAnalysisServiceTest {
     private final QuantDeepAnalysisMapper mapper = mock(QuantDeepAnalysisMapper.class);
 
     private final DeepAnalysisService service =
-            new DeepAnalysisService(marketDataService, newsCache, mapper);
+            new DeepAnalysisService(marketDataService, newsCache, mapper, PROMPTS);
 
     {
         // 服务内部走 ChatClient，而 ChatClient 建请求时**无条件**执行 getOptions().mutate()
@@ -71,7 +75,7 @@ class DeepAnalysisServiceTest {
         when(model.call(any(Prompt.class))).thenReturn(responseOf(judgeJson(30, 30, 37, false)));
 
         QuantDeepAnalysis analysis = service.judge(model, "BTCUSDT", 123L, "cron_1h",
-                "无新闻上下文", "bull论据", "bear论据");
+                "无新闻上下文", "bull论据", "bear论据", AgentLang.ZH);
 
         assertThat(analysis).isNotNull();
         assertThat(analysis.getTriggerSource()).isEqualTo("cron_1h");
@@ -88,7 +92,7 @@ class DeepAnalysisServiceTest {
         when(model.call(any(Prompt.class))).thenThrow(new RuntimeException("LLM down"));
 
         QuantDeepAnalysis analysis = service.judge(model, "BTCUSDT", 123L, "cron_1h",
-                "无新闻上下文", "bull", "bear");
+                "无新闻上下文", "bull", "bear", AgentLang.ZH);
 
         assertThat(analysis).isNull(); // 研判缺席，不抛异常
     }
@@ -98,14 +102,14 @@ class DeepAnalysisServiceTest {
         marketUnavailable();
         when(model.call(any(Prompt.class))).thenThrow(new RuntimeException("timeout"));
 
-        assertThat(service.bullArgue(model, "BTCUSDT", "无新闻上下文")).contains("未能提供论据");
+        assertThat(service.bullArgue(model, "BTCUSDT", "无新闻上下文", AgentLang.ZH)).contains("未能提供论据");
     }
 
     @Test
     void newsContextDegradesWhenCacheEmpty() {
         when(newsCache.getFlashes()).thenReturn(List.of());
 
-        assertThat(service.buildNewsContext()).isEqualTo("无新闻上下文");
+        assertThat(service.buildNewsContext(AgentLang.ZH)).isEqualTo("无新闻上下文");
     }
 
     @Test
@@ -115,7 +119,7 @@ class DeepAnalysisServiceTest {
                 .thenReturn(responseOf(judgeJson(33, 34, 33, true)));
 
         QuantDeepAnalysis analysis = service.judge(model, "BTCUSDT", 1L, "sentinel",
-                "无新闻上下文", "bull", "bear");
+                "无新闻上下文", "bull", "bear", AgentLang.ZH);
 
         assertThat(analysis).isNotNull();
         assertThat(analysis.getNoDirection()).isTrue(); // 无方向态是一等状态
@@ -136,11 +140,11 @@ class DeepAnalysisServiceTest {
                 .thenReturn(responseOf("看空理由"))
                 .thenReturn(responseOf(judgeJson(50, 30, 20, false)));
 
-        assertThat(service.bullArgue(model, "BTCUSDT", "无新闻上下文")).isEqualTo("看多理由");
-        assertThat(service.bearArgue(model, "BTCUSDT", "无新闻上下文")).isEqualTo("看空理由");
+        assertThat(service.bullArgue(model, "BTCUSDT", "无新闻上下文", AgentLang.ZH)).isEqualTo("看多理由");
+        assertThat(service.bearArgue(model, "BTCUSDT", "无新闻上下文", AgentLang.ZH)).isEqualTo("看空理由");
 
         QuantDeepAnalysis analysis = service.judge(model, "BTCUSDT", 1L, "chat",
-                "无新闻上下文", "看多理由", "看空理由");
+                "无新闻上下文", "看多理由", "看空理由", AgentLang.ZH);
         assertThat(analysis).isNotNull();
         assertThat(analysis.getNarrative()).contains("下行脆弱");
     }

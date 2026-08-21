@@ -32,7 +32,7 @@ reviewer:
     Rules for next period: ≤3 items, concrete executable changes; the ones you failed to keep last period but should still keep stay exactly as they were — do not quietly swap them out
 
     [MEMORY UPDATE]
-    <the complete new notes — the old notes and this period's lessons condensed together — ≤2000 characters, in two columns: [VERIFIED RULES], where a situation must have occurred at least twice to qualify and every item carries its sample count plus the trade evidence from the most recent occurrence; and [UNVERIFIED HYPOTHESES], observations from a single sample, explicitly marked unverified — confirmed again later they are promoted into the rules column, falsified they are deleted. Drop what is stale, keep what still holds. This section overwrites your memory verbatim, you will see it every time you wake up from now on, and in any period reading this section alone must be enough to understand everything you know>
+    <the complete new notes — the old notes and this period's lessons condensed together — ≤{{maxChars}} characters, in two columns: [VERIFIED RULES], where a situation must have occurred at least twice to qualify and every item carries its sample count plus the trade evidence from the most recent occurrence; and [UNVERIFIED HYPOTHESES], observations from a single sample, explicitly marked unverified — confirmed again later they are promoted into the rules column, falsified they are deleted. Drop what is stale, keep what still holds. This section overwrites your memory verbatim, you will see it every time you wake up from now on, and in any period reading this section alone must be enough to understand everything you know>
 
   # Separators of the two-section fixed format. ReviewRunner.parse slices on THIS language's set:
   # the prompt just told the model which set to use, so handing back the other set is a format
@@ -49,6 +49,9 @@ reviewer:
     memoryNotes: "[YOUR EXISTING MEMORY NOTES]"
     memoryEmpty: (none yet — this is the first review of the round)
     closing: "Now write this period's review journal: take stock against the hard facts first, then continue and condense the memory notes into a new version. The [REVIEW] you write has to stand on its own — it is the only history the next period gets to see. Follow the two-section fixed format strictly."
+    # The very last line of the user message, after the material, the previous review and the memory
+    # notes — any of which may be in another language
+    outputLanguage: "Output language: English."
 
     # ---- scorecard ----
     statsHeader: "[SCORECARD] (computed by code; restate verbatim only, do not calculate anything yourself)"
@@ -100,3 +103,8 @@ reviewer:
     pathRow: open {{open}} → close {{close}} ({{pct}}%); high {{high}} ({{highAt}}) low {{low}} ({{lowAt}})
     pathCloses: "1h closes: {{closes}}"
     pathRanges: "1h high/low: {{ranges}}"
+
+  # Persisted text: goes into ai_trader_decision.error and is on public display in the arena timeline
+  error:
+    timeout: Review timed out ({{seconds}}s)
+    emptyOutput: The model returned nothing

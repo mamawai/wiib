@@ -212,7 +212,7 @@ class ReviewRunnerTest {
     @Test
     void memoryTruncatedAtLimit() {
         stubMaterial();
-        String longMemory = "长".repeat(ReviewRunner.MEMORY_MAX_CHARS + 500);
+        String longMemory = "长".repeat(NoteBudget.maxChars(AgentLang.ZH) + 500);
         ChatModel model = modelReturning("【本期复盘】\n战绩：……\n【记忆更新】\n" + longMemory);
         when(modelFactory.modelFor(any())).thenReturn(model);
 
@@ -225,7 +225,7 @@ class ReviewRunnerTest {
         String written = up.getValue().getParamNameValuePairs().values().stream()
                 .filter(v -> v instanceof String s && s.startsWith("长"))
                 .map(String.class::cast).findFirst().orElseThrow();
-        assertThat(written).hasSize(ReviewRunner.MEMORY_MAX_CHARS);
+        assertThat(written).hasSize(NoteBudget.maxChars(AgentLang.ZH));
     }
 
     @Test

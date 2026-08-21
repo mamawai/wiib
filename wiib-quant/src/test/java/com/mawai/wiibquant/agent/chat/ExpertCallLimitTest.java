@@ -1,5 +1,6 @@
 package com.mawai.wiibquant.agent.chat;
 
+import com.mawai.wiibcommon.enums.AgentLang;
 import com.mawai.wiibquant.agent.analysis.DeepAnalysisService;
 import com.mawai.wiibquant.agent.toolkit.MarketToolkit;
 import com.mawai.wiibquant.agent.toolkit.NewsToolkit;
@@ -63,7 +64,8 @@ class ExpertCallLimitTest {
                 mock(MarketToolkit.class), mock(NewsToolkit.class),
                 mock(DeepAnalysisService.class), mock(TraderChatService.class),
                 mock(WorkbenchRunRegistry.class),
-                new ApprovalRegistry(), LIMIT, 32000, 6, "X");
+                new ApprovalRegistry(), ChatTestEndpoints.PROMPTS, ChatTestEndpoints.TOOLS,
+                LIMIT, 32000, 6, "X");
     }
 
     /** 模型永不收尾（每轮都只想再调一次工具）时，必须被保险丝按配置的上限收束，而不是撞框架硬顶 */
@@ -82,7 +84,7 @@ class ExpertCallLimitTest {
         });
 
         CompiledGraph<MessagesState<Message>> expert = factory()
-                .expertGraph(model, new FakeMarketTools(), "required", "你是市场状态专家");
+                .expertGraph(AgentLang.ZH, model, new FakeMarketTools(), "required", "你是市场状态专家");
         expert.invoke(Map.of("messages", List.of(new UserMessage("看看行情")))).orElseThrow();
 
         // 恰好等于而非"不超过"：ModelCallLimiter 是 calls=已有+1、calls>=runLimit 跳 END，

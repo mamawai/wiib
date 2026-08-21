@@ -1,5 +1,6 @@
 package com.mawai.wiibquant.agent.chat;
 
+import com.mawai.wiibcommon.enums.AgentLang;
 import com.mawai.wiibquant.agent.llm.AgentGraphs;
 import com.mawai.wiibquant.agent.llm.ChatEndpoints;
 import com.mawai.wiibquant.agent.analysis.DeepAnalysisService;
@@ -45,7 +46,8 @@ class ChatAgentFactoryTest {
                 mock(MarketToolkit.class), mock(NewsToolkit.class),
                 mock(DeepAnalysisService.class), mock(TraderChatService.class),
                 mock(WorkbenchRunRegistry.class),
-                new ApprovalRegistry(), 12, 32000, 6, "X");
+                new ApprovalRegistry(), ChatTestEndpoints.PROMPTS, ChatTestEndpoints.TOOLS,
+                12, 32000, 6, "X");
     }
 
     private static ChatEndpoints config(String model) {
@@ -54,7 +56,7 @@ class ChatAgentFactoryTest {
 
     @Test
     void 建出三个专家和一个汇总叶子() {
-        ChatAgentFactory.Leaves leaves = factory().leavesFor(config("gpt-5"));
+        ChatAgentFactory.Leaves leaves = factory().leavesFor(config("gpt-5"), AgentLang.ZH);
 
         // 保序：派发顺序、结论进历史的顺序都跟着它
         assertThat(leaves.experts()).containsOnlyKeys("market_agent", "news_agent", "trader_agent");
@@ -77,16 +79,40 @@ class ChatAgentFactoryTest {
     void 同配置共享叶子改配置后重建() {
         ChatAgentFactory factory = factory();
 
-        ChatAgentFactory.Leaves first = factory.leavesFor(config("gpt-5"));
+        ChatAgentFactory.Leaves first = factory.leavesFor(config("gpt-5"), AgentLang.ZH);
 
-        assertThat(factory.leavesFor(config("gpt-5"))).isSameAs(first);
-        assertThat(factory.leavesFor(config("gpt-5.1"))).isNotSameAs(first);
+        assertThat(factory.leavesFor(config("gpt-5"), AgentLang.ZH)).isSameAs(first);
+        assertThat(factory.leavesFor(config("gpt-5.1"), AgentLang.ZH)).isNotSameAs(first);
         // 两条 verify 各管一件事，都是 isSameAs 抓不到的：
         // 1) 每份配置只建一次。把"先查缓存"那步删掉，第二次照样重建一整套、再被 putIfAbsent
         //    换回旧的——断言全绿而每轮对话都在白建（实测过）
         // 2) 取模型时用的就是调用方给的这份配置，而不是别处随便来的一份
         verify(chatModelFactory).modelsFor(config("gpt-5"));
         verify(chatModelFactory).modelsFor(config("gpt-5.1"));
+    }
+
+    /**
+     * 语言在叶子缓存键里：三个专家与 summarizer 的系统提示词、工具描述都是建叶子那一刻按语言
+     * 烤死写进图里的，语言变则叶子须重建。
+     */
+    @Test
+    void 同一用户切语言拿到不同叶子() {
+        ChatAgentFactory factory = factory();
+
+        ChatAgentFactory.Leaves zh = factory.leavesFor(config("gpt-5"), AgentLang.ZH);
+        ChatAgentFactory.Leaves en = factory.leavesFor(config("gpt-5"), AgentLang.EN);
+
+        assertThat(ChatAgentFactory.leafKey(config("gpt-5"), AgentLang.EN))
+                .as("语言不进键 = 切了语言还拿旧叶子")
+                .isNotEqualTo(ChatAgentFactory.leafKey(config("gpt-5"), AgentLang.ZH));
+        assertThat(en).isNotSameAs(zh);
+        assertThat(en.lang()).isEqualTo(AgentLang.EN);
+        assertThat(zh.lang()).isEqualTo(AgentLang.ZH);
+        // 切回去要拿回原来那套，不是再建第三份
+        assertThat(factory.leavesFor(config("gpt-5"), AgentLang.ZH)).isSameAs(zh);
+        // 语言只加在叶子这一层：模型指纹本身不含语言，切语言不会连 SDK 客户端和连接池一起重建
+        assertThat(ChatAgentFactory.leafKey(config("gpt-5"), AgentLang.EN))
+                .startsWith(ChatModelFactory.fingerprint(config("gpt-5")));
     }
 
     // ===== 序列化：叶子与会话上下文表共用的序列化器必须是 Jackson 版，默认的 Java 对象流存不下 Spring AI Message =====
@@ -103,7 +129,7 @@ class ChatAgentFactoryTest {
     /** 叶子拿到的确实是 {@link AgentGraphs#STATE_SERIALIZER}——与会话上下文表同一份，两边不一致就写得进读不出 */
     @Test
     void leafSerializerCanCloneStateWithSpringAiMessages() throws Exception {
-        ChatAgentFactory.Leaves leaves = factory().leavesFor(config("gpt-5"));
+        ChatAgentFactory.Leaves leaves = factory().leavesFor(config("gpt-5"), AgentLang.ZH);
 
         MessagesState<Message> cloned = leaves.summarizer().stateGraph.getStateSerializer()
                 .cloneObject(Map.of("messages", List.of(

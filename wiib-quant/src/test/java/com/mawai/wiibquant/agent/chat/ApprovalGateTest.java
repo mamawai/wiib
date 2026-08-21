@@ -1,5 +1,6 @@
 package com.mawai.wiibquant.agent.chat;
 
+import com.mawai.wiibcommon.enums.AgentLang;
 import org.bsc.langgraph4j.RunnableConfig;
 import org.bsc.langgraph4j.action.Command;
 import org.bsc.langgraph4j.prebuilt.MessagesState;
@@ -27,7 +28,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class ApprovalGateTest {
 
     private final ApprovalRegistry registry = new ApprovalRegistry();
-    private final ApprovalGate gate = new ApprovalGate(registry);
+    private final ApprovalGate gate = new ApprovalGate(registry, ChatTestEndpoints.PROMPTS, AgentLang.ZH);
 
     private static final String SESSION = "wb-1-abc";
 

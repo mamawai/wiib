@@ -1,5 +1,6 @@
 package com.mawai.wiibquant.agent.chat;
 
+import com.mawai.wiibcommon.enums.AgentLang;
 import com.mawai.wiibquant.agent.llm.SseChannel;
 import com.mawai.wiibquant.agent.llm.ChatEndpoints;
 import com.mawai.wiibquant.agent.llm.LlmEndpointService;
@@ -83,12 +84,13 @@ class LlmErrorSurfaceTest {
                 mock(MarketToolkit.class), mock(NewsToolkit.class),
                 mock(DeepAnalysisService.class), mock(TraderChatService.class),
                 mock(WorkbenchRunRegistry.class),
-                new ApprovalRegistry(), 8, 999_999, 6, "X")
-                .leavesFor(llmConfig);
+                new ApprovalRegistry(), ChatTestEndpoints.PROMPTS, ChatTestEndpoints.TOOLS,
+                8, 999_999, 6, "X")
+                .leavesFor(llmConfig, AgentLang.ZH);
 
         ChatContextStore contextStore = mock(ChatContextStore.class);
         List<ChatTurnRunner.ExpertProgress> progress = new CopyOnWriteArrayList<>();
-        new ChatTurnRunner(contextStore, new ApprovalRegistry())
+        new ChatTurnRunner(contextStore, new ApprovalRegistry(), ChatTestEndpoints.PROMPTS, ChatTestEndpoints.TOOLS)
                 .run(leaves, 1L, "wb-1-expert-fail", "看看行情", chunk -> { }, progress::add,
                         ChatTurnRunner.TurnYield.NONE);
 
@@ -127,16 +129,16 @@ class LlmErrorSurfaceTest {
         WorkbenchRunRegistry runRegistry = mock(WorkbenchRunRegistry.class);
         ChatHistoryService history = mock(ChatHistoryService.class);
         ChatYieldCoordinator coordinator =
-                new ChatYieldCoordinator(gate, runRegistry, turnRunner, history);
+                new ChatYieldCoordinator(gate, runRegistry, turnRunner, history, ChatTestEndpoints.PROMPTS);
         ChatWorkbenchController controller = new ChatWorkbenchController(mock(ChatAgentFactory.class),
                 mock(LlmEndpointService.class), new ApprovalRegistry(),
                 history, mock(ChatContextStore.class), turnRunner,
-                runRegistry, gate, coordinator);
+                runRegistry, gate, coordinator, ChatTestEndpoints.PROMPTS, ChatTestEndpoints.zhLang());
 
         // run() 要拿叶子清账本，给不了 null；否则 NPE 会先于 runner 抛的那条上游异常，测的就不是这件事了
         UsageTrackingChatModel model = new UsageTrackingChatModel(mock(ChatModel.class));
         ChatAgentFactory.Leaves leaves =
-                new ChatAgentFactory.Leaves("test", model, model, Map.of(), null);
+                new ChatAgentFactory.Leaves("test", model, model, Map.of(), null, AgentLang.ZH);
 
         controller.run(new SseChannel(emitter), 1L, "wb-1-boom", "看看行情", leaves,
                 coordinator.openTurn(1L), null);

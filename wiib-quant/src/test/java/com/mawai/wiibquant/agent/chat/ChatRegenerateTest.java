@@ -1,5 +1,6 @@
 package com.mawai.wiibquant.agent.chat;
 
+import com.mawai.wiibcommon.enums.AgentLang;
 import com.mawai.wiibcommon.enums.ErrorCode;
 import com.mawai.wiibcommon.exception.BizException;
 import com.mawai.wiibquant.agent.llm.LlmEndpointService;
@@ -86,15 +87,15 @@ class ChatRegenerateTest {
         // 叶子只需要账本是真的：turnRunner 被替身顶了，图用不上
         UsageTrackingChatModel model = new UsageTrackingChatModel(mock(ChatModel.class));
         ChatAgentFactory agentFactory = mock(ChatAgentFactory.class);
-        when(agentFactory.leavesFor(any()))
-                .thenReturn(new ChatAgentFactory.Leaves("端点 · gpt-5", model, model, Map.of(), null));
+        when(agentFactory.leavesFor(any(), any()))
+                .thenReturn(new ChatAgentFactory.Leaves("端点 · gpt-5", model, model, Map.of(), null, AgentLang.ZH));
 
         ChatConcurrencyGate gate = new ChatConcurrencyGate(10);
         WorkbenchRunRegistry runRegistry = mock(WorkbenchRunRegistry.class);
         ChatYieldCoordinator coordinator =
-                new ChatYieldCoordinator(gate, runRegistry, turnRunner, history);
+                new ChatYieldCoordinator(gate, runRegistry, turnRunner, history, ChatTestEndpoints.PROMPTS);
         ChatWorkbenchController controller = new ChatWorkbenchController(agentFactory, endpointService,
-                new ApprovalRegistry(), history, contextStore, turnRunner, runRegistry, gate, coordinator);
+                new ApprovalRegistry(), history, contextStore, turnRunner, runRegistry, gate, coordinator, ChatTestEndpoints.PROMPTS, ChatTestEndpoints.zhLang());
         return new Harness(controller, history, contextStore, turnRunner, gate, coordinator);
     }
 
@@ -238,7 +239,8 @@ class ChatRegenerateTest {
         // 补答行对应的提问不在会话末尾，中间夹着别的问答，回退会误伤那些轮次
         Harness h = harness(
                 List.of(msg(1, "user", "BTC 怎么样"), msg(2, "user", "ETH 呢"), msg(3, "assistant", "ETH 的答案"),
-                        msg(4, "assistant", ChatYieldCoordinator.DEFERRED_PREFIX + "BTC 怎么样」】\n\n补上的答案")),
+                        msg(4, "assistant", ChatTestEndpoints.PROMPTS.get(AgentLang.ZH, "chat.deferred.prefix")
+                                + "BTC 怎么样」】\n\n补上的答案")),
                 List.of(turnStart("ETH 呢"), new AssistantMessage("ETH 的答案")));
 
         assertRejected(h);

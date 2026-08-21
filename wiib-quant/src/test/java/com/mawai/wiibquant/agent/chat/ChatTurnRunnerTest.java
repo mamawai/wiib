@@ -1,5 +1,6 @@
 package com.mawai.wiibquant.agent.chat;
 
+import com.mawai.wiibcommon.enums.AgentLang;
 import com.mawai.wiibquant.agent.llm.ChatEndpoints;
 import com.mawai.wiibquant.agent.analysis.DeepAnalysisService;
 import com.mawai.wiibquant.agent.toolkit.MarketToolkit;
@@ -116,12 +117,13 @@ class ChatTurnRunnerTest {
         return new ChatAgentFactory(chatModelFactory, mock(MarketToolkit.class), newsToolkit,
                 mock(DeepAnalysisService.class), traderChatService,
                 mock(WorkbenchRunRegistry.class),
-                registry, LIMIT, NO_COMPRESSION, 6, "X")
-                .leavesFor(llmConfig);
+                registry, ChatTestEndpoints.PROMPTS, ChatTestEndpoints.TOOLS,
+                LIMIT, NO_COMPRESSION, 6, "X")
+                .leavesFor(llmConfig, AgentLang.ZH);
     }
 
     private void turn(String message) {
-        new ChatTurnRunner(contextStore, registry)
+        new ChatTurnRunner(contextStore, registry, ChatTestEndpoints.PROMPTS, ChatTestEndpoints.TOOLS)
                 .run(leaves(), 1L, SESSION, message, answer::append, progress::add,
                         ChatTurnRunner.TurnYield.NONE);
     }
@@ -438,10 +440,7 @@ class ChatTurnRunnerTest {
         assertThat(expertMessage.getText()).startsWith("【market_agent 取回的数据】");
     }
 
-    /**
-     * 派过专家就必须垫收尾指令，且排在<b>最后一条</b>——整段输入以用户侧消息结尾，
-     * 模型才知道该由它作答，而不是"我刚说完、没什么可补充的"。
-     */
+    /** 派过专家：最后一条是用户侧消息，内容 = 专家收尾指令 + 输出语言硬收尾 */
     @Test
     void 专家数据之后垫收尾指令且排在最后() {
         lightAnswers(() -> route("market_agent"),
@@ -453,20 +452,45 @@ class ChatTurnRunnerTest {
 
         Message last = summarizerLastInput();
         assertThat(last).isInstanceOf(UserMessage.class);
-        assertThat(last.getText()).isEqualTo(ChatTurnRunner.EXPERT_HANDOFF);
+        assertThat(last.getText())
+                .isEqualTo(ChatTestEndpoints.PROMPTS.get(AgentLang.ZH, "chat.expertHandoff")
+                        + "\n" + ChatTestEndpoints.PROMPTS.get(AgentLang.ZH, "chat.outputLanguage"));
     }
 
-    /** 一个专家都没派时不许垫：那句话说的是"依据上面的专家数据"，垫了就是凭空捏造不存在的数据 */
+    /** 没派专家：专家收尾指令不垫（"依据上面的专家数据"指向的消息不存在），只留输出语言硬收尾 */
     @Test
-    void 没派专家时不垫收尾指令() {
+    void 没派专家时只垫输出语言不垫专家收尾指令() {
         lightAnswers(() -> route("FINISH"), () -> responseOf(new AssistantMessage("市场结论")),
                 () -> responseOf(new AssistantMessage("新闻结论")));
         summarizerAnswers("这是答案");
 
         turn("你好呀");
 
-        assertThat(summarizerInput()).doesNotContain(ChatTurnRunner.EXPERT_HANDOFF);
-        assertThat(summarizerLastInput().getText()).isEqualTo("你好呀");
+        assertThat(summarizerInput()).doesNotContain(ChatTestEndpoints.PROMPTS.get(AgentLang.ZH, "chat.expertHandoff"));
+        assertThat(summarizerLastInput().getText())
+                .isEqualTo(ChatTestEndpoints.PROMPTS.get(AgentLang.ZH, "chat.outputLanguage"));
+    }
+
+    /**
+     * 输出语言硬收尾恒在整轮输入的最后一条，两门语言各钉一遍。
+     * 用户打的字不翻译，聊天输入随时可能是另一门语言，而它近因权重最高。
+     */
+    @Test
+    void 输出语言硬收尾恒在整轮输入末尾() {
+        ChatTurnRunner runner =
+                new ChatTurnRunner(contextStore, registry, ChatTestEndpoints.PROMPTS, ChatTestEndpoints.TOOLS);
+        for (AgentLang lang : AgentLang.values()) {
+            String tail = ChatTestEndpoints.PROMPTS.get(lang, "chat.outputLanguage");
+            assertThat(runner.summaryTail(lang, true)).as("%s 派过专家", lang.code()).endsWith(tail);
+            assertThat(runner.summaryTail(lang, false)).as("%s 没派专家", lang.code()).isEqualTo(tail);
+            // 另一门语言的那条一个字都不许混进来
+            for (AgentLang other : AgentLang.values()) {
+                if (other != lang) {
+                    assertThat(runner.summaryTail(lang, true))
+                            .doesNotContain(ChatTestEndpoints.PROMPTS.get(other, "chat.outputLanguage"));
+                }
+            }
+        }
     }
 
     /**
@@ -483,7 +507,7 @@ class ChatTurnRunnerTest {
         // 改桩成 openai 协议的 options（leaves() 里默认桩的是泛型那种）
         when(light.getOptions()).thenReturn(OpenAiChatOptions.builder().model("deepseek-chat").build());
 
-        new ChatTurnRunner(contextStore, registry)
+        new ChatTurnRunner(contextStore, registry, ChatTestEndpoints.PROMPTS, ChatTestEndpoints.TOOLS)
                 .run(leaves, 1L, SESSION, "BTC 怎么样", answer::append, progress::add,
                         ChatTurnRunner.TurnYield.NONE);
 
@@ -540,9 +564,9 @@ class ChatTurnRunnerTest {
     void 补答零产出时兜底剥掉出处标注() {
         summarizerAnswers("");
 
-        String deferred = new ChatTurnRunner(contextStore, registry).runDeferredSummary(
+        String deferred = new ChatTurnRunner(contextStore, registry, ChatTestEndpoints.PROMPTS, ChatTestEndpoints.TOOLS).runDeferredSummary(
                 leaves(), 1L, SESSION, "看看行情",
-                List.of(ChatTurnRunner.expertMessage("market_agent", "取回的数据", "资金费 0.01%")));
+                List.of(ChatTurnRunner.expertMessage(ChatTestEndpoints.PROMPTS, AgentLang.ZH, "market_agent", "chat.expertStatus.data", "资金费 0.01%")));
 
         assertThat(deferred).isEqualTo("资金费 0.01%");
     }

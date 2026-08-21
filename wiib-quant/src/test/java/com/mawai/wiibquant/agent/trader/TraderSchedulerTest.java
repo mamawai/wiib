@@ -49,7 +49,7 @@ class TraderSchedulerTest {
     }
 
     private AlertTrigger trig() {
-        return new AlertTrigger("BTCUSDT", new BigDecimal("1.2"), new BigDecimal("63120"), "下跌", H1_BOUNDARY);
+        return new AlertTrigger("BTCUSDT", new BigDecimal("1.2"), new BigDecimal("63120"), AlertTrigger.DOWN, H1_BOUNDARY);
     }
 
     /** 北京时间 2026-07-27 hh:mm 的 epoch ms（与 DAY_BOUNDARY 同一天；+8 整时区，整点即 UTC 整点） */
@@ -95,7 +95,7 @@ class TraderSchedulerTest {
         s.nowMs = () -> bj(12, 10);
 
         s.tryAlertWake(nightTrader(),
-                new AlertTrigger("BTCUSDT", new BigDecimal("1.2"), new BigDecimal("63120"), "下跌", bj(12, 10)));
+                new AlertTrigger("BTCUSDT", new BigDecimal("1.2"), new BigDecimal("63120"), AlertTrigger.DOWN, bj(12, 10)));
 
         verify(runner, after(300).never()).wakeAlert(any(), any());
     }

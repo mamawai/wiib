@@ -1,0 +1,16 @@
+# llm 域词表（中文）。目录 zh 即语言码，PromptCatalog 扫 prompts/<语言>/<域>.yml 自动装配。
+#
+# 装的是上游异常归类后的那一句话（LlmErrorMessages）：chat 与 coach 共用，
+# 既推给用户上屏，也会拼进 AssistantMessage 喂回模型、随会话上下文落库。
+# 硬约束：任何一条都不许回显上游原文——原文里常带完整请求 URL（?api_key=…）与自定义 header。
+llm:
+
+  error:
+    # 认不出病因时不替用户判：两个调用方的 catch 罩的范围比 LLM 大得多，数据库挂了也走这条路
+    fallback: 处理失败，请稍后重试
+    unauthorized: API key 无效或无权限，请到配置里检查
+    quota: 你的 API 额度已用尽或触发限流，请稍后再试
+    modelNotFound: 端点不支持该模型，请重新选择模型
+    unreachable: 端点无响应，请检查 Base URL 是否正确
+    # type 是最深层 cause 的类名，语言无关；归类不到的形态靠它被发现
+    unknown: 处理失败（{{type}}），请稍后重试

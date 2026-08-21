@@ -1,5 +1,7 @@
 package com.mawai.wiibquant.agent.chat;
 
+import com.mawai.wiibcommon.enums.AgentLang;
+import com.mawai.wiibquant.agent.i18n.PromptCatalog;
 import com.mawai.wiibquant.agent.llm.LlmErrorMessages;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -48,6 +50,8 @@ public class ChatYieldCoordinator {
     private final WorkbenchRunRegistry runRegistry;
     private final ChatTurnRunner turnRunner;
     private final ChatHistoryService chatHistoryService;
+    /** 补答行的标头与失败交代都上屏；语言取自那一单自己的叶子（{@code work.leaves().lang()}） */
+    private final PromptCatalog prompts;
 
     /** 补答跑在虚拟线程上：全程阻塞在 LLM 上游 IO */
     private final ExecutorService deferredExecutor = Executors.newVirtualThreadPerTaskExecutor();
@@ -251,13 +255,14 @@ public class ChatYieldCoordinator {
             String answer = turnRunner.runDeferredSummary(work.leaves(), work.userId(), work.sessionId(),
                     work.question(), work.experts().join());
             chatHistoryService.append(work.sessionId(), work.userId(), "assistant",
-                    deferredHeader(work.question()) + answer, deferredMeta(work, startedAt, dirtyBook));
+                    deferredHeader(work) + answer, deferredMeta(work, startedAt, dirtyBook));
             log.info("[Yield] 补答完成 session={} chars={}", work.sessionId(), answer.length());
         } catch (Exception e) {
             log.warn("[Yield] 补答失败 session={}", work.sessionId(), e);
             // 失败也要给一行交代：不落的话轮询一停，用户看到的是问题永远没有下文
             chatHistoryService.append(work.sessionId(), work.userId(), "assistant",
-                    deferredHeader(work.question()) + "（补答失败：" + LlmErrorMessages.classify(e) + "，可重新提问）",
+                    deferredHeader(work) + prompts.get(work.leaves().lang(), "chat.deferred.failed",
+                            Map.of("reason", LlmErrorMessages.classify(e, prompts, work.leaves().lang()))),
                     deferredMeta(work, startedAt, dirtyBook));   // 失败也照记：token 是真烧掉了
         } finally {
             runRegistry.finish(work.sessionId());
@@ -280,17 +285,25 @@ public class ChatYieldCoordinator {
     }
 
     /**
-     * 补答行的标头前缀。对外可见是因为"这条能不能重新生成"要认它：
+     * 补答行的标头前缀（{@code chat.deferred.prefix}）。前端按它认出"这行是补答、不给重新生成"：
      * 补答行对应的提问不在会话末尾，中间夹着别的问答，回退会误伤那些轮次。
+     * 认全部语言的那一份——历史行是写入时那门语言落库的。
      */
-    static final String DEFERRED_PREFIX = "【补答「";
+    static boolean isDeferredRow(String content, PromptCatalog prompts) {
+        for (AgentLang candidate : AgentLang.values()) {
+            if (content.startsWith(prompts.get(candidate, "chat.deferred.prefix"))) {
+                return true;
+            }
+        }
+        return false;
+    }
 
     /** 补答的标头：时间线上它离原问题隔着别的对话，得自己说明在答哪个问题 */
-    private static String deferredHeader(String question) {
-        String q = question.strip().replaceAll("\\s+", " ");
+    private String deferredHeader(DeferredWork work) {
+        String q = work.question().strip().replaceAll("\\s+", " ");
         if (q.length() > 40) {
             q = q.substring(0, 40) + "…";
         }
-        return DEFERRED_PREFIX + q + "」】\n\n";
+        return prompts.get(work.leaves().lang(), "chat.deferred.header", Map.of("question", q)) + "\n\n";
     }
 }

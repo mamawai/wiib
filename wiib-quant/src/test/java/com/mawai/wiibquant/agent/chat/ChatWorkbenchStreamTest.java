@@ -1,5 +1,6 @@
 package com.mawai.wiibquant.agent.chat;
 
+import com.mawai.wiibcommon.enums.AgentLang;
 import com.mawai.wiibquant.agent.llm.LlmEndpointService;
 import com.mawai.wiibquant.agent.llm.SseChannel;
 import com.mawai.wiibquant.agent.llm.UsageTrackingChatModel;
@@ -60,11 +61,11 @@ class ChatWorkbenchStreamTest {
         ChatConcurrencyGate gate = new ChatConcurrencyGate(10);
         WorkbenchRunRegistry runRegistry = mock(WorkbenchRunRegistry.class);
         ChatYieldCoordinator coordinator =
-                new ChatYieldCoordinator(gate, runRegistry, turnRunner, historyService);
+                new ChatYieldCoordinator(gate, runRegistry, turnRunner, historyService, ChatTestEndpoints.PROMPTS);
         ChatWorkbenchController controller = new ChatWorkbenchController(mock(ChatAgentFactory.class),
                 mock(LlmEndpointService.class), new ApprovalRegistry(),
                 historyService, mock(ChatContextStore.class), turnRunner,
-                runRegistry, gate, coordinator);
+                runRegistry, gate, coordinator, ChatTestEndpoints.PROMPTS, ChatTestEndpoints.zhLang());
 
         RecordingEmitter emitter = new RecordingEmitter();
         SseChannel channel = new SseChannel(emitter);
@@ -73,7 +74,7 @@ class ChatWorkbenchStreamTest {
         // run() 要拿叶子清账本、取模型名落库，给不了 null；这条用例不看模型本身，深浅共用一个装饰器
         UsageTrackingChatModel model = new UsageTrackingChatModel(mock(ChatModel.class));
         ChatAgentFactory.Leaves leaves =
-                new ChatAgentFactory.Leaves("test", model, model, Map.of(), null);
+                new ChatAgentFactory.Leaves("test", model, model, Map.of(), null, AgentLang.ZH);
 
         controller.run(channel, 1L, SESSION, "看看行情", leaves, coordinator.openTurn(1L), null);
 

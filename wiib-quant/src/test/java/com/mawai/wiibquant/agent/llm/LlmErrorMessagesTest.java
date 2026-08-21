@@ -1,5 +1,8 @@
 package com.mawai.wiibquant.agent.llm;
 
+import com.mawai.wiibcommon.enums.AgentLang;
+import com.mawai.wiibquant.agent.i18n.PromptCatalog;
+import com.mawai.wiibquant.agent.i18n.PromptI18nAssertions;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -7,25 +10,34 @@ import static org.assertj.core.api.Assertions.assertThat;
 /**
  * BYOK 之后最高频的用户故障就是 key 相关，错误文案的质量直接决定用户能不能自己解决。
  * 而 SDK 原始异常可能是几百字符、带 URL 和请求片段的东西。
+ * <p>
+ * 文案按语言取（{@code llm.error.*}）；归类判据只认上游英文原文，与语言无关。
  */
 class LlmErrorMessagesTest {
 
+    private static final PromptCatalog PROMPTS = new PromptCatalog();
+
+    /** 中文侧断言原样保留：这批只是把文案外置，成文一个字没变 */
+    private static String zh(Throwable t) {
+        return LlmErrorMessages.classify(t, PROMPTS, AgentLang.ZH);
+    }
+
     @Test
     void 认证失败给出可操作的提示() {
-        assertThat(LlmErrorMessages.classify(new RuntimeException("HTTP 401 Unauthorized: invalid api key")))
+        assertThat(zh(new RuntimeException("HTTP 401 Unauthorized: invalid api key")))
                 .contains("API key");
     }
 
     @Test
     void 限流与额度用尽单独归类() {
-        assertThat(LlmErrorMessages.classify(new RuntimeException("429 Too Many Requests")))
+        assertThat(zh(new RuntimeException("429 Too Many Requests")))
                 .contains("额度");
     }
 
     /** 断"重新选择"而不是断"模型"：兜底文案里也有"模型"二字，删掉这条分支照样绿 */
     @Test
     void 模型不存在提示重选() {
-        assertThat(LlmErrorMessages.classify(new RuntimeException("404 model 'gpt-9' not found")))
+        assertThat(zh(new RuntimeException("404 model 'gpt-9' not found")))
                 .contains("重新选择");
     }
 
@@ -35,7 +47,7 @@ class LlmErrorMessagesTest {
      */
     @Test
     void 连不上时提示检查端点() {
-        assertThat(LlmErrorMessages.classify(new java.net.ConnectException("")))
+        assertThat(zh(new java.net.ConnectException("")))
                 .contains("Base URL");
     }
 
@@ -46,7 +58,7 @@ class LlmErrorMessagesTest {
                 "org.bsc.langgraph4j.GraphRunnerException: node execution failed",
                 new RuntimeException("HTTP 401 Unauthorized"));
 
-        assertThat(LlmErrorMessages.classify(wrapped)).contains("API key");
+        assertThat(zh(wrapped)).contains("API key");
     }
 
     /** 兜底文案里的类名取最深层 cause：最外层几乎总是包装异常，用户拿它查不到病因 */
@@ -55,7 +67,7 @@ class LlmErrorMessagesTest {
         Throwable wrapped = new java.util.concurrent.CompletionException("wrapper",
                 new IllegalStateException("db down"));
 
-        assertThat(LlmErrorMessages.classify(wrapped))
+        assertThat(zh(wrapped))
                 .contains("IllegalStateException").doesNotContain("CompletionException");
     }
 
@@ -68,7 +80,7 @@ class LlmErrorMessagesTest {
     void 未知错误既不回显原文也不替用户判病因() {
         String longMsg = "x".repeat(500);
 
-        String msg = LlmErrorMessages.classify(new IllegalStateException(longMsg));
+        String msg = zh(new IllegalStateException(longMsg));
 
         assertThat(msg).doesNotContain("xxxx").doesNotContain("配置");
     }
@@ -80,12 +92,28 @@ class LlmErrorMessagesTest {
      */
     @Test
     void 任何情况下不回显key() {
-        assertThat(LlmErrorMessages.classify(new RuntimeException(
+        assertThat(zh(new RuntimeException(
                 "request failed, Authorization: Bearer sk-secret-abcdef123456")))
                 .doesNotContain("sk-secret-abcdef123456");
         // 正则追不到的形态也必须安全
-        assertThat(LlmErrorMessages.classify(new RuntimeException(
+        assertThat(zh(new RuntimeException(
                 "GET https://gw.example.com/v1/chat?api_key=Zm9vYmFyMTIzNDU2 failed")))
                 .doesNotContain("Zm9vYmFyMTIzNDU2");
+    }
+
+    /** 英文用户不许收到一个中文字：五条归类各扫一遍 */
+    @Test
+    void 英文侧全部文案无中文() {
+        for (Throwable t : new Throwable[]{
+                new RuntimeException("HTTP 401 Unauthorized"),
+                new RuntimeException("429 Too Many Requests"),
+                new RuntimeException("404 model 'gpt-9' not found"),
+                new java.net.ConnectException(""),
+                new IllegalStateException("db down")}) {
+            PromptI18nAssertions.assertNoCjk("英文 llm 错误文案",
+                    LlmErrorMessages.classify(t, PROMPTS, AgentLang.EN));
+        }
+        PromptI18nAssertions.assertNoCjk("英文 llm 兜底文案",
+                LlmErrorMessages.classify(null, PROMPTS, AgentLang.EN));
     }
 }

@@ -4,7 +4,10 @@ import com.alibaba.fastjson2.JSONObject;
 import com.mawai.wiibcommon.annotation.CurrentUserId;
 import com.mawai.wiibcommon.enums.ErrorCode;
 import com.mawai.wiibcommon.exception.BizException;
+import com.mawai.wiibcommon.enums.AgentLang;
 import com.mawai.wiibcommon.util.Result;
+import com.mawai.wiibquant.agent.i18n.PromptCatalog;
+import com.mawai.wiibquant.agent.i18n.UserLangResolver;
 import com.mawai.wiibquant.agent.llm.ChatEndpoints;
 import com.mawai.wiibquant.agent.llm.ConversationSummarizer;
 import com.mawai.wiibquant.agent.llm.LlmEndpointService;
@@ -66,6 +69,9 @@ public class ChatWorkbenchController {
     private final WorkbenchRunRegistry runRegistry;
     private final ChatConcurrencyGate concurrencyGate;
     private final ChatYieldCoordinator yieldCoordinator;
+    private final PromptCatalog prompts;
+    /** chat 是实时请求：语言走 @CurrentUserId → user.lang，与 trader 同一条路 */
+    private final UserLangResolver userLangResolver;
     /** 包私有：名额泄漏那条钉子（{@code ChatWorkbenchAdmissionTest}）要关掉它来制造 submit 失败 */
     final ExecutorService streamExecutor = Executors.newVirtualThreadPerTaskExecutor();
     /** 心跳专用：只发注释帧(微秒级)，单线程够所有会话用；虚拟线程不支持定时调度故用平台线程 */
@@ -135,7 +141,7 @@ public class ChatWorkbenchController {
         try {
             // 建叶子放准入期：配置能过保存校验但仍可能建不出模型（协议对不上等），这类错误必须在建流前暴露。
             // 建叶子不发网络请求，慢端点不会拖垮这里
-            leaves = chatAgentFactory.leavesFor(eps);
+            leaves = chatAgentFactory.leavesFor(eps, userLangResolver.of(userId));
         } catch (Exception e) {
             log.warn("[Workbench] 建模失败 userId={}", userId, e);
             throw new BizException(ErrorCode.LLM_CONFIG_INVALID);
@@ -176,7 +182,7 @@ public class ChatWorkbenchController {
         }
         ChatAgentFactory.Leaves leaves;
         try {
-            leaves = chatAgentFactory.leavesFor(eps);
+            leaves = chatAgentFactory.leavesFor(eps, userLangResolver.of(userId));
         } catch (Exception e) {
             log.warn("[Workbench] 建模失败 userId={}", userId, e);
             throw new BizException(ErrorCode.LLM_CONFIG_INVALID);
@@ -218,7 +224,7 @@ public class ChatWorkbenchController {
     private Rollback rollbackLastTurn(String sessionId, long userId) {
         List<ChatHistoryService.ChatMessage> history = chatHistoryService.messages(sessionId);
         if (history.isEmpty() || !"assistant".equals(history.getLast().role())
-                || history.getLast().content().startsWith(ChatYieldCoordinator.DEFERRED_PREFIX)) {
+                || ChatYieldCoordinator.isDeferredRow(history.getLast().content(), prompts)) {
             throw new BizException(ErrorCode.CHAT_REGENERATE_UNAVAILABLE);
         }
         ChatHistoryService.ChatMessage answer = history.getLast();
@@ -249,7 +255,7 @@ public class ChatWorkbenchController {
         }
         // 切在队首且紧跟着摘要，说明命中的是压缩原样放回的首问，不是本轮提问——
         // 同一句常用问法在一个会话里问两遍就会这样，文本对得上但位置是假的，照切会把整段上下文连摘要清空
-        if (cut == 0 && context.size() > 1 && ConversationSummarizer.isSummary(context.get(1))) {
+        if (cut == 0 && context.size() > 1 && ConversationSummarizer.isSummary(context.get(1), prompts)) {
             throw new BizException(ErrorCode.CHAT_REGENERATE_UNAVAILABLE);
         }
         contextStore.save(sessionId, userId, List.copyOf(context.subList(0, cut)));
@@ -444,12 +450,12 @@ public class ChatWorkbenchController {
                                     .fluentPut("role", "answer"));
                         }
                     },
-                    event -> onExpertProgress(channel, expertLog, event), turn);
+                    event -> onExpertProgress(channel, expertLog, event, leaves.lang()), turn);
 
             if (result.cancelled()) {
                 // 用户点了停止：半截答案照落库（token 已经烧掉了，屏幕上那段也该留得住）。
                 // 与让位不同，这一轮不欠补答，done 收尾即完结
-                String stopped = ChatTurnRunner.cancelledAnswer(answer.toString());
+                String stopped = ChatTurnRunner.cancelledAnswer(prompts, leaves.lang(), answer.toString());
                 ChatHistoryService.TurnMeta meta = turnMeta(leaves, dirtyBook, turnStartedAt);
                 boolean saved = chatHistoryService.append(sessionId, userId, "assistant", stopped, meta);
                 // 重生成轮：出了半截才顶掉旧答案，半截也是这一次重生成的产物，留着旧的同一个提问下
@@ -479,7 +485,7 @@ public class ChatWorkbenchController {
                     channel.send("done", new JSONObject()
                             .fluentPut("sessionId", sessionId)
                             .fluentPut("deferred", true)
-                            .fluentPut("answer", "收到新消息，先处理它——这个问题的专家还在取数，答案稍后自动补上"));
+                            .fluentPut("answer", prompts.get(leaves.lang(), "chat.yieldDoneAnswer")));
                     channel.complete();
                 }
                 return;
@@ -497,7 +503,8 @@ public class ChatWorkbenchController {
                             .fluentPut("symbol", pendingRequest.symbol())
                             .fluentPut("reason", pendingRequest.reason())
                             .fluentPut("requestId", pendingRequest.requestId())
-                            .fluentPut("resumeMessage", "已确认，请继续执行深度研判")));
+                            .fluentPut("resumeMessage",
+                                    prompts.get(leaves.lang(), "chat.hitl.resumeMessage"))));
 
             // 极端场景（调用上限截停等）summarizer 没产出汇总，退专家结论，答案不至于丢
             String finalAnswer = !answer.isEmpty() ? answer.toString() : expertLog.toString();
@@ -522,7 +529,7 @@ public class ChatWorkbenchController {
             log.error("[Workbench] 对话失败 sessionId={}", sessionId, e);
             if (!channel.isClosed()) {
                 channel.send("error", new JSONObject()
-                        .fluentPut("message", LlmErrorMessages.classify(e)));
+                        .fluentPut("message", LlmErrorMessages.classify(e, prompts, leaves.lang())));
                 // 正常收尾而非 completeWithError：原因已随上面的 error 事件发出去了，
                 // 再把异常抛回 MVC 只会让 GlobalExceptionHandler 往 event-stream 里写 JSON，
                 // 撞 HttpMessageNotWritableException，反而把真实错误盖掉
@@ -568,7 +575,7 @@ public class ChatWorkbenchController {
      * 内容真实，只是并行下拿不到逐字流，一次性给。
      */
     private void onExpertProgress(SseChannel channel, StringBuilder expertLog,
-                                  ChatTurnRunner.ExpertProgress event) {
+                                  ChatTurnRunner.ExpertProgress event, AgentLang lang) {
         switch (event.phase()) {
             case ChatTurnRunner.ExpertProgress.START -> channel.send("agent_start", new JSONObject()
                     .fluentPut("node", event.agent())
@@ -583,7 +590,8 @@ public class ChatWorkbenchController {
                 }
             }
             case ChatTurnRunner.ExpertProgress.ERROR -> channel.send("progress", new JSONObject()
-                    .fluentPut("text", event.agent() + " 执行失败：" + event.text()));
+                    .fluentPut("text", prompts.get(lang, "chat.progress.expertFailed",
+                            java.util.Map.of("agent", event.agent(), "reason", event.text()))));
             default -> log.warn("[Workbench] 未知专家进度阶段 {}", event.phase());
         }
     }

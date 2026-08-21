@@ -23,7 +23,7 @@ class VolatilitySentinelTest {
 
         // (100600-99800)/99800 = 0.8016%
         assertThat(w.amplitudePct()).isEqualByComparingTo("0.8016");
-        assertThat(w.direction()).isEqualTo("下跌"); // 现价 99800 < 窗口首价 100000
+        assertThat(w.direction()).isEqualTo(AlertTrigger.DOWN); // 现价 99800 < 窗口首价 100000
     }
 
     /** 超过 5 分钟的 tick 剔除出窗：旧尖峰不许一直撑着振幅 */
@@ -45,7 +45,7 @@ class VolatilitySentinelTest {
         w.add(1_786_200_000_000L, new BigDecimal("100000"));
 
         assertThat(w.amplitudePct()).isEqualByComparingTo("0");
-        assertThat(w.direction()).isEqualTo("波动");
+        assertThat(w.direction()).isEqualTo(AlertTrigger.FLAT);
     }
 
     /**

@@ -1,5 +1,6 @@
 package com.mawai.wiibquant.agent.learning;
 
+import com.mawai.wiibcommon.entity.AiTrader;
 import com.mawai.wiibcommon.enums.AgentLang;
 import com.mawai.wiibcommon.market.KlineHistoryStore;
 import com.mawai.wiibquant.agent.i18n.LocalizedToolCallbacks;
@@ -41,7 +42,7 @@ class PromptMarkParsingTest {
 
     @Test
     void 中文复盘_认中文标记切两段() {
-        ReviewRunner.Parsed p = ReviewRunner.parse(ZH_REVIEW, prompts.get(AgentLang.ZH, "reviewer.mark.memory"));
+        ReviewRunner.Parsed p = ReviewRunner.parse(ZH_REVIEW, prompts.get(AgentLang.ZH, "reviewer.mark.memory"), 2000);
 
         assertThat(p.review()).isEqualTo("【本期复盘】战绩：起始 10000 → 期末 9800");
         assertThat(p.memory()).isEqualTo("已验证纪律：等回踩");
@@ -49,7 +50,7 @@ class PromptMarkParsingTest {
 
     @Test
     void 英文复盘_认英文标记切两段() {
-        ReviewRunner.Parsed p = ReviewRunner.parse(EN_REVIEW, prompts.get(AgentLang.EN, "reviewer.mark.memory"));
+        ReviewRunner.Parsed p = ReviewRunner.parse(EN_REVIEW, prompts.get(AgentLang.EN, "reviewer.mark.memory"), 2000);
 
         assertThat(p.review()).isEqualTo("[REVIEW] Scorecard: 10000 -> 9800");
         assertThat(p.memory()).isEqualTo("verified: wait for the retest");
@@ -58,9 +59,9 @@ class PromptMarkParsingTest {
     /** 反例：语言与标记交叉 → 判格式失守，memory 返回 null（REVIEW 行照存、记忆不动） */
     @Test
     void 复盘标记与语言对不上_判格式失守不污染记忆() {
-        assertThat(ReviewRunner.parse(EN_REVIEW, prompts.get(AgentLang.ZH, "reviewer.mark.memory")).memory())
+        assertThat(ReviewRunner.parse(EN_REVIEW, prompts.get(AgentLang.ZH, "reviewer.mark.memory"), 2000).memory())
                 .as("中文用户交回英文标记").isNull();
-        assertThat(ReviewRunner.parse(ZH_REVIEW, prompts.get(AgentLang.EN, "reviewer.mark.memory")).memory())
+        assertThat(ReviewRunner.parse(ZH_REVIEW, prompts.get(AgentLang.EN, "reviewer.mark.memory"), 2000).memory())
                 .as("英文用户交回中文标记——最容易被漏掉的那一种").isNull();
     }
 
@@ -137,6 +138,36 @@ class PromptMarkParsingTest {
 
         assertThat(a.waitSection("BTC 走强，我先看着。", AgentLang.ZH)).isEmpty();
         assertThat(a.waitSection("BTC looks strong, watching for now.", AgentLang.EN)).isEmpty();
+    }
+
+    // ==================== 输出语言硬收尾：恒在用户消息最末一行 ====================
+
+    /**
+     * 复盘与学习的用户消息都以输出语言硬收尾结尾，两门语言各钉一遍。
+     * 注入的素材（历史决策、旧笔记、同侪材料含别人给 trader 起的名字）可能是另一门语言，
+     * 而它们排在这行之前。
+     */
+    @Test
+    void 复盘与学习的用户消息都以输出语言收尾() {
+        AiTrader t = new AiTrader();
+        t.setId(7L);
+        t.setRoundNo(1);
+        t.setMemory("旧笔记：等回踩");
+        t.setLearningNotes("Peer A: BREAKOUT 12 trades 8 wins.");
+        ReviewMaterialAssembler.ReviewMaterial material = new ReviewMaterialAssembler.ReviewMaterial(
+                "stats", "trades", "timeline", "path", 1);
+        ReviewRunner review = new ReviewRunner(assembler(), null, null, null,
+                prompts, mock(UserLangResolver.class));
+        LearningRunner learn = learningRunner();
+
+        for (AgentLang lang : AgentLang.values()) {
+            assertThat(review.userPrompt(t, material, 0, 86_400_000L, null, lang).stripTrailing())
+                    .as("%s 复盘用户消息", lang.code())
+                    .endsWith(prompts.get(lang, "reviewer.label.outputLanguage"));
+            assertThat(learn.userPrompt(t, 86_400_000L, "leaderboard", lang).stripTrailing())
+                    .as("%s 学习用户消息", lang.code())
+                    .endsWith(prompts.get(lang, "learning.label.outputLanguage"));
+        }
     }
 
     private ReviewMaterialAssembler assembler() {

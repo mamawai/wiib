@@ -1,5 +1,6 @@
 package com.mawai.wiibquant.agent.chat;
 
+import com.mawai.wiibcommon.enums.AgentLang;
 import com.mawai.wiibquant.agent.analysis.DeepAnalysisService;
 import com.mawai.wiibquant.agent.llm.ChatEndpoints;
 import com.mawai.wiibquant.agent.llm.UsageTrackingChatModel;
@@ -75,8 +76,8 @@ class ChatCancelTest {
         return new ChatAgentFactory(chatModelFactory, mock(MarketToolkit.class), mock(NewsToolkit.class),
                 mock(DeepAnalysisService.class), mock(TraderChatService.class),
                 mock(WorkbenchRunRegistry.class), registry,
-                LIMIT, NO_COMPRESSION, 6, "X")
-                .leavesFor(eps);
+                ChatTestEndpoints.PROMPTS, ChatTestEndpoints.TOOLS, LIMIT, NO_COMPRESSION, 6, "X")
+                .leavesFor(eps, AgentLang.ZH);
     }
 
     /** 中断信号可以在跑到一半时打开：cancelRequested 每次检查点都读一次，粘滞不回退 */
@@ -120,7 +121,7 @@ class ChatCancelTest {
         routerFinishes();
         AtomicBoolean cancelled = new AtomicBoolean(true);   // 一进循环就已经点了停
 
-        ChatTurnRunner.TurnResult result = new ChatTurnRunner(contextStore, registry)
+        ChatTurnRunner.TurnResult result = new ChatTurnRunner(contextStore, registry, ChatTestEndpoints.PROMPTS, ChatTestEndpoints.TOOLS)
                 .run(leaves(), 1L, SESSION, "看看行情", answer::append, e -> { }, yieldWith(cancelled));
 
         assertThat(result.cancelled()).isTrue();
@@ -142,7 +143,7 @@ class ChatCancelTest {
         when(deep.stream(any(Prompt.class))).thenAnswer(inv -> Flux.just(
                 responseOf("前半截"), responseOf("后半截")));
 
-        ChatTurnRunner.TurnResult result = new ChatTurnRunner(contextStore, registry)
+        ChatTurnRunner.TurnResult result = new ChatTurnRunner(contextStore, registry, ChatTestEndpoints.PROMPTS, ChatTestEndpoints.TOOLS)
                 .run(leaves(), 1L, SESSION, "看看行情", chunk -> {
                     answer.append(chunk);
                     cancelled.set(true);
@@ -152,14 +153,14 @@ class ChatCancelTest {
         assertThat(answer.toString()).isEqualTo("前半截");
         // 半截进上下文并标明中断：续聊接得上，模型也知道这句话没说完
         String tail = savedContext().getLast().getText();
-        assertThat(tail).startsWith("前半截").endsWith(ChatTurnRunner.CANCELLED_NOTE);
+        assertThat(tail).startsWith("前半截").endsWith(ChatTestEndpoints.PROMPTS.get(AgentLang.ZH, "chat.cancelledNote"));
     }
 
     @Test
     void 一个字没出时给的是未作答而不是空串() {
-        assertThat(ChatTurnRunner.cancelledAnswer("")).contains("未作答");
-        assertThat(ChatTurnRunner.cancelledAnswer("  ")).contains("未作答");
-        assertThat(ChatTurnRunner.cancelledAnswer("半截")).isEqualTo("半截\n\n" + ChatTurnRunner.CANCELLED_NOTE);
+        assertThat(ChatTurnRunner.cancelledAnswer(ChatTestEndpoints.PROMPTS, AgentLang.ZH, "")).contains("未作答");
+        assertThat(ChatTurnRunner.cancelledAnswer(ChatTestEndpoints.PROMPTS, AgentLang.ZH, "  ")).contains("未作答");
+        assertThat(ChatTurnRunner.cancelledAnswer(ChatTestEndpoints.PROMPTS, AgentLang.ZH, "半截")).isEqualTo("半截\n\n" + ChatTestEndpoints.PROMPTS.get(AgentLang.ZH, "chat.cancelledNote"));
     }
 
     /**
@@ -173,7 +174,7 @@ class ChatCancelTest {
         AtomicBoolean cancelled = new AtomicBoolean(true);
         AtomicBoolean yielded = new AtomicBoolean(true);
 
-        ChatTurnRunner.TurnResult result = new ChatTurnRunner(contextStore, registry)
+        ChatTurnRunner.TurnResult result = new ChatTurnRunner(contextStore, registry, ChatTestEndpoints.PROMPTS, ChatTestEndpoints.TOOLS)
                 .run(leaves(), 1L, SESSION, "看看行情", answer::append, e -> { },
                         yieldWith(cancelled, yielded));
 
@@ -203,7 +204,8 @@ class ChatCancelTest {
     void 没有轮在跑时中断请求如实回false() {
         ChatConcurrencyGate gate = new ChatConcurrencyGate(10);
         ChatYieldCoordinator coordinator = new ChatYieldCoordinator(
-                gate, mock(WorkbenchRunRegistry.class), mock(ChatTurnRunner.class), mock(ChatHistoryService.class));
+                gate, mock(WorkbenchRunRegistry.class), mock(ChatTurnRunner.class), mock(ChatHistoryService.class),
+                ChatTestEndpoints.PROMPTS);
 
         // 没登记过任何轮：按钮点晚了，前端要据此如实告诉用户，而不是假装停住了
         assertThat(coordinator.requestCancel(1L)).isFalse();

@@ -3,11 +3,14 @@ package com.mawai.wiibquant.controller;
 import com.alibaba.fastjson2.JSONObject;
 import com.mawai.wiibcommon.annotation.CurrentUserId;
 import com.mawai.wiibcommon.entity.UserLlmEndpoint;
+import com.mawai.wiibcommon.enums.AgentLang;
 import com.mawai.wiibcommon.enums.ErrorCode;
 import com.mawai.wiibcommon.exception.BizException;
 import com.mawai.wiibquant.agent.analysis.ReplayCoachPrompts;
 import com.mawai.wiibquant.agent.analysis.ReplayCoachRequest;
 import com.mawai.wiibquant.agent.chat.ChatModelFactory;
+import com.mawai.wiibquant.agent.i18n.PromptCatalog;
+import com.mawai.wiibquant.agent.i18n.UserLangResolver;
 import com.mawai.wiibquant.agent.llm.ChatEndpoints;
 import com.mawai.wiibquant.agent.llm.LlmEndpointService;
 import com.mawai.wiibquant.agent.llm.LlmErrorMessages;
@@ -63,6 +66,10 @@ public class ReplayCoachController {
 
     private final LlmEndpointService endpointService;
     private final ChatModelFactory chatModelFactory;
+    private final ReplayCoachPrompts coachPrompts;
+    private final PromptCatalog prompts;
+    /** 教练是实时请求：语言走 @CurrentUserId -> user.lang，与 chat/trader 同一条路 */
+    private final UserLangResolver userLangResolver;
     private final ExecutorService streamExecutor = Executors.newVirtualThreadPerTaskExecutor();
     private final ScheduledExecutorService heartbeatScheduler =
             Executors.newSingleThreadScheduledExecutor(r -> {
@@ -78,7 +85,8 @@ public class ReplayCoachController {
     public SseEmitter coach(@CurrentUserId long userId, @RequestBody ReplayCoachRequest request,
                             HttpServletResponse response) {
         response.setHeader("X-Accel-Buffering", "no");
-        String invalid = ReplayCoachPrompts.validate(request);
+        AgentLang lang = userLangResolver.of(userId);
+        String invalid = coachPrompts.validate(request, lang);
         if (invalid != null) {
             throw new BizException(invalid);
         }
@@ -114,7 +122,7 @@ public class ReplayCoachController {
         try {
             streamExecutor.submit(() -> {
                 try {
-                    run(channel, model, request);
+                    run(channel, model, request, lang);
                 } catch (Throwable e) {
                     log.error("[ReplayCoach] 任务异常退出 userId={}", userId, e);
                 } finally {
@@ -129,17 +137,18 @@ public class ReplayCoachController {
     }
 
     /** 一次流式调用的全过程。包私有：单测直接喂 mock 模型看它发出去的事件 */
-    void run(SseChannel channel, ChatModel model, ReplayCoachRequest request) {
+    void run(SseChannel channel, ChatModel model, ReplayCoachRequest request, AgentLang lang) {
         ScheduledFuture<?> heartbeat = heartbeatScheduler.scheduleWithFixedDelay(
                 channel::heartbeat, HEARTBEAT_SECONDS, HEARTBEAT_SECONDS, TimeUnit.SECONDS);
         StringBuilder answer = new StringBuilder();
         try {
             // 借 ResilientChatService 捎系统提示 + 流式重试；不挂工具不建图，落到底就是一次 model.stream
             ReactAgent.ChatService service = ResilientChatService.builder().model(model).asFactory()
-                    .apply(ReactAgent.<MessagesState<Message>>builder().defaultSystem(ReplayCoachPrompts.system(request)));
+                    .apply(ReactAgent.<MessagesState<Message>>builder()
+                            .defaultSystem(coachPrompts.system(request, lang)));
             // toStream + try-with-resources：用户切走（通道关闭）后 takeWhile 停止迭代、close 取消订阅，不再烧 token
             try (Stream<ChatResponse> frames = service.streamingExecute(
-                    List.of(new UserMessage(ReplayCoachPrompts.user(request)))).toStream()) {
+                    List.of(new UserMessage(coachPrompts.user(request, lang)))).toStream()) {
                 frames.takeWhile(f -> !channel.isClosed()).forEach(f -> {
                     String chunk = textOf(f);
                     if (chunk == null || chunk.isEmpty()) {
@@ -153,7 +162,8 @@ public class ReplayCoachController {
                 return;
             }
             if (answer.isEmpty()) {
-                channel.send("error", new JSONObject().fluentPut("message", "模型没有返回内容，请重试"));
+                channel.send("error", new JSONObject().fluentPut("message",
+                        prompts.get(lang, "coach.error.emptyAnswer")));
             } else {
                 channel.send("done", new JSONObject().fluentPut("answer", answer.toString()));
             }
@@ -162,7 +172,8 @@ public class ReplayCoachController {
             log.error("[ReplayCoach] 调用失败 mode={}", request.mode(), e);
             if (!channel.isClosed()) {
                 // 正常收尾而非 completeWithError：原因已随 error 事件发出，抛回 MVC 只会往 event-stream 里塞 JSON 盖掉真因
-                channel.send("error", new JSONObject().fluentPut("message", LlmErrorMessages.classify(e)));
+                channel.send("error", new JSONObject().fluentPut("message",
+                        LlmErrorMessages.classify(e, prompts, lang)));
                 channel.complete();
             }
         } finally {
