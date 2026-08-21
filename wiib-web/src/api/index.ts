@@ -1,7 +1,7 @@
 import axios from 'axios';
 import i18n, { type Lang } from '../i18n';
 import type { TnOverview, TnTrade, TnDailyCell, TnEquityPoint, TnFillStats, TnManualOrderReq, TnOrderResult, TnAck } from '../types/testnet';
-import type { BacktestStrategyMeta, BacktestTaskStatus, BacktestEventsPage, BacktestKlinesPage, BacktestResultPayload, ReplayCoverage, HistoryKlinesPayload, ReplayCoachRequest, ReplayCoachEvent } from '../types';
+import type { BacktestTaskStatus, BacktestEventsPage, BacktestKlinesPage, BacktestResultPayload, ReplayCoverage, HistoryKlinesPayload, ReplayCoachRequest, ReplayCoachEvent } from '../types';
 import type { LedgerEntry, LedgerBizTypeOption, PublicTrade, UserProfile, PositionHistoryItem, RankingSort } from '../types';
 import type { CampaignInfo, CampaignReward, CampaignScore, MyCampaignView } from '../types';
 import type { LlmEndpointView, LlmEndpointSaveRequest, LlmBindings, LlmPurpose } from '../types';
@@ -586,7 +586,6 @@ export const testnetApi = {
 
 // ========== 可视化回测页 ==========
 export const backtestApi = {
-  strategies: () => api.get<unknown, BacktestStrategyMeta[]>('/ai/backtest/strategies'),
   /** 提交回测（异步；同一时刻仅一个任务，冲突时后端 fail）。fromMs 含、toMs 不含 */
   run: (req: { strategyId: string; symbol: string; fromMs: number; toMs: number; initialBalance?: number; leverage?: number }) =>
     api.post<unknown, { taskId: string }>('/ai/backtest/run', req),

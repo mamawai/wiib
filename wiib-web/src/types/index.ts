@@ -1110,15 +1110,6 @@ export interface PublicTrade {
 
 // ==================== 可视化回测页 ====================
 
-export interface BacktestStrategyMeta {
-  id: string;
-  name: string;
-  desc: string;
-  symbols: string[];
-  /** 附加提示（如 LIQFADE 依赖研究性回填数据）；无则 null */
-  note: string | null;
-}
-
 export interface BacktestTaskStatus {
   taskId: string;
   state: 'QUEUED' | 'RUNNING' | 'DONE' | 'FAILED';

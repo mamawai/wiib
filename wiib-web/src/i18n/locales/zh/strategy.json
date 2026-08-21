@@ -20,10 +20,10 @@
     "loading": "加载策略账户...",
     "offline": "离线",
     "name": {
-      "fibo": "Fibo 回撤",
-      "liqfade": "Liq Fade",
-      "sqzmom": "Sqz Momentum",
-      "turtle": "Turtle 突破"
+      "fibo": "斐波回踩",
+      "turtle": "海龟突破",
+      "sqzmom": "挤压动量",
+      "liqfade": "清算逆袭"
     },
     "desc": {
       "fibo": "斐波那契回撤挂单",
@@ -80,6 +80,15 @@
     "subtitleReplay": "逐根揭示历史行情 · 按收盘价开多开空、加减仓 · 练自己的盘感",
     "modeStrategy": "策略回测",
     "modeReplay": "手动复盘",
+    "strategy": {
+      "fibo": "15m 找推动腿，0.66 黄金口袋挂限价等回踩；SL=腿回撤位，TP=前高/前低，1h SMA200 趋势同向过滤",
+      "turtle": "4h 通道突破触价追入，ATR 止损，反向通道出场，经典趋势跟随",
+      "sqzmom": "4h BB/KC 压缩蓄能，释放后顺动量方向市价进场，信号稀疏",
+      "liqfade": "5m 清算瀑布三签名（跌幅/premium/taker 卖压）命中即逆势接多，1h 时间出场",
+      "note": {
+        "liqfade": "依赖本地 taker/premium 侧数据；所选窗口覆盖不足会直接失败"
+      }
+    },
     "speed": {
       "slow": "慢",
       "normal": "中",

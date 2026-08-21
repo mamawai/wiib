@@ -11,18 +11,15 @@ import { EquityChart } from '../EquityChart';
 import { useToast } from '../ui/use-toast';
 import { getCoinPriceDecimals } from '../../lib/coinConfig';
 import { aggregateBars, barIndexAt, IV_OPTIONS, ivLabel } from '../../lib/klineAgg';
+import { STRATEGIES, strategyDisplay } from '../../lib/strategyCatalog';
 import { cn, fmtDateTime, fmtNum } from '../../lib/utils';
 import type {
-  BacktestEvent, BacktestResultPayload, BacktestStrategyMeta, BacktestTaskStatus, BacktestTrade,
+  BacktestEvent, BacktestResultPayload, BacktestTaskStatus, BacktestTrade,
 } from '../../types';
 import type { TnEquityPoint } from '../../types/testnet';
 
 const STORE_KEY = 'wiib.backtest.task';
 const POLL_MS = 800;
-/** 策略点缀色与 Strategies 页同源（图标底/选中识别用） */
-const ACCENT: Record<string, string> = {
-  FIBO: '#F97316', LIQFADE: '#3b82f6', SQZMOM: '#a855f7', TURTLE: '#10b981',
-};
 /** 回放速度档：bar/秒（5m bar：120/s ≈ 10小时行情每秒）。表里存词表 key，渲染时现查 */
 const SPEEDS = [
   { labelKey: 'backtest.speed.slow', bps: 30 }, { labelKey: 'backtest.speed.normal', bps: 120 },
@@ -165,7 +162,6 @@ export function StrategyBacktestPanel() {
   const { toast } = useToast();
 
   // ---- 配置 ----
-  const [metas, setMetas] = useState<BacktestStrategyMeta[]>([]);
   const [strategyId, setStrategyId] = useState('FIBO');
   const [symbol, setSymbol] = useState('ETHUSDT');
   const [fromDate, setFromDate] = useState(() => toDateInput(Date.now() - 365 * 86_400_000));
@@ -204,11 +200,6 @@ export function StrategyBacktestPanel() {
   const busy = running || queued || submitting;
   const done = status?.state === 'DONE';
   const warmupBars = status?.warmupBars ?? 0;
-
-  // ---- 策略元信息 ----
-  useEffect(() => {
-    backtestApi.strategies().then(setMetas).catch(() => { /* 元信息失败不挡页面，选择器退化为四个已知 id */ });
-  }, []);
 
   // ---- 刷新恢复：taskId 落 sessionStorage，回来接着看 ----
   useEffect(() => {
@@ -413,9 +404,11 @@ export function StrategyBacktestPanel() {
   const page = Math.min(tradePage, pageCount - 1);
   const pagedTrades = trades.slice(page * TRADES_PAGE, (page + 1) * TRADES_PAGE);
 
-  const metaOf = (id: string): BacktestStrategyMeta =>
-    metas.find(m => m.id === id) ?? { id, name: id, desc: '', symbols: ['BTCUSDT', 'ETHUSDT'], note: null };
-  const strategyList = metas.length > 0 ? metas : (['FIBO', 'TURTLE', 'SQZMOM', 'LIQFADE'] as const).map(metaOf);
+  /** 认不出的 id 原样显示：后端加了策略而前端词表还没登记时不至于空白 */
+  const strategyName = (id: string) => {
+    const m = strategyDisplay(id);
+    return m ? t(m.nameKey) : id;
+  };
 
   const s = result?.summary;
   // 滑杆在 5m 空间（撮合口径）；图表游标映射到聚合空间
@@ -430,8 +423,7 @@ export function StrategyBacktestPanel() {
       <div className="rounded-lg pt-card p-4 md:p-5 space-y-4">
         {/* 策略四选一 */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5">
-          {strategyList.map(m => {
-            const accent = ACCENT[m.id] ?? '#F97316';
+          {STRATEGIES.map(m => {
             const active = strategyId === m.id;
             return (
               <button
@@ -448,13 +440,18 @@ export function StrategyBacktestPanel() {
               >
                 <div className="flex items-center gap-2">
                   <span className="w-7 h-7 rounded-md border border-border flex items-center justify-center shrink-0"
-                    style={{ background: `${accent}1f`, color: accent }}>
+                    style={{ background: `${m.accent}1f`, color: m.accent }}>
                     <Bot className="w-4 h-4" />
                   </span>
-                  <span className="text-xs font-black truncate">{m.name}</span>
+                  <span className="text-xs font-black truncate">{t(m.nameKey)}</span>
                 </div>
-                <div className="text-[10px] text-muted-foreground mt-1.5 leading-snug line-clamp-2">{m.desc}</div>
-                {m.note && <div className="text-[9px] text-warning mt-1 leading-snug line-clamp-2">⚠ {m.note}</div>}
+                <div className="text-[10px] text-muted-foreground mt-1.5 leading-snug line-clamp-2">{t(m.mechKey)}</div>
+                {m.noteKey && (
+                  <div className="text-[9px] text-warning mt-1 leading-snug line-clamp-2 flex items-start gap-1">
+                    <AlertTriangle className="w-2.5 h-2.5 mt-[3px] shrink-0" />
+                    <span className="min-w-0">{t(m.noteKey)}</span>
+                  </div>
+                )}
               </button>
             );
           })}
@@ -553,7 +550,7 @@ export function StrategyBacktestPanel() {
           <div className="space-y-5 min-w-0">
             <div className="rounded-lg pt-card p-3 md:p-4 space-y-3">
               <div className="flex items-center gap-2 flex-wrap">
-                <span className="microlabel uppercase">{symbol} · {ivLabel(ivMin)}{status ? ` · ${metaOf(status.strategyId).name}` : ''}</span>
+                <span className="microlabel uppercase">{symbol} · {ivLabel(ivMin)}{status ? ` · ${strategyName(status.strategyId)}` : ''}</span>
                 <div className="flex rounded border border-border overflow-hidden">
                   {IV_OPTIONS.map(o => (
                     <button key={o.min} type="button"

@@ -335,7 +335,8 @@ public class BacktestTaskService {
         return pts;
     }
 
-    public List<BacktestOrchestrator.StrategyMeta> strategies() {
-        return orchestrator.strategies();
+    /** 提交前的 id 校验入口：控制器只认这一层，不直连编排器 */
+    public boolean knownStrategy(String strategyId) {
+        return orchestrator.knownStrategy(strategyId);
     }
 }

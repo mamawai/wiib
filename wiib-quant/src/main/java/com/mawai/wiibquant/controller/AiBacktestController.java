@@ -53,13 +53,6 @@ public class AiBacktestController {
     public record HistoryKlines(int total, List<List<Number>> rows) {
     }
 
-    @Operation(summary = "策略元信息")
-    @GetMapping("/strategies")
-    public Result<List<BacktestOrchestrator.StrategyMeta>> strategies() {
-        StpUtil.checkLogin();
-        return Result.ok(taskService.strategies());
-    }
-
     @Operation(summary = "提交回测（异步；同参数指纹直接复用既有任务）")
     @PostMapping("/run")
     public Result<Map<String, String>> run(@RequestBody RunReq req) {
@@ -85,7 +78,7 @@ public class AiBacktestController {
                 return Result.fail("杠杆需在 1~100");
             }
             String strategyId = req.strategyId();
-            if (strategyId == null || taskService.strategies().stream().noneMatch(m -> m.id().equals(strategyId))) {
+            if (strategyId == null || !taskService.knownStrategy(strategyId)) {
                 return Result.fail("未知策略: " + strategyId);
             }
             String taskId = taskService.submit(userId, strategyId, symbol,

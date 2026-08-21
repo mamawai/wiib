@@ -42,9 +42,9 @@ class BacktestOrchestratorTest {
         store.bars = flatBars(50);
         BacktestOrchestrator orch = new BacktestOrchestrator(store, denseSide());
 
-        assertThat(orch.strategies()).extracting(BacktestOrchestrator.StrategyMeta::id)
-                .containsExactly("FIBO", "TURTLE", "SQZMOM", "LIQFADE");
+        assertThat(orch.knownStrategy("NOPE")).isFalse();
         for (String id : List.of("FIBO", "TURTLE", "SQZMOM", "LIQFADE")) {
+            assertThat(orch.knownStrategy(id)).as(id).isTrue();
             BacktestOrchestrator.Prepared p = orch.prepare(id, "BTCUSDT", 10 * M5, 50 * M5);
             assertThat(p.strategy().id()).isEqualTo(id);
             assertThat(p.bars()).hasSize(50);

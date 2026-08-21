@@ -12,17 +12,10 @@ import { EquityChart } from '../components/EquityChart';
 import { cn, fmtDateTime, fmtNum } from '../lib/utils';
 import type { FuturesPosition, StrategyAccountView, StrategyClosedPosition, StrategySignalState } from '../types';
 import type { TnEquityPoint } from '../types/testnet';
+import { DEFAULT_ACCENT, strategyDisplay } from '../lib/strategyCatalog';
 
 const ADMIN_USER_ID = 1;
 const REFRESH_MS = 60_000;
-
-/** 策略展示名与一句话说明（id 来自 TradingStrategySpi.id()）+ 专属点缀色（图标底/识别用，不入图表） */
-const STRATEGY_META: Record<string, { nameKey: string; descKey: string; accent: string }> = {
-  FIBO: { nameKey: 'strategies.name.fibo', descKey: 'strategies.desc.fibo', accent: '#F97316' },
-  LIQFADE: { nameKey: 'strategies.name.liqfade', descKey: 'strategies.desc.liqfade', accent: '#3b82f6' },
-  SQZMOM: { nameKey: 'strategies.name.sqzmom', descKey: 'strategies.desc.sqzmom', accent: '#a855f7' },
-  TURTLE: { nameKey: 'strategies.name.turtle', descKey: 'strategies.desc.turtle', accent: '#10b981' },
-};
 
 
 function PnlText({ value, className }: { value: number | null | undefined; className?: string }) {
@@ -155,11 +148,11 @@ function StrategyColumn({ view, signals, canClose, closingId, onClose }: {
   onClose: (strategyId: string, pos: FuturesPosition) => void;
 }) {
   const { t } = useTranslation('strategy');
-  const meta = STRATEGY_META[view.strategyId];
+  const meta = strategyDisplay(view.strategyId);
   // 认不出的策略 id 直接把 id 当名字显示（后端新增策略时不至于空白）
   const metaName = meta ? t(meta.nameKey) : view.strategyId;
   const metaDesc = meta ? t(meta.descKey) : '';
-  const accent = meta?.accent ?? '#F97316';
+  const accent = meta?.accent ?? DEFAULT_ACCENT;
   const [tradePage, setTradePage] = useState(0);
 
   // 收益曲线：已平仓 closedPnl 按平仓时间升序累加（testnet 页同口径，从 0 起）

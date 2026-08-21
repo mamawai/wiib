@@ -17,6 +17,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.Set;
 
 /**
  * 回测编排：策略注册表（工厂 + warmup 公式，数值照抄各 DbRun 现值）+ 数据装载 + fail-fast 校验。
@@ -26,9 +27,11 @@ import java.util.List;
 @RequiredArgsConstructor
 public class BacktestOrchestrator {
 
-    /** 策略元信息（前端配置台展示用）。 */
-    public record StrategyMeta(String id, String name, String desc, List<String> symbols, String note) {
-    }
+    /**
+     * 可回测的策略 id，与 {@link #warmupMs} / {@link #prepare} 两个 switch 同一批。
+     * 展示用的名字与说明全在前端词表里（见 wiib-web 的 lib/strategyCatalog），这一层只认 id。
+     */
+    private static final Set<String> STRATEGY_IDS = Set.of("FIBO", "TURTLE", "SQZMOM", "LIQFADE");
 
     /** 引擎开跑所需的全部输入。bars 含预热段，任务服务直接持有同一份供 K 线接口切片。 */
     public record Prepared(TradingStrategySpi strategy, List<KlineBar> bars, int warmupBars) {
@@ -41,29 +44,11 @@ public class BacktestOrchestrator {
         }
     }
 
-    private static final List<StrategyMeta> METAS = List.of(
-            new StrategyMeta("FIBO", "斐波回踩",
-                    "15m 找推动腿，0.66 黄金口袋挂限价等回踩；SL=腿回撤位，TP=前高/前低，1h SMA200 趋势同向过滤",
-                    QuantConstants.WATCH_SYMBOLS, null),
-            new StrategyMeta("TURTLE", "海龟突破",
-                    "4h 通道突破触价追入，ATR 止损，反向通道出场，经典趋势跟随",
-                    QuantConstants.WATCH_SYMBOLS, null),
-            new StrategyMeta("SQZMOM", "挤压动量",
-                    "4h BB/KC 压缩蓄能，释放后顺动量方向市价进场，信号稀疏",
-                    QuantConstants.WATCH_SYMBOLS, null),
-            new StrategyMeta("LIQFADE", "清算逆袭",
-                    "5m 清算瀑布三签名（跌幅/premium/taker 卖压）命中即逆势接多，1h 时间出场",
-                    QuantConstants.WATCH_SYMBOLS, "依赖本地 taker/premium 侧数据；所选窗口覆盖不足会直接失败"));
-
     private final KlineHistoryStore klineHistoryStore;
     private final DbLiqSideData dbLiqSideData;
 
-    public List<StrategyMeta> strategies() {
-        return METAS;
-    }
-
     public boolean knownStrategy(String strategyId) {
-        return METAS.stream().anyMatch(m -> m.id().equals(strategyId));
+        return STRATEGY_IDS.contains(strategyId);
     }
 
     /** 预热毫秒（照抄各 DbRun 现值；FIBO 含 SMA200 趋势闸预热，比老 /fibo 端点的取值更足）。 */
