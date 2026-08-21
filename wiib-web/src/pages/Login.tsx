@@ -277,7 +277,8 @@ export function Login() {
           </div>
         </div>
 
-        <div className="flex items-center gap-6 text-[11px] font-semibold text-muted-foreground">
+        {/* 三项特性条：英文压缩后仍 458px，1024–1152 段左栏装不下，给 wrap 让它自然折行 */}
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-[11px] font-semibold text-muted-foreground">
           <span className="flex items-center gap-1.5"><BarChart3 className="w-3.5 h-3.5" />{t('login.featQuotes')}</span>
           <span className="flex items-center gap-1.5"><Wallet className="w-3.5 h-3.5" />{t('login.featFunds')}</span>
           <span className="flex items-center gap-1.5"><LineChart className="w-3.5 h-3.5" />{t('login.featAi')}</span>

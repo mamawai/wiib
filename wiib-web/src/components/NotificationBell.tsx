@@ -9,7 +9,7 @@ import { NotificationList } from './NotificationList';
 
 /**
  * 顶栏信封：未读角标 + 下拉面板。点开即全部标已读，面板仍列最近 50 条历史。
- * 只在 PC 显示（顶栏整体 hidden md:flex），手机端的通知入口在「我的」页。
+ * 只在 PC 显示（顶栏操作区整体 hidden lg:flex），手机端的通知入口在「我的」页。
  */
 export function NotificationBell() {
   const navigate = useNavigate();

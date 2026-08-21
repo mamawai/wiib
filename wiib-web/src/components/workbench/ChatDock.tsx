@@ -65,7 +65,7 @@ function ballBounds() {
   const size = rem * 3, edge = rem;
   // 移动端底部压着导航栏（Layout 里 fixed bottom-0 那条，高度随内容+安全区走），
   // 给一段宽裕的留白让开；PC 没有导航，只留视觉边距
-  const bottom = window.matchMedia('(min-width: 768px)').matches ? edge * 1.5 : rem * 5;
+  const bottom = window.matchMedia('(min-width: 1024px)').matches ? edge * 1.5 : rem * 5;
   return {
     size,
     minX: edge,

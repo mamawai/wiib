@@ -2,12 +2,13 @@
   "nav": {
     "home": "Home",
     "markets": "Markets",
-    "portfolio": "Portfolio",
+    "portfolio": "Assets",
     "ledger": "Ledger",
     "ai": "AI",
     "arena": "Arena",
-    "ranking": "Leaderboard",
+    "ranking": "Ranks",
     "games": "Games",
+    "more": "More",
     "testnet": "Testnet",
     "strategies": "Strategies",
     "backtest": "Backtest",
@@ -33,10 +34,10 @@
     "down": "Disconnected",
     "unknown": "Unknown"
   },
-  "offline": "Network disconnected. Market data has stopped updating.",
+  "offline": "Offline — market data has stopped updating",
   "tour": {
     "skip": "Skip tour",
-    "prev": "Previous",
+    "prev": "Back",
     "next": "Next",
     "done": "Done"
   },

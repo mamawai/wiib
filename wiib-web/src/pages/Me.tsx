@@ -13,7 +13,7 @@ import { ProfilePublicToggle } from '../components/ProfilePublicToggle';
 import { LanguageSettingRow } from '../components/LanguageSwitcher';
 import { useNotificationPanel } from '../hooks/useNotificationPanel';
 import { userApi } from '../api';
-import { Trophy, Gamepad2, Sun, Moon, LogOut, ChevronRight, User, LineChart, Monitor, RotateCcw, MessageSquare, Bell, Receipt, Gift, FlaskConical } from 'lucide-react';
+import { Trophy, Gamepad2, Sun, Moon, LogOut, ChevronRight, User, LineChart, Monitor, RotateCcw, MessageSquare, Bell, Receipt, Gift, FlaskConical, Swords } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 export function Me() {
@@ -27,7 +27,7 @@ export function Me() {
   const [confirmName, setConfirmName] = useState('');
   const [resetting, setResetting] = useState(false);
 
-  // 通知：手机端顶栏信封是 hidden md:flex 看不到，这里是手机用户唯一的通知入口。
+  // 通知：手机端顶栏信封是 hidden lg:flex 看不到，这里是手机用户唯一的通知入口。
   // 订阅与开合逻辑跟顶栏信封共用一份 hook，未读数也是同一份（各存各的会导致
   // 在这儿标了已读、顶栏红点还挂着旧数字）
   // 只盯 id：fetchUser 每次返回新 user 对象，盯整个对象会反复退订重订，
@@ -66,6 +66,8 @@ export function Me() {
     { icon: Gift, label: t('me.nav.campaign'), to: '/campaign', color: 'text-amber-400' },
     // 账单没进顶栏/底栏（导航已经满了），手机端只有这一个入口
     { icon: Receipt, label: t('me.nav.ledger'), to: '/ledger', color: 'text-primary' },
+    // 竞技场原先只有桌面顶栏那一个入口，手机端零入口只能手敲 URL，排第三位补上
+    { icon: Swords, label: t('me.nav.arena'), to: '/arena', color: 'text-cyan-400' },
     // 移动端底栏只有5槽，策略/模拟盘与排行/游戏一样从这里进（桌面走头部导航）
     { icon: LineChart, label: t('me.nav.strategies'), to: '/strategies', color: 'text-violet-400' },
     { icon: FlaskConical, label: t('me.nav.backtest'), to: '/backtest', color: 'text-orange-400' },

@@ -16,11 +16,18 @@ import {
   Home, Briefcase, LogOut, LogIn, TrendingUp, Sun, Moon,
   BarChart3, User, ChevronDown, List, DollarSign,
   Brain, Gem, Globe,
+  Monitor, LineChart, FlaskConical, Gift, MessageSquare,
 } from 'lucide-react';
 
 interface Props { children: React.ReactNode }
 
 const MARKET_PATHS = ['/bstock', '/coin', '/commodity', '/tradfi'];
+/** 收进 More 下拉的低频入口：13 项平铺英文顶栏要 1524px，1280/1366/1440 三档笔记本全横向溢出 */
+const MORE_PATHS = ['/testnet', '/strategies', '/backtest', '/campaign', '/comments'];
+
+/** 当前路由是否落在这组前缀里——下拉自身要跟着亮激活态，不然进了子页顶栏就没了着落 */
+const matchPaths = (pathname: string, paths: string[]) =>
+  paths.some(p => pathname === p || pathname.startsWith(p + '/'));
 
 /** 模块级常量存 key 不存文案：存文案的话切语言不会变 */
 const LED_LABEL_KEY: Record<HealthLevel, string> = {
@@ -46,7 +53,7 @@ function SystemLeds() {
   );
 }
 
-/** 仓库入口图标：桌面/移动两处顶栏共用，display 由调用方传（hidden lg:inline-flex / inline-flex） */
+/** 仓库入口图标：桌面/移动两处顶栏共用，display 由调用方传（hidden xl:inline-flex / inline-flex） */
 function GitHubLink({ className }: { className?: string }) {
   return (
     <a
@@ -69,7 +76,8 @@ export function Layout({ children }: Props) {
   const { t } = useTranslation('layout');
 
   const handleLogout = async () => { await logout(); navigate('/login'); };
-  const isMarketActive = MARKET_PATHS.some(p => location.pathname === p || location.pathname.startsWith(p + '/'));
+  const isMarketActive = matchPaths(location.pathname, MARKET_PATHS);
+  const isMoreActive = matchPaths(location.pathname, MORE_PATHS);
 
   return (
     <div className="min-h-screen flex flex-col bg-background">
@@ -92,9 +100,23 @@ export function Layout({ children }: Props) {
           </button>
 
           {/* Desktop Nav */}
-          <nav className="hidden md:flex items-center gap-4 h-full whitespace-nowrap">
+          {/* 桌面/移动分界卡在 lg 不是 md：两侧固定开销(logo+内边距+右侧操作区)约 383px，
+              9 个入口自身的 padding/gap/chevron 又要 217px，768 视口只剩 168px 装 9 个标签，
+              中英文都填不进——这是算术不是取舍。768–1023 因此走底栏 5 格。
+              gap 也从 4 收到 3：1024 段要给 GitHub 让位后的用户名腾出 34px，
+              每项自带 px-1，字到字仍有 21px，不挤 */}
+          <nav className="hidden lg:flex items-center gap-3 h-full whitespace-nowrap">
             <HeaderNavItem to="/" label={t('nav.home')} />
-            <MarketDropdown isActive={isMarketActive} />
+            <NavDropdown
+              label={t('nav.markets')}
+              isActive={isMarketActive}
+              items={[
+                { to: '/bstock', icon: <List className="w-4 h-4" />, label: t('marketMenu.stocks') },
+                { to: '/coin', icon: <DollarSign className="w-4 h-4" />, label: t('marketMenu.crypto') },
+                { to: '/commodity', icon: <Gem className="w-4 h-4" />, label: t('marketMenu.commodity') },
+                { to: '/tradfi', icon: <Globe className="w-4 h-4" />, label: t('marketMenu.tradfi') },
+              ]}
+            />
             <HeaderNavItem to="/portfolio" label={t('nav.portfolio')} />
             {/* 账单：桌面端唯一入口（手机端在「我的」页里）。原先挂在持仓页当按钮，
                 资金流水跟持仓是两件事，藏在别的页面里找不着 */}
@@ -103,19 +125,26 @@ export function Layout({ children }: Props) {
             <HeaderNavItem to="/arena" label={t('nav.arena')} />
             <HeaderNavItem to="/ranking" label={t('nav.ranking')} />
             <HeaderNavItem to="/games" label={t('nav.games')} />
-            <HeaderNavItem to="/testnet" label={t('nav.testnet')} />
-            <HeaderNavItem to="/strategies" label={t('nav.strategies')} />
-            <HeaderNavItem to="/backtest" label={t('nav.backtest')} />
-            {/* 活动：桌面端入口。手机端底部 Tab 只有 5 格且已满，收在「我的」页里 */}
-            <HeaderNavItem to="/campaign" label={t('nav.campaign')} />
-            <HeaderNavItem to="/comments" label={t('nav.comments')} />
+            {/* 低频五项收进 More：外露的 8 项是每天要点的，这五项进来一趟看一眼就走 */}
+            <NavDropdown
+              label={t('nav.more')}
+              isActive={isMoreActive}
+              items={[
+                { to: '/testnet', icon: <Monitor className="w-4 h-4" />, label: t('nav.testnet') },
+                { to: '/strategies', icon: <LineChart className="w-4 h-4" />, label: t('nav.strategies') },
+                { to: '/backtest', icon: <FlaskConical className="w-4 h-4" />, label: t('nav.backtest') },
+                // 活动：桌面端入口。手机端底部 Tab 只有 5 格且已满，收在「我的」页里
+                { to: '/campaign', icon: <Gift className="w-4 h-4" />, label: t('nav.campaign') },
+                { to: '/comments', icon: <MessageSquare className="w-4 h-4" />, label: t('nav.comments') },
+              ]}
+            />
           </nav>
 
           {/* Actions */}
-          <div className="hidden md:flex items-center gap-2 ml-auto whitespace-nowrap">
+          <div className="hidden lg:flex items-center gap-2 ml-auto whitespace-nowrap">
             <SystemLeds />
 
-            <GitHubLink className="hidden lg:inline-flex" />
+            <GitHubLink className="hidden xl:inline-flex" />
 
             <LanguageSwitcher />
 
@@ -133,7 +162,9 @@ export function Layout({ children }: Props) {
                 两边都不显示，否则每次刷新都要闪一下"登录"再变回用户名 */}
             {user ? (
               <div className="flex items-center gap-2">
-                <span className="text-xs font-semibold text-muted-foreground hidden lg:inline">{user.username}</span>
+                {/* lg 段(1024–1279)横向只剩几十像素，用户名给上限+省略号：它是登录态的可见凭据，
+                    宁可截断也别整个藏掉；xl 起 GitHub 回来了空间仍够，放宽到 32 */}
+                <span className="text-xs font-semibold text-muted-foreground hidden lg:block max-w-14 xl:max-w-32 truncate">{user.username}</span>
                 <NotificationBell />
                 <Button variant="ghost" size="icon" className="w-8 h-8" onClick={handleLogout}>
                   <LogOut className="w-4 h-4" />
@@ -148,7 +179,7 @@ export function Layout({ children }: Props) {
           </div>
 
           {/* 移动端右侧：GitHub + 主题切换，其余入口在底部 Tab 和「我的」页 */}
-          <div className="flex md:hidden items-center ml-auto">
+          <div className="flex lg:hidden items-center ml-auto">
             <GitHubLink className="inline-flex" />
             <LanguageSwitcher />
             <Button
@@ -168,12 +199,12 @@ export function Layout({ children }: Props) {
       </header>
 
       {/* Main */}
-      <main className="flex-1 pb-24 md:pb-6 pt-4 pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]">
+      <main className="flex-1 pb-24 lg:pb-6 pt-4 pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]">
         {children}
       </main>
 
       {/* ===== 移动端底部 Tab：贴边实条 ===== */}
-      <nav className="fixed bottom-0 inset-x-0 md:hidden z-50 flex items-stretch border-t border-border bg-card pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]">
+      <nav className="fixed bottom-0 inset-x-0 lg:hidden z-50 flex items-stretch border-t border-border bg-card pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]">
         <BottomNavItem to="/" icon={<Home className="w-5 h-5" />} label={t('nav.home')} />
         <BottomNavItem to="/bstock" icon={<BarChart3 className="w-5 h-5" />} label={t('nav.markets')} forceActive={isMarketActive} />
         <BottomNavItem to="/portfolio" icon={<Briefcase className="w-5 h-5" />} label={t('nav.portfolio')} />
@@ -206,10 +237,12 @@ function HeaderNavItem({ to, label }: { to: string; label: string }) {
   );
 }
 
-function MarketDropdown({ isActive }: { isActive: boolean }) {
+interface NavDropdownItem { to: string; icon: React.ReactNode; label: string }
+
+/** 顶栏下拉壳子：市场与 More 共用一份，面板宽度/激活态/指示线逐字同款，别再复制一遍 */
+function NavDropdown({ label, isActive, items }: { label: string; isActive: boolean; items: NavDropdownItem[] }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
-  const { t } = useTranslation('layout');
 
   useClickOutside(ref, () => setOpen(false));
 
@@ -224,19 +257,14 @@ function MarketDropdown({ isActive }: { isActive: boolean }) {
             : "text-muted-foreground font-medium hover:text-foreground"
         )}
       >
-        {t('nav.markets')}
+        {label}
         <ChevronDown className={cn("w-3.5 h-3.5 transition-transform", open && "rotate-180")} />
       </button>
 
       {open && (
         // z-50 不能省：NumberFlow 的 transform 会创建层叠上下文，副条数字会盖到面板上
         <div className="absolute top-full left-0 mt-1 w-44 rounded-lg pt-card shadow-lg py-1 z-50 animate-in fade-in slide-in-from-top-2">
-          {[
-            { to: '/bstock', icon: <List className="w-4 h-4" />, label: t('marketMenu.stocks') },
-            { to: '/coin', icon: <DollarSign className="w-4 h-4" />, label: t('marketMenu.crypto') },
-            { to: '/commodity', icon: <Gem className="w-4 h-4" />, label: t('marketMenu.commodity') },
-            { to: '/tradfi', icon: <Globe className="w-4 h-4" />, label: t('marketMenu.tradfi') },
-          ].map(({ to, icon, label }) => (
+          {items.map(({ to, icon, label: itemLabel }) => (
             <NavLink
               key={to}
               to={to}
@@ -251,7 +279,7 @@ function MarketDropdown({ isActive }: { isActive: boolean }) {
               }
             >
               {icon}
-              {label}
+              {itemLabel}
             </NavLink>
           ))}
         </div>

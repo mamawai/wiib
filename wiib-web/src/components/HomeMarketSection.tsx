@@ -21,10 +21,12 @@ function CategoryHeader({ icon: Icon, title, subtitle, iconColor, to }: {
       onClick={() => navigate(to)}
       className="flex items-center gap-2 w-full px-3 py-2.5 border-b border-border group cursor-pointer hover:bg-surface-hover transition-colors"
     >
-      <Icon className={cn('w-3.5 h-3.5', iconColor)} />
-      <span className="text-xs font-bold">{title}</span>
-      <span className="text-[10px] text-muted-foreground">{subtitle}</span>
-      <span className="ml-auto inline-flex items-center gap-0.5 text-[10px] font-semibold text-muted-foreground group-hover:text-primary transition-colors">
+      {/* 四列并排时这行只有 ~294px：主标题/图标/「全部」都锁死不缩，让副标题独自吃掉差额并省略号收尾，
+         否则 flex 会按比例一起压，主标题先折成两行 */}
+      <Icon className={cn('w-3.5 h-3.5 shrink-0', iconColor)} />
+      <span className="text-xs font-bold shrink-0">{title}</span>
+      <span className="text-[10px] text-muted-foreground min-w-0 truncate">{subtitle}</span>
+      <span className="ml-auto shrink-0 inline-flex items-center gap-0.5 text-[10px] font-semibold text-muted-foreground group-hover:text-primary transition-colors">
         {t('all')} <ChevronRight className="w-3 h-3" />
       </span>
     </button>

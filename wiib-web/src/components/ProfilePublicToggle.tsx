@@ -7,7 +7,8 @@ import { useToast } from './ui/use-toast';
 import { cn } from '../lib/utils';
 
 /**
- * 详情页公开开关。手机走 /me、桌面走 /portfolio（底栏 md:hidden，桌面进不到「我的」页），
+ * 详情页公开开关。/me 与 /portfolio 各摆一处，两边按同一条界切开：底栏 lg:hidden，
+ * ≥1024 没有「我的」页，桌面只能从持仓页进；1023 及以下反过来，持仓页那块 hidden lg:block 收起，走「我的」页。
  * 两处摆同一个组件而不是各写一份——两份状态逻辑迟早只改一边。
  */
 export function ProfilePublicToggle() {

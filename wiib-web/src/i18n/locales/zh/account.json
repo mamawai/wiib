@@ -31,6 +31,7 @@
     "nav": {
       "campaign": "LDC 瓜分活动",
       "ledger": "资金账单",
+      "arena": "竞技场",
       "strategies": "策略",
       "backtest": "回测",
       "testnet": "模拟盘",

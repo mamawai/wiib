@@ -101,7 +101,7 @@
     "loginToTrade": "请登录后交易",
     "noSidePosition": "暂无 {{side}} 持仓",
     "liveTrades": "实时成交",
-    "waitingTrades": "等待交易...",
+    "waitingTrades": "等待成交…",
     "tabBets": "我的下注",
     "tabRounds": "往期回合",
     "noBets": "暂无下注记录",

@@ -783,8 +783,8 @@ export function Portfolio() {
         )}
       </div>
 
-      {/* 隐私开关 + 重置账户。只在 PC 出现——手机端底栏有「我的」页，同一个入口不重复摆两处 */}
-      <div className="hidden md:block space-y-4">
+      {/* 隐私开关 + 重置账户。只在 ≥1024 出现——底栏 lg:hidden，1023 及以下有「我的」页，同一个入口不重复摆两处 */}
+      <div className="hidden lg:block space-y-4">
         <ProfilePublicToggle />
 
         <Card className="border-destructive/20">

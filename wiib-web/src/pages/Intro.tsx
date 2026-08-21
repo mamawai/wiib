@@ -24,7 +24,7 @@ export function Intro() {
   const goHome = () => navigate('/', { replace: true });
 
   return (
-    <div className="page-shell px-4 md:px-6 py-6 pb-36 md:pb-24 space-y-5">
+    <div className="page-shell px-4 md:px-6 py-6 pb-36 lg:pb-24 space-y-5">
 
       <h1 className="text-2xl font-extrabold flex items-center gap-2">
         <Bell className="w-6 h-6 text-primary" />
@@ -112,7 +112,7 @@ export function Intro() {
       </div>
 
       {/* sticky 底部按钮 */}
-      <div className="fixed left-0 right-0 bottom-20 md:bottom-6 px-4 md:px-6 z-50">
+      <div className="fixed left-0 right-0 bottom-20 lg:bottom-6 px-4 md:px-6 z-50">
         <div className="max-w-2xl mx-auto flex gap-3">
           <Button variant="outline" className="flex-1" onClick={() => { hideNoticeToday(); goHome(); }}>{t('intro.hideToday')}</Button>
           <Button className="flex-1" onClick={() => { markNoticeSeen(); goHome(); }}>{t('intro.gotIt')}</Button>

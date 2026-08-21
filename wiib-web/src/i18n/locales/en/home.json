@@ -12,6 +12,7 @@
     "crypto": "Crypto",
     "prediction": "Prediction",
     "ai": "AI",
+    "arena": "Arena",
     "games": "Games",
     "buff": "Rewards"
   },
@@ -21,13 +22,13 @@
     "totalPnl": "Total PnL",
     "todayPnl": "Today's PnL",
     "monthPnl": "Monthly PnL",
-    "monthPnlHelp": "Each cell comes from the asset snapshot taken at midnight, covering unrealized PnL across stocks, crypto, futures, prediction and games.\n\nNo snapshot is written on days the service was not running. Daily PnL is that day's snapshot minus the previous day's, so a single missing day blanks out both that day and the one after it.\n\nFor reference only and possibly incomplete. For today's live number, see Today's PnL above.",
+    "monthPnlHelp": "Cells come from the midnight asset snapshot — unrealized PnL across stocks, crypto, futures, prediction and games.\n\nDays the service was down leave no snapshot. Daily PnL is that day's snapshot minus the previous day's, so one missing day blanks out that day and the next.\n\nReference only, may be incomplete. For today's live figure see Today's PnL above.",
     "refreshed": "Refreshed"
   },
   "guest": {
-    "badge": "Paper trading platform",
+    "badge": "Paper trading",
     "headline": "Paper trading,<0/><1>anytime, anywhere</1>",
-    "tagline": "Find out what if you had bought. Stocks, BTC and futures, all covered.",
+    "tagline": "Find out what if you had bought — stocks, BTC and futures.",
     "start": "Start trading",
     "howToPlay": "How it works",
     "statStocks": "Stocks",
@@ -42,7 +43,7 @@
     "commodity": "Commodities",
     "commoditySub": "Gold / Oil",
     "tradfi": "TradFi futures",
-    "tradfiSub": "US equity / ETF perpetuals",
+    "tradfiSub": "US equity / ETF perps",
     "usStock": "US equity"
   },
   "news": {
@@ -59,14 +60,14 @@
     "title": "Liquidations",
     "longLiq": "Long liq",
     "shortLiq": "Short liq",
-    "hint": "Live liquidation feed from Binance",
+    "hint": "Live Binance liquidation feed",
     "viewAll": "View all"
   },
   "buff": {
     "title": "Daily buff",
     "drawing": "Drawing...",
     "congrats": "You got",
-    "notDrawn": "Not drawn yet today. Try your luck",
+    "notDrawn": "Not drawn today — try your luck",
     "draw": "Draw today's buff",
     "drawnToday": "Already drawn today",
     "loginFirst": "Sign in to draw",
@@ -94,7 +95,7 @@
     "trades_other": "{{count}} trades"
   },
   "dayDetail": {
-    "note": "Daily PnL · whole account · snapshot basis, for reference only",
+    "note": "Daily PnL · whole account · snapshot basis, reference only",
     "stocks": "Stocks",
     "crypto": "Crypto",
     "commodity": "Commodities",
@@ -104,102 +105,102 @@
   "faq": {
     "title": "Getting started · FAQ",
     "spotVsFutures": {
-      "q": "What is the difference between spot and futures?",
-      "a": "Spot means you actually buy and hold the asset — sell higher to profit, and the most you can lose is what you paid. Futures is margin trading: you never hold the underlying, you can go long or short, leverage amplifies your exposure, and you can be liquidated. Gold and oil here are futures-only instruments (TradFi perpetuals) with no spot to buy, while tokenized US equities are spot."
+      "q": "Spot vs futures: what's the difference?",
+      "a": "Spot means you own the asset — sell higher to profit, and you can only lose what you paid. Futures is margin trading: you never hold the underlying, you can go long or short, leverage amplifies exposure, and you can be liquidated. Gold and oil here are futures-only (TradFi perpetuals) with no spot to buy; tokenized US equities are spot."
     },
     "leverage": {
       "q": "What is leverage?",
-      "a": "Leverage lets one unit of capital control several times that size. Open 10x on 100 USDT and you hold a 1,000 USDT position — every 1% move in price is 10% on your capital. Leverage magnifies losses exactly as much as gains, and the higher the multiple the closer liquidation gets. Futures here use tiered leverage (each tier caps position size), and spot buys also offer low-multiple borrowed leverage charged by the day."
+      "a": "One unit of capital controls several times its size. Open 10x on 100 USDT and you hold a 1,000 USDT position — every 1% move in price is 10% on your capital. Losses are magnified exactly as much as gains, and the higher the multiple the closer liquidation gets. Futures here use tiered leverage (each tier caps position size); spot buys also offer low-multiple borrowed leverage, charged daily."
     },
     "crossVsIsolated": {
-      "q": "What is the difference between cross and isolated margin?",
-      "a": "The difference is what pays for the loss. Isolated: each position stakes only its own margin, so the worst case is losing that one slice and the rest of your funds are untouched. Cross: the whole available balance backs every position, so one losing position eats into the entire account — it survives bigger swings, but a liquidation costs far more. Start with isolated, where the maximum loss is obvious."
+      "q": "Cross vs isolated margin: what's the difference?",
+      "a": "It comes down to what pays for the loss. Isolated: each position stakes only its own margin, so the worst case is that one slice and the rest of your funds are untouched. Cross: the whole available balance backs every position, so one loser eats into the entire account — it survives bigger swings, but liquidation costs far more. Start with isolated, where the maximum loss is obvious."
     },
     "markPrice": {
-      "q": "What is the mark price, and why is liquidation based on it?",
-      "a": "The mark price is the fair price an exchange derives from the composite spot index. It is smoother than the last traded price and is what unrealized PnL and liquidation triggers are calculated from. The point is to stop someone pushing the traded price through a thin book with one large order and liquidating others on purpose (a wick). Your position PnL tracks the mark price, not the latest candle price."
+      "q": "What is the mark price, and why does liquidation use it?",
+      "a": "A fair price the exchange derives from the composite spot index. It is smoother than the last traded price, and it is what unrealized PnL and liquidation triggers are computed from. That stops anyone pushing the traded price through a thin book with one big order to liquidate others on purpose (a wick). Your position PnL tracks the mark price, not the latest candle price."
     },
     "liqPrice": {
-      "q": "What is the liquidation price and how is it worked out?",
-      "a": "When the mark price reaches your liquidation price, the system force-closes the position. Intuitively, the liquidation price is where your margin is nearly used up, minus one more cushion for the maintenance margin rate (MMR). The higher the leverage and the thinner the margin, the closer liquidation sits to your entry. The order panel estimates it live; once you hold a position, switch on position lines in the chart toolbar and entry, TP/SL and liquidation are drawn straight onto the chart."
+      "q": "How is the liquidation price worked out?",
+      "a": "When the mark price reaches it, the system force-closes your position. Intuitively it is the price where your margin is nearly used up, minus one more cushion for the maintenance margin rate (MMR). Higher leverage and thinner margin put it closer to your entry. The order panel estimates it live; once you hold a position, switch on position lines in the chart toolbar to draw entry, TP/SL and liquidation onto the chart."
     },
     "mmr": {
       "q": "What is the maintenance margin rate (MMR)?",
-      "a": "The minimum margin ratio a position needs to avoid liquidation. It is tiered by notional value: the larger the position, the higher the tier and the higher the MMR — big positions are harder to unwind, so they are required to carry a thicker cushion. Liquidation triggers when margin + unrealized PnL < position value × MMR."
+      "a": "The minimum margin ratio a position needs to avoid liquidation. It is tiered by notional value: bigger position, higher tier, higher MMR — large positions are harder to unwind, so they must carry a thicker cushion. Liquidation triggers when margin + unrealized PnL < position value × MMR."
     },
     "fundingRate": {
-      "q": "What is the funding rate, and why does holding a position cost money?",
-      "a": "Perpetual futures never settle, so funding keeps the contract price tethered to spot: when the rate is positive longs pay shorts, when it is negative the reverse. Here it is charged three times a day (aligned with Binance settlement times) on notional value, using the live Binance rate for the current period and falling back to a fixed +0.01% only when the feed fails. This is the main cost of sitting in a position for a long time — the position card shows the estimate for each period."
+      "q": "What is the funding rate, and why does holding cost money?",
+      "a": "Perpetual futures never settle, so funding tethers the contract price to spot: a positive rate means longs pay shorts, a negative one the reverse. It is charged three times a day (aligned with Binance settlement times) on notional value, at the live Binance rate for the current period, falling back to a fixed +0.01% only if the feed fails. This is the main cost of holding a position for a long time — the position card shows the estimate for each period."
     },
     "tpSl": {
       "q": "How do take profit and stop loss work?",
-      "a": "Every futures position can carry several TP/SL levels, each with its own price and size. When the mark price reaches one it executes at market and you get a notification. Getting stopped out is nothing to be ashamed of — the campaign even awards points for it under \"Stop-loss hero\". Decide your exit before you enter: liquidation is losing by default, a stop loss is losing on your own terms."
+      "a": "Every futures position can carry several TP/SL levels, each with its own price and size. When the mark price reaches one it fills at market and you get a notification. Getting stopped out is nothing to be ashamed of — the campaign awards points for it under \"Stop-loss hero\". Decide your exit before you enter: liquidation is losing by default, a stop loss is losing on your own terms."
     },
     "doubleLiq": {
-      "q": "What does a long-short double liquidation mean in the liquidation feed?",
-      "a": "The liquidation feed shows force-closed orders from across the site, including the Binance liquidation stream. In violent moves one side goes first — a sharp drop takes out the longs — and then the snap-back takes out everyone who chased the short. That is a long-short double liquidation, and it is often read as a sign of extreme sentiment and a possible short-term reversal."
+      "q": "What is a long-short double liquidation?",
+      "a": "The liquidation feed shows force-closed orders from across the site, including the Binance liquidation stream. In violent moves one side goes first — a sharp drop takes out the longs — then the snap-back takes out everyone who chased the short. That is a long-short double liquidation, often read as a sign of extreme sentiment and a possible short-term reversal."
     },
     "bankrupt": {
       "q": "What happens if I go bankrupt?",
-      "a": "When your trading net worth (cash + position value − borrowed principal and interest) falls below zero, the system marks you bankrupt: all wallets and positions are cleared and your starting capital is restored on the next trading day so you can begin again. Note that an automatic bankruptcy recovery still counts against your weekly resets — during the campaign, going bankrupt after you have already reset this week is charged as a paid reset and costs 30 campaign points."
+      "a": "When your trading net worth (cash + position value − borrowed principal and interest) falls below zero, you are marked bankrupt: all wallets and positions are cleared and your starting capital is restored the next trading day. An automatic recovery still counts against your weekly resets — during the campaign, going bankrupt after you have already reset this week is charged as a paid reset, 30 campaign points."
     },
     "prediction": {
       "q": "How does the prediction market work?",
-      "a": "You bet on future events with the game wallet: the price is the probability the market implies, so buy the side you believe in and hold to settlement, which pays 1 if you were right and 0 if you were not. You can also sell early to lock in the result. During the campaign, single bets of 100 or more held to a winning settlement also earn campaign points, subject to tiered caps — it is not farmable."
+      "a": "You bet on future events with the game wallet: the price is the probability the market implies, so buy the side you believe in and hold to settlement, which pays 1 if you were right and 0 if not. You can also sell early to lock in the result. During the campaign, single bets of 100 or more held to a winning settlement earn campaign points, subject to tiered caps — it is not farmable."
     },
     "dailyVote": {
       "q": "What is the daily long-short vote?",
-      "a": "Every day you vote on whether BTC and gold go up or down tomorrow. The target is tomorrow's UTC daily candle and voting closes tonight, so there is no hindsight; it settles after 08:00 the next morning on the daily close. A pool of 100 points a day is split among everyone who was right: the crowded side gets less per head and a correct contrarian call gets more, capped at 6 points per person per day."
+      "a": "Each day you vote on whether BTC and gold go up or down tomorrow. The target is tomorrow's UTC daily candle and voting closes tonight, so there is no hindsight; it settles on the daily close after 08:00 the next morning. A pool of 100 points a day is split among everyone who was right — the crowded side gets less per head, a correct contrarian call more — capped at 6 points per person per day."
     },
     "wallets": {
-      "q": "Are the game wallet and the trading wallet the same thing?",
-      "a": "No. The main wallet is for trading (spot, futures, stocks), while the game wallet funds Mines, Video Poker, Blackjack and the prediction market. They are accounted for separately and there is an entry to transfer between them. Bankruptcy is judged on trading net worth alone — the game wallet cannot save you, and it is wiped along with everything else."
+      "q": "Are the game wallet and the trading wallet the same?",
+      "a": "No. The main wallet is for trading (spot, futures, stocks); the game wallet funds Mines, Video Poker, Blackjack and the prediction market. They are accounted for separately, with an entry to transfer between them. Bankruptcy is judged on trading net worth alone — the game wallet cannot save you, and it is wiped along with everything else."
     },
     "coupon": {
       "q": "How do discount coupons (buffs) work?",
-      "a": "Discount coupons from the daily buff draw are ticked on when you place a spot market buy, cutting the fill amount by the coupon rate. The \"Saved\" figure on the leaderboard is the total you have discounted this way. The rarer the coupon the steeper the discount, so keep the legendary ones for large orders."
+      "a": "Tick a coupon from the daily buff draw when you place a spot market buy and it cuts the fill amount by the coupon rate. The \"Saved\" figure on the leaderboard totals what you have discounted this way. The rarer the coupon, the steeper the discount — keep the legendary ones for large orders."
     },
     "campaign": {
       "q": "What are campaign points and the LDC prize pool?",
-      "a": "During the five-dimension trading contest you earn points from trading (ROI targets and net PnL), the daily check-in, the long-short vote, the prediction market, comments and more; the campaign page lists every task along with your live breakdown. Liquidations and similar events deduct points. When the campaign ends, the LDC prize pool is split by final point weight — authorize your LinuxDo account on the campaign page to claim your share. Resetting your account does not clear points you have already earned."
+      "a": "During the five-dimension trading contest you earn points from trading (ROI targets and net PnL), the daily check-in, the long-short vote, the prediction market, comments and more; the campaign page lists every task and your live breakdown. Liquidations and the like deduct points. When it ends, the LDC prize pool is split by final point weight — authorize your LinuxDo account on the campaign page to claim. Resetting your account does not clear points already earned."
     },
     "resetAccount": {
-      "q": "What are the rules for resetting an account?",
-      "a": "A reset clears all positions, orders, game records and asset history, and returns your balance to the starting capital; comments, mute status and campaign points are unaffected. During the campaign the first reset in each calendar week is free and every reset after that costs 30 campaign points; once the campaign ends it is one reset per week, refreshed on Monday. An automatic bankruptcy recovery counts toward the same quota."
+      "q": "What are the rules for resetting my account?",
+      "a": "A reset clears all positions, orders, game records and asset history and returns your balance to the starting capital; comments, mute status and campaign points are unaffected. During the campaign the first reset each calendar week is free, every one after that costs 30 campaign points; after the campaign it is one per week, refreshed on Monday. An automatic bankruptcy recovery counts toward the same quota."
     }
   },
   "intro": {
     "title": "How it works",
     "welcomeTitle": "Welcome",
-    "welcomeDesc": "A virtual trading simulator — find out what if you had bought. All data here is simulated.",
-    "welcomeWarn": "For entertainment only, not investment advice. Leverage carries risk and you can be liquidated.",
+    "welcomeDesc": "A virtual trading simulator — find out what if you had bought. All data is simulated.",
+    "welcomeWarn": "Entertainment only, not investment advice. Leverage carries liquidation risk.",
     "rulesTitle": "Trading rules",
     "bstockTitle": "Spot · Tokenized US equities (bStock)",
     "bstock1": "Real Binance spot market data — NVDA, TSLA, QQQ and more, 24/7",
-    "bstock2": "Market and limit orders; market buys can add 1-10x leverage (0.05% daily interest on the loan)",
+    "bstock2": "Market and limit orders; market buys can add 1-10x leverage (0.05% daily interest)",
     "bstock3": "Fee 0.1%, sales settle instantly, no T+1",
     "cryptoTitle": "Spot · Crypto",
-    "crypto1": "BTC and other majors, live Binance WebSocket market data",
-    "crypto2": "Limit orders within 50%-150% of the market price, valid for 24 hours",
+    "crypto1": "BTC and other majors, live Binance WebSocket data",
+    "crypto2": "Limit orders within 50%-150% of market, valid 24 hours",
     "crypto3": "Leverage 1-10x at 0.05% daily interest, fee 0.1%",
     "futuresTitle": "USDT perpetual futures",
-    "futures1": "<0>Open long / Open short</0>: market and limit orders, cross margin — the whole account equity backs the position",
-    "futures2": "<0>Leverage 1-150x</0>: tiered by position value, aligned with the Binance tier table",
-    "futures3": "<0>Take profit / Stop loss</0>: preset at entry, partial exits supported, liquidation price estimated live",
+    "futures1": "<0>Open long / Open short</0>: market and limit orders, cross margin — account equity backs the position",
+    "futures2": "<0>Leverage 1-150x</0>: tiered by position value, aligned with Binance tiers",
+    "futures3": "<0>Take profit / Stop loss</0>: preset at entry, partial exits, live liquidation price estimate",
     "futures4": "<0>Funding rate</0>: real rates, longs and shorts pay each other every 8 hours",
     "futures5": "<0>Fees</0>: maker 0.02%, taker 0.04%",
-    "futures6": "Positions are liquidated automatically once margin runs out — keep your leverage in check",
+    "futures6": "Positions liquidate automatically once margin runs out — keep leverage in check",
     "walletTitle": "Two wallets",
-    "walletDesc": "The balance wallet funds trading and the game wallet funds games. They are isolated from each other, and you can transfer between them at any time.",
+    "walletDesc": "The balance wallet funds trading, the game wallet funds games. Isolated from each other, transfer between them any time.",
     "quantTitle": "Quant strategies",
     "quantDesc": "The Strategies page shows live signals from four quant strategies (channel breakout, squeeze momentum, liquidation cascade fade, Fibonacci retracement) and their automated testnet execution.",
     "gamesTitle": "Games and rewards",
-    "game1": "<0>Blackjack</0>: the classic game, with split, double and insurance",
-    "game2": "<0>Video Poker</0>: five cards dealt, hold what you want and draw once, paid by hand rank",
-    "game3": "<0>Mines</0>: every safe tile raises the payout, one mine wipes it out, cash out whenever you like",
-    "game4": "<0>BTC up/down prediction</0>: a new round every 5 minutes, priced on live Polymarket probabilities, sellable at any time",
+    "game1": "<0>Blackjack</0>: the classic, with split, double and insurance",
+    "game2": "<0>Video Poker</0>: five cards, hold what you want and draw once, paid by hand rank",
+    "game3": "<0>Mines</0>: every safe tile raises the payout, one mine wipes it out, cash out any time",
+    "game4": "<0>BTC up/down prediction</0>: a new round every 5 minutes, priced on live Polymarket probabilities, sellable any time",
     "game5": "<0>Daily buff</0>: one draw a day — cash, shares or a discount coupon",
-    "riskNotice": "Risk notice: every trade on this platform is a simulation and no real money is involved. No data, market feed or return shown here constitutes investment advice. Leveraged and futures trading carry liquidation risk, so proceed with care.",
+    "riskNotice": "Risk notice: every trade here is simulated, no real money is involved. No data, market feed or return shown constitutes investment advice. Leveraged and futures trading carry liquidation risk — proceed with care.",
     "hideToday": "Don't show today",
     "gotIt": "Got it"
   }

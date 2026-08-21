@@ -435,12 +435,12 @@ function PositionItem({ pos, brackets, wide, onMutated }: {
       )}
       <div className="flex flex-wrap gap-1.5 pt-1">
         {/* 加仓无独立入口（对齐Binance）：同方向再下一单即自动并入仓位，走开仓面板 */}
-        <Button size="sm" variant={action === 'close' ? 'default' : 'outline'} className="h-9 sm:h-7 text-[11px] flex-1 min-w-15" onClick={() => toggleAction('close')}>{t('pos.close')}</Button>
+        <Button size="sm" variant={action === 'close' ? 'default' : 'outline'} className="h-9 sm:h-7 text-[11px] flex-1 min-w-20" onClick={() => toggleAction('close')}>{t('pos.close')}</Button>
         {/* 全仓保证金按账户统一算，单仓加减保证金没意义，后端也会拒（1761），直接不给入口 */}
-        {!isCrossPos && <Button size="sm" variant={action === 'margin' ? 'default' : 'outline'} className="h-9 sm:h-7 text-[11px] flex-1 min-w-15" onClick={() => toggleAction('margin')}>{t('pos.addMargin')}</Button>}
-        {!isCrossPos && <Button size="sm" variant={action === 'reduceMargin' ? 'default' : 'outline'} className="h-9 sm:h-7 text-[11px] flex-1 min-w-15" onClick={() => toggleAction('reduceMargin')}>{t('pos.reduceMargin')}</Button>}
-        <Button size="sm" variant={action === 'leverage' ? 'default' : 'outline'} className="h-9 sm:h-7 text-[11px] flex-1 min-w-15" onClick={() => toggleAction('leverage')}>{t('pos.leverage')}</Button>
-        <Button size="sm" variant={action === 'stoploss' ? 'default' : 'outline'} className="h-9 sm:h-7 text-[11px] flex-1 min-w-15" onClick={() => toggleAction('stoploss')}>{t('pos.sltp')}</Button>
+        {!isCrossPos && <Button size="sm" variant={action === 'margin' ? 'default' : 'outline'} className="h-9 sm:h-7 text-[11px] flex-1 min-w-20" onClick={() => toggleAction('margin')}>{t('pos.addMargin')}</Button>}
+        {!isCrossPos && <Button size="sm" variant={action === 'reduceMargin' ? 'default' : 'outline'} className="h-9 sm:h-7 text-[11px] flex-1 min-w-20" onClick={() => toggleAction('reduceMargin')}>{t('pos.reduceMargin')}</Button>}
+        <Button size="sm" variant={action === 'leverage' ? 'default' : 'outline'} className="h-9 sm:h-7 text-[11px] flex-1 min-w-20" onClick={() => toggleAction('leverage')}>{t('pos.leverage')}</Button>
+        <Button size="sm" variant={action === 'stoploss' ? 'default' : 'outline'} className="h-9 sm:h-7 text-[11px] flex-1 min-w-20" onClick={() => toggleAction('stoploss')}>{t('pos.sltp')}</Button>
       </div>
       {/* 内联操作面板 */}
       {action && (
