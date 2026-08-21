@@ -12,7 +12,8 @@ import { DitherSmoke } from '../components/fx/DitherSmoke';
 import { Input } from '../components/ui/input';
 import { Button } from '../components/ui/button';
 import { LanguageSwitcher } from '../components/LanguageSwitcher';
-import { Loader2, BarChart3, Wallet, LineChart, LogIn } from 'lucide-react';
+import { GitHubLink } from '../components/GitHubLink';
+import { Loader2, BarChart3, Wallet, Bot, MessagesSquare, LogIn } from 'lucide-react';
 
 /** LinuxDo 官方三色圆 Logo（取自 linux.do favicon SVG） */
 function LinuxDoLogo({ className }: { className?: string }) {
@@ -249,8 +250,10 @@ export function Login() {
         />
       </div>
 
-      {/* 语言切换：登录页不在 Layout 里，顶栏那个到不了这儿，单独摆一个（未登录也能切） */}
-      <div className="absolute top-3 right-3 z-10 pt-[env(safe-area-inset-top)] pr-[env(safe-area-inset-right)]">
+      {/* 仓库入口 + 语言切换：登录页不在 Layout 里，顶栏那两个到不了这儿，单独摆一份（未登录也能用）。
+          不留 gap，跟顶栏移动端那组图标一样贴着排 */}
+      <div className="absolute top-3 right-3 z-10 flex items-center pt-[env(safe-area-inset-top)] pr-[env(safe-area-inset-right)]">
+        <GitHubLink className="inline-flex" />
         <LanguageSwitcher />
       </div>
 
@@ -258,7 +261,7 @@ export function Login() {
       <div className="hidden lg:flex relative flex-col justify-between p-14">
         <div className="flex items-baseline gap-3">
           <span className="text-lg font-extrabold tracking-wide">WIIB<span className="text-primary">.</span></span>
-          <span className="microlabel font-semibold">SIMULATED TRADING TERMINAL</span>
+          <span className="microlabel font-semibold">SIMULATED MARKETS · AI AGENTS</span>
         </div>
 
         <div className="space-y-8">
@@ -277,11 +280,12 @@ export function Login() {
           </div>
         </div>
 
-        {/* 三项特性条：英文压缩后仍 458px，1024–1152 段左栏装不下，给 wrap 让它自然折行 */}
+        {/* 四项特性条：一行装不下，靠 wrap 自然折成两行 */}
         <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-[11px] font-semibold text-muted-foreground">
           <span className="flex items-center gap-1.5"><BarChart3 className="w-3.5 h-3.5" />{t('login.featQuotes')}</span>
           <span className="flex items-center gap-1.5"><Wallet className="w-3.5 h-3.5" />{t('login.featFunds')}</span>
-          <span className="flex items-center gap-1.5"><LineChart className="w-3.5 h-3.5" />{t('login.featAi')}</span>
+          <span className="flex items-center gap-1.5"><Bot className="w-3.5 h-3.5" />{t('login.featTrader')}</span>
+          <span className="flex items-center gap-1.5"><MessagesSquare className="w-3.5 h-3.5" />{t('login.featChat')}</span>
         </div>
       </div>
 
@@ -291,14 +295,14 @@ export function Login() {
           {/* 移动端顶部品牌 */}
           <div className="lg:hidden text-center mb-8">
             <div className="text-2xl font-extrabold tracking-wide">WIIB<span className="text-primary">.</span></div>
-            <div className="microlabel font-semibold mt-1.5">SIMULATED TRADING TERMINAL</div>
+            <div className="microlabel font-semibold mt-1.5">SIMULATED MARKETS · AI AGENTS</div>
           </div>
 
           <div className="pt-card rounded-lg p-7 space-y-5">
             <div>
               <div className="flex items-center gap-2">
                 <span className="led" />
-                <span className="microlabel font-semibold">TERMINAL ACCESS</span>
+                <span className="microlabel font-semibold">ACCOUNT ACCESS</span>
               </div>
               <h2 className="text-xl font-extrabold tracking-tight mt-2">
                 {claiming ? t('login.titleClaim') : mode?.passwordLoginEnabled && isRegister ? t('login.titleRegister') : t('login.titleLogin')}
