@@ -6,10 +6,11 @@ import com.mawai.wiibcommon.enums.AgentLang;
 import com.mawai.wiibcommon.util.JsonUtils;
 import com.mawai.wiibquant.agent.i18n.PromptCatalog;
 import com.mawai.wiibquant.market.domain.FeatureSnapshot;
-import com.mawai.wiibquant.market.domain.news.NewsFlash;
 import com.mawai.wiibquant.market.service.MarketAssembly;
 import com.mawai.wiibquant.market.service.MarketDataService;
 import com.mawai.wiibquant.market.service.NewsCache;
+import com.mawai.wiibquant.market.service.NewsFlashLocalizer;
+import com.mawai.wiibquant.market.service.NewsFlashLocalizer.LocalizedFlash;
 import com.mawai.wiibquant.mapper.QuantDeepAnalysisMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -39,24 +40,26 @@ public class DeepAnalysisService {
 
     private final MarketDataService marketDataService;
     private final NewsCache newsCache;
+    private final NewsFlashLocalizer localizer;
     private final QuantDeepAnalysisMapper mapper;
     private final PromptCatalog prompts;
 
     /**
-     * 新闻上下文：缓存的重要快讯原样拼成文本喂辩论（不再 LLM 浓缩）；无则给一句"没有新闻上下文"。
-     * <p>快讯正文是第三方数据，原样透传不翻译；只有占位那句跟语言走。
+     * 新闻上下文：缓存的重要快讯拼成文本喂辩论（不再 LLM 浓缩）；无则给一句"没有新闻上下文"。
+     * <p>源是 BlockBeats 中文快讯，按语言取一份：英文取打标时同批产出的译文，缺译文回落中文原文。
      */
     public String buildNewsContext(AgentLang lang) {
-        List<NewsFlash> flashes = newsCache.getFlashes();
+        List<LocalizedFlash> flashes = localizer.localize(newsCache.getFlashes(), lang);
         if (flashes.isEmpty()) {
             return prompts.get(lang, "chat.deepAnalysis.noNews");
         }
         StringBuilder sb = new StringBuilder();
-        for (NewsFlash f : flashes) {
+        for (LocalizedFlash f : flashes) {
             sb.append("· ").append(f.title());
-            String body = f.plainContent();
+            String body = f.plain();
             if (!body.isBlank()) {
-                sb.append("：").append(body);
+                // 标题与正文之间的分隔符也跟语言走：英文行里插一个全角冒号就是英文提示词里混中文
+                sb.append(lang == AgentLang.ZH ? "：" : ": ").append(body);
             }
             sb.append('\n');
         }

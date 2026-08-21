@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Newspaper, ExternalLink } from 'lucide-react';
+import { Newspaper, ExternalLink, Languages } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Skeleton } from './ui/skeleton';
 import { quantApi } from '../api';
@@ -14,6 +14,8 @@ function fmtTime(t: string): string {
 /**
  * 实时快讯卡（首页，与最新成交并列）：BlockBeats 重要快讯，
  * 数据走 quant 侧内存缓存（未过期不打上游），前端 60s 轻轮询。
+ * <p>源是中文快讯：取原文还是译文由后端按用户语言定，前端只按 translated 打个机器译文标——
+ * 与 AI 侧取的是同一份，不会出现"用户看到译文、trader 读到原文"。
  */
 export function NewsFlashCard() {
   const { t } = useTranslation('home');
@@ -56,7 +58,10 @@ export function NewsFlashCard() {
                 rel="noopener noreferrer"
                 className="group flex gap-2.5 py-2 border-b border-border/60 last:border-0 hover:bg-surface-hover -mx-2 px-2 rounded-md transition-colors"
               >
-                <span className="num text-[10px] text-muted-foreground shrink-0 pt-0.5">{fmtTime(n.createTime)}</span>
+                <span className="num text-[10px] text-muted-foreground shrink-0 pt-0.5 inline-flex items-center gap-1">
+                  {fmtTime(n.createTime)}
+                  {n.translated && <Languages className="w-3 h-3 opacity-50" aria-label={t('news.translated')} />}
+                </span>
                 <span className="min-w-0 flex-1">
                   <span className="block text-xs font-semibold leading-snug break-words group-hover:text-primary transition-colors">
                     {n.title}

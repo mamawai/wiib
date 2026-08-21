@@ -48,7 +48,8 @@
   },
   "news": {
     "title": "实时快讯",
-    "empty": "暂无快讯"
+    "empty": "暂无快讯",
+    "translated": "机器译文（源为中文快讯）"
   },
   "trades": {
     "title": "最新成交",

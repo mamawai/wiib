@@ -1,12 +1,14 @@
 package com.mawai.wiibquant.controller;
 
-import cn.dev33.satoken.stp.StpUtil;
 import com.mawai.wiibcommon.annotation.CurrentUserId;
 import com.mawai.wiibcommon.dto.NewsEventItem;
+import com.mawai.wiibcommon.enums.AgentLang;
 import com.mawai.wiibcommon.util.Result;
 import com.mawai.wiibquant.agent.behavior.BehaviorAnalysisReport;
 import com.mawai.wiibquant.agent.behavior.BehaviorAnalysisService;
+import com.mawai.wiibquant.agent.i18n.UserLangResolver;
 import com.mawai.wiibquant.market.service.NewsCache;
+import com.mawai.wiibquant.market.service.NewsFlashLocalizer;
 import com.mawai.wiibquant.mapper.NewsEventMapper;
 
 import io.swagger.v3.oas.annotations.Operation;
@@ -33,7 +35,9 @@ public class AiAgentController {
 
     private final BehaviorAnalysisService behaviorAnalysisService;
     private final NewsCache newsCache;
+    private final NewsFlashLocalizer newsFlashLocalizer;
     private final NewsEventMapper newsEventMapper;
+    private final UserLangResolver userLangResolver;
 
     @PostMapping("/analyze-behavior")
     @Operation(summary = "用户行为分析")
@@ -41,26 +45,33 @@ public class AiAgentController {
         return behaviorAnalysisService.analyze(userId);
     }
 
-    /** 快讯条目：正文脱 HTML 的纯文本，前端直接展示 */
-    public record NewsFlashView(long id, String title, String plain, String url, String createTime) {
+    /**
+     * 快讯条目：正文脱 HTML 的纯文本，前端直接展示。
+     *
+     * @param translated true=标题/正文是机器译文（源是 BlockBeats 中文快讯），前端据此打译文标
+     */
+    public record NewsFlashView(long id, String title, String plain, String url,
+                                String createTime, boolean translated) {
     }
 
     @GetMapping("/quant/news")
     @Operation(summary = "重要快讯（BlockBeats 内存缓存：未过期复用不打上游，首页快讯卡数据源）")
-    public Result<List<NewsFlashView>> news() {
-        StpUtil.checkLogin();
-        return Result.ok(newsCache.getFlashes().stream()
-                .map(f -> new NewsFlashView(f.id(), f.title(), f.plainContent(), f.url(), f.createTime()))
+    public Result<List<NewsFlashView>> news(@CurrentUserId long userId) {
+        AgentLang lang = userLangResolver.of(userId);
+        return Result.ok(newsFlashLocalizer.localize(newsCache.getFlashes(), lang).stream()
+                .map(f -> new NewsFlashView(f.id(), f.title(), f.plain(), f.url(),
+                        f.createTime(), f.translated()))
                 .toList());
     }
 
     @GetMapping("/quant/news-events")
     @Operation(summary = "打标快讯（K线新闻图标数据源：按标签+时间窗查 news_event 存档）")
-    public Result<List<NewsEventItem>> newsEvents(@RequestParam String tag,
+    public Result<List<NewsEventItem>> newsEvents(@CurrentUserId long userId,
+                                                  @RequestParam String tag,
                                                   @RequestParam long from,
                                                   @RequestParam long to) {
-        StpUtil.checkLogin();
         // 上限 500：图标按 K 线桶聚合，一屏至多几百桶，多给纯属流量浪费
-        return Result.ok(newsEventMapper.selectByTagInRange(tag.trim().toUpperCase(), from, to, 500));
+        return Result.ok(newsEventMapper.selectByTagInRange(tag.trim().toUpperCase(), from, to, 500,
+                userLangResolver.of(userId) == AgentLang.EN));
     }
 }

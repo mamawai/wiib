@@ -17,6 +17,7 @@ import com.mawai.wiibquant.market.service.KlineFetcher;
 import com.mawai.wiibquant.market.service.MarketDataService;
 import com.mawai.wiibquant.agent.toolkit.MarketToolkit;
 import com.mawai.wiibquant.market.service.NewsCache;
+import com.mawai.wiibquant.market.service.NewsFlashLocalizer;
 import com.mawai.wiibquant.agent.toolkit.NewsToolkit;
 import com.mawai.wiibquant.mapper.AiTraderDecisionMapper;
 import com.mawai.wiibquant.agent.i18n.PromptCatalog;
@@ -85,7 +86,7 @@ class TraderWakeupLoopTest {
             simTradeClient, binanceRestClient,
             new IndicatorToolkit(new KlineFetcher(binanceRestClient, 60_000)),
             new MarketToolkit(mock(MarketDataService.class)),
-            new NewsToolkit(mock(NewsCache.class)),
+            new NewsToolkit(mock(NewsCache.class), mock(NewsFlashLocalizer.class)),
             traderMapper, decisionMapper, new TraderPlanStore(planMapper), requestService, langResolver,
             prompts);
 

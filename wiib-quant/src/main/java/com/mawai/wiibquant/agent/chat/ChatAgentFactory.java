@@ -239,7 +239,7 @@ public class ChatAgentFactory {
         // 联网补的那一路不归它：模型的服务端搜索关不掉（grok 实测所有请求参数/换模型均无效），
         // 与其在两处禁，不如把搜索正式划给 summarizer 当职责、这里明令禁用——预取喂饱后它没有搜索动机，禁得住
         experts.put(NEWS_AGENT, new Expert(expertGraph(lang, light, null, null,
-                prompts.get(lang, "chat.expert.news")), newsToolkit::newsSearch));
+                prompts.get(lang, "chat.expert.news")), () -> newsToolkit.newsSearch(lang)));
         // trader 专家只读这个用户自己的 trader：userId 在这里烤进工具实例，不做成模型可填的参数
         //（做成参数就等于让模型自己说要看谁的档案）。无预取——四个工具各答一类问题，取哪个得看问题
         experts.put(TRADER_AGENT, new Expert(expertGraph(lang, light,

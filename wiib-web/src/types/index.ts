@@ -958,6 +958,8 @@ export interface NewsFlashItem {
   url: string;
   /** 形如 "2026-07-09 00:30:12" */
   createTime: string;
+  /** true=标题/正文是机器译文（源是中文快讯）；取哪份由后端按用户语言定，前端只负责打标 */
+  translated: boolean;
 }
 
 // ========== 留言板与通知 ==========

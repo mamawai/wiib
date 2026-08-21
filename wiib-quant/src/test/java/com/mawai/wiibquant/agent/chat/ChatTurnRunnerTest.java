@@ -371,7 +371,7 @@ class ChatTurnRunnerTest {
     /** 专家的预取数据必须真喂进去：news 的工具无参，不预取就只能指望模型自己想起来调 */
     @Test
     void news专家拿到预取的快讯原文() {
-        when(newsToolkit.newsSearch()).thenReturn("BlockBeats 快讯原文若干");
+        when(newsToolkit.newsSearch(AgentLang.ZH)).thenReturn("BlockBeats 快讯原文若干");
         lightAnswers(() -> route("news_agent"),
                 () -> responseOf(new AssistantMessage("市场结论")),
                 () -> responseOf(new AssistantMessage("新闻结论")));
@@ -379,7 +379,7 @@ class ChatTurnRunnerTest {
 
         turn("最近有什么新闻");
 
-        verify(newsToolkit).newsSearch();
+        verify(newsToolkit).newsSearch(AgentLang.ZH);
         assertThat(expertPrompts).hasSize(1);
         assertThat(textOf(expertPrompts.getFirst())).contains("BlockBeats 快讯原文若干");
     }
@@ -394,7 +394,7 @@ class ChatTurnRunnerTest {
 
         turn("看看行情");
 
-        verify(newsToolkit, never()).newsSearch();
+        verify(newsToolkit, never()).newsSearch(any());
         assertThat(textOf(expertPrompts.getFirst())).doesNotContain("系统预取的原始数据");
     }
 

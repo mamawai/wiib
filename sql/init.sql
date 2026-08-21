@@ -688,6 +688,8 @@ CREATE TABLE IF NOT EXISTS news_event (
     source_id    BIGINT NOT NULL UNIQUE,
     title        TEXT NOT NULL,
     content      TEXT,
+    title_en     TEXT,
+    content_en   TEXT,
     url          TEXT,
     published_at BIGINT NOT NULL,
     tags         VARCHAR(128),
@@ -700,6 +702,15 @@ COMMENT ON COLUMN news_event.source_id IS 'BlockBeats快讯id,增量去重键';
 COMMENT ON COLUMN news_event.published_at IS '发稿时刻epoch毫秒(BlockBeats create_time按北京时间解析),对齐K线open_time用';
 COMMENT ON COLUMN news_event.tags IS '逗号串,封闭词表(OIL/GOLD/BTC/美股白名单,见news.collect.vocabulary);空串=轻模型判定与词表标的无关';
 COMMENT ON COLUMN news_event.tagged_model IS '打标用的模型名,坏标追责用';
+
+-- 英文译文：打标同一次调用顺带产出，中英用户读同一份新闻(不拉第二个数据源,竞技场才有可比性)
+ALTER TABLE news_event ADD COLUMN IF NOT EXISTS title_en   TEXT;
+ALTER TABLE news_event ADD COLUMN IF NOT EXISTS content_en TEXT;
+COMMENT ON COLUMN news_event.title_en IS '标题英文译文;NULL=没译成(模型没给/正文超长/存量老行),取用侧回落中文原文——不许拿原文冒充译文';
+COMMENT ON COLUMN news_event.content_en IS '正文英文译文;NULL 同 title_en。正文超过打标输入上限的那条不留译文:半截译文比原文更糟';
+-- 存量行 title_en/content_en 为 NULL，英文界面按"缺译文回落原文"照常出中文，不做全量回填。
+-- 真想让最近这批重走一遍采集轨(只对还在 BlockBeats 当前拉取窗口里的那 20 条有效,更早的删了是净损失)：
+--     DELETE FROM news_event WHERE title_en IS NULL AND published_at > (EXTRACT(EPOCH FROM NOW()) - 86400) * 1000;
 
 -- ============================================
 -- 27. 留言板评论（全站唯一，无附着实体）

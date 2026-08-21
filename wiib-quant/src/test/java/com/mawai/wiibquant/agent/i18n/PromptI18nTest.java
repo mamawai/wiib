@@ -178,6 +178,15 @@ class PromptI18nTest {
                 Map.of("symbol", "BTCUSDT", "price", "1", "micro", "m", "iv", "i", "news", "n")));
     }
 
+    /** 打标是平台后台任务（没有"当前用户"）：提示词整篇取英文，混一个中文字都可能把译文带回中文 */
+    @Test
+    void 英文打标提示词与快讯行模板全文无中文() {
+        assertNoCjk("英文打标提示词", prompts.get(AgentLang.EN, "news.tagging",
+                Map.of("vocabulary", "OIL, GOLD, BTC", "flashes", "id=1 TITLE: t BODY: b")));
+        assertNoCjk("英文快讯行模板", prompts.get(AgentLang.EN, "news.flashLine",
+                Map.of("id", 1, "title", "t", "content", "b")));
+    }
+
     @Test
     void 英文coach系统提示词与成文全文无中文() {
         assertNoCjk("英文 coach 盘面提示", coach.system(hintRequest(), AgentLang.EN));
@@ -270,6 +279,7 @@ class PromptI18nTest {
                 "chat.hitl.reason", "chat.deferred.prefix",
                 "coach.hint.system", "coach.review.system", "coach.label.barsHeader",
                 "trader.wake.routineQuestion", "trader.wake.sleepNotice", "trader.error.wakeTimeout",
+                "news.tagging", "news.flashLine",
                 // 任务 5 的两条缓解：回落成中文＝英文用户被一行中文指令要求"输出中文"，正好反了
                 "trader.label.ownerWritten", "trader.label.outputLanguage",
                 "reviewer.label.outputLanguage", "learning.label.outputLanguage",
@@ -299,6 +309,23 @@ class PromptI18nTest {
         assertThat(prompts.get(AgentLang.ZH, "chat.expert.news"))
                 .contains("严禁把你联网搜索到的任何内容写进回答");
         assertThat(prompts.get(AgentLang.ZH, "chat.router")).contains("只调用 route 工具，不要输出任何文字");
+    }
+
+    /**
+     * 快讯译文口径是<b>配对</b>的：news 专家那句"材料就这么多、是原文还是译文"与 summarizer 那句
+     * "[BlockBeats] 那批来自中文源，按事件去重"必须同时在。只改一处，另一处的模型就会出事——
+     * news 专家以为材料不全自己去搜（它明令禁搜），summarizer 把同一件事当成两件事。
+     */
+    @Test
+    void 快讯译文口径在news专家与summarizer两处同时钉住() {
+        Map<String, Object> tags = Map.of("supplementTag", "[X]", "mergedTag", "[BlockBeats+X]");
+        for (AgentLang lang : AgentLang.values()) {
+            String anchor = lang == AgentLang.ZH ? "中文源" : "machine translation";
+            assertThat(prompts.get(lang, "chat.expert.news"))
+                    .as("%s 的 news 专家没交代快讯是原文还是译文", lang.code()).contains(anchor);
+            assertThat(prompts.get(lang, "chat.summarizer", tags))
+                    .as("%s 的 summarizer 没交代 [BlockBeats] 那批是原文还是译文", lang.code()).contains(anchor);
+        }
     }
 
     /** coach：只依据给定数据 + 中性不下单 */

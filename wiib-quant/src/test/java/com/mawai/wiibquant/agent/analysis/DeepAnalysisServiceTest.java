@@ -7,6 +7,8 @@ import com.mawai.wiibcommon.entity.QuantDeepAnalysis;
 import com.mawai.wiibquant.market.service.MarketAssembly;
 import com.mawai.wiibquant.market.service.MarketDataService;
 import com.mawai.wiibquant.market.service.NewsCache;
+import com.mawai.wiibquant.market.service.NewsFlashLocalizer;
+import com.mawai.wiibquant.mapper.NewsEventMapper;
 import com.mawai.wiibquant.mapper.QuantDeepAnalysisMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.messages.AssistantMessage;
@@ -37,9 +39,10 @@ class DeepAnalysisServiceTest {
     private final MarketDataService marketDataService = mock(MarketDataService.class);
     private final NewsCache newsCache = mock(NewsCache.class);
     private final QuantDeepAnalysisMapper mapper = mock(QuantDeepAnalysisMapper.class);
+    private final NewsEventMapper newsEventMapper = mock(NewsEventMapper.class);
 
-    private final DeepAnalysisService service =
-            new DeepAnalysisService(marketDataService, newsCache, mapper, PROMPTS);
+    private final DeepAnalysisService service = new DeepAnalysisService(marketDataService, newsCache,
+            new NewsFlashLocalizer(newsEventMapper), mapper, PROMPTS);
 
     {
         // 服务内部走 ChatClient，而 ChatClient 建请求时**无条件**执行 getOptions().mutate()

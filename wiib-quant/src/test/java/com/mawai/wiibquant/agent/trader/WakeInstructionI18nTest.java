@@ -16,6 +16,7 @@ import com.mawai.wiibquant.mapper.AiTraderPlanMapper;
 import com.mawai.wiibquant.market.service.KlineFetcher;
 import com.mawai.wiibquant.market.service.MarketDataService;
 import com.mawai.wiibquant.market.service.NewsCache;
+import com.mawai.wiibquant.market.service.NewsFlashLocalizer;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
@@ -45,7 +46,7 @@ class WakeInstructionI18nTest {
             mock(SimTradeClient.class), binance,
             new IndicatorToolkit(new KlineFetcher(binance, 60_000)),
             new MarketToolkit(mock(MarketDataService.class)),
-            new NewsToolkit(mock(NewsCache.class)),
+            new NewsToolkit(mock(NewsCache.class), mock(NewsFlashLocalizer.class)),
             traderMapper, mock(AiTraderDecisionMapper.class),
             new TraderPlanStore(mock(AiTraderPlanMapper.class)),
             mock(TraderRequestService.class), mock(UserLangResolver.class), prompts);

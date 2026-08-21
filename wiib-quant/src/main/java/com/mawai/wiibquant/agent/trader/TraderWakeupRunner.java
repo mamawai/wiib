@@ -273,7 +273,8 @@ public class TraderWakeupRunner {
                 .toolsFromObject(tradeTools)
                 .toolsFromObject(indicatorToolkit)
                 .toolsFromObject(marketToolkit)
-                .toolsFromObject(newsToolkit)
+                // 快讯按 trader 主人的语言取（英文取译文，缺译文回落中文原文）
+                .toolsFromObject(newsToolkit.boundTo(lang))
                 .addExecuteToolsHook(new ModelCallLimiter(MAX_MODEL_CALLS))
                 .addExecuteToolsHook(trace)
                 // 首轮强制调工具：不看数据不许决策；弱模型不支持 tool_choice 会以 ERROR 落库并最终自动暂停
