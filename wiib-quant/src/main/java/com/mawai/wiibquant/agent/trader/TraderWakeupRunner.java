@@ -15,6 +15,7 @@ import com.mawai.wiibcommon.entity.FuturesPosition;
 import com.mawai.wiibcommon.entity.FuturesStopLoss;
 import com.mawai.wiibcommon.entity.FuturesTakeProfit;
 import com.mawai.wiibcommon.market.BinanceRestClient;
+import com.mawai.wiibquant.agent.i18n.UserLangResolver;
 import com.mawai.wiibquant.agent.llm.AgentGraphs;
 import com.mawai.wiibquant.agent.llm.ModelCallLimiter;
 import com.mawai.wiibquant.agent.llm.ResilientChatService;
@@ -97,6 +98,7 @@ public class TraderWakeupRunner {
     private final AiTraderDecisionMapper decisionMapper;
     private final TraderPlanStore planStore;
     private final TraderRequestService requestService;
+    private final UserLangResolver userLangResolver;
 
     /** 墙钟注入点：预算计算要可测（测试里把"现在"钉在边界附近） */
     java.util.function.LongSupplier nowMs = System::currentTimeMillis;
@@ -249,9 +251,11 @@ public class TraderWakeupRunner {
         List<AiTraderPlan> plans = planStore.cleanupStale(trader.getId(), trader.getRoundNo(), liveKeys, boundaryTime);
 
         List<AiTraderRequest> decided = requestService.decidedUnnotified(trader.getId(), trader.getRoundNo());
+        // 系统提示词跟着 trader 主人的语言走：ai_trader.user_id → user.lang（取不到回落中文）
         String prompt = promptAssembler.assemble(trader,
                 accountStateJson(equity, positions, pendingOrders, plans, boundaryTime,
-                        requestService.pendingOf(trader.getId(), trader.getRoundNo()), decided), recent);
+                        requestService.pendingOf(trader.getId(), trader.getRoundNo()), decided), recent,
+                userLangResolver.of(trader.getUserId()));
         // 结果说一次就够：注入本轮后置已通知，防同一条回执每轮反复出现
         requestService.markNotified(decided);
 

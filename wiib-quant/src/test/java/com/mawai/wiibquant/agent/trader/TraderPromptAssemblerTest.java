@@ -5,6 +5,8 @@ import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.mawai.wiibcommon.entity.AiTrader;
 import com.mawai.wiibcommon.entity.AiTraderDecision;
+import com.mawai.wiibcommon.enums.AgentLang;
+import com.mawai.wiibquant.agent.i18n.PromptCatalog;
 import com.mawai.wiibquant.mapper.AiTraderMapper;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.BeforeAll;
@@ -30,7 +32,7 @@ class TraderPromptAssemblerTest {
     }
 
     private final AiTraderMapper traderMapper = mock(AiTraderMapper.class);
-    private final TraderPromptAssembler assembler = new TraderPromptAssembler(traderMapper);
+    private final TraderPromptAssembler assembler = new TraderPromptAssembler(traderMapper, new PromptCatalog());
 
     private AiTrader trader() {
         AiTrader t = new AiTrader();
@@ -64,7 +66,7 @@ class TraderPromptAssemblerTest {
         t.setOwnerNote("今晚有 CPI 数据，仓位放轻一点");
         t.setOwnerNoteRounds(1);
 
-        String prompt = assembler.assemble(t, "{}", List.of());
+        String prompt = assembler.assemble(t, "{}", List.of(), AgentLang.ZH);
 
         assertThat(prompt).contains("今晚有 CPI 数据，仓位放轻一点").contains("主人的留言");
         verify(traderMapper).update(isNull(), any(LambdaUpdateWrapper.class));   // 注了就一定减了
@@ -78,17 +80,17 @@ class TraderPromptAssemblerTest {
         t.setId(1L);
         t.setWakeWindow("21:00-08:30");
 
-        String withTemplate = assembler.assemble(t, "{}", List.of());
+        String withTemplate = assembler.assemble(t, "{}", List.of(), AgentLang.ZH);
         assertThat(withTemplate).contains("节奏：每天 21:00-08:30（北京时间，两端含）内每根 1h K线收盘唤醒你一次");
         assertThat(withTemplate).doesNotContain("\n唤醒时段：");
 
         t.setUseDefaultPrompt(false);
-        assertThat(assembler.assemble(t, "{}", List.of())).contains("唤醒时段：每天 21:00-08:30");
+        assertThat(assembler.assemble(t, "{}", List.of(), AgentLang.ZH)).contains("唤醒时段：每天 21:00-08:30");
 
         t.setWakeWindow(null);
-        assertThat(assembler.assemble(t, "{}", List.of())).doesNotContain("唤醒时段");
+        assertThat(assembler.assemble(t, "{}", List.of(), AgentLang.ZH)).doesNotContain("唤醒时段");
         t.setUseDefaultPrompt(true);
-        assertThat(assembler.assemble(t, "{}", List.of())).contains("节奏：每根 1h K线收盘唤醒你一次");
+        assertThat(assembler.assemble(t, "{}", List.of(), AgentLang.ZH)).contains("节奏：每根 1h K线收盘唤醒你一次");
     }
 
     /** 单轮留言消费完再组一次提示词：不该复活，也不该再写一次库 */
@@ -98,9 +100,9 @@ class TraderPromptAssemblerTest {
         t.setId(7L);
         t.setOwnerNote("今晚有 CPI 数据");
         t.setOwnerNoteRounds(1);
-        assembler.assemble(t, "{}", List.of());
+        assembler.assemble(t, "{}", List.of(), AgentLang.ZH);
 
-        String second = assembler.assemble(t, "{}", List.of());
+        String second = assembler.assemble(t, "{}", List.of(), AgentLang.ZH);
 
         assertThat(second).doesNotContain("今晚有 CPI 数据").doesNotContain("主人的留言");
         verify(traderMapper, times(1)).update(isNull(), any(LambdaUpdateWrapper.class));
@@ -117,7 +119,7 @@ class TraderPromptAssemblerTest {
         t.setOwnerNote("今晚有 CPI 数据");
         t.setOwnerNoteRounds(3);
 
-        String first = assembler.assemble(t, "{}", List.of());
+        String first = assembler.assemble(t, "{}", List.of(), AgentLang.ZH);
 
         assertThat(first).contains("今晚有 CPI 数据").contains("本次之后还会出现 2 次");
         assertThat(t.getOwnerNote()).isNotNull();
@@ -132,7 +134,7 @@ class TraderPromptAssemblerTest {
         t.setOwnerNote("今晚有 CPI 数据");
         t.setOwnerNoteRounds(1);
 
-        String prompt = assembler.assemble(t, "{}", List.of());
+        String prompt = assembler.assemble(t, "{}", List.of(), AgentLang.ZH);
 
         assertThat(prompt).contains("只在本次唤醒出现").doesNotContain("还会出现");
         assertThat(t.getOwnerNote()).isNull();
@@ -151,7 +153,7 @@ class TraderPromptAssemblerTest {
         t.setOwnerNote("存量留言");
         t.setOwnerNoteRounds(null);
 
-        String prompt = assembler.assemble(t, "{}", List.of());
+        String prompt = assembler.assemble(t, "{}", List.of(), AgentLang.ZH);
 
         assertThat(prompt).contains("存量留言").contains("只在本次唤醒出现");
         assertThat(t.getOwnerNote()).isNull();
@@ -160,7 +162,7 @@ class TraderPromptAssemblerTest {
     /** 没留言就别去动库：每轮唤醒都白写一次 UPDATE 是纯浪费 */
     @Test
     void 没有留言时不写库() {
-        String prompt = assembler.assemble(trader(), "{}", List.of());
+        String prompt = assembler.assemble(trader(), "{}", List.of(), AgentLang.ZH);
 
         assertThat(prompt).doesNotContain("主人的留言");
         verify(traderMapper, never()).update(any(), any());
@@ -173,7 +175,7 @@ class TraderPromptAssemblerTest {
         t.setId(7L);
         t.setOwnerNote("   ");
 
-        String prompt = assembler.assemble(t, "{}", List.of());
+        String prompt = assembler.assemble(t, "{}", List.of(), AgentLang.ZH);
 
         assertThat(prompt).doesNotContain("主人的留言");
         verify(traderMapper, never()).update(any(), any());
@@ -181,7 +183,7 @@ class TraderPromptAssemblerTest {
 
     @Test
     void containsHardRulesAccountAndCustomPrompt() {
-        String prompt = assembler.assemble(trader(), "{\"balance\":10000}", List.of());
+        String prompt = assembler.assemble(trader(), "{\"balance\":10000}", List.of(), AgentLang.ZH);
 
         assertThat(prompt)
                 .contains("3~20 倍")        // 默认杠杆区间
@@ -198,7 +200,7 @@ class TraderPromptAssemblerTest {
      */
     @Test
     void disciplineAnchorsPlanBasedExits() {
-        String prompt = assembler.assemble(trader(), "{}", List.of());
+        String prompt = assembler.assemble(trader(), "{}", List.of(), AgentLang.ZH);
 
         assertThat(prompt)
                 .contains("虚拟资金")
@@ -214,7 +216,7 @@ class TraderPromptAssemblerTest {
     /** 模板必须交代计划管理工具与修改纪律：止损只许收紧、止盈只许远离入场、无计划持仓先补立 */
     @Test
     void templateMentionsPlanManagementTools() {
-        String prompt = assembler.assemble(trader(), "{}", List.of());
+        String prompt = assembler.assemble(trader(), "{}", List.of(), AgentLang.ZH);
 
         assertThat(prompt)
                 .contains("set_take_profit")
@@ -231,7 +233,7 @@ class TraderPromptAssemblerTest {
         custom.setMarginPctMin(new BigDecimal("10"));
         custom.setMarginPctMax(new BigDecimal("10"));
 
-        String p = assembler.assemble(custom, "{}", List.of());
+        String p = assembler.assemble(custom, "{}", List.of(), AgentLang.ZH);
         assertThat(p).contains("50~100 倍").contains("10%~10%").contains("不是上限");
     }
 
@@ -242,7 +244,7 @@ class TraderPromptAssemblerTest {
         t.setAllowSelfAdd(true);
         t.setAllowSelfReduce(true);
 
-        assertThat(assembler.assemble(t, "{}", List.of())).doesNotContain("需要主人确认的动作");
+        assertThat(assembler.assemble(t, "{}", List.of(), AgentLang.ZH)).doesNotContain("需要主人确认的动作");
     }
 
     /** 关掉自主减仓：必须同时告诉模型"止损止盈仍自动执行"，否则它会因为平不了仓而乱来 */
@@ -252,7 +254,7 @@ class TraderPromptAssemblerTest {
         t.setAllowSelfAdd(true);
         t.setAllowSelfReduce(false);
 
-        String p = assembler.assemble(t, "{}", List.of());
+        String p = assembler.assemble(t, "{}", List.of(), AgentLang.ZH);
         assertThat(p).contains("减仓/平仓不会立即成交")
                 .contains("止损单和止盈单是自动执行的")
                 .doesNotContain("加仓（对已有仓位再开同方向）不会立即成交");
@@ -264,7 +266,7 @@ class TraderPromptAssemblerTest {
         AiTrader t = trader();
         t.setAllowMultiPosition(false);
 
-        assertThat(assembler.assemble(t, "{}", List.of())).contains("挂单同样占坑");
+        assertThat(assembler.assemble(t, "{}", List.of(), AgentLang.ZH)).contains("挂单同样占坑");
     }
 
     /** 历史注入：最新一条全文保留（截1000），更早的截200——模型必须能读出上一轮的完整意图 */
@@ -275,7 +277,7 @@ class TraderPromptAssemblerTest {
         AiTraderDecision older = decision("旧的" + "y".repeat(500));
 
         // 与 runner 查询同序：倒序（最新在前）
-        String prompt = assembler.assemble(trader(), "{}", List.of(latest, older));
+        String prompt = assembler.assemble(trader(), "{}", List.of(latest, older), AgentLang.ZH);
 
         assertThat(prompt)
                 .contains("x".repeat(500))
@@ -285,7 +287,7 @@ class TraderPromptAssemblerTest {
 
     @Test
     void emptyRecentDecisionsHidesSection() {
-        String prompt = assembler.assemble(trader(), "{}", List.of());
+        String prompt = assembler.assemble(trader(), "{}", List.of(), AgentLang.ZH);
 
         assertThat(prompt).doesNotContain("最近决策");
     }
@@ -293,7 +295,7 @@ class TraderPromptAssemblerTest {
     @Test
     void recentDecisionsRenderDigest() {
         String prompt = assembler.assemble(trader(), "{}",
-                List.of(decision("突破前高做多，止损放在颈线下")));
+                List.of(decision("突破前高做多，止损放在颈线下")), AgentLang.ZH);
 
         assertThat(prompt)
                 .contains("最近决策")
@@ -308,7 +310,7 @@ class TraderPromptAssemblerTest {
         t.setUseDefaultPrompt(false);
 
         String prompt = assembler.assemble(t, "{\"balance\":10000}",
-                List.of(decision("突破前高做多")));
+                List.of(decision("突破前高做多")), AgentLang.ZH);
 
         assertThat(prompt)
                 .doesNotContain("工具：")
@@ -323,13 +325,13 @@ class TraderPromptAssemblerTest {
         AiTrader t = trader();
         t.setCustomPrompt(null);
 
-        assertThat(assembler.assemble(t, "{}", List.of())).contains("BTCUSDT");
+        assertThat(assembler.assemble(t, "{}", List.of(), AgentLang.ZH)).contains("BTCUSDT");
     }
 
     /** 单问题框架 + 固定收尾格式 + 分析次序（检验旧论点→大周期定方向）：深度来自问题清晰与收束压力 */
     @Test
     void singleQuestionFramingAndConclusionFormat() {
-        String p = assembler.assemble(trader(), "{}", List.of());
+        String p = assembler.assemble(trader(), "{}", List.of(), AgentLang.ZH);
 
         assertThat(p)
                 .contains("只需要回答一个问题")
@@ -342,7 +344,7 @@ class TraderPromptAssemblerTest {
     /** 成本意识要有数字：没有数字的手续费纪律等于没有纪律 */
     @Test
     void feeNumbersRendered() {
-        String p = assembler.assemble(trader(), "{}", List.of());
+        String p = assembler.assemble(trader(), "{}", List.of(), AgentLang.ZH);
 
         assertThat(p).contains("0.04%").contains("0.08%");
     }
@@ -353,10 +355,11 @@ class TraderPromptAssemblerTest {
         AiTrader t = trader();
         t.setMemory("教训：突破回踩不守住颈线就别追。");
 
-        assertThat(assembler.assemble(t, "{}", List.of()))
-                .contains("复盘笔记").contains("别追");
-        assertThat(assembler.assemble(trader(), "{}", List.of()))
-                .doesNotContain("复盘笔记");
+        // 认段头而不是"复盘笔记"四个字：模板里那句跨语言交代也提到它，光看词会误判
+        assertThat(assembler.assemble(t, "{}", List.of(), AgentLang.ZH))
+                .contains("————— 复盘笔记（").contains("别追");
+        assertThat(assembler.assemble(trader(), "{}", List.of(), AgentLang.ZH))
+                .doesNotContain("————— 复盘笔记（");
     }
 
     /**
@@ -369,17 +372,17 @@ class TraderPromptAssemblerTest {
         t.setMemory("教训：突破回踩不守住颈线就别追。");
         t.setLearningNotes("同侪A的BREAKOUT 12笔8胜靠等回踩确认，我9笔2胜差在追价。");
 
-        assertThat(assembler.assemble(t, "{}", List.of()))
-                .contains("复盘笔记").contains("别追")
-                .contains("学习笔记").contains("差在追价");
-        assertThat(assembler.assemble(trader(), "{}", List.of()))
-                .doesNotContain("学习笔记");
+        assertThat(assembler.assemble(t, "{}", List.of(), AgentLang.ZH))
+                .contains("————— 复盘笔记（").contains("别追")
+                .contains("————— 学习笔记（").contains("差在追价");
+        assertThat(assembler.assemble(trader(), "{}", List.of(), AgentLang.ZH))
+                .doesNotContain("————— 学习笔记（");
     }
 
     /** 用户风格指令的优先级必须明示：风格冲突听主人的，仓位规格与硬性规则不可覆盖 */
     @Test
     void customPromptPriorityDeclared() {
-        String p = assembler.assemble(trader(), "{}", List.of());
+        String p = assembler.assemble(trader(), "{}", List.of(), AgentLang.ZH);
 
         assertThat(p).contains("听主人的").contains("不在可覆盖范围").contains("只做突破，不抄底。");
     }
@@ -391,7 +394,7 @@ class TraderPromptAssemblerTest {
         latest.setWakeTime(1785175200000L);
         AiTraderDecision older = decision("旧的开头行情铺垫" + "z".repeat(300) + "【本轮结论】等待：跌破94000");
 
-        String prompt = assembler.assemble(trader(), "{}", List.of(latest, older));
+        String prompt = assembler.assemble(trader(), "{}", List.of(latest, older), AgentLang.ZH);
 
         assertThat(prompt)
                 .contains("等待：跌破94000")

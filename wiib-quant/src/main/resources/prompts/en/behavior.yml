@@ -1,5 +1,6 @@
-# Prompt catalog (English). Filename `en` is the language code; PromptCatalog globs prompts/*.yml.
-# Keys mirror zh.yml one for one. A key missing here falls back to zh.yml with a WARN,
+# behavior domain catalog (English). Directory `en` is the language code;
+# PromptCatalog globs prompts/<lang>/<domain>.yml.
+# Keys mirror zh/behavior.yml one for one. A key missing here falls back to zh with a WARN,
 # so a half-translated file degrades to Chinese instead of shipping an empty prompt.
 
 behavior:

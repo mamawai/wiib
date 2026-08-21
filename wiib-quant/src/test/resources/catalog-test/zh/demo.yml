@@ -5,7 +5,3 @@ demo:
     你好 {{name}}，
     欢迎回来
   onlyZh: 只有中文词表有这条
-
-tool:
-  echo_tool: 回声工具（词表中文描述）
-  zh_only_tool: 只有中文词表有它

@@ -9,7 +9,7 @@ import java.util.Optional;
  * 语言码与前端 i18n 的 Lang 逐字相同（zh/en），落库在 {@code user.lang} 列；
  * 前端 localStorage(wiib-lang) 是唯一事实源，登录/切换时推给服务端，服务端那份只决定 AI 产出。
  * <p>
- * 【改名警告】code() 的字符串就是 user.lang 列里存的值，也是 prompts/&lt;code&gt;.yml 的文件名，
+ * 【改名警告】code() 的字符串就是 user.lang 列里存的值，也是 prompts/&lt;code&gt;/ 词表目录名，
  * 上线后只准加新的，不准改名。
  */
 public enum AgentLang {
@@ -23,14 +23,14 @@ public enum AgentLang {
         this.code = code;
     }
 
-    /** 语言码，与前端 Lang、user.lang 列、prompts 文件名三处同一套字符串 */
+    /** 语言码，与前端 Lang、user.lang 列、prompts 词表目录名三处同一套字符串 */
     public String code() {
         return code;
     }
 
     /**
      * 精确匹配（忽略大小写与首尾空白），认不出返回 empty。
-     * 校验前端传进来的值、按 yml 文件名认语言用它——这两处认不出就该报错，不该悄悄变中文。
+     * 校验前端传进来的值、按词表目录名认语言用它——这两处认不出就该报错，不该悄悄变中文。
      */
     public static Optional<AgentLang> find(String code) {
         if (code == null) {

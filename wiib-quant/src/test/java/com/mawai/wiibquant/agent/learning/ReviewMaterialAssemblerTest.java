@@ -1,5 +1,7 @@
 package com.mawai.wiibquant.agent.learning;
 
+import com.mawai.wiibquant.agent.i18n.PromptCatalog;
+import com.mawai.wiibcommon.enums.AgentLang;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.mawai.wiibcommon.dto.FuturesPositionDTO;
@@ -54,7 +56,7 @@ class ReviewMaterialAssemblerTest {
     private final KlineHistoryStore historyStore = mock(KlineHistoryStore.class);
 
     private final ReviewMaterialAssembler assembler = new ReviewMaterialAssembler(
-            decisionMapper, planMapper, simTradeClient, historyStore);
+            decisionMapper, planMapper, simTradeClient, historyStore, new PromptCatalog());
 
     private AiTrader trader() {
         AiTrader t = new AiTrader();
@@ -117,7 +119,7 @@ class ReviewMaterialAssemblerTest {
                 closedPos("LONG", "100000", "103000", "300", FROM + 3600_000, FROM + 7200_000),
                 closedPos("LONG", "100000", "99000", "-100", FROM + 7200_000, FROM + 10800_000)));
 
-        ReviewMaterialAssembler.ReviewMaterial m = assembler.assemble(trader(), FROM, TO);
+        ReviewMaterialAssembler.ReviewMaterial m = assembler.assemble(trader(), FROM, TO, AgentLang.ZH);
 
         // 收益率 (10500-10000)/10000=+5%；回撤峰10200谷9800=3.92%；2笔1胜1负
         assertThat(m.statsBlock()).contains("10000").contains("10500").contains("+5.00%");
@@ -132,7 +134,7 @@ class ReviewMaterialAssemblerTest {
         when(decisionMapper.selectList(any())).thenReturn(
                 List.of(equityRow(FROM + 3600_000, "10100")), List.of());
 
-        ReviewMaterialAssembler.ReviewMaterial m = assembler.assemble(trader(), FROM, TO);
+        ReviewMaterialAssembler.ReviewMaterial m = assembler.assemble(trader(), FROM, TO, AgentLang.ZH);
 
         // 无前值 → 起始按初始资金 10000：(10100-10000)/10000=+1%
         assertThat(m.statsBlock()).contains("+1.00%");
@@ -152,7 +154,7 @@ class ReviewMaterialAssemblerTest {
         when(simTradeClient.getClosedPositions(eq(99L), anyInt())).thenReturn(full);
         when(decisionMapper.selectOne(any())).thenReturn(null);
 
-        ReviewMaterialAssembler.ReviewMaterial m = assembler.assemble(trader(), FROM, TO);
+        ReviewMaterialAssembler.ReviewMaterial m = assembler.assemble(trader(), FROM, TO, AgentLang.ZH);
 
         assertThat(m.statsBlock()).contains("不完全统计").contains("200");
     }
@@ -164,7 +166,7 @@ class ReviewMaterialAssemblerTest {
                 closedPos("LONG", "100000", "103000", "300", FROM + 3600_000, FROM + 7200_000)));
         when(decisionMapper.selectOne(any())).thenReturn(null);
 
-        ReviewMaterialAssembler.ReviewMaterial m = assembler.assemble(trader(), FROM, TO);
+        ReviewMaterialAssembler.ReviewMaterial m = assembler.assemble(trader(), FROM, TO, AgentLang.ZH);
 
         assertThat(m.statsBlock()).doesNotContain("不完全统计");
     }
@@ -188,7 +190,7 @@ class ReviewMaterialAssemblerTest {
         plan.setClosedWakeTime(FROM + 25200_000);
         when(planMapper.selectList(any())).thenReturn(List.of(plan));
 
-        ReviewMaterialAssembler.ReviewMaterial m = assembler.assemble(trader(), FROM, TO);
+        ReviewMaterialAssembler.ReviewMaterial m = assembler.assemble(trader(), FROM, TO, AgentLang.ZH);
 
         // 论点→结局配对：playType/失效条件/入场/出场/盈亏/持有时长/了结方式一行齐
         assertThat(m.tradesBlock()).contains("BREAKOUT").contains("98000")
@@ -201,22 +203,22 @@ class ReviewMaterialAssemblerTest {
         // 强平状态直判
         FuturesPositionDTO liq = closedPos("LONG", "100000", "90000", "-500", FROM, FROM + 1);
         liq.setStatus("LIQUIDATED");
-        assertThat(ReviewMaterialAssembler.closeManner(liq)).isEqualTo("强平");
+        assertThat(ReviewMaterialAssembler.closeManner(new PromptCatalog(), liq, AgentLang.ZH)).isEqualTo("强平");
 
         // 触发价是探测时的markPrice会越过挂单价：方向性对照而非相等
         FuturesPositionDTO sl = closedPos("LONG", "100000", "95400", "-46", FROM, FROM + 1);
         sl.setStopLosses(List.of(new FuturesStopLoss("s1", new BigDecimal("95500"), new BigDecimal("0.01"))));
-        assertThat(ReviewMaterialAssembler.closeManner(sl)).isEqualTo("止损带走");
+        assertThat(ReviewMaterialAssembler.closeManner(new PromptCatalog(), sl, AgentLang.ZH)).isEqualTo("止损带走");
 
         FuturesPositionDTO tp = closedPos("SHORT", "100000", "94900", "51", FROM, FROM + 1);
         tp.setTakeProfits(List.of(new FuturesTakeProfit("t1", new BigDecimal("95000"), new BigDecimal("0.01"))));
-        assertThat(ReviewMaterialAssembler.closeManner(tp)).isEqualTo("止盈带走");
+        assertThat(ReviewMaterialAssembler.closeManner(new PromptCatalog(), tp, AgentLang.ZH)).isEqualTo("止盈带走");
 
         // 保护单实时监控在先，带内成交只能是主动平仓（模型自平或审批执行）
         FuturesPositionDTO manual = closedPos("LONG", "100000", "101000", "10", FROM, FROM + 1);
         manual.setStopLosses(List.of(new FuturesStopLoss("s1", new BigDecimal("95500"), new BigDecimal("0.01"))));
         manual.setTakeProfits(List.of(new FuturesTakeProfit("t1", new BigDecimal("110000"), new BigDecimal("0.01"))));
-        assertThat(ReviewMaterialAssembler.closeManner(manual)).isEqualTo("主动平仓");
+        assertThat(ReviewMaterialAssembler.closeManner(new PromptCatalog(), manual, AgentLang.ZH)).isEqualTo("主动平仓");
     }
 
     @Test
@@ -232,7 +234,7 @@ class ReviewMaterialAssemblerTest {
         plan.setClosedWakeTime(FROM + 7200_000);
         when(planMapper.selectList(any())).thenReturn(List.of(plan));
 
-        ReviewMaterialAssembler.ReviewMaterial m = assembler.assemble(trader(), FROM, TO);
+        ReviewMaterialAssembler.ReviewMaterial m = assembler.assemble(trader(), FROM, TO, AgentLang.ZH);
 
         assertThat(m.tradesBlock()).contains("ETHUSDT").contains("RANGE").contains("未配对");
     }
@@ -258,7 +260,7 @@ class ReviewMaterialAssemblerTest {
         when(decisionMapper.selectList(any())).thenReturn(
                 List.of(), List.of(act, hold, alert, err));
 
-        ReviewMaterialAssembler.ReviewMaterial m = assembler.assemble(trader(), FROM, TO);
+        ReviewMaterialAssembler.ReviewMaterial m = assembler.assemble(trader(), FROM, TO, AgentLang.ZH);
 
         // 动作行带工具摘要+结论；HOLD行压缩但等待条件必须保住（观望对账的原料）；警报行有标记；ERROR聚合计数
         assertThat(m.timelineBlock()).contains("open_position").contains("突破确认");
@@ -279,7 +281,7 @@ class ReviewMaterialAssemblerTest {
                 okRow(FROM + 3600_000, AiTraderDecision.KIND_TRADE,
                         "【本轮结论】\n判断：失效条件触发\n动作：申请减仓\n等待：主人确认", pendingAction)));
 
-        ReviewMaterialAssembler.ReviewMaterial m = assembler.assemble(trader(), FROM, TO);
+        ReviewMaterialAssembler.ReviewMaterial m = assembler.assemble(trader(), FROM, TO, AgentLang.ZH);
 
         assertThat(m.timelineBlock()).contains("close_position").contains("待确认");
     }
@@ -299,7 +301,7 @@ class ReviewMaterialAssemblerTest {
         when(decisionMapper.selectOne(any())).thenReturn(null);
         when(decisionMapper.selectList(any())).thenReturn(List.of(), rows);
 
-        ReviewMaterialAssembler.ReviewMaterial m = assembler.assemble(trader(), FROM, TO);
+        ReviewMaterialAssembler.ReviewMaterial m = assembler.assemble(trader(), FROM, TO, AgentLang.ZH);
 
         assertThat(m.timelineBlock()).contains("open_position");
         assertThat(m.timelineBlock()).contains("已省略");
@@ -324,7 +326,7 @@ class ReviewMaterialAssemblerTest {
                 - ETH 多：15m 回踩 1896–1901 且收盘站上 1892，目标 1925/1937
                 - 转空：BTC 15m 收盘跌破 63140；ETH 15m 收盘跌破 1888""";
 
-        String wait = ReviewMaterialAssembler.waitSection(reasoning);
+        String wait = assembler.waitSection(reasoning, AgentLang.ZH);
 
         assertThat(wait).contains("63370–63480").contains("1896–1901").contains("63140");
         // 判断段是当时的指标读数，复盘没有对账物，不该混进等待里占额度
@@ -349,7 +351,7 @@ class ReviewMaterialAssemblerTest {
         when(decisionMapper.selectOne(any())).thenReturn(null);
         when(decisionMapper.selectList(any())).thenReturn(List.of(), rows);
 
-        String timeline = assembler.assemble(trader(), FROM, TO).timelineBlock();
+        String timeline = assembler.assemble(trader(), FROM, TO, AgentLang.ZH).timelineBlock();
 
         // 前两轮只有纯文字注解不同 → 一段两轮；后两轮条件相同但一例行一警报 → 不并
         assertThat(timeline).contains("（2轮）");
@@ -373,7 +375,7 @@ class ReviewMaterialAssemblerTest {
         when(decisionMapper.selectOne(any())).thenReturn(null);
         when(decisionMapper.selectList(any())).thenReturn(List.of(), rows);
 
-        String timeline = assembler.assemble(trader(), FROM, TO).timelineBlock();
+        String timeline = assembler.assemble(trader(), FROM, TO, AgentLang.ZH).timelineBlock();
 
         assertThat(timeline.lines().filter(l -> l.startsWith("- ")).count()).isEqualTo(2);
         assertThat(timeline).contains("63140").contains("62800");
@@ -383,7 +385,7 @@ class ReviewMaterialAssemblerTest {
     /** 没有【本轮结论】块就是这轮没给条件，不能拿正文尾巴冒充——那段是行情叙述，对账对不了 */
     @Test
     void waitSectionReturnsEmptyWhenNoConclusionBlock() {
-        assertThat(ReviewMaterialAssembler.waitSection("BTC 走强，我先看着。ETH 也在震荡，暂时不动手。"))
+        assertThat(assembler.waitSection("BTC 走强，我先看着。ETH 也在震荡，暂时不动手。", AgentLang.ZH))
                 .isEmpty();
     }
 
@@ -410,7 +412,7 @@ class ReviewMaterialAssemblerTest {
                 bar5m(FROM + 3900_000L, "61900", "64000", "61800", "63500")));
         when(decisionMapper.selectOne(any())).thenReturn(null);
 
-        ReviewMaterialAssembler.ReviewMaterial m = assembler.assemble(trader(), FROM, TO);
+        ReviewMaterialAssembler.ReviewMaterial m = assembler.assemble(trader(), FROM, TO, AgentLang.ZH);
 
         // 开=61000 收=63500 高=64000 低=60800，涨跌幅 (63500-61000)/61000=+4.10%
         assertThat(m.pricePathBlock()).contains("61000").contains("63500")
@@ -432,7 +434,7 @@ class ReviewMaterialAssemblerTest {
                 .thenReturn(List.of(bar5m(TO - 300_000L, "61000", "61500", "60800", "61200")));
         when(decisionMapper.selectOne(any())).thenReturn(null);
 
-        ReviewMaterialAssembler.ReviewMaterial m = assembler.assemble(trader(), 0L, TO);
+        ReviewMaterialAssembler.ReviewMaterial m = assembler.assemble(trader(), 0L, TO, AgentLang.ZH);
 
         assertThat(m.pricePathBlock()).contains("覆盖").contains("开局前");
     }
@@ -444,7 +446,7 @@ class ReviewMaterialAssemblerTest {
                 .thenReturn(List.of(bar5m(FROM, "61000", "61500", "60800", "61200")));
         when(decisionMapper.selectOne(any())).thenReturn(null);
 
-        ReviewMaterialAssembler.ReviewMaterial m = assembler.assemble(trader(), FROM, TO);
+        ReviewMaterialAssembler.ReviewMaterial m = assembler.assemble(trader(), FROM, TO, AgentLang.ZH);
 
         assertThat(m.pricePathBlock()).contains("覆盖").doesNotContain("开局前");
     }
@@ -455,7 +457,7 @@ class ReviewMaterialAssemblerTest {
         when(historyStore.load(any(), any(), anyLong(), anyLong())).thenReturn(List.of());
         when(decisionMapper.selectOne(any())).thenReturn(null);
 
-        ReviewMaterialAssembler.ReviewMaterial m = assembler.assemble(trader(), FROM, TO);
+        ReviewMaterialAssembler.ReviewMaterial m = assembler.assemble(trader(), FROM, TO, AgentLang.ZH);
 
         assertThat(m.pricePathBlock()).contains("无K线数据");
         assertThat(m.statsBlock()).contains("【战绩表】");

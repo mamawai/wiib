@@ -8,6 +8,8 @@ import com.mawai.wiibcommon.dto.FuturesPositionDTO;
 import com.mawai.wiibcommon.entity.AiTrader;
 import com.mawai.wiibcommon.entity.AiTraderDecision;
 import com.mawai.wiibcommon.entity.AiTraderPlan;
+import com.mawai.wiibcommon.enums.AgentLang;
+import com.mawai.wiibquant.agent.i18n.PromptCatalog;
 import com.mawai.wiibquant.agent.learning.ReviewMaterialAssembler;
 import com.mawai.wiibquant.external.sim.SimTradeClient;
 import com.mawai.wiibquant.mapper.AiTraderDecisionMapper;
@@ -45,6 +47,8 @@ public class TradeRecordService {
     private final SimTradeClient simTradeClient;
     private final AiTraderPlanMapper planMapper;
     private final AiTraderDecisionMapper decisionMapper;
+    /** 只为借了结方式那套文案：配对算法与文案三处必须同一套 */
+    private final PromptCatalog prompts;
 
     /** 时间线里那一条决策的引用（id 可对上时间线卡）；reason 只有平仓有——close_position 的一句话理由 */
     public record DecisionRef(long id, long wakeTime, String kind, String reasoning, String reason) {
@@ -80,15 +84,18 @@ public class TradeRecordService {
         for (FuturesPositionDTO pos : closed) {
             AiTraderPlan plan = planByPos.get(pos.getId());
             AiTraderDecision open = plan == null ? null : openByWake.get(plan.getOpenedWakeTime());
-            String manner = ReviewMaterialAssembler.closeManner(pos);
+            // 下发给竞技场的字段固定中文：这批只管 AI 产出跟语言走，前端下发数据不动
+            String manner = ReviewMaterialAssembler.closeManner(prompts, pos, AgentLang.ZH);
             out.add(new TradeRecord(pos.getId(), pos.getSymbol(), pos.getSide(), pos.getLeverage(),
                     pos.getEntryPrice(), pos.getClosedPrice(), pos.getClosedPnl(),
                     ReviewMaterialAssembler.msOf(pos.getCreatedAt()), ReviewMaterialAssembler.msOf(pos.getUpdatedAt()),
                     manner, plan,
                     open == null ? null
                             : new DecisionRef(open.getId(), open.getWakeTime(), open.getKind(), open.getReasoning(), null),
-                    // 止损/止盈带走的依据就是计划里的原始止损/目标，不挂平仓决策
-                    "主动平仓".equals(manner) ? closeByPos.get(pos.getId()) : null));
+                    // 止损/止盈带走的依据就是计划里的原始止损/目标，不挂平仓决策。
+                    // 判定认语言无关的码，不认文案——文案换语言，字符串比对就悄悄失效
+                    ReviewMaterialAssembler.MANNER_MANUAL.equals(ReviewMaterialAssembler.closeMannerKey(pos))
+                            ? closeByPos.get(pos.getId()) : null));
         }
         return out;
     }

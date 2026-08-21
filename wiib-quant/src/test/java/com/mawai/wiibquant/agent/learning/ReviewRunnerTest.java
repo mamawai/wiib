@@ -1,5 +1,8 @@
 package com.mawai.wiibquant.agent.learning;
 
+import com.mawai.wiibquant.agent.i18n.UserLangResolver;
+import com.mawai.wiibquant.agent.i18n.PromptCatalog;
+import com.mawai.wiibcommon.enums.AgentLang;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
@@ -51,11 +54,20 @@ class ReviewRunnerTest {
     private final AiTraderMapper traderMapper = mock(AiTraderMapper.class);
     private final AiTraderDecisionMapper decisionMapper = mock(AiTraderDecisionMapper.class);
 
-    private final ReviewRunner runner = new ReviewRunner(assembler, modelFactory, traderMapper, decisionMapper);
+    /** 语言解析钉在中文：本类钉的是复盘回路行为，双语文案由 PromptI18nTest 单管 */
+    private final UserLangResolver langResolver = mock(UserLangResolver.class);
+
+    private final ReviewRunner runner = new ReviewRunner(assembler, modelFactory, traderMapper,
+            decisionMapper, new PromptCatalog(), langResolver);
+
+    {
+        when(langResolver.of(anyLong())).thenReturn(AgentLang.ZH);
+    }
 
     private AiTrader trader() {
         AiTrader t = new AiTrader();
         t.setId(7L);
+        t.setUserId(1L);
         t.setRoundNo(1);
         t.setSimUserId(99L);
         t.setSymbols("BTCUSDT");
@@ -78,7 +90,7 @@ class ReviewRunnerTest {
     private void stubMaterial() {
         when(assembler.lastReview(7L, 1)).thenReturn(priorReview());
         when(assembler.hasNewMaterial(eq(7L), eq(1), anyLong(), anyLong())).thenReturn(true);
-        when(assembler.assemble(any(), anyLong(), anyLong())).thenReturn(
+        when(assembler.assemble(any(), anyLong(), anyLong(), any())).thenReturn(
                 new ReviewMaterialAssembler.ReviewMaterial(
                         "【战绩表】起始权益 10000.00 → 期末权益 9800.00，期间收益率 -2.00%\n",
                         "【已了结交易配对表】1. BTCUSDT LONG [BREAKOUT] …止损带走\n",

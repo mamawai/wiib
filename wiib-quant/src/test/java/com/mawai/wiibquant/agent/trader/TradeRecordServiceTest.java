@@ -1,5 +1,6 @@
 package com.mawai.wiibquant.agent.trader;
 
+import com.mawai.wiibquant.agent.i18n.PromptCatalog;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.mawai.wiibcommon.dto.FuturesPositionDTO;
@@ -43,7 +44,8 @@ class TradeRecordServiceTest {
     private final SimTradeClient sim = mock(SimTradeClient.class);
     private final AiTraderPlanMapper planMapper = mock(AiTraderPlanMapper.class);
     private final AiTraderDecisionMapper decisionMapper = mock(AiTraderDecisionMapper.class);
-    private final TradeRecordService service = new TradeRecordService(sim, planMapper, decisionMapper);
+    private final TradeRecordService service =
+            new TradeRecordService(sim, planMapper, decisionMapper, new PromptCatalog());
 
     private static AiTrader trader() {
         AiTrader t = new AiTrader();

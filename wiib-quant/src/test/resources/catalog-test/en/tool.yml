@@ -1,0 +1,3 @@
+# 刻意缺 tool.zh_only_tool：工具描述那条也走回落
+tool:
+  echo_tool: Echo tool (catalog English description)

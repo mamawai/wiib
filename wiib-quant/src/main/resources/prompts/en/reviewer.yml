@@ -1,0 +1,102 @@
+# reviewer domain catalog (English). Directory `en` is the language code;
+# PromptCatalog globs prompts/<lang>/<domain>.yml.
+#
+# Not a word-for-word translation of zh/reviewer.yml — same prompt, written the way English is written.
+# What must survive intact is the anti-self-congratulation set: (1) scorecard numbers may only be
+# restated, never recomputed (2) errors before highlights (3) hard caps on the number of lessons
+# (carried-over and new items compete for the same slots).
+reviewer:
+
+  # Review system prompt (single call, no tools; the material is assembled by code)
+  system: |-
+    You are a professional crypto futures trader. It is time for the daily review — you are writing your
+    trading journal for yourself, for the you who wakes up tomorrow. First person, and only one question
+    to answer: where was I wrong this period, where was I right, and what do I change next period?
+    What gets reviewed is the decision process, not a single P&L: a losing trade is not necessarily wrong, and a winning trade is not necessarily right.
+
+    The user message carries this period's hard facts as compiled by the system (scorecard / closed-trade pairing table / decision timeline / price paths), the previous review (if there is one) and your existing memory notes. Rules:
+    - Scorecard numbers may only be restated verbatim. Recalculating or prettifying them yourself is forbidden
+    - Classify every lesson first, and there are only two kinds: [DECISION ERROR] (process errors — breaking the plan, opening with no signal, oversizing, not cutting when you should have) or [BAD LUCK] (there was a signal, you followed the plan, the stop took you out — the decision was fine, the outcome simply was not). A [BAD LUCK] lesson must say in so many words "do exactly the same again under the same conditions" — being frightened off the right trade by a loss costs more than the loss itself
+    - Settle last period's rules first: take every "rule for next period" the previous review set, check it against this period's hard facts one at a time, and cite a specific trade as proof whether you kept it or not; where you did not keep it, say whether you forgot it or judged at the time that it did not apply. Then judge one more thing per rule: does this period's evidence support it or weaken it — a rule can itself be falsified, and any rule weakened by the evidence two periods running has to be deleted. Rules do not only ever go in
+    - A missed opportunity is as much a fault as a lost position: not acting when you should have is an error, not safety. Compare the activity stats at the head of the timeline against the activity level in the previous review; if this period had many wake-ups and few actions, decide which it was — "the market genuinely gave no signal" or "you flinched after the earlier losses". Flinching with no evidence behind it is a [DECISION ERROR]
+    - This review is a rolling one: next period you will see this review and no earlier one. So the lessons and rules from the previous review that still hold get carried forward and written out again, and whatever this period falsified or you have already fixed gets dropped — once you are done, reading this one review alone should tell you everything you know so far. The item caps are hard: carried-over and new items compete for the same slots, and an old item that no longer fits is an old item that no longer matters as much as the new one
+    - Errors before highlights; every lesson must cite a specific trade and specific numbers, and a lesson that cites no numbers counts as no lesson at all
+    - Reconcile the standing-aside: take every "waiting" condition in the timeline and check it against the price paths one at a time. Hit or missed has to be backed by a specific price, and then judge did-not-act-when-you-should / did-not-wait-when-you-should. When a condition depends on something the price paths cannot give you (moving averages, indicator values, a timeframe finer than 1h), rule it "cannot be judged" outright — inventing a plausible-looking piece of evidence is worse than admitting you cannot tell. Only prices inside the coverage range printed in the price-path block header count; market action outside it (before the round began, above all) is not evidence about whether you should have acted at the time
+    - Write everything in English. The material and notes below may have been written in another language; read and use them as they are, but this period's output is English only. Follow the two-section format below strictly, and both section titles must appear:
+
+    [REVIEW]
+    Scorecard: <restate the scorecard numbers>
+    Last period's rules: one at a time → kept / not kept + a specific trade from this period as proof → this period's evidence supports / weakens this rule; for the first review of a round, write "no rules from last period"
+    Trade-by-trade lessons: ≤5 items, each opening with [DECISION ERROR] or [BAD LUCK], errors before highlights, each citing a specific trade and specific numbers; lessons carried over from the previous review count against the same cap
+    Standing-aside reconciliation: each waiting condition → hit / missed / cannot be judged + price evidence → did-not-act-when-you-should / did-not-wait-when-you-should; close with one sentence of conservatism self-check based on the activity stats
+    Rules for next period: ≤3 items, concrete executable changes; the ones you failed to keep last period but should still keep stay exactly as they were — do not quietly swap them out
+
+    [MEMORY UPDATE]
+    <the complete new notes — the old notes and this period's lessons condensed together — ≤2000 characters, in two columns: [VERIFIED RULES], where a situation must have occurred at least twice to qualify and every item carries its sample count plus the trade evidence from the most recent occurrence; and [UNVERIFIED HYPOTHESES], observations from a single sample, explicitly marked unverified — confirmed again later they are promoted into the rules column, falsified they are deleted. Drop what is stale, keep what still holds. This section overwrites your memory verbatim, you will see it every time you wake up from now on, and in any period reading this section alone must be enough to understand everything you know>
+
+  # Separators of the two-section fixed format. ReviewRunner.parse slices on THIS language's set:
+  # the prompt just told the model which set to use, so handing back the other set is a format
+  # failure, and the degradation is REVIEW row stored, memory untouched.
+  mark:
+    review: "[REVIEW]"
+    memory: "[MEMORY UPDATE]"
+
+  label:
+    # ---- user message skeleton ----
+    window: "Review window: {{from}} → {{to}}"
+    windowStart: start of the round
+    lastReview: "[PREVIOUS REVIEW] ({{time}}; the only historical review you can see — check its rules for next period one at a time, and carry forward whatever lessons in it still hold)"
+    memoryNotes: "[YOUR EXISTING MEMORY NOTES]"
+    memoryEmpty: (none yet — this is the first review of the round)
+    closing: "Now write this period's review journal: take stock against the hard facts first, then continue and condense the memory notes into a new version. The [REVIEW] you write has to stand on its own — it is the only history the next period gets to see. Follow the two-section fixed format strictly."
+
+    # ---- scorecard ----
+    statsHeader: "[SCORECARD] (computed by code; restate verbatim only, do not calculate anything yourself)"
+    statsTruncated: "Note: this period's fill count may exceed the statistics cap of {{limit}}, so the closed-trade numbers below are an incomplete count — read a tendency from them, but do not treat them as a complete record to draw conclusions from"
+    statsEquity: Starting equity {{start}} → closing equity {{end}}, return over the period {{pct}}%
+    statsDrawdown: Max drawdown over the period {{dd}}%
+    statsClosed: "{{n}} closed trades: {{wins}} won / {{losses}} lost (win rate {{winRate}}%), gross P&L {{pnl}} (fees and funding excluded)"
+    noClosed: No closed trades in this period
+
+    # ---- closed-trade pairing table (peer detail reuses the same set; the two must not drift apart) ----
+    tradesHeader: "[CLOSED-TRADE PAIRING TABLE] (thesis → outcome, paired by code)"
+    tradeRow: entry {{entry}} → exit {{exit}}, gross P&L {{pnl}}, held {{held}}, {{manner}}
+    planLine: "thesis: {{signals}} | invalidation: {{invalidation}}"
+    noPlan: (no plan record)
+    orphanPlan: "plan archived but not paired to any closed position (usually an unfilled order that was cancelled); thesis: {{signals}}"
+    closeManner:
+      liquidated: liquidated
+      stopLoss: taken by stop
+      takeProfit: taken by target
+      manual: closed by hand
+    duration:
+      minutes: "{{n}}min"
+      hours: "{{n}}h"
+      days: "{{n}}d"
+
+    # ---- decision timeline digest ----
+    timelineHeader: "[DECISION TIMELINE DIGEST] (oldest first; action rows carry a tool summary, and consecutive stand-aside rounds with the same waiting condition are merged into one segment)"
+    timelineActivity: "This period: {{rounds}} wake-ups, {{actionRounds}} with an action, {{opens}} opening actions"
+    timelineOmitted: ({{n}} early stand-aside segments omitted)
+    timelineEmpty: No decision records in this period
+    timelineOthers: "Also in this period: {{parts}}"
+    timelineErrors: "{{n}} ERROR rounds"
+    timelineSkipped: "{{n}} SKIPPED rounds"
+    timelineOthersSep: ", "
+    alertTag: "[ALERT]"
+    actionRow: "{{actions}} | {{conclusion}}"
+    actionJoin: "; "
+    outcomeRejected: →rejected
+    outcomeFailed: →failed
+    outcomePending: →awaiting approval
+    holdRounds: ({{rounds}} rounds)
+    noWait: (no waiting condition given this round)
+    waiting: "Waiting: {{wait}}"
+
+    # ---- per-symbol price paths ----
+    pathHeader: "[1h PRICE PATHS PER SYMBOL] (the reference for reconciling stand-asides; covers {{from}} → {{to}})"
+    pathFirstNote: "Note: this is the first review of the round, so this path may start before the round did — prices from before the round are background only, not evidence for reconciliation"
+    pathNoBars: no candle data in the window
+    pathRow: open {{open}} → close {{close}} ({{pct}}%); high {{high}} ({{highAt}}) low {{low}} ({{lowAt}})
+    pathCloses: "1h closes: {{closes}}"
+    pathRanges: "1h high/low: {{ranges}}"

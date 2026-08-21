@@ -1,0 +1,11 @@
+# Tool description catalog (English). @Tool descriptions are compile-time constants and cannot be
+# swapped, so LocalizedToolCallbacks substitutes the tool.<name> entry from here instead; a tool with
+# no entry keeps the description from its annotation (so tools can be moved over one at a time).
+# A description only says what can be looked up — never "look up more / look up less". That is an
+# open decision the system prompt hands to the model.
+tool:
+  peer_insights: |-
+    Look at peers (read-only). Two modes:
+    - Pass traderId: look closely at that one trader — their latest review in full, their learning notes, the thesis and invalidation condition of their live plans, and the "thesis → outcome" pairing of their last few closed trades.
+    - Omit traderId: returns a snapshot of this round's leaderboard (per trader: name / status / return this round / closed-trade count / one line of their latest review). You were already given one in the opening message; call this when you want to re-check it.
+    The N in the [id=N] at the start of every leaderboard row is the traderId to pass here.

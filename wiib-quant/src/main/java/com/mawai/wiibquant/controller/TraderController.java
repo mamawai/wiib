@@ -10,6 +10,7 @@ import com.mawai.wiibcommon.entity.AiTraderPlan;
 import com.mawai.wiibcommon.entity.UserLlmBinding;
 import com.mawai.wiibcommon.entity.UserLlmEndpoint;
 import com.mawai.wiibcommon.util.Result;
+import com.mawai.wiibquant.agent.i18n.UserLangResolver;
 import com.mawai.wiibquant.agent.llm.LlmEndpointService;
 import com.mawai.wiibquant.external.sim.SimTradeClient;
 import com.mawai.wiibquant.agent.trader.TradeRecordService;
@@ -48,6 +49,7 @@ public class TraderController {
     private final LlmEndpointService endpointService;
     private final TraderActionService actionService;
     private final TradeRecordService tradeRecordService;
+    private final UserLangResolver userLangResolver;
 
     // ========== 我的 trader ==========
 
@@ -109,7 +111,7 @@ public class TraderController {
 
     @PostMapping("/prompt-template")
     @Operation(summary = "平台系统提示词预览（与唤醒组装同一份文本）")
-    public Result<String> promptTemplate(@RequestBody PromptPreviewRequest req) {
+    public Result<String> promptTemplate(@CurrentUserId long userId, @RequestBody PromptPreviewRequest req) {
         StpUtil.checkLogin();
         String interval = req.intervalCode() == null || req.intervalCode().isBlank() ? "15m" : req.intervalCode();
         String symbols = req.symbols() == null || req.symbols().isBlank() ? "BTCUSDT" : req.symbols();
@@ -122,7 +124,9 @@ public class TraderController {
         } catch (IllegalArgumentException e) {
             windowText = null; // 预览只是看文本，时段还没填对就按全天预览，保存时才真校验
         }
-        return Result.ok(promptAssembler.platformTemplate(interval, symbols, cfg, windowText));
+        // 预览也按当前用户语言出：MyTrader 页展示的就是这份文本，英文用户不该看到中文模板
+        return Result.ok(promptAssembler.platformTemplate(
+                userLangResolver.of(userId), interval, symbols, cfg, windowText));
     }
 
     /** llmEndpointId：端点库里的一条，空=跟随用户默认端点 */

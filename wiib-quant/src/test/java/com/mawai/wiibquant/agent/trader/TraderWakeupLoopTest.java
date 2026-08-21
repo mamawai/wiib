@@ -9,6 +9,7 @@ import com.mawai.wiibcommon.entity.AiTraderRequest;
 import com.mawai.wiibcommon.entity.FuturesPosition;
 import com.mawai.wiibquant.mapper.AiTraderPlanMapper;
 import com.mawai.wiibcommon.entity.AiTraderDecision;
+import com.mawai.wiibcommon.enums.AgentLang;
 import com.mawai.wiibcommon.market.BinanceRestClient;
 import com.mawai.wiibquant.external.sim.SimTradeClient;
 import com.mawai.wiibquant.agent.toolkit.IndicatorToolkit;
@@ -18,6 +19,8 @@ import com.mawai.wiibquant.agent.toolkit.MarketToolkit;
 import com.mawai.wiibquant.market.service.NewsCache;
 import com.mawai.wiibquant.agent.toolkit.NewsToolkit;
 import com.mawai.wiibquant.mapper.AiTraderDecisionMapper;
+import com.mawai.wiibquant.agent.i18n.PromptCatalog;
+import com.mawai.wiibquant.agent.i18n.UserLangResolver;
 import com.mawai.wiibquant.mapper.AiTraderMapper;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
@@ -72,16 +75,21 @@ class TraderWakeupLoopTest {
     private final AiTraderPlanMapper planMapper = mock(AiTraderPlanMapper.class);
     private final TraderRequestService requestService = mock(TraderRequestService.class);
 
+    /** 语言解析走真实词表的中文侧：本类钉的是唤醒回路行为，不是文案 */
+    private final UserLangResolver langResolver = mock(UserLangResolver.class);
+
     private final TraderWakeupRunner runner = new TraderWakeupRunner(
-            modelFactory, new TraderPromptAssembler(traderMapper), simTradeClient, binanceRestClient,
+            modelFactory, new TraderPromptAssembler(traderMapper, new PromptCatalog()),
+            simTradeClient, binanceRestClient,
             new IndicatorToolkit(new KlineFetcher(binanceRestClient, 60_000)),
             new MarketToolkit(mock(MarketDataService.class)),
             new NewsToolkit(mock(NewsCache.class)),
-            traderMapper, decisionMapper, new TraderPlanStore(planMapper), requestService);
+            traderMapper, decisionMapper, new TraderPlanStore(planMapper), requestService, langResolver);
 
     {
         // 测试边界是固定历史时刻，墙钟钉在边界后 1s——预算充足，各用例不受真实时间影响
         runner.nowMs = () -> 1785171600000L + 1_000L;
+        when(langResolver.of(anyLong())).thenReturn(AgentLang.ZH);
     }
 
     private AiTrader trader() {

@@ -1,9 +1,0 @@
-# 刻意缺 demo.onlyZh 与 tool.zh_only_tool：用来钉"英文缺 key 回落中文"
-demo:
-  plain: hello
-  greet: |
-    Hi {{name}},
-    welcome back
-
-tool:
-  echo_tool: Echo tool (catalog English description)

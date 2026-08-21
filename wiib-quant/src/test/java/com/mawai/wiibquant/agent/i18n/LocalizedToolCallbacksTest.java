@@ -40,7 +40,7 @@ class LocalizedToolCallbacksTest {
     }
 
     private final LocalizedToolCallbacks localized =
-            new LocalizedToolCallbacks(new PromptCatalog("classpath*:catalog-test/*.yml"));
+            new LocalizedToolCallbacks(new PromptCatalog("classpath*:catalog-test/*/*.yml"));
 
     private Map<String, ToolCallback> callbacks(AgentLang lang) {
         return localized.of(lang, new DemoTools()).stream()

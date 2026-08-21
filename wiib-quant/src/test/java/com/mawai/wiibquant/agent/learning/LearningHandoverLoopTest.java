@@ -1,5 +1,9 @@
 package com.mawai.wiibquant.agent.learning;
 
+import com.mawai.wiibquant.agent.i18n.LocalizedToolCallbacks;
+import com.mawai.wiibquant.agent.i18n.UserLangResolver;
+import com.mawai.wiibquant.agent.i18n.PromptCatalog;
+import com.mawai.wiibcommon.enums.AgentLang;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.mawai.wiibcommon.entity.AiTrader;
@@ -64,6 +68,7 @@ class LearningHandoverLoopTest {
     private static AiTrader trader(long id, String name) {
         AiTrader t = new AiTrader();
         t.setId(id);
+        t.setUserId(id);
         t.setName(name);
         t.setStatus(AiTrader.STATUS_RUNNING);
         t.setIntervalCode("1h");
@@ -124,10 +129,13 @@ class LearningHandoverLoopTest {
         ChatModel model = sharedModel();
         when(modelFactory.modelFor(any())).thenReturn(model);
 
+        PromptCatalog prompts = new PromptCatalog();
+        UserLangResolver langResolver = mock(UserLangResolver.class);
+        when(langResolver.of(anyLong())).thenReturn(AgentLang.ZH);
         PeerInsightService peers = new PeerInsightService(
-                traderMapper, decisionMapper, planMapper, simTradeClient, assembler);
+                traderMapper, decisionMapper, planMapper, simTradeClient, assembler, prompts);
         LearningRunner learningRunner = new LearningRunner(peers, modelFactory, traderMapper,
-                decisionMapper);
+                decisionMapper, prompts, new LocalizedToolCallbacks(prompts), langResolver);
         TraderScheduler scheduler = new TraderScheduler(traderMapper, wakeupRunner, reviewRunner, learningRunner);
 
         scheduler.onKlineClosed(new KlineClosedEvent(this, "BTCUSDT", "5m", DAY_BOUNDARY - 1));
