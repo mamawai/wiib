@@ -197,9 +197,10 @@ public class ChatTurnRunner {
         @Tool(name = "route", description = """
                 决定下一步。需要真实数据时给出专家名；专家数据已够、可以作答时给 ["FINISH"]。""")
         public String route(@ToolParam(description = """
-                下一步去向：market_agent(行情/持仓/清算/期权)、news_agent(加密新闻快讯)、
-                trader_agent(用户自己的AI交易员：状态/持仓/决策/计划/复盘笔记)，
-                或 ["FINISH"] 表示不再派发、直接作答。""") List<String> next) {
+                Where to go next: market_agent (prices/positions/liquidations/options),
+                news_agent (crypto news flashes), trader_agent (the user's own AI trader:
+                status/positions/decisions/plans/retrospective notes),
+                or ["FINISH"] to stop dispatching and answer directly.""") List<String> next) {
             return "";
         }
     }

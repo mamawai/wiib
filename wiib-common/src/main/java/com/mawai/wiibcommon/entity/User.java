@@ -80,6 +80,12 @@ public class User {
      */
     private Boolean profilePublic;
 
+    /**
+     * AI 产出语言（{@link com.mawai.wiibcommon.enums.AgentLang} 的 code：zh/en），NULL=跟随中文。
+     * 只管后端 AI 的提示词与回答语言；界面语言在前端 localStorage，不从这里读。
+     */
+    private String lang;
+
     /** 创建时间 */
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdAt;

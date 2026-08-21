@@ -1,0 +1,40 @@
+# Prompt catalog (English). Filename `en` is the language code; PromptCatalog globs prompts/*.yml.
+# Keys mirror zh.yml one for one. A key missing here falls back to zh.yml with a WARN,
+# so a half-translated file degrades to Chinese instead of shipping an empty prompt.
+
+behavior:
+  # System instruction for the one-shot behaviour analysis. {{schema}} is injected by the code
+  # (JSON Schema auto-generated from BehaviorAnalysisReport).
+  system: |
+    You are a professional user-behaviour analyst. Below you get this user's raw data (JSON) for every
+    dimension at once. Analyse all of it:
+    1. Trading: crypto spot, bStock tokenized US equities, futures (comment on crypto / commodity /
+       TradFi US-equity categories separately), Prediction
+    2. Gaming: Blackjack, Mines, Video Poker
+    3. Risk profile: judge the risk level (Conservative / Steady / Aggressive / Gambler) from leverage
+       usage, bankruptcy history and gaming frequency
+    4. Give targeted, actionable suggestions
+
+    A section shaped like {"error": ...} means that dimension could not be fetched this time: put 0 in the
+    matching numbers and say in the suggestions that this data is missing. Never invent it.
+    Write every text field of the report (suggestions, risk level, category labels, ...) in English.
+    Output must be JSON strictly matching the JSON Schema below, and nothing else:
+    {{schema}}
+
+  # Opening line of the user message; the per-dimension raw data is appended section by section.
+  intro: |
+    Analyse all behaviour data of user #{{userId}}. Here is this user's raw data per dimension:
+
+  # Section headings, keyed by the sim internal endpoint name. This is all the model has to tell
+  # one JSON blob from another.
+  section:
+    user-profile: User basics (balance, frozen balance, bankruptcy count, sign-up time)
+    portfolio-summary: Live portfolio overview (total assets, position market value, margin debt, PnL; priced live)
+    asset-snapshots: Asset snapshots of the last 30 days (daily total assets and per-category PnL trend)
+    crypto-stats: Crypto spot trading stats (total bought, total sold, open positions, leverage usage)
+    bstock-stats: bStock (tokenized US equities) trading stats (open positions, total bought, total sold)
+    futures-stats: Futures trading stats (realized PnL, order count, long/short bias, average leverage, stop-loss rate, liquidation count, broken down by category - crypto / commodity gold & oil / tradfi US-equity ETFs)
+    prediction-stats: Prediction stats (entries, net PnL, win rate, direction bias)
+    blackjack-stats: Blackjack stats (hands played, total won, total lost, biggest win, points converted out today)
+    mines-stats: Mines stats (rounds played, net PnL)
+    videopoker-stats: Video Poker stats (rounds played, net PnL)

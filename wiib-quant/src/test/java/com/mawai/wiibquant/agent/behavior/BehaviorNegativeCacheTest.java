@@ -1,5 +1,7 @@
 package com.mawai.wiibquant.agent.behavior;
 
+import com.mawai.wiibcommon.enums.AgentLang;
+import com.mawai.wiibquant.agent.i18n.UserLangResolver;
 import com.mawai.wiibquant.agent.runtime.AiAgentRuntimeManager;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -27,8 +29,11 @@ class BehaviorNegativeCacheTest {
     void setUp() {
         runtimeManager = mock(AiAgentRuntimeManager.class);
         // 一进 workflow 就失败：最短路径触发 doAnalyze 失败
-        when(runtimeManager.runBehaviorAnalysis(anyLong(), any())).thenThrow(new RuntimeException("模型不可用"));
-        service = new BehaviorAnalysisService(runtimeManager);
+        when(runtimeManager.runBehaviorAnalysis(anyLong(), any(), any()))
+                .thenThrow(new RuntimeException("模型不可用"));
+        UserLangResolver langResolver = mock(UserLangResolver.class);
+        when(langResolver.of(anyLong())).thenReturn(AgentLang.ZH);
+        service = new BehaviorAnalysisService(runtimeManager, langResolver);
     }
 
     @Test
@@ -41,7 +46,7 @@ class BehaviorNegativeCacheTest {
         assertThat(second.getMsg()).isNotBlank();
 
         // 第二次没有再跑分析——这是负缓存的全部意义
-        verify(runtimeManager, times(1)).runBehaviorAnalysis(anyLong(), any());
+        verify(runtimeManager, times(1)).runBehaviorAnalysis(anyLong(), any(), any());
     }
 
     @Test
@@ -49,6 +54,6 @@ class BehaviorNegativeCacheTest {
         service.analyze(7L);
         service.analyze(8L);
         // 各自烧各自的一次，7 的失败不挡 8
-        verify(runtimeManager, times(2)).runBehaviorAnalysis(anyLong(), any());
+        verify(runtimeManager, times(2)).runBehaviorAnalysis(anyLong(), any(), any());
     }
 }

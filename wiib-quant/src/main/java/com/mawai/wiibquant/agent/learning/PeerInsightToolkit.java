@@ -33,7 +33,8 @@ public class PeerInsightToolkit {
             排行榜每行开头 [id=N] 里的 N，就是这里要传的 traderId。""")
     public String peerInsights(
             @ToolParam(required = false,
-                    description = "要深看的同侪 traderId（取自排行榜的 [id=N]）；不传则返回排行榜快照")
+                    description = "traderId of the peer to inspect, i.e. the N in [id=N] on the leaderboard; "
+                            + "omit it to get the leaderboard snapshot instead")
             Long traderId) {
         if (traderId == null) {
             log.info("[PeerTool] peer_insights 取排行榜 self={}", selfTraderId);

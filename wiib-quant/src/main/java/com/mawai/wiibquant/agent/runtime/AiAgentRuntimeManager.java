@@ -4,6 +4,7 @@ import com.mawai.wiibcommon.constant.AiFunctions;
 import com.mawai.wiibcommon.constant.AiProtocols;
 import com.mawai.wiibcommon.entity.AiModelAssignment;
 import com.mawai.wiibcommon.entity.AiRuntimeConfig;
+import com.mawai.wiibcommon.enums.AgentLang;
 import com.mawai.wiibcommon.mapper.AiModelAssignmentMapper;
 import com.mawai.wiibcommon.mapper.AiRuntimeConfigMapper;
 import com.mawai.wiibquant.agent.behavior.BehaviorAnalysisWorkflow;
@@ -118,9 +119,12 @@ public class AiAgentRuntimeManager {
         }
     }
 
-    /** 跑一次行为分析（阻塞出报告，不需要流式），返回模型原文；模型取当前 runtime 的 behavior 功能位。 */
-    public String runBehaviorAnalysis(long userId, Consumer<String> onProgress) {
-        return behaviorAnalysisWorkflow.run(current().behaviorChatModel(), userId, onProgress);
+    /**
+     * 跑一次行为分析（阻塞出报告，不需要流式），返回模型原文；模型取当前 runtime 的 behavior 功能位。
+     * lang 决定提示词与报告正文的语言，由调用方按用户偏好取好再传进来。
+     */
+    public String runBehaviorAnalysis(long userId, AgentLang lang, Consumer<String> onProgress) {
+        return behaviorAnalysisWorkflow.run(current().behaviorChatModel(), userId, lang, onProgress);
     }
 
     // 旧 quant graph 构建/fallback 整套已随旧管线删除（P2a）：

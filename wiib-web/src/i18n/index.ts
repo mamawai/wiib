@@ -67,6 +67,9 @@ void i18n
     react: { useSuspense: false },
   });
 
+/** 当前语言。i18next 的 resolvedLanguage 可能带地区码，这里归一到支持列表里的两门 */
+export const currentLang = (): Lang => (i18n.resolvedLanguage === 'en' ? 'en' : 'zh');
+
 /** html lang 跟着切：影响浏览器断词与字体回退，也让读屏软件知道当前在读哪门语言 */
 const applyHtmlLang = (lng: string) => {
   document.documentElement.lang = lng.startsWith('zh') ? 'zh-CN' : 'en';

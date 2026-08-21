@@ -1,7 +1,8 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { User } from '../types';
-import { authApi } from '../api';
+import { authApi, userApi } from '../api';
+import { currentLang } from '../i18n';
 import { reconnectWithIdentity } from '../hooks/stompClient';
 
 interface UserState {
@@ -27,6 +28,11 @@ export const useUserStore = create<UserState>()(
       setToken: (token: string | null) => {
         set({ token });
         reconnectWithIdentity();
+        // 登录即把本地语言推给服务端：游客期切的语言也靠这一下带过去，否则英文用户注册完
+        // 第一份 AI 产出还是中文。localStorage 始终是唯一事实源，不做反向同步
+        if (token) {
+          void userApi.setLang(currentLang()).catch(() => {});
+        }
       },
 
       fetchUser: async () => {

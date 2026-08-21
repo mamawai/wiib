@@ -59,7 +59,7 @@ public class TraderActionToolkit {
             Never say the note has been saved; say the form is open with your draft in it.""")
     public String leaveNoteToTrader(
             @ToolParam(description =
-                    "The note drafted in the user's own words, <=500 chars, e.g. 今晚有 CPI 数据，仓位放轻一点")
+                    "The note drafted in the user's own words, <=500 chars, e.g. 'CPI print tonight, keep size light'")
             String note,
             @ToolParam(required = false, description =
                     "How many upcoming wake-ups should carry this note, 1-24. Omit for 1 (a one-off remark).")

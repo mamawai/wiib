@@ -1,5 +1,5 @@
 import axios from 'axios';
-import i18n from '../i18n';
+import i18n, { type Lang } from '../i18n';
 import type { TnOverview, TnTrade, TnDailyCell, TnEquityPoint, TnFillStats, TnManualOrderReq, TnOrderResult, TnAck } from '../types/testnet';
 import type { BacktestStrategyMeta, BacktestTaskStatus, BacktestEventsPage, BacktestKlinesPage, BacktestResultPayload, ReplayCoverage, HistoryKlinesPayload, ReplayCoachRequest, ReplayCoachEvent } from '../types';
 import type { LedgerEntry, LedgerBizTypeOption, PublicTrade, UserProfile, PositionHistoryItem, RankingSort } from '../types';
@@ -98,6 +98,8 @@ export const userApi = {
   getProfilePublic: () => api.get<unknown, boolean>('/user/profile-public'),
   setProfilePublic: (profilePublic: boolean) =>
     api.post<unknown, void>('/user/profile-public', { profilePublic }),
+  /** 只写不读：界面语言以本地 localStorage 为准，服务端这份只决定 AI 产出（提示词/回答）的语言 */
+  setLang: (lang: Lang) => api.put<unknown, void>('/user/lang', { lang }),
 };
 
 // ========== 钱包划转（余额钱包 ⇌ 游戏钱包） ==========

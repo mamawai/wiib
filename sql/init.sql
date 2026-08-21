@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS "user" (
     bankrupt_count INT NOT NULL DEFAULT 0,
     bankrupt_at TIMESTAMP,
     bankrupt_reset_date DATE,
+    lang VARCHAR(8),
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -779,6 +780,10 @@ COMMENT ON COLUMN "user".muted_until IS '禁言到期时间，NULL或已过期=�
 -- 排行榜用户详情页的公开开关。DEFAULT TRUE 让存量用户和新用户都是开着的（需求：默认开启）
 ALTER TABLE "user" ADD COLUMN IF NOT EXISTS profile_public BOOLEAN NOT NULL DEFAULT TRUE;
 COMMENT ON COLUMN "user".profile_public IS '是否允许别人查看自己的持仓与交易历史。关掉只挡详情页，仍照常上排行榜（榜上只有总资产/收益率）';
+
+-- AI 产出语言。可空：存量用户全是 NULL，读出来回落中文，等于零影响
+ALTER TABLE "user" ADD COLUMN IF NOT EXISTS lang VARCHAR(8);
+COMMENT ON COLUMN "user".lang IS 'AI产出语言 zh/en（AgentLang.code），NULL=跟随中文。只管后端AI的提示词与回答；界面语言在前端localStorage(wiib-lang)，不从这里读';
 
 --新版本删掉这两列(待执行不进入commit)
 ALTER TABLE crypto_order  DROP COLUMN IF EXISTS expire_at;
