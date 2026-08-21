@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Trans, useTranslation } from 'react-i18next';
 import { useSearchParams } from 'react-router-dom';
 import {
   ArrowLeft, ChevronDown, CornerDownRight, Loader2, MessageSquare, Pencil,
@@ -18,11 +19,8 @@ const ROOT_PAGE_SIZE = 20;
 const CHILD_PAGE_SIZE = 10;
 const ISSUE_URL = 'https://github.com/mamawai/wtfibought/issues/new';
 
-const MUTE_OPTIONS = [
-  { days: 1, label: '禁言 1 天' },
-  { days: 7, label: '禁言 7 天' },
-  { days: -1, label: '永久禁言' },
-];
+/** 可选禁言天数，-1 为永久。文案在渲染时按天数现查，不写死在数组里 */
+const MUTE_OPTIONS = [1, 7, -1];
 
 /** 正在回复谁：rootId 恒指向根评论（回复子评论也是），toUserId 决定"回复 @xxx"挂在谁身上 */
 type ReplyTarget = { rootId: number; toUserId: number; toUsername: string };
@@ -90,7 +88,7 @@ function ActionButton({ disabled, title, onClick, hoverClass, children }: {
 }
 
 /** 发帖、回复、编辑三处共用的输入框。ready=false 是 user 还没拉回来，先禁用免得拿不到自己的 id */
-function ComposeBox({ value, onChange, onSubmit, submitting, ready, placeholder, rows = 3, onCancel, submitLabel = '发布' }: {
+function ComposeBox({ value, onChange, onSubmit, submitting, ready, placeholder, rows = 3, onCancel, submitLabel }: {
   value: string;
   onChange: (v: string) => void;
   onSubmit: () => void;
@@ -101,6 +99,7 @@ function ComposeBox({ value, onChange, onSubmit, submitting, ready, placeholder,
   onCancel?: () => void;
   submitLabel?: string;
 }) {
+  const { t } = useTranslation(['community', 'common']);
   const over = value.length > MAX_LEN;
   return (
     <div className="space-y-2">
@@ -121,10 +120,10 @@ function ComposeBox({ value, onChange, onSubmit, submitting, ready, placeholder,
         <span className={cn('text-[11px] tabular-nums mr-auto', over ? 'text-destructive' : 'text-muted-foreground')}>
           {value.length} / {MAX_LEN}
         </span>
-        {onCancel && <Button variant="ghost" size="sm" onClick={onCancel}>取消</Button>}
+        {onCancel && <Button variant="ghost" size="sm" onClick={onCancel}>{t('common:cancel')}</Button>}
         <Button size="sm" disabled={!ready || submitting || !value.trim() || over} onClick={onSubmit}>
           {submitting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
-          {submitLabel}
+          {submitLabel ?? t('comments.post')}
         </Button>
       </div>
     </div>
@@ -146,6 +145,7 @@ function CommentRow({ c, isChild, focused, currentUserId, isAdmin, busy, onVote,
   onDelete: (c: CommentItem) => void;
   onMute: (c: CommentItem) => void;
 }) {
+  const { t } = useTranslation(['community', 'common']);
   // 编辑态就地自管：提上去要往每一行传 4 个 props，而它跟别的行毫无关系
   const [editing, setEditing] = useState(false);
   const [editText, setEditText] = useState('');
@@ -158,7 +158,7 @@ function CommentRow({ c, isChild, focused, currentUserId, isAdmin, busy, onVote,
   // 自删只换掉正文，底下挂的一串回复还在，管理员得有办法整组清掉
   const canDelete = isMine ? !c.selfDeleted : isAdmin;
   // voted 一置就同时锁死赞和踩：一人对一条评论只有一次表态机会
-  const voteTitle = c.voted ? '你已经表过态了' : undefined;
+  const voteTitle = c.voted ? t('comments.voteAlready') : undefined;
 
   const startEdit = () => {
     setEditText(c.content);   // 每次打开都取当下正文，免得留着上一轮的草稿
@@ -184,10 +184,12 @@ function CommentRow({ c, isChild, focused, currentUserId, isAdmin, busy, onVote,
         <div className="flex items-baseline gap-2">
           <span className="text-xs font-black truncate">{c.username}</span>
           {c.replyToUsername && (
-            <span className="text-[11px] text-muted-foreground shrink-0">回复 @{c.replyToUsername}</span>
+            <span className="text-[11px] text-muted-foreground shrink-0">
+              {t('comments.replyToUser', { name: c.replyToUsername })}
+            </span>
           )}
           {c.updatedAt && !c.selfDeleted && (
-            <span className="text-[10px] text-muted-foreground shrink-0">已编辑</span>
+            <span className="text-[10px] text-muted-foreground shrink-0">{t('comments.edited')}</span>
           )}
           <span className="ml-auto text-[10px] text-muted-foreground shrink-0">{fmtDateTime(c.createdAt)}</span>
         </div>
@@ -199,9 +201,9 @@ function CommentRow({ c, isChild, focused, currentUserId, isAdmin, busy, onVote,
             onSubmit={() => void submitEdit()}
             submitting={saving}
             ready={ready}
-            placeholder="改点什么…"
+            placeholder={t('comments.editPlaceholder')}
             rows={2}
-            submitLabel="保存"
+            submitLabel={t('common:save')}
             onCancel={() => setEditing(false)}
           />
         ) : (
@@ -237,22 +239,22 @@ function CommentRow({ c, isChild, focused, currentUserId, isAdmin, busy, onVote,
               hoverClass="hover:text-primary"
               onClick={() => onReply(c)}
             >
-              <CornerDownRight className="w-3 h-3" /> 回复
+              <CornerDownRight className="w-3 h-3" /> {t('comments.reply')}
             </ActionButton>
 
             {canEdit && (
               <ActionButton hoverClass="hover:text-primary" onClick={startEdit}>
-                <Pencil className="w-3 h-3" /> 编辑
+                <Pencil className="w-3 h-3" /> {t('common:edit')}
               </ActionButton>
             )}
             {canDelete && (
               <ActionButton hoverClass="hover:text-destructive" onClick={() => onDelete(c)}>
-                <Trash2 className="w-3 h-3" /> 删除
+                <Trash2 className="w-3 h-3" /> {t('common:delete')}
               </ActionButton>
             )}
             {isAdmin && !isMine && (
               <ActionButton hoverClass="hover:text-destructive" onClick={() => onMute(c)}>
-                <VolumeX className="w-3 h-3" /> 禁言
+                <VolumeX className="w-3 h-3" /> {t('comments.mute')}
               </ActionButton>
             )}
           </div>
@@ -268,6 +270,7 @@ function CommentRow({ c, isChild, focused, currentUserId, isAdmin, busy, onVote,
  * 不用去算"它在第几页第几条"（通知跳转就走这条路）。
  */
 export function Comments() {
+  const { t } = useTranslation(['community', 'common']);
   const { toast } = useToast();
   const [params, setParams] = useSearchParams();
   const user = useUserStore(s => s.user);
@@ -322,11 +325,11 @@ export function Comments() {
       setChildPage({});
       setReplyTo(null);
     } catch (e) {
-      if (seq === loadSeq.current) toast((e as Error).message || '加载留言失败', 'error');
+      if (seq === loadSeq.current) toast((e as Error).message || t('comments.toast.loadFailed'), 'error');
     } finally {
       if (seq === loadSeq.current) setLoading(false);
     }
-  }, [focusId, toast]);
+  }, [focusId, toast, t]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -340,7 +343,7 @@ export function Comments() {
       setPage(next);
       setHasMore(list.length === ROOT_PAGE_SIZE);
     } catch (e) {
-      toast((e as Error).message || '加载失败', 'error');
+      toast((e as Error).message || t('common:loadFailed'), 'error');
     } finally {
       setLoadingMore(false);
     }
@@ -359,7 +362,7 @@ export function Comments() {
       })));
       setChildPage(prev => ({ ...prev, [root.id]: next }));
     } catch (e) {
-      toast((e as Error).message || '加载回复失败', 'error');
+      toast((e as Error).message || t('comments.toast.loadRepliesFailed'), 'error');
     } finally {
       setExpanding(prev => {
         const s = new Set(prev);
@@ -375,12 +378,12 @@ export function Comments() {
     try {
       await commentApi.post(text.trim());
       setText('');
-      toast('留言已发布', 'success');
+      toast(t('comments.toast.posted'), 'success');
       // 聚焦视图下新根评论不属于当前这串，清掉 focus 退回全部列表才看得到（清参数会触发重载）
       if (focusId) setParams({}, { replace: true });
       else await load();
     } catch (e) {
-      toast((e as Error).message || '发布失败', 'error');
+      toast((e as Error).message || t('comments.toast.postFailed'), 'error');
     } finally {
       setPostingRoot(false);
     }
@@ -393,7 +396,7 @@ export function Comments() {
     try {
       await commentApi.post(replyText.trim(), rootId, replyTo.toUserId);
     } catch (e) {
-      toast((e as Error).message || '回复失败', 'error');
+      toast((e as Error).message || t('comments.toast.replyFailed'), 'error');
       setPostingReply(false);
       return;
     }
@@ -402,14 +405,14 @@ export function Comments() {
     // 刷新一失败就在"回复已发布"后面再弹一个"回复失败"，用户以为没发出去会再发一遍
     setReplyText('');
     setReplyTo(null);
-    toast('回复已发布', 'success');
+    toast(t('comments.toast.replyPosted'), 'success');
     try {
       // 用 context 把整串重拉：一次拿到根+全部子评论，比按页往回拼稳，也保证看得见自己刚发的
       const fresh = await commentApi.context(rootId);
       setRoots(prev => prev.map(r => (r.id === rootId ? fresh : r)));
     } catch {
       // 回复本身是成功的，只是没刷出来，提示一下让用户自己刷新，别说成"失败"
-      toast('回复已发布，下拉刷新可看到', 'success');
+      toast(t('comments.toast.replyPostedStale'), 'success');
     } finally {
       setPostingReply(false);
     }
@@ -426,7 +429,7 @@ export function Comments() {
         voted: true,
       })));
     } catch (e) {
-      toast((e as Error).message || '操作失败', 'error');
+      toast((e as Error).message || t('comments.toast.voteFailed'), 'error');
     } finally {
       setVotingId(null);
     }
@@ -437,7 +440,7 @@ export function Comments() {
     try {
       await commentApi.edit(c.id, content);
     } catch (e) {
-      toast((e as Error).message || '保存失败', 'error');
+      toast((e as Error).message || t('comments.toast.saveFailed'), 'error');
       throw e;
     }
     setRoots(prev => patchComment(prev, c.id, x => ({
@@ -445,7 +448,7 @@ export function Comments() {
       content,
       updatedAt: new Date().toISOString(),
     })));
-    toast('已保存', 'success');
+    toast(t('comments.toast.saved'), 'success');
   };
 
   /**
@@ -459,9 +462,9 @@ export function Comments() {
       setRoots(prev => isMine
         ? patchComment(prev, c.id, x => ({ ...x, content: DELETED_PLACEHOLDER, selfDeleted: true }))
         : dropComment(prev, c.id));
-      toast('已删除', 'success');
+      toast(t('comments.toast.deleted'), 'success');
     } catch (e) {
-      toast((e as Error).message || '删除失败', 'error');
+      toast((e as Error).message || t('comments.toast.deleteFailed'), 'error');
     }
   };
 
@@ -470,10 +473,12 @@ export function Comments() {
     setMuting(true);
     try {
       await commentApi.mute(muteTarget.userId, days);
-      toast(days === -1 ? `已永久禁言 ${muteTarget.username}` : `已禁言 ${muteTarget.username} ${days} 天`, 'success');
+      toast(days === -1
+        ? t('comments.toast.mutedPermanent', { name: muteTarget.username })
+        : t('comments.toast.mutedDays', { name: muteTarget.username, count: days }), 'success');
       setMuteTarget(null);
     } catch (e) {
-      toast((e as Error).message || '禁言失败', 'error');
+      toast((e as Error).message || t('comments.toast.muteFailed'), 'error');
     } finally {
       setMuting(false);
     }
@@ -493,13 +498,13 @@ export function Comments() {
           <MessageSquare className="w-5.5 h-5.5 text-primary" />
         </div>
         <div className="min-w-0">
-          <h1 className="text-xl font-black tracking-tight">留言板</h1>
-          <p className="text-[11px] text-muted-foreground">评价 · 建议 · 涨跌看法</p>
+          <h1 className="text-xl font-black tracking-tight">{t('comments.title')}</h1>
+          <p className="text-[11px] text-muted-foreground">{t('comments.subtitle')}</p>
         </div>
         <button
           onClick={() => { void load(); }}
           className="ml-auto border border-border hover:bg-surface-hover w-9 h-9 rounded-lg flex items-center justify-center text-muted-foreground hover:text-primary cursor-pointer"
-          aria-label="刷新"
+          aria-label={t('common:refresh')}
         >
           <RefreshCcw className={cn('w-4 h-4', loading && 'animate-spin')} />
         </button>
@@ -509,19 +514,23 @@ export function Comments() {
       <details className="group rounded-lg pt-card px-4 py-3">
         <summary className="flex items-center gap-2 cursor-pointer text-sm font-bold list-none [&::-webkit-details-marker]:hidden">
           <ShieldAlert className="w-4 h-4 text-primary" />
-          留言规范
+          {t('comments.rulesTitle')}
           <ChevronDown className="w-4 h-4 ml-auto text-muted-foreground transition-transform group-open:rotate-180" />
         </summary>
         <div className="mt-3 pt-3 border-t border-border/50 space-y-2 text-xs leading-relaxed text-muted-foreground">
-          <p>欢迎发表对本项目的评价、建议和修改意见，也可以聊聊涨跌看法，畅所欲言。</p>
+          <p>{t('comments.rulesWelcome')}</p>
           <p>
-            有具体的功能建议或 bug，欢迎直接提 issue：
-            <a href={ISSUE_URL} target="_blank" rel="noreferrer" className="text-primary font-bold underline underline-offset-2 ml-1">
-              提交 issue
-            </a>
+            <Trans
+              ns="community"
+              i18nKey="comments.rulesIssue"
+              components={[
+                <a key="issue" href={ISSUE_URL} target="_blank" rel="noreferrer"
+                   className="text-primary font-bold underline underline-offset-2 ml-1" />,
+              ]}
+            />
           </p>
           <p className="text-destructive font-bold">
-            禁止辱骂攻击性言论、带单信息、QQ/微信群等引流信息，违者禁言封号。
+            {t('comments.rulesBan')}
           </p>
         </div>
       </details>
@@ -534,7 +543,7 @@ export function Comments() {
           onSubmit={() => void submitRoot()}
           submitting={postingRoot}
           ready={ready}
-          placeholder="说点什么…"
+          placeholder={t('comments.composePlaceholder')}
         />
       </div>
 
@@ -545,22 +554,22 @@ export function Comments() {
           className="flex items-center gap-2 text-xs font-bold text-primary border border-border hover:bg-surface-hover rounded-xl px-3 py-2 cursor-pointer"
         >
           <ArrowLeft className="w-3.5 h-3.5" />
-          返回全部评论
+          {t('comments.backToAll')}
         </button>
       )}
 
       {/* 列表 */}
       {loading && roots.length === 0 ? (
         <div className="flex items-center justify-center py-16 gap-2 text-sm text-muted-foreground">
-          <Loader2 className="w-4 h-4 animate-spin" /> 加载留言…
+          <Loader2 className="w-4 h-4 animate-spin" /> {t('comments.loading')}
         </div>
       ) : roots.length === 0 ? (
         <div className="rounded-lg border border-border bg-card-2 flex flex-col items-center justify-center gap-2.5 py-14 px-4 text-center">
           <div className="w-11 h-11 rounded-full border border-border bg-background flex items-center justify-center text-muted-foreground/70">
             <MessageSquare className="w-5 h-5" />
           </div>
-          <div className="text-xs font-bold text-muted-foreground">还没有人留言</div>
-          <div className="text-[10px] text-muted-foreground/70">来说第一句吧</div>
+          <div className="text-xs font-bold text-muted-foreground">{t('comments.emptyTitle')}</div>
+          <div className="text-[10px] text-muted-foreground/70">{t('comments.emptyHint')}</div>
         </div>
       ) : (
         <div className="space-y-3">
@@ -613,14 +622,16 @@ export function Comments() {
                     className="ml-5 text-[11px] font-bold text-primary hover:underline disabled:opacity-50 cursor-pointer flex items-center gap-1"
                   >
                     {expanding.has(root.id) && <Loader2 className="w-3 h-3 animate-spin" />}
-                    {started ? `加载更多回复（还有 ${rest} 条）` : `查看全部 ${root.childCount} 条回复`}
+                    {started
+                      ? t('comments.moreReplies', { count: rest })
+                      : t('comments.viewAllReplies', { count: root.childCount })}
                   </button>
                 )}
 
                 {replying && (
                   <div className="pl-4 ml-1 border-l border-primary/40">
                     <div className="text-[11px] font-bold text-muted-foreground mb-1.5">
-                      回复 @{replyTo.toUsername}
+                      {t('comments.replyToUser', { name: replyTo.toUsername })}
                     </div>
                     <ComposeBox
                       value={replyText}
@@ -628,7 +639,7 @@ export function Comments() {
                       onSubmit={() => void submitReply()}
                       submitting={postingReply}
                       ready={ready}
-                      placeholder="写下你的回复…"
+                      placeholder={t('comments.replyPlaceholder')}
                       rows={2}
                       onCancel={() => { setReplyTo(null); setReplyText(''); }}
                     />
@@ -641,7 +652,7 @@ export function Comments() {
           {hasMore && (
             <Button variant="outline" className="w-full" disabled={loadingMore} onClick={() => void loadMoreRoots()}>
               {loadingMore && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-              加载更多留言
+              {t('comments.loadMore')}
             </Button>
           )}
         </div>
@@ -650,29 +661,33 @@ export function Comments() {
       {/* 管理员禁言：选时长即生效，-1 为永久 */}
       <Dialog open={muteTarget != null} onClose={() => setMuteTarget(null)}>
         <DialogHeader>
-          <h2 className="text-lg font-bold">禁言用户</h2>
+          <h2 className="text-lg font-bold">{t('comments.muteTitle')}</h2>
         </DialogHeader>
         <DialogContent>
           <p className="text-xs text-muted-foreground leading-relaxed">
-            禁言期间 <strong className="text-foreground">{muteTarget?.username}</strong> 无法发表任何留言，
-            到期自动解除。重置账户不会清除禁言。
+            <Trans
+              ns="community"
+              i18nKey="comments.muteDesc"
+              values={{ name: muteTarget?.username ?? '' }}
+              components={[<strong key="name" className="text-foreground" />]}
+            />
           </p>
           <div className="grid grid-cols-3 gap-2 mt-4">
-            {MUTE_OPTIONS.map(o => (
+            {MUTE_OPTIONS.map(days => (
               <Button
-                key={o.days}
+                key={days}
                 variant="outline"
                 size="sm"
                 disabled={muting}
-                onClick={() => void handleMute(o.days)}
+                onClick={() => void handleMute(days)}
               >
-                {o.label}
+                {days === -1 ? t('comments.mutePermanent') : t('comments.muteDays', { count: days })}
               </Button>
             ))}
           </div>
         </DialogContent>
         <DialogFooter>
-          <Button variant="ghost" size="sm" onClick={() => setMuteTarget(null)}>取消</Button>
+          <Button variant="ghost" size="sm" onClick={() => setMuteTarget(null)}>{t('common:cancel')}</Button>
         </DialogFooter>
       </Dialog>
     </div>

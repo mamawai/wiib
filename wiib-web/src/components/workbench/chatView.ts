@@ -3,11 +3,14 @@ import type { ChatItem } from './chatStore';
 /** 调度中枢的对外名字：后端事件里仍叫 supervisor，只在展示层换 */
 export const HUB_NAME = 'Polaris';
 
-export const AGENT_CN: Record<string, string> = {
-  market_agent: '市场专家',
-  news_agent: '新闻专家',
-  trader_agent: '交易员',
-  supervisor: HUB_NAME,
+/**
+ * 专家 agent 的展示名（存词表 key，渲染时现翻——模块级常量存翻好的字面量切了语言不会变）。
+ * supervisor 不在表里：它显示的是 HUB_NAME 这个品牌名，不翻。
+ */
+export const AGENT_LABEL_KEY: Record<string, string> = {
+  market_agent: 'rail.marketAgent',
+  news_agent: 'rail.newsAgent',
+  trader_agent: 'term.trader',
 };
 
 /** 带 rid 的那三种条目就是过程条目 */

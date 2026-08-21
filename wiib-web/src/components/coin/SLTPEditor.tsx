@@ -1,4 +1,5 @@
 import { X, Plus } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { Input } from '../ui/input';
 import { PctSlider } from '../PctSlider';
 import { fmtNum } from '../../lib/utils';
@@ -8,11 +9,12 @@ import { getStepPrecision, qtyByPct, FUTURES_COMMISSION_RATE, type SLTPRow } fro
  * 止损/止盈多档编辑器：价格直接输入，数量按持仓百分比滑杆（0-100 连续，25% 档刻痕可点跳档）；
  * 数量统一以 USDT 名义价值（开仓价×币量）展示；价格+数量齐全时实时预估触发盈亏（扣平仓手续费）
  * 与对应保证金份额的回报率。
+ * <p>止损/止盈由 kind 区分，不拿显示文案判——文案会随语言变，判不出来。
  */
-export function SLTPEditor({ rows, onChange, label, posQty, minQty, entryPrice, margin, side, minPriceStep = 0.01, priceFormatter = fmtNum }: {
+export function SLTPEditor({ rows, onChange, kind, posQty, minQty, entryPrice, margin, side, minPriceStep = 0.01, priceFormatter = fmtNum }: {
   rows: SLTPRow[];
   onChange: (rows: SLTPRow[]) => void;
-  label: string;
+  kind: 'SL' | 'TP';
   posQty: number;
   minQty: number;
   entryPrice: number;
@@ -21,7 +23,8 @@ export function SLTPEditor({ rows, onChange, label, posQty, minQty, entryPrice, 
   minPriceStep?: number;
   priceFormatter?: (value?: number | null) => string;
 }) {
-  const isSL = label === '止损';
+  const { t } = useTranslation('trade');
+  const isSL = kind === 'SL';
   const accent = isSL ? '#eab308' : '#3b82f6';
   const inputPriceStepText = minPriceStep.toFixed(getStepPrecision(minPriceStep));
 
@@ -56,7 +59,7 @@ export function SLTPEditor({ rows, onChange, label, posQty, minQty, entryPrice, 
           <div key={i} className="space-y-1.5">
             <div className="flex items-center gap-1.5">
               <span className="text-[10px] text-muted-foreground w-3 shrink-0">{i + 1}</span>
-              <Input type="number" placeholder={`${label}价 (USDT)`} value={row.price}
+              <Input type="number" placeholder={isSL ? t('sltp.slPrice') : t('sltp.tpPrice')} value={row.price}
                 onChange={e => { const n = [...rows]; n[i] = { ...n[i], price: e.target.value }; onChange(n); }}
                 step={inputPriceStepText} className="flex-1 h-9 sm:h-8 text-xs" />
               {/* 删除按钮手机扩热区（负margin抵消占位），PC 恢复紧凑 */}
@@ -78,15 +81,15 @@ export function SLTPEditor({ rows, onChange, label, posQty, minQty, entryPrice, 
               />
             </div>
             <div className="pl-4.5 flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] font-mono tabular-nums">
-              <span className="text-muted-foreground">已选 {pct}% ≈{fmtNum(usdtOf(row.quantity))} USDT</span>
+              <span className="text-muted-foreground">{t('sltp.selected', { pct, amount: fmtNum(usdtOf(row.quantity)) })}</span>
               {est && (
                 <>
-                  <span className="text-muted-foreground">触发价 ${priceFormatter(parseFloat(row.price))}</span>
+                  <span className="text-muted-foreground">{t('sltp.trigger', { price: priceFormatter(parseFloat(row.price)) })}</span>
                   <span className={est.value >= 0 ? 'text-green-500' : 'text-red-500'}>
-                    预计盈亏 {est.value >= 0 ? '+' : ''}{fmtNum(est.value)}
+                    {t('sltp.estPnl', { value: `${est.value >= 0 ? '+' : ''}${fmtNum(est.value)}` })}
                   </span>
                   <span className={est.roi >= 0 ? 'text-green-500' : 'text-red-500'}>
-                    回报率 {est.roi >= 0 ? '+' : ''}{est.roi.toFixed(1)}%
+                    {t('sltp.roi', { roi: `${est.roi >= 0 ? '+' : ''}${est.roi.toFixed(1)}` })}
                   </span>
                 </>
               )}
@@ -97,11 +100,11 @@ export function SLTPEditor({ rows, onChange, label, posQty, minQty, entryPrice, 
       <div className="flex items-center justify-between">
         {rows.length < 4 ? (
           <button type="button" onClick={() => onChange([...rows, { price: '', quantity: '' }])} className="text-xs text-primary hover:underline flex items-center gap-0.5">
-            <Plus className="w-3 h-3" /> 添加
+            <Plus className="w-3 h-3" /> {t('sltp.add')}
           </button>
         ) : <span />}
         <span className={`text-[11px] ${over ? 'text-red-500' : 'text-muted-foreground'}`}>
-          已分配 ≈{fmtNum(total * entryPrice)} / {fmtNum(posQty * entryPrice)} USDT
+          {t('sltp.allocated', { used: fmtNum(total * entryPrice), total: fmtNum(posQty * entryPrice) })}
         </span>
       </div>
     </div>

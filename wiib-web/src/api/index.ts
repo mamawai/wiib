@@ -1,4 +1,5 @@
 import axios from 'axios';
+import i18n from '../i18n';
 import type { TnOverview, TnTrade, TnDailyCell, TnEquityPoint, TnFillStats, TnManualOrderReq, TnOrderResult, TnAck } from '../types/testnet';
 import type { BacktestStrategyMeta, BacktestTaskStatus, BacktestEventsPage, BacktestKlinesPage, BacktestResultPayload, ReplayCoverage, HistoryKlinesPayload, ReplayCoachRequest, ReplayCoachEvent } from '../types';
 import type { LedgerEntry, LedgerBizTypeOption, PublicTrade, UserProfile, PositionHistoryItem, RankingSort } from '../types';
@@ -42,13 +43,14 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   (res) => {
     const { code, msg, data } = res.data;
+    // msg 是后端下发的，原样透传；只有后端没给话时才用词表兜底那半句
     if (code === 401) {
       localStorage.removeItem('wiib-user');
       window.location.href = '/login';
-      return Promise.reject(new ApiError(msg || '未登录', code));
+      return Promise.reject(new ApiError(msg || i18n.t('errors:unauthorized'), code));
     }
     if (code !== 0) {
-      return Promise.reject(new ApiError(msg || '请求失败', code));
+      return Promise.reject(new ApiError(msg || i18n.t('errors:requestFailed'), code));
     }
     return data;
   },
@@ -384,7 +386,7 @@ const streamSseEvents = async <E,>(
   response: Response,
   onEvent: (e: E) => void,
 ) => {
-  if (!response.body) throw new Error('响应流不可用');
+  if (!response.body) throw new Error(i18n.t('errors:streamUnavailable'));
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
@@ -436,9 +438,9 @@ const postSse = async <E,>(url: string, body: unknown, onEvent: (e: E) => void, 
   const contentType = response.headers.get('content-type') || '';
   if (contentType.includes('application/json')) {
     const payload = await response.json() as { code?: number; msg?: string };
-    throw new ApiError(payload.msg || '请求失败', payload.code ?? -1);
+    throw new ApiError(payload.msg || i18n.t('errors:requestFailed'), payload.code ?? -1);
   }
-  if (!response.ok) throw new Error(`请求失败: ${response.status}`);
+  if (!response.ok) throw new Error(i18n.t('errors:requestFailedStatus', { status: response.status }));
   await streamSseEvents<E>(response, onEvent);
 };
 

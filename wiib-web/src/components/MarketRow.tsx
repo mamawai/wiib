@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { cn } from '../lib/utils';
 import { formatCoinPrice, type CoinCfg } from '../lib/coinConfig';
 import { cryptoApi, futuresApi, bstockApi } from '../api';
@@ -101,6 +102,7 @@ export function CoinMarketRow({ cfg }: { cfg: CoinCfg }) {
  */
 export function BStockMarketRow({ stock }: { stock: BStock }) {
   const navigate = useNavigate();
+  const { t } = useTranslation('home');
   const tick = useCryptoStream(stock.symbol, 'spot');
   const [closes, setCloses] = useState<number[]>([]);
 
@@ -127,7 +129,7 @@ export function BStockMarketRow({ stock }: { stock: BStock }) {
         </span>
       )}
       name={stock.name}
-      sub={`${stock.ticker} · 美股`}
+      sub={`${stock.ticker} · ${t('market.usStock')}`}
       price={price == null ? null : `$${Number(price).toLocaleString('en-US', { maximumFractionDigits: 2 })}`}
       pct={pct}
       spark={spark}

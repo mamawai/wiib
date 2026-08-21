@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import {
   ArrowDownRight, ArrowUpRight, CalendarDays, ChevronRight, Dices, Flag, Gauge,
   History, KeyRound, Loader2, Pause, Play, RotateCcw, Skull, Sparkles, Wallet, X, Zap,
@@ -23,10 +24,7 @@ import type { TnEquityPoint } from '../../types/testnet';
 const M5 = 300_000;
 /** 开局前置上下文根数：给玩家一屏"过去"可看，也给画线留参照 */
 const CONTEXT_BARS = 200;
-const DURATIONS = [
-  { label: '3 天', days: 3 }, { label: '7 天', days: 7 },
-  { label: '14 天', days: 14 }, { label: '28 天', days: 28 },
-];
+const DURATIONS = [3, 7, 14, 28];
 /** 自动播放速度档（bar/秒） */
 const AUTO_SPEEDS = [1, 3, 10];
 const PCT_OPTIONS = [25, 50, 75, 100];
@@ -36,14 +34,16 @@ const LEVERAGE_OPTIONS = [1, 2, 3, 5, 10, 20, 50];
 const dayStartUtc = (yyyyMmDd: string) => Date.parse(`${yyyyMmDd}T00:00:00Z`);
 const toDateInput = (ms: number) => new Date(ms).toISOString().slice(0, 10);
 
+/** 表里一律存词表 key，渲染时现查——存成文案会在模块加载那一刻定死，切语言不跟着变 */
 const REASON_LABEL: Record<ReplayTrade['reason'], string> = {
-  MANUAL: '平仓', LIQUIDATION: '爆仓', END: '结算',
+  MANUAL: 'replay.reason.manual', LIQUIDATION: 'replay.reason.liquidation', END: 'replay.reason.end',
 };
 /** 成交种类 → 图表标记文字（entry 类只有加仓要标出来，首开沿用图表默认的 多/空） */
 const FILL_LABEL: Record<ReplayFill['kind'], string | undefined> = {
-  OPEN: undefined, ADD: '加', CLOSE: '平', REDUCE: '减', LIQUIDATION: '爆', END: '结',
+  OPEN: undefined, ADD: 'replay.fill.add', CLOSE: 'replay.fill.close',
+  REDUCE: 'replay.fill.reduce', LIQUIDATION: 'replay.fill.liquidation', END: 'replay.fill.end',
 };
-const SIDE_LABEL: Record<Side, string> = { LONG: '多', SHORT: '空' };
+const SIDE_LABEL: Record<Side, string> = { LONG: 'side.long', SHORT: 'side.short' };
 /** 有效杠杆显示：整数照常，加仓换档产生的小数留一位 */
 const fmtLev = (l: number) => `${Number.isInteger(l) ? l : l.toFixed(1)}x`;
 
@@ -68,11 +68,12 @@ interface AiRun {
 
 /** AI 输出区：流式正文 + 错误行（配置类错误带去配置入口） */
 function AiBody({ run, onGoConfig }: { run: AiRun; onGoConfig: () => void }) {
+  const { t } = useTranslation('strategy');
   return (
     <div className="space-y-1.5">
       {run.busy && !run.text && (
         <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-          <Loader2 className="w-3.5 h-3.5 animate-spin" /> 模型思考中…
+          <Loader2 className="w-3.5 h-3.5 animate-spin" /> {t('replay.aiThinking')}
         </div>
       )}
       {run.text && <div className="text-xs leading-relaxed"><Markdown content={run.text} /></div>}
@@ -81,7 +82,7 @@ function AiBody({ run, onGoConfig }: { run: AiRun; onGoConfig: () => void }) {
           <KeyRound className="w-3.5 h-3.5 text-warning shrink-0" />
           <span className="flex-1">{run.error}</span>
           {run.needsConfig && (
-            <button type="button" onClick={onGoConfig} className="font-bold text-primary hover:underline shrink-0">去配置</button>
+            <button type="button" onClick={onGoConfig} className="font-bold text-primary hover:underline shrink-0">{t('replay.goConfig')}</button>
           )}
         </div>
       )}
@@ -105,6 +106,7 @@ interface Session {
  * 撮合在 lib/replayEngine（纯函数），本组件只管节奏与展示。成绩不落库，刷新即失。
  */
 export function ReplayPanel() {
+  const { t } = useTranslation(['strategy', 'common', 'errors']);
   const { toast } = useToast();
 
   // ---- 配置 ----
@@ -172,7 +174,7 @@ export function ReplayPanel() {
   // ---- 开局 ----
   const handleStart = useCallback(async () => {
     if (!cov) {
-      toast('该币种暂无本地 K 线数据', 'error');
+      toast(t('replay.toast.noCoverage'), 'error');
       return;
     }
     const bal = Number(balance) || 100000;
@@ -180,7 +182,7 @@ export function ReplayPanel() {
     const minStart = cov.earliestMs + CONTEXT_BARS * M5;
     const maxStart = cov.latestMs - need * M5;
     if (maxStart <= minStart) {
-      toast('本地 K 线深度不足一局所需', 'error');
+      toast(t('replay.toast.notEnoughDepth'), 'error');
       return;
     }
     let startMs: number;
@@ -190,7 +192,7 @@ export function ReplayPanel() {
     } else {
       const picked = dayStartUtc(customDate);
       if (!Number.isFinite(picked)) {
-        toast('日期无效', 'error');
+        toast(t('replay.toast.badDate'), 'error');
         return;
       }
       startMs = Math.min(Math.max(picked, minStart), maxStart);
@@ -201,7 +203,7 @@ export function ReplayPanel() {
       const rows = page.rows;
       const playable5 = rows.filter(r => r[0] >= startMs).length;
       if (playable5 < 30) {
-        toast('该区间 K 线不足，换个起点再试', 'error');
+        toast(t('replay.toast.rangeTooShort'), 'error');
         return;
       }
       eqPointsRef.current = [];
@@ -215,11 +217,11 @@ export function ReplayPanel() {
       setAuto(0);
       setSession({ symbol, blind, startMs, raw: rows, balance: bal });
     } catch (e) {
-      toast((e as Error).message || 'K 线拉取失败', 'error');
+      toast((e as Error).message || t('replay.toast.klineFailed'), 'error');
     } finally {
       setLoading(false);
     }
-  }, [cov, balance, days, blind, customDate, symbol, toast]);
+  }, [cov, balance, days, blind, customDate, symbol, toast, t]);
 
   // ---- 逐根推进（键盘/自动播放共用；按当前周期一根一根走，不可回退，重开一局即复位） ----
   const doNext = useCallback(() => {
@@ -271,7 +273,7 @@ export function ReplayPanel() {
     // 进度向下对齐会重走一小段，把重叠窗口的旧权益点裁掉，曲线保持单调
     const nextStepMs = newAgg[ctx + np]?.[0] ?? Infinity;
     eqPointsRef.current = eqPointsRef.current.filter(p => p.time < nextStepMs);
-    toast(`已切换到 ${ivLabel(min)}，回放将按 ${ivLabel(min)} 周期推进`, 'info');
+    toast(t('replay.toast.ivSwitched', { iv: ivLabel(min) }), 'info');
   };
 
   // 空格 = 下一根（输入框聚焦时不抢键）
@@ -332,12 +334,14 @@ export function ReplayPanel() {
     return state.fills.map(f => {
       const i = barIndexAt(bars, f.time);
       const entry = f.kind === 'OPEN' || f.kind === 'ADD';
+      const labelKey = FILL_LABEL[f.kind];
       return {
         barIndex: i, time: bars[i][0], side: f.side, kind: entry ? 'entry' : 'exit',
-        pnl: f.pnl, label: FILL_LABEL[f.kind],
+        pnl: f.pnl, label: labelKey ? t(labelKey) : undefined,
       };
     });
-  }, [state, derived]);
+    // 依赖带 t：切语言时标记文字跟着换
+  }, [state, derived, t]);
 
   const held = openPositions(state);
   const decimals = session ? getCoinPriceDecimals(session.symbol) : 2;
@@ -356,17 +360,17 @@ export function ReplayPanel() {
         else if (e.type === 'done') text = e.answer;
         else if (e.type === 'error') err = e.message;
       }, ctrl.signal);
-      set({ text, busy: false, error: err ?? (text ? null : '模型没有返回内容'), needsConfig: false, at });
+      set({ text, busy: false, error: err ?? (text ? null : t('replay.emptyAnswer')), needsConfig: false, at });
     } catch (e) {
       if (ctrl.signal.aborted) return;   // 用户关卡片/重开一局主动掐的，不算错
       const code = e instanceof ApiError ? e.code : -1;
-      set({ text, busy: false, error: (e as Error).message || '请求失败', needsConfig: code === 2201 || code === 2202, at });
+      set({ text, busy: false, error: (e as Error).message || t('errors:requestFailed'), needsConfig: code === 2201 || code === 2202, at });
     }
-  }, []);
+  }, [t]);
 
   /** 卡片上标"用的哪个模型"：选中的那条，没选就是默认那条 */
   const aiEndpoint = endpoints.find(e => e.id === aiEndpointId) ?? endpoints.find(e => e.isDefault) ?? endpoints[0];
-  const aiLabel = aiEndpoint ? `${aiEndpoint.name} · ${aiEndpoint.model}` : '未配置端点';
+  const aiLabel = aiEndpoint ? `${aiEndpoint.name} · ${aiEndpoint.model}` : t('replay.noEndpoint');
 
   /** 局中提示：最近 HINT_BARS 根已揭示 K 线 + 当前持仓；盲测只给相对时间标签 */
   const askHint = () => {
@@ -399,10 +403,10 @@ export function ReplayPanel() {
       mode: 'REVIEW', endpointId: aiEndpointId ?? undefined, symbol: session.symbol, intervalMin: iv, blind: false,
       startAt: fmtDateTime(session.startMs),
       bars: rows.map(r => toCoachBar(r, fmtDateTime, decimals)),
-      trades: state.trades.map(t => ({
-        side: t.side, qty: round(t.qty, 4), leverage: round(t.leverage, 1),
-        entryPrice: round(t.entryPrice, decimals), exitPrice: round(t.exitPrice, decimals),
-        pnl: round(t.pnl, 2), openAt: fmtDateTime(t.openTime), closeAt: fmtDateTime(t.closeTime), reason: t.reason, partial: t.partial,
+      trades: state.trades.map(tr => ({
+        side: tr.side, qty: round(tr.qty, 4), leverage: round(tr.leverage, 1),
+        entryPrice: round(tr.entryPrice, decimals), exitPrice: round(tr.exitPrice, decimals),
+        pnl: round(tr.pnl, 2), openAt: fmtDateTime(tr.openTime), closeAt: fmtDateTime(tr.closeTime), reason: tr.reason, partial: tr.partial,
       })),
       stats: {
         totalTrades: st.totalTrades, wins: st.wins, losses: st.losses, netProfit: round(st.netProfit, 2),
@@ -418,7 +422,7 @@ export function ReplayPanel() {
       <div className="rounded-lg pt-card p-4 md:p-5 space-y-4">
         <div className="flex flex-wrap items-end gap-3">
           <div>
-            <div className="microlabel uppercase mb-1">币种</div>
+            <div className="microlabel uppercase mb-1">{t('replay.form.symbol')}</div>
             <div className="flex rounded-md border border-border overflow-hidden">
               {['BTCUSDT', 'ETHUSDT'].map(sym => (
                 <button key={sym} type="button"
@@ -431,49 +435,49 @@ export function ReplayPanel() {
             </div>
           </div>
           <div>
-            <div className="microlabel uppercase mb-1">开局方式</div>
+            <div className="microlabel uppercase mb-1">{t('replay.form.mode')}</div>
             <div className="flex rounded-md border border-border overflow-hidden">
               <button type="button" onClick={() => setBlind(true)}
                 className={cn('px-3 h-9 text-xs font-bold flex items-center gap-1.5 transition-colors',
                   blind ? 'bg-primary text-primary-foreground' : 'bg-card-2 text-muted-foreground hover:bg-surface-hover')}>
-                <Dices className="w-3.5 h-3.5" /> 随机盲测
+                <Dices className="w-3.5 h-3.5" /> {t('replay.form.blind')}
               </button>
               <button type="button" onClick={() => setBlind(false)}
                 className={cn('px-3 h-9 text-xs font-bold flex items-center gap-1.5 transition-colors',
                   !blind ? 'bg-primary text-primary-foreground' : 'bg-card-2 text-muted-foreground hover:bg-surface-hover')}>
-                <CalendarDays className="w-3.5 h-3.5" /> 自选起点
+                <CalendarDays className="w-3.5 h-3.5" /> {t('replay.form.custom')}
               </button>
             </div>
           </div>
           {!blind && (
             <div>
-              <div className="microlabel uppercase mb-1">起始日期</div>
+              <div className="microlabel uppercase mb-1">{t('replay.form.startDate')}</div>
               <input type="date" value={customDate}
                 onChange={e => setCustomDate(e.target.value)}
                 className="h-9 px-2.5 rounded-md border border-border bg-input text-xs num" />
             </div>
           )}
           <div>
-            <div className="microlabel uppercase mb-1">复盘时长</div>
+            <div className="microlabel uppercase mb-1">{t('replay.form.duration')}</div>
             <div className="flex rounded-md border border-border overflow-hidden">
               {DURATIONS.map(d => (
-                <button key={d.days} type="button" onClick={() => setDays(d.days)}
+                <button key={d} type="button" onClick={() => setDays(d)}
                   className={cn('px-3 h-9 text-xs font-bold transition-colors num',
-                    days === d.days ? 'bg-primary text-primary-foreground' : 'bg-card-2 text-muted-foreground hover:bg-surface-hover')}>
-                  {d.label}
+                    days === d ? 'bg-primary text-primary-foreground' : 'bg-card-2 text-muted-foreground hover:bg-surface-hover')}>
+                  {t('replay.days', { count: d })}
                 </button>
               ))}
             </div>
           </div>
           <div>
-            <div className="microlabel uppercase mb-1">初始资金</div>
+            <div className="microlabel uppercase mb-1">{t('replay.form.balance')}</div>
             <input type="number" min={1} value={balance}
               onChange={e => setBalance(e.target.value)}
               className="h-9 w-28 px-2.5 rounded-md border border-border bg-input text-xs num" />
           </div>
           {/* AI 教练：从 AI 页「模型配置」的端点库里选一条（提示可能每几根点一次，评估一局一次；挑贵的慢的自己掂量） */}
           <div>
-            <div className="microlabel uppercase mb-1">AI 教练</div>
+            <div className="microlabel uppercase mb-1">{t('replay.form.coach')}</div>
             {/* 原生 select 的自然宽度由最长 option 撑，只给 max-w 压不住，窄屏会顶出横向滚动 */}
             <LlmEndpointSelect endpoints={endpoints} value={aiEndpointId} onChange={setAiEndpointId} className="w-full max-w-[300px]" />
           </div>
@@ -492,13 +496,13 @@ export function ReplayPanel() {
             )}
           >
             {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
-            开始复盘
+            {t('replay.start')}
           </button>
           <span className="text-[10px] text-muted-foreground leading-snug">
             {cov
-              ? <>本地数据 {toDateInput(cov.earliestMs)} ~ {toDateInput(cov.latestMs)} · 盲测隐藏真实日期，结算后揭晓</>
-              : '正在读取本地 K 线覆盖范围…'}
-            <br />按所选周期逐根推进（空格 = 下一根，对局中可切 5m/15m/1h/4h/1d），只能按收盘价买卖，多空可双开、可加仓/减仓、杠杆随时调 · 复盘进度不保存，刷新即失
+              ? t('replay.coverage', { from: toDateInput(cov.earliestMs), to: toDateInput(cov.latestMs) })
+              : t('replay.coverageLoading')}
+            <br />{t('replay.hintLine')}
           </span>
         </div>
       </div>
@@ -514,7 +518,7 @@ export function ReplayPanel() {
           <div className="rounded-lg pt-card p-3 md:p-4 space-y-3">
             <div className="flex items-center gap-2 flex-wrap">
               <span className="microlabel uppercase">
-                {session.symbol} · {ivLabel(ivMin)} · {session.blind && !finished ? '盲测' : '复盘'}
+                {session.symbol} · {ivLabel(ivMin)} · {session.blind && !finished ? t('replay.blind') : t('replay.review')}
               </span>
               <div className="flex rounded border border-border overflow-hidden">
                 {IV_OPTIONS.map(o => (
@@ -529,7 +533,7 @@ export function ReplayPanel() {
                 <span className="text-[10px] num text-primary font-bold">{fmtReplayTime(curBar[0])}</span>
               )}
               <span className="ml-auto text-[10px] text-muted-foreground num">
-                {played} / {playable} 根
+                {t('replay.barsProgress', { played, total: playable })}
               </span>
             </div>
 
@@ -555,7 +559,7 @@ export function ReplayPanel() {
                   'disabled:opacity-40 disabled:cursor-not-allowed',
                 )}
               >
-                下一根 <ChevronRight className="w-4 h-4" />
+                {t('replay.next')} <ChevronRight className="w-4 h-4" />
               </button>
               <div className="flex items-center gap-1">
                 <Gauge className="w-3.5 h-3.5 text-muted-foreground" />
@@ -564,24 +568,24 @@ export function ReplayPanel() {
                     onClick={() => setAuto(a => (a === sp ? 0 : sp))}
                     className={cn('px-2 h-7 rounded text-[10px] font-bold transition-colors num disabled:opacity-40',
                       auto === sp ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground')}>
-                    {sp}根/秒
+                    {t('replay.speed', { n: sp })}
                   </button>
                 ))}
                 {auto > 0 && (
                   <button type="button" onClick={() => setAuto(0)}
-                    className="w-7 h-7 rounded flex items-center justify-center text-primary" aria-label="暂停">
+                    className="w-7 h-7 rounded flex items-center justify-center text-primary" aria-label={t('player.pause')}>
                     <Pause className="w-3.5 h-3.5" />
                   </button>
                 )}
               </div>
-              <span className="hidden md:inline text-[10px] text-muted-foreground">空格 = 下一根 · 不可回退</span>
+              <span className="hidden md:inline text-[10px] text-muted-foreground">{t('replay.spaceHint')}</span>
               {!finished && (
                 <div className="ml-auto flex items-center gap-2">
                   {/* AI 提示：只送已揭示的 K 线（盲测下只有相对时间），不泄露未来 */}
                   <button type="button" onClick={askHint} disabled={!!hint?.busy}
-                    title={`让 AI（${aiLabel}）读一下当前盘面：结构 / 关键位 / 量能 / 持仓风险`}
+                    title={t('replay.aiHintTip', { model: aiLabel })}
                     className="h-8 px-3 rounded-lg border border-primary/40 text-primary hover:bg-primary/10 text-[11px] font-bold flex items-center gap-1 disabled:opacity-50 disabled:cursor-wait">
-                    {hint?.busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />} AI 提示
+                    {hint?.busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />} {t('replay.aiHint')}
                   </button>
                   <button type="button"
                     onClick={() => {
@@ -591,7 +595,7 @@ export function ReplayPanel() {
                       setAuto(0);
                     }}
                     className="h-8 px-3 rounded-lg border border-border hover:bg-surface-hover text-[11px] font-bold text-muted-foreground hover:text-foreground flex items-center gap-1">
-                    <Flag className="w-3.5 h-3.5" /> 结束本局
+                    <Flag className="w-3.5 h-3.5" /> {t('replay.endGame')}
                   </button>
                 </div>
               )}
@@ -602,7 +606,7 @@ export function ReplayPanel() {
               <div className="space-y-2 pt-1 border-t border-border/40">
                 <div className="flex items-stretch gap-2 flex-wrap">
                   {/* 杠杆：只作用于接下来的开/加仓；已有仓位的杠杆不变（加仓换档后按保证金加权成有效杠杆） */}
-                  <div className="flex items-center gap-1" title="杠杆：下一次开/加仓用；同向加仓换档后仓位显示有效杠杆">
+                  <div className="flex items-center gap-1" title={t('replay.levTip')}>
                     <Zap className="w-3.5 h-3.5 text-muted-foreground" />
                     {LEVERAGE_OPTIONS.map(l => (
                       <button key={l} type="button" onClick={() => setLeverage(l)}
@@ -612,7 +616,7 @@ export function ReplayPanel() {
                       </button>
                     ))}
                   </div>
-                  <div className="flex items-center gap-1" title="开/加仓：占可用现金的比例">
+                  <div className="flex items-center gap-1" title={t('replay.openPctTip')}>
                     <Wallet className="w-3.5 h-3.5 text-muted-foreground" />
                     {PCT_OPTIONS.map(p => (
                       <button key={p} type="button" onClick={() => setOpenPct(p)}
@@ -628,17 +632,17 @@ export function ReplayPanel() {
                   <div className="w-full flex items-stretch gap-2 md:contents">
                     <button type="button" onClick={() => handleOpen('LONG')}
                       className="flex-1 min-w-[110px] h-11 rounded-lg bg-gain text-white font-black text-[13px] md:text-sm flex items-center justify-center gap-1.5 hover:brightness-105 active:scale-[.98] machined">
-                      <ArrowUpRight className="w-4 h-4" /> {state.positions.LONG ? '加多' : '开多'} {leverage}x @ {fmtNum(curPrice, decimals)}
+                      <ArrowUpRight className="w-4 h-4" /> {state.positions.LONG ? t('replay.addLong') : t('replay.openLong')} {leverage}x @ {fmtNum(curPrice, decimals)}
                     </button>
                     <button type="button" onClick={() => handleOpen('SHORT')}
                       className="flex-1 min-w-[110px] h-11 rounded-lg bg-loss text-white font-black text-[13px] md:text-sm flex items-center justify-center gap-1.5 hover:brightness-105 active:scale-[.98] machined">
-                      <ArrowDownRight className="w-4 h-4" /> {state.positions.SHORT ? '加空' : '开空'} {leverage}x @ {fmtNum(curPrice, decimals)}
+                      <ArrowDownRight className="w-4 h-4" /> {state.positions.SHORT ? t('replay.addShort') : t('replay.openShort')} {leverage}x @ {fmtNum(curPrice, decimals)}
                     </button>
                   </div>
                 </div>
                 {held.length > 0 && (
                   <div className="space-y-1.5">
-                    <div className="flex items-center gap-1" title="平/减仓：占该侧仓位数量的比例">
+                    <div className="flex items-center gap-1" title={t('replay.closePctTip')}>
                       <X className="w-3.5 h-3.5 text-muted-foreground" />
                       {PCT_OPTIONS.map(p => (
                         <button key={p} type="button" onClick={() => setClosePct(p)}
@@ -655,10 +659,10 @@ export function ReplayPanel() {
                         <div key={p.side} className="flex items-stretch gap-2 flex-wrap">
                           <div className="flex-1 min-w-[200px] rounded-lg border border-border bg-card-2 px-3 py-1.5 text-[11px] flex items-center gap-2.5">
                             <span className={cn('font-black shrink-0', isLong ? 'text-gain' : 'text-loss')}>
-                              {SIDE_LABEL[p.side]} {fmtLev(p.leverage)}
+                              {t(SIDE_LABEL[p.side])} {fmtLev(p.leverage)}
                             </span>
                             <span className="num text-muted-foreground truncate">
-                              均价 {fmtNum(p.entryPrice, decimals)} · {fmtNum(p.qty, 4)}
+                              {t('replay.avgEntry', { price: fmtNum(p.entryPrice, decimals), qty: fmtNum(p.qty, 4) })}
                             </span>
                             <span className={cn('num font-black ml-auto shrink-0', upnl >= 0 ? 'text-gain' : 'text-loss')}>
                               {upnl >= 0 ? '+' : ''}{fmtNum(upnl)}
@@ -666,7 +670,8 @@ export function ReplayPanel() {
                           </div>
                           <button type="button" onClick={() => handleClose(p.side)}
                             className="min-w-[130px] h-10 px-3 rounded-lg bg-primary text-primary-foreground font-black text-sm flex items-center justify-center gap-1.5 hover:brightness-105 active:scale-[.98] machined">
-                            {closePct >= 100 ? '平' : '减'}{SIDE_LABEL[p.side]} {closePct}% @ {fmtNum(curPrice, decimals)}
+                            {t(closePct >= 100 ? 'replay.closeAction' : 'replay.reduceAction',
+                              { side: t(SIDE_LABEL[p.side]), pct: closePct, price: fmtNum(curPrice, decimals) })}
                           </button>
                         </div>
                       );
@@ -682,11 +687,11 @@ export function ReplayPanel() {
             <div className="rounded-lg pt-card p-3 md:p-4 space-y-2">
               <div className="flex items-center gap-1.5">
                 <Sparkles className="w-3.5 h-3.5 text-primary" />
-                <span className="text-[11px] font-black">AI 盘面提示</span>
+                <span className="text-[11px] font-black">{t('replay.aiPanelTitle')}</span>
                 {hint.at && <span className="text-[10px] text-muted-foreground num">· {hint.at}</span>}
                 <span className="ml-auto text-[10px] text-muted-foreground truncate max-w-[160px]">{aiLabel}</span>
                 {/* p-2 -m-2：图标只有 14px，手指点不中——内边距把命中区撑到 30px，负外边距抵掉占位 */}
-                <button type="button" aria-label="关闭"
+                <button type="button" aria-label={t('common:close')}
                   onClick={() => { aiAbortRef.current?.abort(); setHint(null); }}
                   className="p-2 -m-2 text-muted-foreground/60 hover:text-foreground">
                   <X className="w-3.5 h-3.5" />
@@ -701,8 +706,8 @@ export function ReplayPanel() {
             <div className="rounded-lg pt-card p-4 md:p-5 space-y-4">
               <div className="flex items-center gap-2">
                 {finished === 'LIQUIDATION'
-                  ? <><Skull className="w-4 h-4 text-loss" /><span className="text-sm font-black text-loss">爆仓出局</span></>
-                  : <><Flag className="w-4 h-4 text-primary" /><span className="text-sm font-black">本局结算</span></>}
+                  ? <><Skull className="w-4 h-4 text-loss" /><span className="text-sm font-black text-loss">{t('replay.liquidatedOut')}</span></>
+                  : <><Flag className="w-4 h-4 text-primary" /><span className="text-sm font-black">{t('replay.settled')}</span></>}
                 <span className="ml-auto text-[10px] text-muted-foreground num">
                   {/* 盲测揭晓真实区间 */}
                   {fmtDateTime(session.startMs)} ~ {curBar ? fmtDateTime(curBar[0]) : ''}
@@ -713,21 +718,21 @@ export function ReplayPanel() {
                   <div className={cn('text-lg font-black num', st.netProfit >= 0 ? 'text-gain' : 'text-loss')}>
                     {st.netProfit >= 0 ? '+' : ''}{fmtNum(st.netProfit)}
                   </div>
-                  <div className="microlabel uppercase mt-1">净利 · {(st.returnPct * 100).toFixed(1)}%</div>
+                  <div className="microlabel uppercase mt-1">{t('replay.stat.netProfit', { pct: (st.returnPct * 100).toFixed(1) })}</div>
                 </div>
                 <div className="rounded-md border border-border bg-card-2 px-3 py-2.5">
                   <div className="text-lg font-black num">
                     {st.totalTrades > 0 ? `${(st.winRate * 100).toFixed(0)}%` : '—'}
                   </div>
-                  <div className="microlabel uppercase mt-1">胜率 · {st.wins}胜{st.losses}负</div>
+                  <div className="microlabel uppercase mt-1">{t('replay.stat.winRate', { wins: st.wins, losses: st.losses })}</div>
                 </div>
                 <div className="rounded-md border border-border bg-card-2 px-3 py-2.5">
                   <div className="text-lg font-black num text-loss">{(st.maxDrawdownPct * 100).toFixed(1)}%</div>
-                  <div className="microlabel uppercase mt-1">最大回撤</div>
+                  <div className="microlabel uppercase mt-1">{t('replay.stat.maxDd')}</div>
                 </div>
                 <div className="rounded-md border border-border bg-card-2 px-3 py-2.5">
                   <div className="text-lg font-black num">{fmtNum(st.finalEquity, 0)}</div>
-                  <div className="microlabel uppercase mt-1">最终权益 · 费 {fmtNum(st.totalFees, 0)}</div>
+                  <div className="microlabel uppercase mt-1">{t('replay.stat.finalEquity', { fees: fmtNum(st.totalFees, 0) })}</div>
                 </div>
               </div>
               {eqPointsRef.current.length > 1 && <EquityChart points={eqPointsRef.current} />}
@@ -737,10 +742,10 @@ export function ReplayPanel() {
                 <div className="flex items-center gap-2 flex-wrap">
                   <button type="button" onClick={askReview} disabled={!!review?.busy}
                     className="h-9 px-4 rounded-lg bg-primary text-primary-foreground font-black text-xs flex items-center gap-1.5 hover:brightness-105 active:scale-[.98] machined disabled:opacity-50 disabled:cursor-wait">
-                    {review?.busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />} AI 评估本局
+                    {review?.busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />} {t('replay.aiReview')}
                   </button>
                   <span className="text-[10px] text-muted-foreground">
-                    对照整局走势逐笔评你的进出场、行为模式与仓位杠杆 · {aiLabel}
+                    {t('replay.aiReviewHint', { model: aiLabel })}
                   </span>
                 </div>
                 {review && <AiBody run={review} onGoConfig={goConfig} />}
@@ -751,7 +756,7 @@ export function ReplayPanel() {
                 onClick={() => { aiAbortRef.current?.abort(); setSession(null); }}
                 className="h-10 px-5 rounded-lg font-black text-sm flex items-center gap-2 bg-primary text-primary-foreground hover:brightness-105 active:scale-[.98] machined"
               >
-                <RotateCcw className="w-4 h-4" /> 再来一局
+                <RotateCcw className="w-4 h-4" /> {t('replay.playAgain')}
               </button>
             </div>
           )}
@@ -764,48 +769,49 @@ export function ReplayPanel() {
               <div className={cn('text-base font-black num', curEquity >= session.balance ? 'text-gain' : 'text-loss')}>
                 {fmtNum(curEquity, 0)}
               </div>
-              <div className="microlabel uppercase mt-0.5">权益</div>
+              <div className="microlabel uppercase mt-0.5">{t('replay.equity')}</div>
             </div>
             <div className="rounded-md border border-border bg-card-2 px-3 py-2">
               <div className="text-base font-black num">{fmtNum(state.cash, 0)}</div>
-              <div className="microlabel uppercase mt-0.5">可用现金</div>
+              <div className="microlabel uppercase mt-0.5">{t('replay.cash')}</div>
             </div>
           </div>
 
           <div className="rounded-lg pt-card p-3 flex flex-col min-w-0 lg:max-h-[560px] max-h-[360px]">
             <div className="flex items-center gap-1.5 pb-2 border-b border-border/40 shrink-0">
               <History className="w-3.5 h-3.5 text-primary" />
-              <span className="text-[11px] font-black">本局交易</span>
-              <span className="ml-auto text-[10px] text-muted-foreground num">{state.trades.length} 笔</span>
+              <span className="text-[11px] font-black">{t('replay.tradesTitle')}</span>
+              <span className="ml-auto text-[10px] text-muted-foreground num">{t('replay.tradesCount', { count: state.trades.length })}</span>
             </div>
             <div className="flex-1 overflow-y-auto py-1 space-y-0.5 overscroll-contain">
               {state.trades.length === 0 ? (
-                <div className="py-10 text-center text-[11px] text-muted-foreground">还没有成交</div>
+                <div className="py-10 text-center text-[11px] text-muted-foreground">{t('replay.noTrades')}</div>
               ) : (
-                [...state.trades].reverse().map((t, i) => {
-                  const isLong = t.side === 'LONG';
-                  const win = t.pnl >= 0;
+                /* 循环变量避开 t：与 i18n 的 t 同名会遮蔽 */
+                [...state.trades].reverse().map((tr, i) => {
+                  const isLong = tr.side === 'LONG';
+                  const win = tr.pnl >= 0;
                   return (
                     <div key={state.trades.length - i}
                       className="flex items-center gap-2.5 py-1.5 px-2 rounded-md text-[11px] border-b border-border/40 last:border-0">
                       <span className={cn('w-1 self-stretch rounded-full shrink-0', isLong ? 'bg-gain' : 'bg-loss')} />
                       <div className="min-w-0">
                         <div className="font-bold leading-tight">
-                          <span className={cn('text-[10px] font-black', isLong ? 'text-gain' : 'text-loss')}>{isLong ? '多' : '空'}</span>
-                          <span className="ml-1 text-[10px] text-muted-foreground">{fmtLev(t.leverage)}</span>
+                          <span className={cn('text-[10px] font-black', isLong ? 'text-gain' : 'text-loss')}>{isLong ? t('side.long') : t('side.short')}</span>
+                          <span className="ml-1 text-[10px] text-muted-foreground">{fmtLev(tr.leverage)}</span>
                           <span className="ml-1.5 text-[9px] font-bold px-1 py-px rounded bg-muted text-muted-foreground">
-                            {t.partial && t.reason === 'MANUAL' ? '减仓' : REASON_LABEL[t.reason]}
+                            {tr.partial && tr.reason === 'MANUAL' ? t('replay.reason.reduce') : t(REASON_LABEL[tr.reason])}
                           </span>
                         </div>
                         <div className="text-[10px] text-muted-foreground num leading-tight mt-0.5">
-                          {fmtNum(t.entryPrice, decimals)} → {fmtNum(t.exitPrice, decimals)} · {fmtNum(t.qty, 4)}
+                          {fmtNum(tr.entryPrice, decimals)} → {fmtNum(tr.exitPrice, decimals)} · {fmtNum(tr.qty, 4)}
                         </div>
                         <div className="text-[9px] text-muted-foreground/60 num leading-tight">
-                          {fmtReplayTime(t.openTime)} ~ {fmtReplayTime(t.closeTime)}
+                          {fmtReplayTime(tr.openTime)} ~ {fmtReplayTime(tr.closeTime)}
                         </div>
                       </div>
                       <span className={cn('ml-auto font-black num shrink-0', win ? 'text-gain' : 'text-loss')}>
-                        {win ? '+' : ''}{fmtNum(t.pnl)}
+                        {win ? '+' : ''}{fmtNum(tr.pnl)}
                       </span>
                     </div>
                   );

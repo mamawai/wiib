@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
 import { rankingApi } from '../api';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
@@ -40,6 +41,7 @@ function ProfitText({ value, className }: { value: number | null; className?: st
 }
 
 function PositionRow({ p, onOpen }: { p: ProfilePosition; onOpen: () => void }) {
+  const { t } = useTranslation('account');
   const isFutures = p.side != null;
   return (
     <button
@@ -55,17 +57,17 @@ function PositionRow({ p, onOpen }: { p: ProfilePosition; onOpen: () => void }) 
           {isFutures && (
             <>
               <Badge variant={p.side === 'LONG' ? 'success' : 'destructive'} className="text-[10px] px-1.5 py-0">
-                {p.side === 'LONG' ? '做多' : '做空'}
+                {p.side === 'LONG' ? t('profile.long') : t('profile.short')}
               </Badge>
               <Badge variant="outline" className="text-[10px] px-1.5 py-0">
-                {p.marginMode === 'CROSS' ? '全仓' : '逐仓'} {p.leverage}x
+                {p.marginMode === 'CROSS' ? t('profile.cross') : t('profile.isolated')} {p.leverage}x
               </Badge>
             </>
           )}
         </div>
         <div className="mt-0.5 num text-[11px] text-muted-foreground">
-          {fmtNum(p.quantity, 4)} · 均价 {formatCoinPrice(p.symbol, p.entryPrice)}
-          {p.currentPrice != null && <> · 现价 {formatCoinPrice(p.symbol, p.currentPrice)}</>}
+          {fmtNum(p.quantity, 4)} · {t('profile.avgPrice', { price: formatCoinPrice(p.symbol, p.entryPrice) })}
+          {p.currentPrice != null && <> · {t('profile.lastPrice', { price: formatCoinPrice(p.symbol, p.currentPrice) })}</>}
         </div>
       </div>
       <div className="text-right shrink-0">
@@ -83,12 +85,13 @@ function PositionCard({ title, positions, onOpen }: {
   positions: ProfilePosition[];
   onOpen: (symbol: string) => void;
 }) {
+  const { t } = useTranslation('account');
   return (
     <Card className="overflow-hidden">
       <CardHeader className="pb-2">
         <CardTitle className="text-sm font-black flex items-center gap-2">
           {title}
-          <span className="text-xs text-muted-foreground font-normal">{positions.length} 个</span>
+          <span className="text-xs text-muted-foreground font-normal">{t('profile.count', { count: positions.length })}</span>
         </CardTitle>
       </CardHeader>
       <CardContent className="p-0">
@@ -101,6 +104,7 @@ function PositionCard({ title, positions, onOpen }: {
 }
 
 export function UserProfile() {
+  const { t } = useTranslation('account');
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
   const userId = Number(id);
@@ -179,11 +183,11 @@ export function UserProfile() {
       <div className="page-shell p-4 md:p-6 space-y-4">
         <Button variant="ghost" size="sm" className="gap-1.5" onClick={() => navigate('/ranking')}>
           <ArrowLeft className="w-4 h-4" />
-          返回排行榜
+          {t('profile.back')}
         </Button>
         <Card>
           <CardContent className="p-0">
-            <EmptyState icon={<EyeOff />} text="该用户没有公开自己的持仓与仓位历史" />
+            <EmptyState icon={<EyeOff />} text={t('profile.private')} />
           </CardContent>
         </Card>
       </div>
@@ -199,7 +203,7 @@ export function UserProfile() {
     <div className="page-shell p-4 md:p-6 space-y-4">
       <Button variant="ghost" size="sm" className="gap-1.5" onClick={() => navigate('/ranking')}>
         <ArrowLeft className="w-4 h-4" />
-        返回排行榜
+        {t('profile.back')}
       </Button>
 
       {/* 概览：口径与排行榜完全一致（后端直接复用榜单行） */}
@@ -225,17 +229,17 @@ export function UserProfile() {
               </div>
               <div className="mt-2 grid grid-cols-3 gap-x-6 gap-y-2">
                 <div>
-                  <div className="microlabel">总资产</div>
+                  <div className="microlabel">{t('profile.totalAssets')}</div>
                   <div className="num text-base font-bold">{fmtNum(s.totalAssets)}</div>
                 </div>
                 <div>
-                  <div className="microlabel">收益率</div>
+                  <div className="microlabel">{t('profile.return')}</div>
                   <div className={cn('num text-base font-bold', up ? 'text-gain' : 'text-loss')}>
                     {up ? '+' : ''}{s.profitPct.toFixed(2)}%
                   </div>
                 </div>
                 <div>
-                  <div className="microlabel" title="合约 + 现货 + 预测的净盈亏，不含优惠券">交易盈利</div>
+                  <div className="microlabel" title={t('profile.tradingProfitHint')}>{t('profile.tradingProfit')}</div>
                   <ProfitText value={s.tradingProfit} className="text-base font-bold" />
                 </div>
               </div>
@@ -248,14 +252,14 @@ export function UserProfile() {
       {hasSpot || hasFutures ? (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
           {hasSpot && (
-            <PositionCard title="现货持仓" positions={profile.spotPositions} onOpen={s2 => navigate(tradeHref(s2))} />
+            <PositionCard title={t('profile.spotTitle')} positions={profile.spotPositions} onOpen={s2 => navigate(tradeHref(s2))} />
           )}
           {hasFutures && (
-            <PositionCard title="合约持仓" positions={profile.futuresPositions} onOpen={s2 => navigate(tradeHref(s2))} />
+            <PositionCard title={t('profile.futuresTitle')} positions={profile.futuresPositions} onOpen={s2 => navigate(tradeHref(s2))} />
           )}
         </div>
       ) : (
-        <Card><CardContent className="p-0"><EmptyState icon={<Briefcase />} text="当前没有持仓" /></CardContent></Card>
+        <Card><CardContent className="p-0"><EmptyState icon={<Briefcase />} text={t('profile.noPositions')} /></CardContent></Card>
       )}
 
       {/* 历史：仓位历史 / 成交明细 两个粒度，同一张卡切换 */}
@@ -267,7 +271,7 @@ export function UserProfile() {
               onClick={() => setTab('positions')}
               icon={<History className="w-3.5 h-3.5" />}
             >
-              仓位历史
+              {t('profile.tabPositions')}
               {!positionsLoading && <span className="text-xs text-muted-foreground font-normal">{positions.total}</span>}
             </TabButton>
             <TabButton
@@ -275,7 +279,7 @@ export function UserProfile() {
               onClick={() => setTab('trades')}
               icon={<Receipt className="w-3.5 h-3.5" />}
             >
-              成交明细
+              {t('profile.tabTrades')}
               {tab === 'trades' && !tradesLoading && (
                 <span className="text-xs text-muted-foreground font-normal">{trades.total}</span>
               )}
@@ -290,7 +294,7 @@ export function UserProfile() {
               pages={positions.pages}
               loading={positionsLoading}
               onPage={setPositionPage}
-              emptyText="该用户没有已平仓的合约仓位"
+              emptyText={t('profile.emptyHistory')}
             />
           ) : (
             <TradesPanel
@@ -313,6 +317,8 @@ function TradesPanel({ trades, loading, onPage, onOpen }: {
   onPage: (p: number) => void;
   onOpen: (symbol: string) => void;
 }) {
+  // 这里订一份 t 不只为下面几句：orderSideView 的方向标签走 i18n 实例现查，靠本组件重渲染跟上切语言
+  const { t } = useTranslation('account');
   if (loading) {
     return (
       <div className="p-4 space-y-2.5">
@@ -321,17 +327,17 @@ function TradesPanel({ trades, loading, onPage, onOpen }: {
     );
   }
   if (trades.records.length === 0) {
-    return <EmptyState icon={<Briefcase />} text="暂无成交记录" />;
+    return <EmptyState icon={<Briefcase />} text={t('profile.emptyTrades')} />;
   }
   return (
     <>
-      {trades.records.map(t => {
-        const { label, tone } = orderSideView(t.orderSide);
+      {trades.records.map(tr => {
+        const { label, tone } = orderSideView(tr.orderSide);
         return (
           <button
-            key={`${t.kind}-${t.tradeId}`}
+            key={`${tr.kind}-${tr.tradeId}`}
             type="button"
-            onClick={() => onOpen(t.symbol)}
+            onClick={() => onOpen(tr.symbol)}
             className="w-full text-left px-4 py-2.5 flex items-center gap-3 border-b border-border/25 last:border-b-0 hover:bg-accent/30 transition-colors"
           >
             <span className={cn(
@@ -340,15 +346,15 @@ function TradesPanel({ trades, loading, onPage, onOpen }: {
             )}>
               {label}
             </span>
-            <span className="text-[13px] font-semibold truncate">{tradeSymbolName(t.symbol)}</span>
-            {t.kind === 'FUTURES' && <span className="text-[10px] text-muted-foreground shrink-0">合约</span>}
-            {t.isAi && <Bot className="w-3.5 h-3.5 text-emerald-500 shrink-0" />}
+            <span className="text-[13px] font-semibold truncate">{tradeSymbolName(tr.symbol)}</span>
+            {tr.kind === 'FUTURES' && <span className="text-[10px] text-muted-foreground shrink-0">{t('profile.futuresTag')}</span>}
+            {tr.isAi && <Bot className="w-3.5 h-3.5 text-emerald-500 shrink-0" />}
             <span className="num text-[11px] text-muted-foreground ml-auto shrink-0 hidden sm:inline">
-              {fmtNum(t.quantity, 4)} @ {formatCoinPrice(t.symbol, t.filledPrice)}
+              {fmtNum(tr.quantity, 4)} @ {formatCoinPrice(tr.symbol, tr.filledPrice)}
             </span>
-            <span className="num text-[13px] font-bold shrink-0">${fmtNum(t.filledAmount)}</span>
+            <span className="num text-[13px] font-bold shrink-0">${fmtNum(tr.filledAmount)}</span>
             <span className="num text-[10px] text-muted-foreground shrink-0 w-20 text-right">
-              {fmtDateTime(t.createdAt)}
+              {fmtDateTime(tr.createdAt)}
             </span>
           </button>
         );
@@ -356,7 +362,7 @@ function TradesPanel({ trades, loading, onPage, onOpen }: {
 
       {trades.pages > 1 && (
         <div className="flex items-center justify-between px-4 py-3 border-t border-border/30">
-          <span className="text-xs text-muted-foreground">第 {trades.current} / {trades.pages} 页</span>
+          <span className="text-xs text-muted-foreground">{t('profile.page', { page: trades.current, pages: trades.pages })}</span>
           <div className="flex items-center gap-1">
             <Button variant="ghost" size="sm" className="h-8 w-8 p-0"
               disabled={trades.current <= 1} onClick={() => onPage(trades.current - 1)}>

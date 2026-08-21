@@ -1,0 +1,6 @@
+{
+  "unauthorized": "未登录",
+  "requestFailed": "请求失败",
+  "requestFailedStatus": "请求失败: {{status}}",
+  "streamUnavailable": "响应流不可用"
+}

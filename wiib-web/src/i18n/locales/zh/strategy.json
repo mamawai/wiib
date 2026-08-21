@@ -1,0 +1,392 @@
+{
+  "side": {
+    "long": "多",
+    "short": "空"
+  },
+  "pager": {
+    "prev": "上一页",
+    "next": "下一页"
+  },
+  "player": {
+    "play": "播放",
+    "pause": "暂停",
+    "reset": "复位到全量",
+    "progress": "回放进度"
+  },
+  "strategies": {
+    "title": "策略账户",
+    "subtitle": "四策略独立账户 · 本平台模拟盘执行 · 决策价与撮合价同源",
+    "testnetLink": "Testnet 监测",
+    "loading": "加载策略账户...",
+    "offline": "离线",
+    "name": {
+      "fibo": "Fibo 回撤",
+      "liqfade": "Liq Fade",
+      "sqzmom": "Sqz Momentum",
+      "turtle": "Turtle 突破"
+    },
+    "desc": {
+      "fibo": "斐波那契回撤挂单",
+      "liqfade": "清算级联反向",
+      "sqzmom": "挤压动量突破",
+      "turtle": "4H 90/15 通道突破"
+    },
+    "unavailable": {
+      "title": "账户不可用",
+      "hint": "sim 未启动或尚未开仓过，启动后自动恢复"
+    },
+    "stats": {
+      "equity": "权益 · 可用 ${{available}}",
+      "realized_other": "累计已实现 · {{count}} 笔",
+      "winRate": "胜率 · {{wins}}/{{total}}",
+      "unrealized_other": "持仓浮盈 · {{count}} 仓"
+    },
+    "signals": {
+      "title": "实时信号状态",
+      "empty": "信号快照不可用",
+      "emptyHint": "quant 策略运行时未启用或该策略未激活"
+    },
+    "equity": {
+      "empty": "暂无收益曲线",
+      "emptyHint": "首笔平仓后自动出现"
+    },
+    "positions": {
+      "title": "当前持仓",
+      "empty": "空仓 · 等待新信号"
+    },
+    "trades": {
+      "title": "交易记录",
+      "empty": "暂无交易记录",
+      "pageInfo": "{{page}} / {{pages}} · 共 {{total}} 笔",
+      "liquidated": "强平"
+    },
+    "pos": {
+      "qty": "数量",
+      "entry": "开仓",
+      "mark": "标记",
+      "margin": "保证金",
+      "unrealized": "浮动盈亏",
+      "close": "平仓"
+    },
+    "toast": {
+      "loadFailed": "加载策略账户失败",
+      "closed": "平仓指令已执行",
+      "closeFailed": "平仓失败"
+    }
+  },
+  "backtest": {
+    "title": "回测",
+    "subtitleStrategy": "本地 5m K线 · 与实盘同一撮合口径 · 右侧工作记录还原策略每一步",
+    "subtitleReplay": "逐根揭示历史行情 · 按收盘价开多开空、加减仓 · 练自己的盘感",
+    "modeStrategy": "策略回测",
+    "modeReplay": "手动复盘",
+    "speed": {
+      "slow": "慢",
+      "normal": "中",
+      "fast": "快",
+      "turbo": "极速"
+    },
+    "reject": {
+      "directional": "方向失效",
+      "gappedBeyondStop": "跳空越过止损",
+      "rrTooLow": "盈亏比不足",
+      "qtyZero": "数量为 0",
+      "balanceRejected": "余额不足",
+      "priceInvalid": "价格无效"
+    },
+    "exit": {
+      "sl": "止损",
+      "tp": "止盈",
+      "signalClose": "信号平仓",
+      "timeExit": "时间出场",
+      "timeout": "超时",
+      "trailingStop": "追踪止损",
+      "forceClose": "收尾强平",
+      "liquidation": "强平"
+    },
+    "form": {
+      "symbol": "币种",
+      "from": "开始日期",
+      "to": "结束日期",
+      "balance": "初始资金",
+      "leverage": "杠杆"
+    },
+    "run": {
+      "queued": "排队中…",
+      "running": "回测中…",
+      "start": "跑回测"
+    },
+    "queueHint": "排队中 · 第 <0>{{pos}}</0> 位 —— 相同参数的回测会直接复用结果，无需等待",
+    "progress": "{{done}} / {{total}} 根 · {{pct}}%",
+    "failed": "回测失败",
+    "replayAt": "回放 @ {{time}}",
+    "barsLoaded": "{{bars}} 根已载入",
+    "waitingBars": "等待K线…",
+    "equityTitle": "权益曲线（相对初始资金）",
+    "timeline": {
+      "title": "策略工作记录",
+      "count_other": "{{count}} 条",
+      "waiting": "等待事件…"
+    },
+    "ev": {
+      "taskStart": "任务启动",
+      "taskStartDetail": "共 <0>{{bars}}</0> 根 · 预热 <1>{{warmup}}</1> 根 · 杠杆 <2>{{leverage}}x</2>",
+      "signal": "信号",
+      "cancelled": "撤单",
+      "entry": "进场",
+      "qty": "数量",
+      "rejected": "拒单",
+      "exitDetail": "<0>{{entry}}</0> → <1>{{exit}}</1> · 持仓 <2>{{bars}}</2> 根",
+      "done_other": "回测完成 · {{count}} 笔"
+    },
+    "stat": {
+      "netProfit": "净利",
+      "winRate": "胜率",
+      "pf": "盈亏比 PF",
+      "maxDd": "最大回撤",
+      "avgR": "平均 R",
+      "fees": "手续费",
+      "trades": "交易笔数",
+      "finalEquity": "最终权益",
+      "winLoss": "{{wins}}胜{{losses}}负",
+      "hold": "持仓 {{hours}}h"
+    },
+    "trades": {
+      "title": "成交明细",
+      "count_other": "{{count}} 笔",
+      "jumpTip": "点击定位到图表"
+    },
+    "toast": {
+      "badRange": "时间范围无效",
+      "submitFailed": "提交失败",
+      "pollFailed": "回测任务查询失败",
+      "ivSwitched": "已切换到 {{iv}}，回放将按 {{iv}} K线展示"
+    }
+  },
+  "replay": {
+    "days_other": "{{count}} 天",
+    "reason": {
+      "manual": "平仓",
+      "liquidation": "爆仓",
+      "end": "结算",
+      "reduce": "减仓"
+    },
+    "fill": {
+      "add": "加",
+      "close": "平",
+      "reduce": "减",
+      "liquidation": "爆",
+      "end": "结"
+    },
+    "form": {
+      "symbol": "币种",
+      "mode": "开局方式",
+      "blind": "随机盲测",
+      "custom": "自选起点",
+      "startDate": "起始日期",
+      "duration": "复盘时长",
+      "balance": "初始资金",
+      "coach": "AI 教练"
+    },
+    "start": "开始复盘",
+    "coverage": "本地数据 {{from}} ~ {{to}} · 盲测隐藏真实日期，结算后揭晓",
+    "coverageLoading": "正在读取本地 K 线覆盖范围…",
+    "hintLine": "按所选周期逐根推进（空格 = 下一根，对局中可切 5m/15m/1h/4h/1d），只能按收盘价买卖，多空可双开、可加仓/减仓、杠杆随时调 · 复盘进度不保存，刷新即失",
+    "blind": "盲测",
+    "review": "复盘",
+    "barsProgress": "{{played}} / {{total}} 根",
+    "next": "下一根",
+    "speed": "{{n}}根/秒",
+    "spaceHint": "空格 = 下一根 · 不可回退",
+    "aiHint": "AI 提示",
+    "aiHintTip": "让 AI（{{model}}）读一下当前盘面：结构 / 关键位 / 量能 / 持仓风险",
+    "endGame": "结束本局",
+    "levTip": "杠杆：下一次开/加仓用；同向加仓换档后仓位显示有效杠杆",
+    "openPctTip": "开/加仓：占可用现金的比例",
+    "closePctTip": "平/减仓：占该侧仓位数量的比例",
+    "openLong": "开多",
+    "addLong": "加多",
+    "openShort": "开空",
+    "addShort": "加空",
+    "avgEntry": "均价 {{price}} · {{qty}}",
+    "closeAction": "平{{side}} {{pct}}% @ {{price}}",
+    "reduceAction": "减{{side}} {{pct}}% @ {{price}}",
+    "aiPanelTitle": "AI 盘面提示",
+    "aiThinking": "模型思考中…",
+    "goConfig": "去配置",
+    "noEndpoint": "未配置端点",
+    "emptyAnswer": "模型没有返回内容",
+    "liquidatedOut": "爆仓出局",
+    "settled": "本局结算",
+    "stat": {
+      "netProfit": "净利 · {{pct}}%",
+      "winRate": "胜率 · {{wins}}胜{{losses}}负",
+      "maxDd": "最大回撤",
+      "finalEquity": "最终权益 · 费 {{fees}}"
+    },
+    "aiReview": "AI 评估本局",
+    "aiReviewHint": "对照整局走势逐笔评你的进出场、行为模式与仓位杠杆 · {{model}}",
+    "playAgain": "再来一局",
+    "equity": "权益",
+    "cash": "可用现金",
+    "tradesTitle": "本局交易",
+    "tradesCount_other": "{{count}} 笔",
+    "noTrades": "还没有成交",
+    "toast": {
+      "noCoverage": "该币种暂无本地 K 线数据",
+      "notEnoughDepth": "本地 K 线深度不足一局所需",
+      "badDate": "日期无效",
+      "rangeTooShort": "该区间 K 线不足，换个起点再试",
+      "klineFailed": "K 线拉取失败",
+      "ivSwitched": "已切换到 {{iv}}，回放将按 {{iv}} 周期推进"
+    }
+  },
+  "chart": {
+    "magnetOn": "磁吸开：端点自动贴住最近的开/高/低/收",
+    "magnetOff": "磁吸关：自由落点",
+    "showDrawings": "画线已隐藏，点击恢复显示",
+    "hideDrawings": "隐藏当前所有画线（不删除）",
+    "deleteSelected": "删除选中（Del）",
+    "clearAll": "清空本币种全部画线",
+    "textPlaceholder": "标注文字，回车确认"
+  },
+  "testnet": {
+    "title": "模拟盘监测",
+    "subtitle": "Binance Testnet · 策略实盘验证轨 · 真实盘口撮合",
+    "refreshed": "已刷新",
+    "banner": {
+      "title": "Testnet 轨已停用：",
+      "body": "策略执行目标当前为本平台模拟盘（sim），本页展示的是切换前 Binance Testnet 的历史交易，不再产生新记录，与「策略账户」页的记录不一致属正常。最新策略交易请看",
+      "link": "策略账户"
+    },
+    "empty": {
+      "title": "暂无 testnet 数据",
+      "hint": "需在 application.yml 配置 binance-testnet 的 api-key/secret-key，并开启 strategy.execution.enabled 跑出成交后才有数据"
+    },
+    "stat": {
+      "equity": "当前权益",
+      "available": "可用 ${{value}}",
+      "cumPnl": "累计盈亏",
+      "cumPnlSub": "含手续费 · 实时直拉",
+      "fillRate": "进场成交率",
+      "fillRateSub": "{{filled}}/{{placed}} 成交 · 超时 {{expired}}",
+      "fillRateHint": "fill 生死线",
+      "winRate": "胜率",
+      "winRateSub": "{{wins}}/{{total}} 笔盈利"
+    },
+    "equity": {
+      "title": "权益曲线",
+      "hint": "累计已实现盈亏（从0起）"
+    },
+    "grid": {
+      "title": "日交易网格",
+      "hint": "点格子看当天成交",
+      "dayTrades": "{{date}} 当天成交（{{n}}）",
+      "empty": "当天无成交明细"
+    },
+    "positions": {
+      "title": "当前持仓"
+    },
+    "orders": {
+      "title": "当前挂单"
+    },
+    "pos": {
+      "mark": "标记价",
+      "liq": "强平价",
+      "entry": "开仓价"
+    },
+    "order": {
+      "entry": "进场",
+      "stopLoss": "止损",
+      "takeProfit": "止盈"
+    },
+    "fill": {
+      "title": "fill 对账",
+      "hint": "回测 touch=fill 假设的真实检验",
+      "rate": "成交率",
+      "expired": "超时撤单",
+      "expiredSub": "挂了没排到",
+      "avgTime": "平均成交时长",
+      "avgTimeSub": "挂单→成交",
+      "maker": "零滑点确认",
+      "makerSub": "成交价=挂单价",
+      "note": "成交率 = 挂在回撤位的进场单真正被回踩成交的比例。回测假设\"价格触及即成交(100%)\"，实盘 GTX maker 单\"触及还要排队\"——此处成交率越接近回测假设，回测越可信；差距越大，回测越乐观。"
+    },
+    "trades": {
+      "title": "交易记录",
+      "hint": "近30天真实成交",
+      "empty": "暂无成交记录"
+    },
+    "manual": {
+      "title": "接口自检 · 手动交易",
+      "subtitle": "仅管理员 · 直连 testnet",
+      "buy": "买/多",
+      "sell": "卖/空",
+      "market": "市价",
+      "limit": "限价",
+      "qty": "数量(张)",
+      "price": "限价",
+      "pricePh": "挂单价",
+      "leverage": "杠杆",
+      "submit": "下单",
+      "submitting": "提交中…",
+      "closeMarket": "市价平仓",
+      "closing": "平仓中…",
+      "cancelAll": "撤挂单",
+      "cancelling": "撤单中…",
+      "qtyPositive": "数量必须 > 0",
+      "priceRequired": "LIMIT 需填价格",
+      "opFailed": "操作失败",
+      "orderResult": "#{{id}} {{status}}{{at}}（{{side}} {{type}} {{qty}}）",
+      "closeResult": "平仓 #{{id}} {{status}}{{at}}",
+      "cancelResult": "已撤 {{symbol}} 全部挂单",
+      "note": "数量为币本位张数(如 BTC 0.002)。需先在 application.yml 配置 binance-testnet 的 api-key/secret-key；手动测试建议关闭自动执行(strategy.execution.enabled=false)，避免两套状态机冲突。"
+    }
+  },
+  "monitor": {
+    "live": "实时",
+    "heap": "堆内存",
+    "nonHeap": "堆外",
+    "committed": "已提交{{value}}",
+    "threads": "线程",
+    "threadSub": "峰{{peak}} · 守护{{daemon}}",
+    "uptime": "运行",
+    "gcTimes": "次",
+    "gcSub": "{{total}}ms · 均{{avg}}ms",
+    "proc": {
+      "sim": "模拟盘",
+      "feed": "行情上游",
+      "quant": "量化引擎"
+    }
+  },
+  "feed": {
+    "title": "feed 数据流健康",
+    "desc": "Binance 行情 WS（应当常连；断开=故障，点重试强制立即重连）。状态实时推送。",
+    "allOk": "全部正常",
+    "someDown": "有流异常",
+    "loadError": "无法连接 feed（是否在线？）—点右上角刷新重试",
+    "noStreams": "无登记的流",
+    "downFor": "断开 {{age}}",
+    "reconnects": "重连×{{n}}",
+    "status": {
+      "connected": "已连接",
+      "connecting": "连接中",
+      "reconnecting": "重连中",
+      "disconnected": "已断开"
+    },
+    "toast": {
+      "loadFailed": "feed 流状态获取失败",
+      "retryTriggered": "已触发重连 {{name}}",
+      "notFound": "未找到流 {{name}}",
+      "retryFailed": "重试失败"
+    }
+  },
+  "radar": {
+    "crypto": "加密货币",
+    "commodity": "大宗商品",
+    "bstock": "bStock",
+    "prediction": "预测",
+    "game": "游戏",
+    "betterThan": "超过{{pct}}%的其他用户"
+  }
+}

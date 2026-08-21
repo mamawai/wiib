@@ -1,5 +1,7 @@
 import { cn, fmtNum, fmtDateTime } from '../lib/utils';
 import { useEffect, useRef, useState, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
+import i18n from '../i18n';
 import {
   createChart, createSeriesMarkers, CrosshairMode, CandlestickSeries, HistogramSeries, LineSeries, LineStyle,
   type IChartApi, type ISeriesApi, type UTCTimestamp, type MouseEventParams,
@@ -48,11 +50,14 @@ function tooltipHtml(bar: Bar, bars: Bar[], idx: Map<number, number>, d: number,
   const tStr = fmtBarTime(barDate(bar.time), interval);
   const row = (k: string, v: string, c = '#1f2328') =>
     `<div style="display:flex;justify-content:space-between;gap:18px"><span style="color:#6b7280">${k}</span><span style="color:${c};font-weight:700">${v}</span></div>`;
+  // 词表在函数体里现查：气泡每次悬停重新拼，切语言下一次悬停就是新的
   return `<div style="color:#6b7280;font-weight:700;margin-bottom:5px;padding-bottom:5px;border-bottom:1px solid rgba(0,0,0,.1)">${tStr}</div>`
-    + row('开', fmtNum(bar.open, d)) + row('高', fmtNum(bar.high, d)) + row('低', fmtNum(bar.low, d)) + row('收', fmtNum(bar.close, d))
-    + row('涨跌', sign + fmtNum(chg, d), col) + row('涨跌幅', sign + chgPct.toFixed(2) + '%', col)
-    + row('振幅', amp.toFixed(2) + '%')
-    + row('量', fmtVol(bar.volume) + ' ' + base) + row('额', fmtVol(bar.quote) + ' USDT');
+    + row(i18n.t('market:chart.open'), fmtNum(bar.open, d)) + row(i18n.t('market:chart.high'), fmtNum(bar.high, d))
+    + row(i18n.t('market:chart.low'), fmtNum(bar.low, d)) + row(i18n.t('market:chart.close'), fmtNum(bar.close, d))
+    + row(i18n.t('market:chart.change'), sign + fmtNum(chg, d), col) + row(i18n.t('market:chart.changePct'), sign + chgPct.toFixed(2) + '%', col)
+    + row(i18n.t('market:chart.amplitude'), amp.toFixed(2) + '%')
+    + row(i18n.t('market:chart.volume'), fmtVol(bar.volume) + ' ' + base)
+    + row(i18n.t('market:chart.turnover'), fmtVol(bar.quote) + ' USDT');
 }
 
 // ========== 副图指标 (MACD / RSI) ==========
@@ -398,6 +403,7 @@ const esc = (s: string) => s.replace(/[&<>"']/g, c =>
 const clip = (s: string, n: number) => (s.length > n ? s.slice(0, n) + '…' : s);
 
 export function CandleChart({ symbol, interval, limit = 300, visibleBars = 110, klinesFn = futuresApi.klines, streamLive = true, tick = null, indicators = false, onIntervalChange, positionOverlays, tradeMarks, newsTag }: { symbol: string; interval: Interval; limit?: number; visibleBars?: number; klinesFn?: (symbol: string, interval: string, limit: number, endTime?: number) => Promise<number[][]>; streamLive?: boolean; tick?: { price: number; ts: number } | null; indicators?: boolean; onIntervalChange?: (i: Interval) => void; positionOverlays?: PositionOverlay[]; tradeMarks?: TradeMark[]; newsTag?: string }) {
+  const { t } = useTranslation('market');
   const isDark = useIsDark();
   const rootRef = useRef<HTMLDivElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -634,9 +640,10 @@ export function CandleChart({ symbol, interval, limit = 300, visibleBars = 110, 
       if (!g || !param.point) { tipEl.style.display = 'none'; return; }
       const row = (side: string, col: string, prices: number[]) => prices.map(p =>
         `<div style="display:flex;gap:16px;justify-content:space-between"><span style="color:${col};font-weight:700">${side}</span><span style="color:#1f2328;font-weight:700">${fmtNum(p, decimals)}</span></div>`).join('');
+      // 弹窗每次点击现拼，词表走 i18n 实例（建图 effect 不该因为切语言整个重建）
       tipEl.innerHTML =
-        `<div style="color:#6b7280;font-weight:700;margin-bottom:4px;padding-bottom:4px;border-bottom:1px solid rgba(0,0,0,.1)">成交 · ${fmtBarTime(barDate(t as number), interval)}</div>`
-        + row('买', '#089981', g.b) + row('卖', '#f23645', g.s);
+        `<div style="color:#6b7280;font-weight:700;margin-bottom:4px;padding-bottom:4px;border-bottom:1px solid rgba(0,0,0,.1)">${i18n.t('market:chart.fillsAt', { time: fmtBarTime(barDate(t as number), interval) })}</div>`
+        + row(i18n.t('market:chart.buy'), '#089981', g.b) + row(i18n.t('market:chart.sell'), '#f23645', g.s);
       tipEl.style.left = `${Math.min(param.point.x + 12, host.clientWidth - 150)}px`;
       tipEl.style.top = `${Math.min(param.point.y + 12, host.clientHeight - 30 * (g.b.length + g.s.length) - 40)}px`;
       tipEl.style.display = 'block';
@@ -669,17 +676,17 @@ export function CandleChart({ symbol, interval, limit = 300, visibleBars = 110, 
 
     const loadMore = () => {
       if (loadingRef.current || exhaustedRef.current || !readyRef.current || !barsRef.current.length) return;
-      if (barsRef.current.length >= MAX_BARS) { exhaustedRef.current = true; showHint('已达载入上限'); return; }
+      if (barsRef.current.length >= MAX_BARS) { exhaustedRef.current = true; showHint(i18n.t('market:chart.limitReached')); return; }
 
       loadingRef.current = true;
-      showHint('载入历史…', 0);
+      showHint(i18n.t('market:chart.loadingHistory'), 0);
       // endTime = 现有最早那根开盘前 1ms；后端按 endTime 缓存 1h（闭合 bar 不可变），多人翻同一页共享同一个 key
       klinesFn(symbol, interval, PAGE_SIZE, barsRef.current[0].openMs - 1).then(raw => {
         if (disposed) return;
         // 去重：币安边界可能回一根重叠的，LWC 遇到重复时间会抛
         const oldest = barsRef.current[0].time;
         const older = raw.map(toBar).filter(b => b.time < oldest);
-        if (!older.length) { exhaustedRef.current = true; showHint('已到最早'); return; }
+        if (!older.length) { exhaustedRef.current = true; showHint(i18n.t('market:chart.earliest')); return; }
 
         const merged = older.concat(barsRef.current);
         const idx = new Map<number, number>();
@@ -779,10 +786,10 @@ export function CandleChart({ symbol, interval, limit = 300, visibleBars = 110, 
         wrap.appendChild(el);
         labels.push({ el, price });
       };
-      add(p.entry, `${p.label} 入场`, LineStyle.Solid, col, 2);
-      p.tps.forEach((t, i) => add(t, `${p.label} TP${p.tps.length > 1 ? i + 1 : ''}`, LineStyle.Dashed));
+      add(p.entry, `${p.label} ${t('chart.entry')}`, LineStyle.Solid, col, 2);
+      p.tps.forEach((tp, i) => add(tp, `${p.label} TP${p.tps.length > 1 ? i + 1 : ''}`, LineStyle.Dashed));
       p.sls.forEach((s, i) => add(s, `${p.label} SL${p.sls.length > 1 ? i + 1 : ''}`, LineStyle.SparseDotted));
-      add(p.liq, `${p.label} 强平`, LineStyle.LargeDashed, '#f97316');
+      add(p.liq, `${p.label} ${t('chart.liq')}`, LineStyle.LargeDashed, '#f97316');
     }
     posLabelElsRef.current = labels;
     return () => {
@@ -791,7 +798,8 @@ export function CandleChart({ symbol, interval, limit = 300, visibleBars = 110, 
       // 开关/数据变时挨个摘掉重画；图整体重建时 series 已死、removePriceLine 会抛，吞掉即可
       try { lines.forEach(l => series.removePriceLine(l)); } catch { /* chart disposed */ }
     };
-  }, [positionOverlays, showPosLines, hiddenPosIds, decimals, chartEpoch]);
+    // t 进依赖：切语言时 t 换新引用，参考线小签（"多10x 入场 63000"）跟着重画
+  }, [positionOverlays, showPosLines, hiddenPosIds, decimals, chartEpoch, t]);
 
   // 历史成交 B/S 标记：同一根 K 线内聚合成一个角标（B3S2 这种），点开看逐笔价格。
   // 全买=涨色、全卖=跌色、混合=主色；文本自带方向语义，shape 缩到 0 只留字
@@ -860,7 +868,7 @@ export function CandleChart({ symbol, interval, limit = 300, visibleBars = 110, 
         + `<div style="color:#6b7280;font-weight:700;margin-bottom:2px">${fmtClock(e.publishedAt)} · ${esc(e.tags)}</div>`
         + `<div style="color:#1f2328;font-weight:700;margin-bottom:2px">${esc(e.title)}</div>`
         + `<div style="color:#374151">${esc(clip(e.content ?? '', 160))}</div>`
-        + (e.url ? `<a href="${esc(e.url)}" target="_blank" rel="noopener noreferrer" style="color:#2962ff;font-weight:700">源 ↗</a>` : '')
+        + (e.url ? `<a href="${esc(e.url)}" target="_blank" rel="noopener noreferrer" style="color:#2962ff;font-weight:700">${i18n.t('market:chart.newsSource')}</a>` : '')
         + '</div>').join('');
       tip.style.display = 'block';
       // 内容定了再量尺寸：横向对中标记并夹在图内，纵向优先弹标记上方、顶部放不下翻到下方
@@ -1119,7 +1127,7 @@ export function CandleChart({ symbol, interval, limit = 300, visibleBars = 110, 
                       setShowMarks(v);
                       localStorage.setItem('wiib-chart-trade-marks', v ? '1' : '0');
                     }}
-                    className={iconCls(showMarks)} title="历史成交标记：B/S 角标，点击对应K线看成交价">
+                    className={iconCls(showMarks)} title={t('chart.marksTitle')}>
               <History className="w-3.5 h-3.5" />
             </button>
           </div>
@@ -1134,7 +1142,7 @@ export function CandleChart({ symbol, interval, limit = 300, visibleBars = 110, 
                       setShowNews(v);
                       localStorage.setItem('wiib-chart-news', v ? '1' : '0');
                     }}
-                    className={iconCls(showNews)} title="新闻标记：globe 悬在对应K线上方，点击看快讯内容">
+                    className={iconCls(showNews)} title={t('chart.newsTitle')}>
               <Globe className="w-3.5 h-3.5" />
             </button>
           </div>
@@ -1150,7 +1158,7 @@ export function CandleChart({ symbol, interval, limit = 300, visibleBars = 110, 
                       setShowPosLines(v);
                       localStorage.setItem('wiib-chart-pos-lines', v ? '1' : '0');
                     }}
-                    className={iconCls(showPosLines)} title="仓位参考线：入场 / 止盈 / 止损 / 强平">
+                    className={iconCls(showPosLines)} title={t('chart.posLinesTitle')}>
               <Layers className="w-3.5 h-3.5" />
             </button>
             {showPosLines && positionOverlays.length > 1 && positionOverlays.map(p => (
@@ -1170,16 +1178,16 @@ export function CandleChart({ symbol, interval, limit = 300, visibleBars = 110, 
 
         <div className={group}>
           <button type="button" onClick={() => setMagnet(!magnet)} className={iconCls(magnet)}
-                  title={magnet ? '磁吸开：端点自动贴住最近的开/高/低/收' : '磁吸关：自由落点'}>
+                  title={magnet ? t('chart.magnetOn') : t('chart.magnetOff')}>
             <Magnet className="w-3.5 h-3.5" />
           </button>
           <button type="button" onClick={() => setHiddenAll(!hiddenAll)} disabled={!drawCount}
-                  title={hiddenAll ? '画线已隐藏，点击恢复显示' : '隐藏当前所有画线（不删除）'}
+                  title={hiddenAll ? t('chart.drawingsHidden') : t('chart.drawingsHide')}
                   className={`${iconCls(hiddenAll)} disabled:opacity-30 disabled:cursor-default disabled:hover:bg-transparent disabled:hover:text-muted-foreground`}>
             {hiddenAll ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
           </button>
           <button type="button" onClick={trash} disabled={!hasSelection && !drawCount}
-                  title={hasSelection ? '删除选中（Del）' : '清空本币种全部画线'}
+                  title={hasSelection ? t('chart.deleteSelected') : t('chart.clearAll')}
                   className={`${iconCls(false)} disabled:opacity-30 disabled:cursor-default disabled:hover:bg-transparent disabled:hover:text-muted-foreground`}>
             <Trash2 className="w-3.5 h-3.5" />
           </button>
@@ -1194,7 +1202,7 @@ export function CandleChart({ symbol, interval, limit = 300, visibleBars = 110, 
           </div>
         )}
 
-        <button type="button" onClick={fs.toggle} title={fs.active ? '退出全屏（Esc）' : '全屏'}
+        <button type="button" onClick={fs.toggle} title={fs.active ? t('chart.exitFullscreen') : t('chart.fullscreen')}
                 className={`ml-auto rounded-md border border-border ${iconCls(false)}`}>
           {fs.active ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
         </button>
@@ -1206,7 +1214,7 @@ export function CandleChart({ symbol, interval, limit = 300, visibleBars = 110, 
         {textEdit && (
           /* 透明浮层：文字直接浮在图上，所见即所得（提交后的标注就长这样）。
              只留一条虚线下划线当"这里在输入"的提示，亮暗主题各配可读的字色+反色描影 */
-          <input autoFocus placeholder="标注文字，回车确认"
+          <input autoFocus placeholder={t('chart.textPlaceholder')}
                  onKeyDown={e => {
                    if (e.key === 'Enter') commitText(e.currentTarget.value);
                    else if (e.key === 'Escape') cancelText();
@@ -1225,7 +1233,7 @@ export function CandleChart({ symbol, interval, limit = 300, visibleBars = 110, 
             iOS 靠它请用户动手。转到横屏 matchMedia 翻面，提示自动消失 */}
         {fs.active && portrait && IS_TOUCH && (
           <div className="absolute left-1/2 top-2 -translate-x-1/2 z-[5] px-2.5 py-1 rounded-md border border-border bg-background/90 text-[11px] font-semibold text-muted-foreground pointer-events-none whitespace-nowrap">
-            旋转手机横屏查看
+            {t('chart.rotate')}
           </div>
         )}
         {/* 翻历史提示（载入中 / 到底）。主图 pane 左上角是空的：叠加指标的读数条在图表外的工具条上 */}

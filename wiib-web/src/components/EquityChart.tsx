@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import * as echarts from 'echarts';
+import { useTranslation } from 'react-i18next';
 import { useIsDark } from '../hooks/useIsDark';
 import { chartUi, cssVar, rgba } from '../lib/chartTheme';
 import { fmtDateTime } from '../lib/utils';
@@ -16,6 +17,7 @@ interface Props {
 export function EquityChart({ points }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const isDark = useIsDark();
+  const { t, i18n } = useTranslation('portfolio');
 
   useEffect(() => {
     if (!ref.current) return;
@@ -38,7 +40,7 @@ export function EquityChart({ points }: Props) {
           const p = params[0];
           const v = p.value[1] as number;
           const sign = v >= 0 ? '+' : '';
-          return `${fmtDateTime(p.value[0])}<br/><b>累计盈亏 ${sign}$${v.toFixed(2)}</b>`;
+          return `${fmtDateTime(p.value[0])}<br/><b>${t('chart.cumPnl', { value: `${sign}$${v.toFixed(2)}` })}</b>`;
         },
       },
       xAxis: {
@@ -95,7 +97,8 @@ export function EquityChart({ points }: Props) {
     const onResize = () => chart.resize();
     window.addEventListener('resize', onResize);
     return () => { chart.dispose(); window.removeEventListener('resize', onResize); };
-  }, [points, isDark]);
+    // 依赖里必须带 i18n.language：少了它切语言后 option 不重算，tooltip 还是旧文案
+  }, [points, isDark, t, i18n.language]);
 
   return <div ref={ref} style={{ width: '100%', height: 220 }} />;
 }

@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Bot, ChevronDown, ChevronLeft, ChevronRight, History } from 'lucide-react';
 import { cn, fmtDateTime, fmtDuration, fmtNum } from '../lib/utils';
 import { formatCoinPrice } from '../lib/coinConfig';
@@ -14,12 +15,15 @@ import type { PositionFill, PositionHistoryItem } from '../types';
  */
 const GRID = 'grid grid-cols-2 gap-x-3 gap-y-2 md:gap-y-0 md:items-center md:grid-cols-[minmax(9rem,1.3fr)_minmax(0,.85fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,.7fr)_minmax(0,.95fr)_minmax(0,.7fr)_1rem]';
 
-/** 这笔成交是怎么来的。FILLED 是手动下单，不用额外标注；其余三种都是被动触发 */
+/**
+ * 这笔成交是怎么来的。FILLED 是手动下单，不用额外标注；其余三种都是被动触发。
+ * 表里存词表 key 不存文案：常量在组件外，存翻译结果会在模块加载那一刻定死，切语言不跟着变。
+ */
 const FILL_TRIGGER: Record<PositionFill['status'], string | null> = {
   FILLED: null,
-  STOP_LOSS: '止损',
-  TAKE_PROFIT: '止盈',
-  LIQUIDATED: '强平',
+  STOP_LOSS: 'history.stopLoss',
+  TAKE_PROFIT: 'history.takeProfit',
+  LIQUIDATED: 'history.liquidated',
 };
 
 /** 窄屏每个格子自带微标签（表头看不见了），宽屏交给表头 */
@@ -43,8 +47,10 @@ function Pnl({ value, className }: { value: number; className?: string }) {
 
 /** 一笔成交明细。分批平仓就是靠这几行还原出「0.4@110 / 0.6@120」的完整过程 */
 function FillRow({ fill, symbol }: { fill: PositionFill; symbol: string }) {
+  // 这行的方向标签走 orderSideView（词表在 labels ns），组件自己订一份 t 才会跟着切语言重渲染
+  const { t } = useTranslation('portfolio');
   const { label, tone } = orderSideView(fill.orderSide);
-  const trigger = FILL_TRIGGER[fill.status];
+  const triggerKey = FILL_TRIGGER[fill.status];
   return (
     <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 px-3 py-2 border-b border-border/20 last:border-b-0">
       <span className="num text-[10px] text-muted-foreground w-[5.5rem] shrink-0">
@@ -56,9 +62,9 @@ function FillRow({ fill, symbol }: { fill: PositionFill; symbol: string }) {
       )}>
         {label}
       </span>
-      {trigger && (
+      {triggerKey && (
         <span className="text-[10px] px-1.5 py-0.5 rounded bg-warning/10 text-warning font-medium shrink-0">
-          {trigger}
+          {t(triggerKey)}
         </span>
       )}
       <span className="num text-[11px]">
@@ -67,7 +73,7 @@ function FillRow({ fill, symbol }: { fill: PositionFill; symbol: string }) {
         {formatCoinPrice(symbol, fill.price)}
       </span>
       <span className="num text-[10px] text-muted-foreground ml-auto shrink-0">
-        费 {fmtNum(fill.commission)}
+        {t('history.fee', { value: fmtNum(fill.commission) })}
       </span>
       {/* 开/加仓单没有已实现盈亏，留空位对齐，不填 0 冒充"这笔不赚不亏" */}
       <span className="num text-[11px] font-semibold w-20 text-right shrink-0">
@@ -80,6 +86,7 @@ function FillRow({ fill, symbol }: { fill: PositionFill; symbol: string }) {
 }
 
 function Row({ item }: { item: PositionHistoryItem }) {
+  const { t } = useTranslation('portfolio');
   const [open, setOpen] = useState(false);
   const long = item.side === 'LONG';
   const liquidated = item.status === 'LIQUIDATED';
@@ -99,13 +106,13 @@ function Row({ item }: { item: PositionHistoryItem }) {
               'text-[10px] font-bold px-1.5 py-0.5 rounded',
               long ? 'bg-gain/10 text-gain' : 'bg-loss/10 text-loss',
             )}>
-              {long ? '多' : '空'}
+              {long ? t('history.long') : t('history.short')}
             </span>
             <span className="text-[10px] px-1.5 py-0.5 rounded bg-secondary text-muted-foreground">
-              {item.marginMode === 'CROSS' ? '全仓' : '逐仓'} {item.leverage}x
+              {item.marginMode === 'CROSS' ? t('history.cross') : t('history.isolated')} {item.leverage}x
             </span>
             {liquidated && (
-              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-loss/15 text-loss">强平</span>
+              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-loss/15 text-loss">{t('history.liquidated')}</span>
             )}
             {item.memo && (
               <span className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary">
@@ -115,15 +122,15 @@ function Row({ item }: { item: PositionHistoryItem }) {
           </div>
         </div>
 
-        <Cell label="已平仓量" className="md:text-right">
+        <Cell label={t('field.closedQty')} className="md:text-right">
           <span className="num text-[12px]">{fmtNum(item.closedQty, 4)}</span>
         </Cell>
 
-        <Cell label="开仓均价" className="md:text-right">
+        <Cell label={t('field.entryPrice')} className="md:text-right">
           <span className="num text-[12px]">{formatCoinPrice(item.symbol, item.entryPrice)}</span>
         </Cell>
 
-        <Cell label="平仓均价" className="md:text-right">
+        <Cell label={t('field.exitPrice')} className="md:text-right">
           {/* 破产清零那批仓位一单没平过，给"—"不给 0——0 会被读成"平在 0 块钱" */}
           <span className="num text-[12px]">
             {item.closeAvgPrice == null
@@ -132,11 +139,11 @@ function Row({ item }: { item: PositionHistoryItem }) {
           </span>
         </Cell>
 
-        <Cell label="已实现盈亏" className="md:text-right">
+        <Cell label={t('field.realizedPnl')} className="md:text-right">
           <Pnl value={item.realizedPnl} className="text-[13px] font-bold" />
         </Cell>
 
-        <Cell label="回报率" className="md:text-right">
+        <Cell label={t('field.roi')} className="md:text-right">
           {item.roiPct == null ? (
             <span className="num text-[12px] text-muted-foreground/50">—</span>
           ) : (
@@ -146,11 +153,11 @@ function Row({ item }: { item: PositionHistoryItem }) {
           )}
         </Cell>
 
-        <Cell label="开仓时间" className="md:text-right">
+        <Cell label={t('field.openedAt')} className="md:text-right">
           <span className="num text-[11px] text-muted-foreground">{fmtDateTime(item.openedAt)}</span>
         </Cell>
 
-        <Cell label="持仓时间" className="md:text-right">
+        <Cell label={t('field.duration')} className="md:text-right">
           <span className="num text-[11px]">{fmtDuration(item.openedAt, item.closedAt)}</span>
         </Cell>
 
@@ -167,7 +174,7 @@ function Row({ item }: { item: PositionHistoryItem }) {
         <div className="bg-card-2 border-t border-border/25">
           {item.fills.length === 0 ? (
             <div className="px-4 py-3 text-[11px] text-muted-foreground">
-              这笔仓位没有成交记录，是爆仓清零时被直接关掉的旧仓位
+              {t('history.noFills')}
             </div>
           ) : (
             item.fills.map(f => <FillRow key={f.orderId} fill={f} symbol={item.symbol} />)
@@ -176,16 +183,16 @@ function Row({ item }: { item: PositionHistoryItem }) {
           {/* 盈亏构成：已实现盈亏已经把手续费和资金费减完了，这里摊开是为了看清钱花在哪 */}
           <div className="flex flex-wrap gap-x-5 gap-y-1 px-3 py-2.5 border-t border-border/30">
             <span className="text-[10px] text-muted-foreground">
-              投入保证金 <span className="num text-foreground">{fmtNum(item.investedMargin)}</span>
+              {t('history.investedMargin')} <span className="num text-foreground">{fmtNum(item.investedMargin)}</span>
             </span>
             <span className="text-[10px] text-muted-foreground">
-              手续费 <span className="num text-loss">-{fmtNum(item.commission)}</span>
+              {t('history.commission')} <span className="num text-loss">-{fmtNum(item.commission)}</span>
             </span>
             <span className="text-[10px] text-muted-foreground">
-              资金费 <span className="num text-loss">-{fmtNum(item.fundingFeeTotal)}</span>
+              {t('history.fundingFee')} <span className="num text-loss">-{fmtNum(item.fundingFeeTotal)}</span>
             </span>
             <span className="text-[10px] text-muted-foreground">
-              平仓时间 <span className="num text-foreground">{fmtDateTime(item.closedAt)}</span>
+              {t('history.closedAt')} <span className="num text-foreground">{fmtDateTime(item.closedAt)}</span>
             </span>
           </div>
         </div>
@@ -198,14 +205,17 @@ function Row({ item }: { item: PositionHistoryItem }) {
  * 仓位历史列表。自己的历史页与排行榜用户详情页共用这一份——
  * 两处只差数据从哪个接口来，行怎么画是同一件事。
  */
-export function PositionHistoryList({ records, page, pages, loading, onPage, emptyText = '暂无已平仓的合约仓位' }: {
+export function PositionHistoryList({ records, page, pages, loading, onPage, emptyText }: {
   records: PositionHistoryItem[];
   page: number;
   pages: number;
   loading: boolean;
   onPage: (p: number) => void;
+  /** 调用方自带的空态文案（已翻译好的字符串）；不传就用本域的默认说法 */
   emptyText?: string;
 }) {
+  const { t } = useTranslation('portfolio');
+
   if (loading) {
     return (
       <div className="p-4 space-y-2.5">
@@ -215,21 +225,21 @@ export function PositionHistoryList({ records, page, pages, loading, onPage, emp
   }
 
   if (records.length === 0) {
-    return <EmptyState icon={<History />} text={emptyText} />;
+    return <EmptyState icon={<History />} text={emptyText ?? t('history.empty')} />;
   }
 
   return (
     <>
       {/* 表头只在宽屏出现，窄屏每格自带微标签 */}
       <div className={cn(GRID, 'hidden md:grid px-4 py-2 bg-card-2 border-b border-border/30')}>
-        <span className="microlabel font-bold">合约</span>
-        <span className="microlabel font-bold text-right">已平仓量</span>
-        <span className="microlabel font-bold text-right">开仓均价</span>
-        <span className="microlabel font-bold text-right">平仓均价</span>
-        <span className="microlabel font-bold text-right">已实现盈亏</span>
-        <span className="microlabel font-bold text-right">回报率</span>
-        <span className="microlabel font-bold text-right">开仓时间</span>
-        <span className="microlabel font-bold text-right">持仓时间</span>
+        <span className="microlabel font-bold">{t('field.contract')}</span>
+        <span className="microlabel font-bold text-right">{t('field.closedQty')}</span>
+        <span className="microlabel font-bold text-right">{t('field.entryPrice')}</span>
+        <span className="microlabel font-bold text-right">{t('field.exitPrice')}</span>
+        <span className="microlabel font-bold text-right">{t('field.realizedPnl')}</span>
+        <span className="microlabel font-bold text-right">{t('field.roi')}</span>
+        <span className="microlabel font-bold text-right">{t('field.openedAt')}</span>
+        <span className="microlabel font-bold text-right">{t('field.duration')}</span>
         <span />
       </div>
 
@@ -237,7 +247,7 @@ export function PositionHistoryList({ records, page, pages, loading, onPage, emp
 
       {pages > 1 && (
         <div className="flex items-center justify-between px-4 py-3 border-t border-border/30">
-          <span className="text-xs text-muted-foreground">第 {page} / {pages} 页</span>
+          <span className="text-xs text-muted-foreground">{t('pager.page', { page, pages })}</span>
           <div className="flex items-center gap-1">
             <Button variant="ghost" size="sm" className="h-8 w-8 p-0" disabled={page <= 1} onClick={() => onPage(page - 1)}>
               <ChevronLeft className="w-4 h-4" />

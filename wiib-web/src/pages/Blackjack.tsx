@@ -1,4 +1,5 @@
 import {useCallback, useEffect, useState} from 'react';
+import {Trans, useTranslation} from 'react-i18next';
 import {blackjackApi} from '../api';
 import {useToast} from '../components/ui/use-toast';
 import {Button} from '../components/ui/button';
@@ -19,15 +20,17 @@ const CHIP_COLORS: Record<number, string> = {
   1000: 'bj-chip-10000',
 };
 
-const RESULT_LABELS: Record<string, string> = {
-  WIN: '赢了!',
-  LOSE: '输了',
-  PUSH: '平局',
-  BLACKJACK: 'Blackjack!',
+// 后端结果枚举 → 词表 key：key 写死成字面量才 grep 得到，别拼 `result.${r}`
+const RESULT_KEYS: Record<string, string> = {
+  WIN: 'blackjack.result.win',
+  LOSE: 'blackjack.result.lose',
+  PUSH: 'blackjack.result.push',
+  BLACKJACK: 'blackjack.result.blackjack',
 };
 
 export function Blackjack() {
   const { toast } = useToast();
+  const { t } = useTranslation(['games', 'common']);
   const [status, setStatus] = useState<BlackjackStatus | null>(null);
   const [game, setGame] = useState<GameState | null>(null);
   const [loading, setLoading] = useState(true);
@@ -43,11 +46,11 @@ export function Blackjack() {
       setStatus(s);
       if (s.activeGame) setResumeOpen(true);
     } catch (e: unknown) {
-      toast((e as Error).message || '加载失败', 'error');
+      toast((e as Error).message || t('common:loadFailed'), 'error');
     } finally {
       setLoading(false);
     }
-  }, [toast]);
+  }, [toast, t]);
 
   useEffect(() => { void fetchStatus(); }, [fetchStatus]);
 
@@ -59,7 +62,7 @@ export function Blackjack() {
       setGame(state);
       if (status) setStatus({ ...status, chips: state.chips });
     } catch (e: unknown) {
-      toast((e as Error).message || '操作失败', 'error');
+      toast((e as Error).message || t('toast.actionFailed'), 'error');
     } finally {
       setActing(false);
     }
@@ -86,7 +89,7 @@ export function Blackjack() {
       setGame(null);
       void fetchStatus();
     } catch (e: unknown) {
-      toast((e as Error).message || '操作失败', 'error');
+      toast((e as Error).message || t('toast.actionFailed'), 'error');
     }
   };
 
@@ -95,14 +98,14 @@ export function Blackjack() {
     if (!amt || amt <= 0) return;
     try {
       const result = await blackjackApi.convert(amt);
-      toast(`成功转出 ${amt.toLocaleString()} 积分至游戏钱包`, 'success');
+      toast(t('toast.converted', { amount: amt.toLocaleString() }), 'success');
       setConvertOpen(false);
       setConvertAmount('');
       if (status) {
         setStatus({ ...status, chips: result.chips, todayConverted: result.todayConverted, convertable: result.convertable });
       }
     } catch (e: unknown) {
-      toast((e as Error).message || '转出失败', 'error');
+      toast((e as Error).message || t('toast.convertFailed'), 'error');
     }
   };
 
@@ -123,11 +126,11 @@ export function Blackjack() {
   return (
     <div className="max-w-2xl mx-auto p-4 space-y-4">
       <div className="rounded-lg border border-loss/30 bg-loss/10 p-5">
-        <h3 className="text-base font-bold text-red-800 dark:text-red-400 mb-2">郑重声明与风险提示</h3>
+        <h3 className="text-base font-bold text-red-800 dark:text-red-400 mb-2">{t('disclaimer.title')}</h3>
         <ul className="list-disc list-inside text-sm text-red-900 dark:text-red-200/90 space-y-1 leading-relaxed">
-          <li>本小游戏不涉及任何赌博行为，不涉及任何现实资金下注或交易。</li>
-          <li>仅用于为用户提供一个每日资金获取途径的趣味化体验，所有结算均为站内机制。</li>
-          <li>赌博可能导致成瘾、债务风险、家庭关系破裂及心理健康问题，请远离任何现实赌博活动。</li>
+          <li>{t('disclaimer.item1')}</li>
+          <li>{t('disclaimer.item2')}</li>
+          <li>{t('disclaimer.item3')}</li>
         </ul>
       </div>
 
@@ -138,12 +141,12 @@ export function Blackjack() {
             <Spade className="w-5 h-5 text-emerald-400" />
           </div>
           <div>
-            <div className="text-xs text-muted-foreground">积分</div>
+            <div className="text-xs text-muted-foreground">{t('blackjack.points')}</div>
             <div className="text-xl font-bold tabular-nums">{chips.toLocaleString()}</div>
           </div>
           {status && (
             <div className="ml-2 pl-3 border-l border-white/10">
-              <div className="text-xs text-muted-foreground">今日积分池</div>
+              <div className="text-xs text-muted-foreground">{t('blackjack.dailyPool')}</div>
               <div className={cn('text-sm font-bold tabular-nums', (status.dailyPool ?? 0) <= 0 ? 'text-red-400' : 'text-emerald-400')}>
                 {(status.dailyPool ?? 0).toLocaleString()}
               </div>
@@ -153,13 +156,17 @@ export function Blackjack() {
         <div className="flex items-center gap-2">
           {status && (
             <div className="text-xs text-muted-foreground text-right space-y-0.5 mr-2">
-              <div>{status.totalHands}局 | 赢{status.totalWon.toLocaleString()} | 输{status.totalLost.toLocaleString()}</div>
+              <div>{t('blackjack.stats', {
+                hands: status.totalHands,
+                won: status.totalWon.toLocaleString(),
+                lost: status.totalLost.toLocaleString(),
+              })}</div>
             </div>
           )}
           {status && status.convertable > 0 && !isPlaying && (
             <Button variant="outline" size="sm" onClick={() => setConvertOpen(true)}>
               <ArrowLeftRight className="w-3.5 h-3.5" />
-              转出
+              {t('blackjack.convert')}
             </Button>
           )}
         </div>
@@ -171,7 +178,7 @@ export function Blackjack() {
           {/* 庄家 */}
           <div className="space-y-3">
             <div className="flex items-center gap-2">
-              <span className="text-xs font-semibold text-white/60 uppercase tracking-wider">庄家</span>
+              <span className="text-xs font-semibold text-white/60 uppercase tracking-wider">{t('blackjack.dealer')}</span>
               {game.dealerScore != null && (
                 <span className="text-sm font-bold text-white bg-black/30 px-2 py-0.5 rounded-md">
                   {game.dealerScore}
@@ -205,8 +212,8 @@ export function Blackjack() {
                     'text-xs font-semibold tracking-wider',
                     isActive ? 'text-amber-300' : 'text-white/60'
                   )}>
-                    {game.playerHands.length > 1 ? `手牌 ${hi + 1}` : '玩家'}
-                    {isActive && game.playerHands.length > 1 && ' · 当前'}
+                    {game.playerHands.length > 1 ? t('blackjack.handN', { n: hi + 1 }) : t('blackjack.player')}
+                    {isActive && game.playerHands.length > 1 && t('blackjack.handActive')}
                   </span>
                   {hand.score > 0 && (
                     <span className={cn(
@@ -220,13 +227,13 @@ export function Blackjack() {
                     <span className="text-xs font-bold text-amber-300 bg-amber-500/20 px-2 py-0.5 rounded-md">BJ!</span>
                   )}
                   {hand.isBust && (
-                    <span className="text-xs font-bold text-red-300">爆牌</span>
+                    <span className="text-xs font-bold text-red-300">{t('blackjack.bust')}</span>
                   )}
                   {hand.isDoubled && (
                     <span className="text-xs text-blue-300 bg-blue-500/20 px-1.5 py-0.5 rounded">x2</span>
                   )}
                   <span className="text-xs text-white/40 ml-auto tabular-nums">
-                    本轮积分 {hand.bet.toLocaleString()}
+                    {t('blackjack.handBet', { amount: hand.bet.toLocaleString() })}
                   </span>
                 </div>
                 <div className="flex gap-2 sm:gap-3 flex-wrap min-h-24 sm:min-h-28">
@@ -241,7 +248,7 @@ export function Blackjack() {
           {/* 保险 */}
           {game.insurance != null && (
             <div className="text-xs text-white/40 mt-2 flex items-center gap-1">
-              <Shield className="w-3 h-3" /> 保险: {game.insurance.toLocaleString()}
+              <Shield className="w-3 h-3" /> {t('blackjack.insurance', { amount: game.insurance.toLocaleString() })}
             </div>
           )}
 
@@ -261,7 +268,7 @@ export function Blackjack() {
                         r.result === 'PUSH' && 'text-white/60'
                       )}>
                         {game.playerHands.length > 1 ? `#${r.handIndex + 1} ` : ''}
-                        {RESULT_LABELS[r.result]}
+                        {t(RESULT_KEYS[r.result])}
                       </span>
                       <span className={cn(
                         'font-bold text-lg tabular-nums',
@@ -286,33 +293,33 @@ export function Blackjack() {
                 className="w-full h-12 text-base bg-emerald-600 hover:bg-emerald-500"
               >
                 <RotateCcw className="w-4 h-4" />
-                继续
+                {t('blackjack.continue')}
               </Button>
             ) : (
               <div className="grid grid-cols-2 gap-2">
                 {game.actions.includes('HIT') && (
-                  <ActionBtn onClick={() => act(() => blackjackApi.hit())} disabled={acting} color="blue" label="要牌">
-                    <Hand className="w-4 h-4" /> 要牌
+                  <ActionBtn onClick={() => act(() => blackjackApi.hit())} disabled={acting} color="blue" label={t('blackjack.action.hit')}>
+                    <Hand className="w-4 h-4" /> {t('blackjack.action.hit')}
                   </ActionBtn>
                 )}
                 {game.actions.includes('STAND') && (
-                  <ActionBtn onClick={() => act(() => blackjackApi.stand())} disabled={acting} color="amber" label="我要验牌">
-                    <Square className="w-4 h-4" /> 我要验牌
+                  <ActionBtn onClick={() => act(() => blackjackApi.stand())} disabled={acting} color="amber" label={t('blackjack.action.stand')}>
+                    <Square className="w-4 h-4" /> {t('blackjack.action.stand')}
                   </ActionBtn>
                 )}
                 {game.actions.includes('DOUBLE') && (
-                  <ActionBtn onClick={() => act(() => blackjackApi.double())} disabled={acting} color="purple" label="加倍">
-                    <CopyPlus className="w-4 h-4" /> 加倍
+                  <ActionBtn onClick={() => act(() => blackjackApi.double())} disabled={acting} color="purple" label={t('blackjack.action.double')}>
+                    <CopyPlus className="w-4 h-4" /> {t('blackjack.action.double')}
                   </ActionBtn>
                 )}
                 {game.actions.includes('SPLIT') && (
-                  <ActionBtn onClick={() => act(() => blackjackApi.split())} disabled={acting} color="green" label="分牌">
-                    <Split className="w-4 h-4" /> 分牌
+                  <ActionBtn onClick={() => act(() => blackjackApi.split())} disabled={acting} color="green" label={t('blackjack.action.split')}>
+                    <Split className="w-4 h-4" /> {t('blackjack.action.split')}
                   </ActionBtn>
                 )}
                 {game.actions.includes('INSURANCE') && (
-                  <ActionBtn onClick={() => act(() => blackjackApi.insurance())} disabled={acting} color="zinc" label="保险" span>
-                    <Shield className="w-3.5 h-3.5" /> 保险
+                  <ActionBtn onClick={() => act(() => blackjackApi.insurance())} disabled={acting} color="zinc" label={t('blackjack.action.insurance')} span>
+                    <Shield className="w-3.5 h-3.5" /> {t('blackjack.action.insurance')}
                   </ActionBtn>
                 )}
               </div>
@@ -324,7 +331,7 @@ export function Blackjack() {
         <div className="bj-table casino-felt rounded-2xl p-6 sm:p-8">
           <div className="text-center space-y-4">
             <div>
-              <div className="text-xs text-white/40 uppercase tracking-widest mb-1">本轮积分</div>
+              <div className="text-xs text-white/40 uppercase tracking-widest mb-1">{t('blackjack.betLabel')}</div>
               <div className="text-4xl sm:text-5xl font-bold text-white tabular-nums bj-count-up">
                 {betAmount.toLocaleString()}
               </div>
@@ -343,7 +350,7 @@ export function Blackjack() {
                   style={{ animationDelay: `${i * 50}ms` }}
                   onClick={() => setBetAmount(v)}
                   disabled={v > chips}
-                  aria-label={`本轮积分 ${v.toLocaleString()}`}
+                  aria-label={t('blackjack.handBet', { amount: v.toLocaleString() })}
                 >
                   {v >= 1000 ? `${v / 1000}K` : v}
                 </button>
@@ -352,7 +359,7 @@ export function Blackjack() {
 
             {/* 发牌 */}
             {poolExhausted ? (
-              <div className="text-sm text-red-400 text-center py-3">今日积分池已耗尽，明日重置</div>
+              <div className="text-sm text-red-400 text-center py-3">{t('blackjack.poolExhausted')}</div>
             ) : (
               <Button
                 className={cn(
@@ -363,7 +370,7 @@ export function Blackjack() {
                 onClick={handleBet}
                 disabled={acting || betAmount > chips}
               >
-                发牌
+                {t('blackjack.deal')}
               </Button>
             )}
           </div>
@@ -373,38 +380,38 @@ export function Blackjack() {
       {/* 规则与风险提示 */}
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-base">小游戏规则与说明</CardTitle>
+          <CardTitle className="text-base">{t('blackjack.rules.title')}</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4 text-sm leading-relaxed">
           <section>
-            <h3 className="font-semibold mb-1">基础规则</h3>
+            <h3 className="font-semibold mb-1">{t('blackjack.rules.basicsTitle')}</h3>
             <ul className="list-disc list-inside text-muted-foreground space-y-1">
-              <li>目标是让手牌点数尽量接近 21 且不超过 21，超过即爆牌。</li>
-              <li>A 可按 1 或 11 计算，J/Q/K 记作 10 点。</li>
-              <li>玩家与庄家开局各发两张牌，玩家根据当前手牌执行动作。</li>
-              <li>玩家全部手牌结束后进入庄家回合，最后按结算规则判定输赢。</li>
+              <li>{t('blackjack.rules.basics1')}</li>
+              <li>{t('blackjack.rules.basics2')}</li>
+              <li>{t('blackjack.rules.basics3')}</li>
+              <li>{t('blackjack.rules.basics4')}</li>
             </ul>
           </section>
 
           <section>
-            <h3 className="font-semibold mb-1">可执行动作</h3>
+            <h3 className="font-semibold mb-1">{t('blackjack.rules.actionsTitle')}</h3>
             <ul className="list-disc list-inside text-muted-foreground space-y-1">
-              <li>要牌（HIT）：再拿一张牌。</li>
-              <li>停牌（STAND）：不再要牌，结束当前手。</li>
-              <li>加倍（DOUBLE）：补一倍下注，仅再拿一张牌后自动停牌。</li>
-              <li>分牌（SPLIT）：起手可分时拆成两手，分别继续操作并独立结算。</li>
-              <li>保险（INSURANCE）：仅在庄家明牌 A 且首决策窗口可用。</li>
+              <li>{t('blackjack.rules.actions1')}</li>
+              <li>{t('blackjack.rules.actions2')}</li>
+              <li>{t('blackjack.rules.actions3')}</li>
+              <li>{t('blackjack.rules.actions4')}</li>
+              <li>{t('blackjack.rules.actions5')}</li>
             </ul>
           </section>
 
           <section>
-            <h3 className="font-semibold mb-1">积分机制</h3>
+            <h3 className="font-semibold mb-1">{t('blackjack.rules.pointsTitle')}</h3>
             <ul className="list-disc list-inside text-muted-foreground space-y-1">
-              <li>积分为站内虚拟数值，用于小游戏内结算与展示。</li>
-              <li>每日保底 200 积分，低于此值时次日自动补足。</li>
-              <li>单局可下注 50 / 100 / 500 / 1000 四档。</li>
-              <li>超出 200 保底的部分可转出至游戏钱包，每日上限 500。</li>
-              <li>每日积分池全站共享，池子耗尽后当日不再开新局。</li>
+              <li>{t('blackjack.rules.points1')}</li>
+              <li>{t('blackjack.rules.points2')}</li>
+              <li>{t('blackjack.rules.points3')}</li>
+              <li>{t('blackjack.rules.points4')}</li>
+              <li>{t('blackjack.rules.points5')}</li>
             </ul>
           </section>
         </CardContent>
@@ -413,40 +420,49 @@ export function Blackjack() {
       {/* 恢复牌局弹窗 */}
       <Dialog open={resumeOpen} onClose={() => setResumeOpen(false)}>
         <DialogHeader>
-          <h2 className="text-lg font-bold">未完成的牌局</h2>
+          <h2 className="text-lg font-bold">{t('blackjack.resume.title')}</h2>
         </DialogHeader>
         <DialogContent>
+          {/* 下注额夹在句子中间，中英语序不同，整句两版本切换而不是拼半句 */}
           <p className="text-sm text-muted-foreground">
-            你有一局未完成的牌局
-            {status?.activeGame?.playerHands?.[0]?.bet && (
-              <span>（本轮积分: {status.activeGame.playerHands[0].bet.toLocaleString()}）</span>
-            )}
-            ，要继续还是放弃？放弃将损失本轮已投入积分。
+            {status?.activeGame?.playerHands?.[0]?.bet
+              ? t('blackjack.resume.bodyWithBet', { amount: status.activeGame.playerHands[0].bet.toLocaleString() })
+              : t('blackjack.resume.body')}
           </p>
         </DialogContent>
         <DialogFooter>
-          <Button variant="ghost" size="sm" onClick={handleForfeit}>放弃</Button>
-          <Button size="sm" onClick={handleResume}>继续游戏</Button>
+          <Button variant="ghost" size="sm" onClick={handleForfeit}>{t('blackjack.resume.forfeit')}</Button>
+          <Button size="sm" onClick={handleResume}>{t('blackjack.resume.resume')}</Button>
         </DialogFooter>
       </Dialog>
 
       {/* 转出弹窗 */}
       <Dialog open={convertOpen} onClose={() => setConvertOpen(false)}>
         <DialogHeader>
-          <h2 className="text-lg font-bold">积分转出</h2>
+          <h2 className="text-lg font-bold">{t('blackjack.convertDialog.title')}</h2>
         </DialogHeader>
         <DialogContent>
           <div className="space-y-3">
             <div className="text-sm text-muted-foreground space-y-1">
-              <p>可转出: <span className="font-bold text-foreground">{(status?.convertable ?? 0).toLocaleString()}</span></p>
-              <p>今日已转: {(status?.todayConverted ?? 0).toLocaleString()} / {(status?.todayConvertLimit ?? 500).toLocaleString()}</p>
-              <p>转出后计入游戏钱包</p>
+              <p>
+                <Trans
+                  ns="games"
+                  i18nKey="blackjack.convertDialog.available"
+                  values={{ amount: (status?.convertable ?? 0).toLocaleString() }}
+                  components={[<span key="amount" className="font-bold text-foreground" />]}
+                />
+              </p>
+              <p>{t('blackjack.convertDialog.today', {
+                used: (status?.todayConverted ?? 0).toLocaleString(),
+                limit: (status?.todayConvertLimit ?? 500).toLocaleString(),
+              })}</p>
+              <p>{t('blackjack.convertDialog.note')}</p>
             </div>
             <input
               type="number"
               value={convertAmount}
               onChange={e => setConvertAmount(e.target.value)}
-              placeholder="输入转出金额"
+              placeholder={t('blackjack.convertDialog.placeholder')}
               className="w-full px-3 py-2 rounded-md bg-input border border-border text-sm"
               min={1}
               max={Math.min(status?.convertable ?? 0, (status?.todayConvertLimit ?? 500) - (status?.todayConverted ?? 0))}
@@ -469,8 +485,8 @@ export function Blackjack() {
           </div>
         </DialogContent>
         <DialogFooter>
-          <Button variant="ghost" size="sm" onClick={() => setConvertOpen(false)}>取消</Button>
-          <Button size="sm" onClick={handleConvert} disabled={!convertAmount || parseInt(convertAmount) <= 0}>确认转出</Button>
+          <Button variant="ghost" size="sm" onClick={() => setConvertOpen(false)}>{t('common:cancel')}</Button>
+          <Button size="sm" onClick={handleConvert} disabled={!convertAmount || parseInt(convertAmount) <= 0}>{t('blackjack.convertDialog.confirm')}</Button>
         </DialogFooter>
       </Dialog>
     </div>

@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Trans, useTranslation } from 'react-i18next';
 import { campaignApi } from '../api';
+import i18n from '../i18n';
 import { buildAuthorizeUrl, CLAIM_STATE_PREFIX, OAUTH_STATE_KEY } from './Login';
 import { useUserStore } from '../stores/userStore';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
@@ -16,16 +18,22 @@ import type {
   CampaignInfo, CampaignReward, CampaignScore, CampaignScoreItem, MyCampaignView,
 } from '../types';
 
-type TaskGroup = '交易' | '日常' | '投票' | '罚分';
+type TaskGroup = 'trade' | 'daily' | 'vote' | 'penalty';
 
 /** 分组渲染顺序。罚分固定垫底 —— 谁也不想一进来先看见自己被扣了多少 */
-const GROUP_ORDER: TaskGroup[] = ['交易', '日常', '投票', '罚分'];
+const GROUP_ORDER: { key: TaskGroup; labelKey: string }[] = [
+  { key: 'trade', labelKey: 'campaign.group.trade' },
+  { key: 'daily', labelKey: 'campaign.group.daily' },
+  { key: 'vote', labelKey: 'campaign.group.vote' },
+  { key: 'penalty', labelKey: 'campaign.group.penalty' },
+];
 
 interface TaskDef {
   /** 与后端 ScoreItem.code 对齐。后端只下发"已达成"的条目，未达成的靠这份清单占位 */
   code: string;
-  label: string;
-  hint: string;
+  /** 词表 key（community ns）。后端下发的清单外条目没有这两项，文案直接用它自己的 */
+  labelKey?: string;
+  hintKey?: string;
   group: TaskGroup;
   /** 子任务行，缩进渲染（三市通吃的三个市场桶） */
   sub?: boolean;
@@ -42,27 +50,27 @@ interface TaskDef {
  * 顺序排成 100 → 60 → 40 → 配额外 → 20~40，读下来就是顺延的方向。
  */
 const TASKS: TaskDef[] = [
-  { code: 'ROI100', label: '单仓位 ROI ≥ 100%', hint: '保证金 ≥ 500；限 1 笔 +15。占位制：每笔仓位只计入还有名额的最高档', group: '交易' },
-  { code: 'ROI60', label: '单仓位 ROI ≥ 60%', hint: '保证金 ≥ 500；限 3 笔各 +5；100% 档满后的仓位顺延到这里', group: '交易' },
-  { code: 'ROI40', label: '单仓位 ROI ≥ 40%', hint: '保证金 ≥ 500；限 5 笔各 +3；高档满后的仓位顺延到这里', group: '交易' },
-  { code: 'ROI40_EXTRA', label: 'ROI ≥ 40% 配额外', hint: '上面三档名额全部占满后，之后每笔 ROI ≥ 40% 再 +1，不限次数（全场唯一无限项）', group: '交易' },
-  { code: 'ROI20', label: '单仓位 ROI 20% ~ 40%', hint: '保证金 ≥ 500；每笔 +1，限 20 笔；只收 20%~40% 区间的仓位，≥ 40% 的走上面的档', group: '交易' },
-  { code: 'GODLY', label: '单笔封神：ROI ≥ 300%', hint: '保证金 ≥ 500；一次性 +25，不占阶梯名额', group: '交易' },
-  { code: 'TRIPLE', label: '三市通吃', hint: '下面三个市场各拿下一笔 ROI ≥ 50%（保证金 ≥ 500）；集齐一次性 +15', group: '交易' },
-  { code: 'BUCKET_crypto', label: '三市 · 加密合约一笔 ROI ≥ 50%', hint: 'BTC / ETH / DOGE / SOL / XRP / BNB 合约', group: '交易', sub: true, noScore: true },
-  { code: 'BUCKET_commodity', label: '三市 · 黄金原油一笔 ROI ≥ 50%', hint: 'XAU 黄金 / CL 原油永续', group: '交易', sub: true, noScore: true },
-  { code: 'BUCKET_tradfi', label: '三市 · 美股永续一笔 ROI ≥ 50%', hint: 'SNDK 闪迪 / MU 美光 / SOXL / SKHYNIX 海力士 / KORU / SPCX 永续', group: '交易', sub: true, noScore: true },
-  { code: 'SPOT', label: '现货达标单位：已实现收益每摸高 10% 记一个', hint: '按标的：活动期买入 ≥ 1000；卖出落袋才算、买卖都含手续费；前 3 个单位各 +5，之后各 +1（限 20 次）；只进不退，细则见下方', group: '交易' },
-  { code: 'PREDICTION', label: '预测市场持有到结算且猜中', hint: '单次额度 ≥ 100；前 3 次各 +3，第 4-10 次各 +1，之后不加分', group: '交易' },
-  { code: 'STOP_LOSS_HERO', label: '止损英雄', hint: '挂过止损并被触发；一次性 +3', group: '交易' },
-  { code: 'PNL_PROFIT', label: '单仓位净利润 > 1000', hint: '无保证金门槛；每仓 +1，限 20 仓', group: '交易' },
-  { code: 'CHECKIN', label: '每日签到', hint: '每天 +1', group: '日常' },
-  { code: 'STREAK', label: '连续签到 3 / 7 / 14 天', hint: '+3 / +5 / +10 累进，断签重计', group: '日常' },
-  { code: 'FIRST_COMMENT', label: '首次评论', hint: '一次性 +1', group: '日常' },
-  { code: 'VOTE', label: '每日多空投票', hint: '每天 100 分池按当日正确票数均分，单人单日封顶 6 分', group: '投票' },
-  { code: 'PNL_LOSS', label: '单仓位净亏损 > 1000', hint: '无保证金门槛；每仓 −2，不限次数', group: '罚分' },
-  { code: 'LIQ_TRIGGER', label: '触发强平', hint: '逐仓强平按仓位数、全仓爆仓按事件数；每次 −5', group: '罚分' },
-  { code: 'RESET_EXTRA', label: '付费重置账户', hint: '活动期每周首次重置免费，之后每次 −30；破产自动恢复同样计入次数', group: '罚分' },
+  { code: 'ROI100', labelKey: 'campaign.task.roi100', hintKey: 'campaign.hint.roi100', group: 'trade' },
+  { code: 'ROI60', labelKey: 'campaign.task.roi60', hintKey: 'campaign.hint.roi60', group: 'trade' },
+  { code: 'ROI40', labelKey: 'campaign.task.roi40', hintKey: 'campaign.hint.roi40', group: 'trade' },
+  { code: 'ROI40_EXTRA', labelKey: 'campaign.task.roi40Extra', hintKey: 'campaign.hint.roi40Extra', group: 'trade' },
+  { code: 'ROI20', labelKey: 'campaign.task.roi20', hintKey: 'campaign.hint.roi20', group: 'trade' },
+  { code: 'GODLY', labelKey: 'campaign.task.godly', hintKey: 'campaign.hint.godly', group: 'trade' },
+  { code: 'TRIPLE', labelKey: 'campaign.task.triple', hintKey: 'campaign.hint.triple', group: 'trade' },
+  { code: 'BUCKET_crypto', labelKey: 'campaign.task.bucketCrypto', hintKey: 'campaign.hint.bucketCrypto', group: 'trade', sub: true, noScore: true },
+  { code: 'BUCKET_commodity', labelKey: 'campaign.task.bucketCommodity', hintKey: 'campaign.hint.bucketCommodity', group: 'trade', sub: true, noScore: true },
+  { code: 'BUCKET_tradfi', labelKey: 'campaign.task.bucketTradfi', hintKey: 'campaign.hint.bucketTradfi', group: 'trade', sub: true, noScore: true },
+  { code: 'SPOT', labelKey: 'campaign.task.spot', hintKey: 'campaign.hint.spot', group: 'trade' },
+  { code: 'PREDICTION', labelKey: 'campaign.task.prediction', hintKey: 'campaign.hint.prediction', group: 'trade' },
+  { code: 'STOP_LOSS_HERO', labelKey: 'campaign.task.stopLossHero', hintKey: 'campaign.hint.stopLossHero', group: 'trade' },
+  { code: 'PNL_PROFIT', labelKey: 'campaign.task.pnlProfit', hintKey: 'campaign.hint.pnlProfit', group: 'trade' },
+  { code: 'CHECKIN', labelKey: 'campaign.task.checkin', hintKey: 'campaign.hint.checkin', group: 'daily' },
+  { code: 'STREAK', labelKey: 'campaign.task.streak', hintKey: 'campaign.hint.streak', group: 'daily' },
+  { code: 'FIRST_COMMENT', labelKey: 'campaign.task.firstComment', hintKey: 'campaign.hint.firstComment', group: 'daily' },
+  { code: 'VOTE', labelKey: 'campaign.task.vote', hintKey: 'campaign.hint.vote', group: 'vote' },
+  { code: 'PNL_LOSS', labelKey: 'campaign.task.pnlLoss', hintKey: 'campaign.hint.pnlLoss', group: 'penalty' },
+  { code: 'LIQ_TRIGGER', labelKey: 'campaign.task.liqTrigger', hintKey: 'campaign.hint.liqTrigger', group: 'penalty' },
+  { code: 'RESET_EXTRA', labelKey: 'campaign.task.resetExtra', hintKey: 'campaign.hint.resetExtra', group: 'penalty' },
 ];
 
 /** 整数不显示小数：任务分大多是整数，"+5.00" 读起来像金额 */
@@ -72,12 +80,14 @@ function fmtScore(n: number): string {
 
 /** 进度文案。签到那两条的 count 是天数，写成 "×8" 会被读成签了 8 次不同的到 */
 function progressText(code: string, count: number): string {
-  if (code === 'CHECKIN') return `已签 ${count} 天`;
-  if (code === 'STREAK') return `最长连续 ${count} 天`;
-  return `×${count}`;
+  // 词表在函数体里现查：存成模块级常量的话切语言后不会变（调用方 TaskRow 订了 t，会跟着重渲染）
+  if (code === 'CHECKIN') return i18n.t('community:campaign.progress.checkin', { count });
+  if (code === 'STREAK') return i18n.t('community:campaign.progress.streak', { count });
+  return i18n.t('community:campaign.progress.times', { value: count });
 }
 
 function TaskRow({ def, item }: { def: TaskDef; item: CampaignScoreItem | null }) {
+  const { t } = useTranslation('community');
   const done = item != null;
   const negative = (item?.score ?? 0) < 0;
   return (
@@ -101,10 +111,11 @@ function TaskRow({ def, item }: { def: TaskDef; item: CampaignScoreItem | null }
 
       <div className="min-w-0 flex-1">
         <div className={cn('text-[13px] font-semibold truncate', !done && 'text-muted-foreground')}>
-          {/* 有后端条目就用它的 label：code 才是稳定标识，文案以后端为准 */}
-          {item?.label ?? def.label}
+          {/* 文案以前端词表为准：后端 label 只有中文，拿它当先会让英文界面一张表两种语言。
+              code 仍是稳定标识，只是清单外的 code 前端没词条，才回落后端 label */}
+          {def.labelKey ? t(def.labelKey) : (item?.label ?? def.code)}
         </div>
-        <div className="text-[10px] text-muted-foreground truncate">{def.hint}</div>
+        <div className="text-[10px] text-muted-foreground truncate">{def.hintKey ? t(def.hintKey) : ''}</div>
       </div>
 
       {item != null && item.count > 0 && (
@@ -154,6 +165,7 @@ function VoteSide({ dir, count, mine, disabled, onClick }: {
   disabled: boolean;
   onClick: () => void;
 }) {
+  const { t } = useTranslation('community');
   const up = dir === 'UP';
   const picked = mine === dir;
   return (
@@ -176,9 +188,9 @@ function VoteSide({ dir, count, mine, disabled, onClick }: {
     >
       <span className="text-[13px] font-bold flex items-center gap-1">
         {up ? <TrendingUp className="w-3.5 h-3.5" /> : <TrendingDown className="w-3.5 h-3.5" />}
-        {up ? '看涨' : '看跌'}
+        {up ? t('campaign.vote.up') : t('campaign.vote.down')}
       </span>
-      <span className="num text-[11px] tabular-nums">{count} 票</span>
+      <span className="num text-[11px] tabular-nums">{t('campaign.vote.votes', { count })}</span>
     </button>
   );
 }
@@ -206,6 +218,7 @@ function tryLoad<T>(p: Promise<T>, fallback: T): Promise<[T, boolean]> {
 }
 
 export function Campaign() {
+  const { t } = useTranslation(['community', 'common']);
   const { toast } = useToast();
   const { user } = useUserStore();
 
@@ -281,10 +294,10 @@ export function Campaign() {
     setActing(true);
     try {
       const streak = await campaignApi.checkin();
-      toast(`签到成功，最长连续 ${streak} 天`, 'success');
+      toast(t('campaign.toast.checkin', { count: streak }), 'success');
       reload();
     } catch (e) {
-      toast((e as Error).message || '签到失败', 'error');
+      toast((e as Error).message || t('campaign.toast.checkinFailed'), 'error');
     } finally {
       setActing(false);
     }
@@ -294,10 +307,10 @@ export function Campaign() {
     setActing(true);
     try {
       await campaignApi.vote(symbol, direction);
-      toast('投票成功', 'success');
+      toast(t('campaign.toast.voted'), 'success');
       reload();
     } catch (e) {
-      toast((e as Error).message || '投票失败', 'error');
+      toast((e as Error).message || t('campaign.toast.voteFailed'), 'error');
     } finally {
       setActing(false);
     }
@@ -320,13 +333,14 @@ export function Campaign() {
     const rows: { def: TaskDef; item: CampaignScoreItem | null }[] = [
       ...TASKS.map(def => ({ def, item: byCode.get(def.code) ?? null })),
       ...items.filter(i => !known.has(i.code)).map(i => ({
-        def: { code: i.code, label: i.label, hint: '', group: (i.score < 0 ? '罚分' : '交易') as TaskGroup },
+        def: { code: i.code, group: (i.score < 0 ? 'penalty' : 'trade') as TaskGroup },
         item: i,
       })),
     ];
     return GROUP_ORDER.map(g => ({
-      group: g,
-      rows: rows.filter(r => ((r.item?.score ?? 0) < 0 ? '罚分' : r.def.group) === g),
+      group: g.key,
+      labelKey: g.labelKey,
+      rows: rows.filter(r => ((r.item?.score ?? 0) < 0 ? 'penalty' : r.def.group) === g.key),
     })).filter(g => g.rows.length > 0);
   }, [view]);
 
@@ -358,12 +372,12 @@ export function Campaign() {
   const rewardUnknown = rewardFailed && !reward && settled;
 
   const statusBadge = notStarted
-    ? { text: '未开始', variant: 'warning' as const }
+    ? { text: t('campaign.status.notStarted'), variant: 'warning' as const }
     : settled
-      ? { text: '已结算 · 可领取', variant: 'success' as const }
+      ? { text: t('campaign.status.settled'), variant: 'success' as const }
       : ended
-        ? { text: '已结束 · 待结算', variant: 'secondary' as const }
-        : { text: '进行中', variant: 'default' as const };
+        ? { text: t('campaign.status.ended'), variant: 'secondary' as const }
+        : { text: t('campaign.status.running'), variant: 'default' as const };
 
   const daysLeft = view
     ? Math.max(0, Math.ceil(((notStarted ? startMs : endMs) - now) / 86400_000))
@@ -379,9 +393,9 @@ export function Campaign() {
       <div className="pt-card rounded-lg p-3 flex items-start gap-2.5 text-xs">
         <TriangleAlert className="w-4 h-4 shrink-0 text-warning mt-px" />
         <div className="leading-relaxed">
-          <span className="font-bold text-warning">本活动仅限 LinuxDo 登录用户参与。</span>
+          <span className="font-bold text-warning">{t('campaign.notice')}</span>
           <span className="text-muted-foreground ml-1">
-            邀请码注册的账号不计积分、不上榜、不参与 LDC 分配
+            {t('campaign.noticeDetail')}
           </span>
         </div>
       </div>
@@ -401,18 +415,18 @@ export function Campaign() {
           <CardContent className="p-0">
             {viewFailed ? (
               <>
-                <EmptyState icon={<TriangleAlert />} text="活动数据加载失败，请刷新重试" />
+                <EmptyState icon={<TriangleAlert />} text={t('campaign.loadFailed')} />
                 <div className="pb-8 flex justify-center">
                   <Button variant="outline" size="sm" onClick={reload} disabled={loading}>
                     {loading
                       ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
                       : <RefreshCw className="w-3.5 h-3.5" />}
-                    重试
+                    {t('common:retry')}
                   </Button>
                 </div>
               </>
             ) : (
-              <EmptyState icon={<Gift />} text="当前没有进行中的活动，下一场开始后这里会自动亮起来" />
+              <EmptyState icon={<Gift />} text={t('campaign.none')} />
             )}
           </CardContent>
         </Card>
@@ -425,14 +439,14 @@ export function Campaign() {
               <TriangleAlert className="w-3.5 h-3.5 shrink-0 text-warning" />
               <span className="text-muted-foreground">
                 {viewFailed
-                  ? '数据刷新失败，下面显示的是上一次的结果'
-                  : '活动状态没拉到，结算状态与到手金额可能不是最新的'}
+                  ? t('campaign.staleView')
+                  : t('campaign.staleStatus')}
               </span>
               <Button variant="ghost" size="sm" className="ml-auto h-7" onClick={reload} disabled={loading}>
                 {loading
                   ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
                   : <RefreshCw className="w-3.5 h-3.5" />}
-                重试
+                {t('common:retry')}
               </Button>
             </div>
           )}
@@ -450,20 +464,22 @@ export function Campaign() {
               </div>
               <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-4">
                 <div>
-                  <div className="microlabel font-semibold">奖池</div>
+                  <div className="microlabel font-semibold">{t('campaign.stat.pool')}</div>
                   <div className="num text-lg font-bold mt-0.5">{fmtNum(view.prizePool)} <span className="text-xs text-muted-foreground">LDC</span></div>
                 </div>
                 <div>
-                  <div className="microlabel font-semibold">参与人数</div>
+                  <div className="microlabel font-semibold">{t('campaign.stat.participants')}</div>
                   <div className="num text-lg font-bold mt-0.5">{view.participants}</div>
                 </div>
                 <div>
-                  <div className="microlabel font-semibold">全站有效总分</div>
+                  <div className="microlabel font-semibold">{t('campaign.stat.eligible')}</div>
                   <div className="num text-lg font-bold mt-0.5">{fmtScore(view.eligibleTotal)}</div>
                 </div>
                 <div>
-                  <div className="microlabel font-semibold">{notStarted ? '距开始' : ended ? '已结束' : '剩余'}</div>
-                  <div className="num text-lg font-bold mt-0.5">{ended ? '—' : `${daysLeft} 天`}</div>
+                  <div className="microlabel font-semibold">
+                    {notStarted ? t('campaign.stat.toStart') : ended ? t('campaign.stat.ended') : t('campaign.stat.left')}
+                  </div>
+                  <div className="num text-lg font-bold mt-0.5">{ended ? '—' : t('campaign.days', { count: daysLeft })}</div>
                 </div>
               </div>
             </CardContent>
@@ -472,26 +488,25 @@ export function Campaign() {
           {/* ===== ② 我的积分 + 预估到手 ===== */}
           <div className="grid lg:grid-cols-[1.6fr_1fr] gap-4 items-stretch">
             <Card>
-              <CardHeader className="pb-2"><CardTitle>我的积分</CardTitle></CardHeader>
+              <CardHeader className="pb-2"><CardTitle>{t('campaign.myPoints')}</CardTitle></CardHeader>
               <CardContent className="pb-4">
                 <div className="flex items-baseline gap-3">
                   <span className="num text-4xl font-bold tracking-tighter tabular-nums">
                     {fmtScore(view.me.finalScore)}
                   </span>
                   <span className="text-xs text-muted-foreground">
-                    {view.rank > 0 ? `全站第 ${view.rank} 名` : '还没上榜'}
+                    {view.rank > 0 ? t('campaign.rank', { rank: view.rank }) : t('campaign.unranked')}
                   </span>
                 </div>
                 <div className="mt-4 pt-4 grid grid-cols-4 gap-3 border-t border-border/50">
-                  <ScoreCell label="交易" value={view.me.tradeScore} />
-                  <ScoreCell label="日常" value={view.me.dailyScore} />
-                  <ScoreCell label="投票" value={view.me.voteScore} />
-                  <ScoreCell label="罚分" value={view.me.penalty} />
+                  <ScoreCell label={t('campaign.group.trade')} value={view.me.tradeScore} />
+                  <ScoreCell label={t('campaign.group.daily')} value={view.me.dailyScore} />
+                  <ScoreCell label={t('campaign.group.vote')} value={view.me.voteScore} />
+                  <ScoreCell label={t('campaign.group.penalty')} value={view.me.penalty} />
                 </div>
                 {/* 活动进行中的分只是下限：临近结束的预测下注与最后一天的投票要隔天才结算得出 */}
                 <p className="mt-3 text-[10px] text-muted-foreground leading-relaxed">
-                  个人总分下限为 0，强平扣分不会把你扣成负数，也不影响别人的分配比例。
-                  最后一天的投票与临近结束的预测下注要隔天结算才计入，活动期间看到的分只会偏低。
+                  {t('campaign.scoreNote')}
                 </p>
               </CardContent>
             </Card>
@@ -502,7 +517,11 @@ export function Campaign() {
             <Card>
               <CardHeader className="pb-2">
                 <CardTitle>
-                  {reward ? '实际到手' : rewardUnknown ? '到手金额' : settled ? '实际到手' : '预估到手'}
+                  {reward
+                    ? t('campaign.payout.actual')
+                    : rewardUnknown
+                      ? t('campaign.payout.unknown')
+                      : settled ? t('campaign.payout.actual') : t('campaign.payout.estimated')}
                 </CardTitle>
               </CardHeader>
               <CardContent className="pb-4">
@@ -517,12 +536,12 @@ export function Campaign() {
                 </div>
                 <p className="mt-2 text-[10px] text-muted-foreground leading-relaxed">
                   {reward
-                    ? '结算已完成，这是按最大余额法分到你名下的实发金额。'
+                    ? t('campaign.payout.actualNote')
                     : rewardUnknown
-                      ? '结算已完成，但奖励信息没拉到，暂时算不出你的到手金额，刷新后重试。'
+                      ? t('campaign.payout.unknownNote')
                       : settled
-                        ? '结算已完成，本次没有分到 LDC。'
-                        : '随参与人数变动，以结算为准。'}
+                        ? t('campaign.payout.noneNote')
+                        : t('campaign.payout.estimatedNote')}
                 </p>
                 {/* 算式只在"还有得算"的时候给：没结算、没拿到奖励行、不在说不准的状态、且分母为正。
                     不判分母的话开赛第一天全站 0 分，这里会渲染成 500.00 × 0 ÷ 0 */}
@@ -537,46 +556,57 @@ export function Campaign() {
 
           {/* ===== ⑤ 领取 ===== */}
           <Card>
-            <CardHeader className="pb-2"><CardTitle>LDC 领取</CardTitle></CardHeader>
+            <CardHeader className="pb-2"><CardTitle>{t('campaign.claim.title')}</CardTitle></CardHeader>
             <CardContent className="pb-4">
               {reward ? (
                 reward.status === 'SUCCESS' ? (
                   <div className="space-y-1">
                     <div className="text-sm font-bold text-gain">
-                      已到账 {fmtNum(reward.ldcAmount)} LDC
+                      {t('campaign.claim.credited', { amount: fmtNum(reward.ldcAmount) })}
                     </div>
                     {reward.externalRef && (
-                      <div className="num text-[10px] text-muted-foreground">流水号 {reward.externalRef}</div>
+                      <div className="num text-[10px] text-muted-foreground">
+                        {t('campaign.claim.ref', { ref: reward.externalRef })}
+                      </div>
                     )}
                   </div>
                 ) : reward.status === 'CLAIMED' ? (
                   <div className="space-y-1">
-                    <div className="text-sm font-bold">发放中…</div>
+                    <div className="text-sm font-bold">{t('campaign.claim.sending')}</div>
                     <p className="text-[11px] text-muted-foreground leading-relaxed">
-                      服务端最坏要等约 2 分钟。稍后刷新本页查看结果；若长时间停在这里，请联系管理员。
+                      {t('campaign.claim.sendingNote')}
                     </p>
                   </div>
                 ) : (
                   <div className="space-y-3">
                     {reward.status === 'FAILED' && (
                       <div className="text-[11px] text-loss leading-relaxed">
-                        上次发放失败{reward.errorMsg ? `：${reward.errorMsg}` : ''}。可以直接重领，
-                        商户单号不变，不会重复发放。
+                        {reward.errorMsg
+                          ? t('campaign.claim.lastFailedMsg', { msg: reward.errorMsg })
+                          : t('campaign.claim.lastFailed')}
                       </div>
                     )}
                     {/* 显示收款账号让人先确认：授权错号 = 把钱发给陌生人。
                         后端还会拿授权回来的 linux_do_id 跟当前账号核对一次，不符直接拒 */}
                     <div className="text-sm">
-                      即将发放给：<strong className="font-bold">{user?.username ?? '—'}</strong>
-                      <span className="text-[11px] text-muted-foreground ml-2">（当前登录账号）</span>
+                      <Trans
+                        ns="community"
+                        i18nKey="campaign.claim.payTo"
+                        values={{ name: user?.username ?? '—' }}
+                        components={[
+                          <strong key="name" className="font-bold" />,
+                          <span key="hint" className="text-[11px] text-muted-foreground ml-2" />,
+                        ]}
+                      />
                     </div>
                     <p className="text-[11px] text-muted-foreground leading-relaxed">
-                      点击后会跳转 LinuxDo 授权一次（平台存的用户名可能是旧的，分发接口要用最新的）。
-                      请确认授权的是与本账号绑定的那个 LinuxDo 账号，授权别人的会被拒绝。
+                      {t('campaign.claim.authNote')}
                     </p>
                     <Button onClick={startClaim} disabled={redirecting}>
                       {redirecting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Gift className="w-4 h-4" />}
-                      {redirecting ? '跳转授权中…' : `领取 ${fmtNum(reward.ldcAmount)} LDC`}
+                      {redirecting
+                        ? t('campaign.claim.redirecting')
+                        : t('campaign.claim.button', { amount: fmtNum(reward.ldcAmount) })}
                     </Button>
                   </div>
                 )
@@ -584,23 +614,23 @@ export function Campaign() {
                 // 没拉到奖励行 ≠ 没分到钱。这一支要是漏了，一次超时就会告诉一个真有钱的人他没分到。
                 // 判据与上面预估卡同一个 rewardUnknown，两张卡不会各说各的
                 <div className="space-y-1">
-                  <div className="text-sm font-bold">奖励信息加载失败</div>
+                  <div className="text-sm font-bold">{t('campaign.claim.unknownTitle')}</div>
                   <p className="text-[11px] text-muted-foreground leading-relaxed">
-                    这不代表你没有奖励，刷新页面重试即可。
+                    {t('campaign.claim.unknownNote')}
                   </p>
                 </div>
               ) : settled ? (
                 // 0.00 不落行（见 CampaignSettleService），所以真参与了也可能查不到奖励行 ——
                 // 这跟"你不在名单里"是两回事，别写成后者
                 <div className="space-y-1">
-                  <div className="text-sm font-bold">本次结算你没有分到 LDC</div>
+                  <div className="text-sm font-bold">{t('campaign.claim.noneTitle')}</div>
                   <p className="text-[11px] text-muted-foreground leading-relaxed">
-                    分配额不足 0.01 LDC 时不会生成发放记录。邀请码注册的账号不参与分配。
+                    {t('campaign.claim.noneNote')}
                   </p>
                 </div>
               ) : (
                 <p className="text-[11px] text-muted-foreground leading-relaxed">
-                  活动结束并完成结算后，你的到手金额会显示在这里，届时点一次 LinuxDo 授权即可领取。
+                  {t('campaign.claim.pending')}
                 </p>
               )}
             </CardContent>
@@ -609,7 +639,7 @@ export function Campaign() {
           {/* ===== ③ 明日投票 + 签到 ===== */}
           <div className="grid md:grid-cols-3 gap-4">
             <Card>
-              <CardHeader className="pb-2"><CardTitle>每日签到</CardTitle></CardHeader>
+              <CardHeader className="pb-2"><CardTitle>{t('campaign.checkin.title')}</CardTitle></CardHeader>
               <CardContent className="pb-4 space-y-3">
                 {/* disabled 里带 loading：页面不再清屏了，刷新那零点几秒里 checkedToday 还是旧的 false，
                     不锁的话手快的人能再点一次，换回一句"今天已经签到过了" */}
@@ -620,10 +650,10 @@ export function Campaign() {
                   onClick={handleCheckin}
                 >
                   {acting ? <Loader2 className="w-4 h-4 animate-spin" /> : <CalendarCheck className="w-4 h-4" />}
-                  {view.checkedToday ? '今日已签到' : '签到 +1'}
+                  {view.checkedToday ? t('campaign.checkin.done') : t('campaign.checkin.action')}
                 </Button>
                 <p className="text-[10px] text-muted-foreground leading-relaxed">
-                  每天 +1，连签 3 / 7 / 14 天再累进拿 +3 / +5 / +10。断签重新计连续天数。
+                  {t('campaign.checkin.note')}
                 </p>
               </CardContent>
             </Card>
@@ -633,7 +663,7 @@ export function Campaign() {
                 <CardHeader className="pb-2">
                   {/* 目标日必须摆在标题上：投的是明天，不写出来是哪天，用户只会当成今天 */}
                   <CardTitle className="flex items-baseline justify-between gap-2">
-                    <span>明日多空 · {v.label}</span>
+                    <span>{t('campaign.vote.title', { label: v.label })}</span>
                     <span className="num text-[10px] tracking-normal normal-case tabular-nums">
                       UTC {voteDay}
                     </span>
@@ -659,10 +689,13 @@ export function Campaign() {
                   {/* 锁盘那句排在最前：按钮灰着的时候，人第一件想知道的事是"为什么点不了" */}
                   <p className="text-[10px] text-muted-foreground leading-relaxed">
                     {voteLocked
-                      ? 'UTC 23:55-00:05 结算锁盘：日线在切换、上一日的票在结算，这 10 分钟不收票。'
+                      ? t('campaign.vote.locked')
                       : v.myDirection
-                        ? `UTC ${voteDay} 的${v.myDirection === 'UP' ? '看涨' : '看跌'}已投，多空二选一，明天再来。`
-                        : `投的是 UTC ${voteDay} 这一天，收票到 UTC 23:55 止（那时这天还没开始）。按该日日线收盘 vs 前日收盘结算，平盘顺延到次日奖池。`}
+                        ? t('campaign.vote.voted', {
+                            day: voteDay,
+                            side: v.myDirection === 'UP' ? t('campaign.vote.up') : t('campaign.vote.down'),
+                          })
+                        : t('campaign.vote.hint', { day: voteDay })}
                   </p>
                 </CardContent>
               </Card>
@@ -672,14 +705,14 @@ export function Campaign() {
           {/* ===== ④ 任务清单 ===== */}
           <Card className="overflow-hidden">
             <CardHeader className="pb-3">
-              <CardTitle>任务清单</CardTitle>
+              <CardTitle>{t('campaign.taskList')}</CardTitle>
             </CardHeader>
             <CardContent className="p-0">
               {grouped.map(g => (
                 <div key={g.group}>
                   <div className="px-4 py-1.5 bg-card-2 border-y border-border/30">
-                    <span className={cn('microlabel font-bold', g.group === '罚分' && 'text-loss')}>
-                      {g.group}
+                    <span className={cn('microlabel font-bold', g.group === 'penalty' && 'text-loss')}>
+                      {t(g.labelKey)}
                     </span>
                   </div>
                   {g.rows.map(r => <TaskRow key={r.def.code} def={r.def} item={r.item} />)}
@@ -693,79 +726,75 @@ export function Campaign() {
               占位 = ScoreRules.roiLadder，现货 = TradeScorer.countSpotUnits。
               改口径时两边一起改，别让页面变成过期承诺 */}
           <Card>
-            <CardHeader className="pb-3"><CardTitle>规则怎么算</CardTitle></CardHeader>
+            <CardHeader className="pb-3"><CardTitle>{t('campaign.rules.title')}</CardTitle></CardHeader>
             <CardContent className="pb-4 space-y-4 text-[11px] leading-relaxed text-muted-foreground">
               <div className="space-y-1.5">
-                <div className="microlabel font-bold text-foreground">合约仓位 ROI</div>
+                <div className="microlabel font-bold text-foreground">{t('campaign.rules.roiTitle')}</div>
                 <div className="num rounded-md bg-card-2 px-2.5 py-1.5 text-foreground">
-                  ROI = 已实现净盈亏 ÷ 累计投入保证金
+                  {t('campaign.rules.roiFormula')}
                 </div>
+                <p>{t('campaign.rules.roiDef')}</p>
                 <p>
-                  已实现净盈亏 = 每次平仓结出的已实现盈亏之和 − 开仓与平仓的全部手续费 − 资金费净额；
-                  累计投入保证金 = 开仓与加仓投入之和（不是部分平仓后剩下的残值）。
-                  与「仓位历史」页显示的 ROI 同一口径。
-                </p>
-                <p>
-                  仓位要<strong className="font-bold text-foreground">完全平掉</strong>（含被强平）才计入，
-                  持仓浮盈不算；部分平仓的每一段都记在整个仓位的账上，等最后一段平掉一起算。
-                  计入哪一天看完全平掉的时刻 —— 活动开始前就开着的老仓位，活动期内平掉照样算。
+                  <Trans
+                    ns="community"
+                    i18nKey="campaign.rules.roiClosed"
+                    components={[<strong key="closed" className="font-bold text-foreground" />]}
+                  />
                 </p>
                 <p>
-                  <strong className="font-bold text-foreground">占位制：每笔仓位只计入一个档位。</strong>
-                  按平仓先后落进"还有名额的最高档"：100% 档（1 笔）满了落 60% 档（3 笔），
-                  再满落 40% 档（5 笔），三档全满后每笔 ≥ 40% 的仓 +1、不限次数。
-                  20%~40% 区间的仓只进自己那档（20 笔），不占高档名额也不参与无限 +1。
-                  单笔封神（≥ 300%，+25）与三市通吃（≥ 50% 点亮市场）独立判定，同一笔仓可以叠着算。
+                  <Trans
+                    ns="community"
+                    i18nKey="campaign.rules.roiLadder"
+                    components={[<strong key="ladder" className="font-bold text-foreground" />]}
+                  />
                 </p>
-                <p className="text-foreground/80">
-                  例：投入保证金 600 开多 BTC，先平一半赚 200，再全平赚 150，开平手续费共 20，资金费付 10
-                  → 净盈亏 = 200 + 150 − 20 − 10 = 320，ROI = 320 ÷ 600 ≈ 53.3%
-                  → 落进「ROI ≥ 40%」档拿 +3（60% 档还够不着），同时点亮三市通吃的加密合约桶（≥ 50%）。
-                </p>
+                <p className="text-foreground/80">{t('campaign.rules.roiExample')}</p>
               </div>
               <div className="space-y-1.5">
-                <div className="microlabel font-bold text-foreground">现货达标单位（已实现收益）</div>
+                <div className="microlabel font-bold text-foreground">{t('campaign.rules.spotTitle')}</div>
                 <div className="num rounded-md bg-card-2 px-2.5 py-1.5 text-foreground">
-                  已实现收益率 = (累计卖出净得 − 累计买入总付) ÷ 累计买入总付
+                  {t('campaign.rules.spotFormula')}
                 </div>
                 <p>
-                  现货没有仓位概念，按<strong className="font-bold text-foreground">标的</strong>算：
-                  「活动期内累计买入 ≥ 1000」是该标的活动期内所有买单的累计，
-                  <strong className="font-bold text-foreground">不要求单笔 ≥ 1000</strong>。
-                  收益率<strong className="font-bold text-foreground">只算卖出落袋的部分</strong>：
-                  买入总付 = 实际掏出的现金（币值 + 手续费），卖出净得 = 实际到手的现金（已扣手续费），
-                  现货手续费买卖各 0.1%，还拿在手里的持仓不折算 ——
-                  分母是该标的全部历史买入总付，所以想拿分基本要把这个标的卖干净（卖出净得超过总投入）。
+                  <Trans
+                    ns="community"
+                    i18nKey="campaign.rules.spotDef"
+                    components={[
+                      <strong key="symbol" className="font-bold text-foreground" />,
+                      <strong key="single" className="font-bold text-foreground" />,
+                      <strong key="realized" className="font-bold text-foreground" />,
+                    ]}
+                  />
                 </p>
                 <p>
-                  <strong className="font-bold text-foreground">台阶制，只进不退：</strong>
-                  已实现收益率每摸到一个 10% 的整数倍（10%、20%、30%……）记一个达标单位；
-                  拿到的单位不因之后回落收回，想再拿要爬上下一个台阶（摸过 10% 后跌回 5%，
-                  回到 15% 不加，摸到 20% 才有第 2 个）。所有标的的单位进同一条阶梯：
-                  前 3 个各 +5，之后各 +1（限 20 次，第 24 个单位起不加分）。
+                  <Trans
+                    ns="community"
+                    i18nKey="campaign.rules.spotStep"
+                    components={[<strong key="step" className="font-bold text-foreground" />]}
+                  />
                 </p>
                 <p>
-                  用折扣券的买单按<strong className="font-bold text-foreground">折后实付</strong>记账，两头一致：
-                  省下的钱做低了成本、会抬高收益率；但门槛进度同样按实付累计，
-                  九五折买 800 只按 760 计入「≥ 1000」，所以还需要买入 240。
+                  <Trans
+                    ns="community"
+                    i18nKey="campaign.rules.spotCoupon"
+                    components={[<strong key="paid" className="font-bold text-foreground" />]}
+                  />
                 </p>
                 <p>
-                  参与标的 = 全部现货：加密现货
-                  <span className="num"> BTC / ETH / DOGE / SOL / XRP / BNB</span>，
-                  以及全部 bStock 代币化美股
-                  <span className="num"> SNDKB 闪迪 / MUB 美光 / NVDAB 英伟达 / AMDB / TSLAB 特斯拉 /
-                  MSTRB 微策略 / CRCLB Circle / QQQB 纳指 / SOXLB 半导体 / SPCXB SpaceX</span>。
+                  <Trans
+                    ns="community"
+                    i18nKey="campaign.rules.spotSymbols"
+                    components={[<span key="crypto" className="num" />, <span key="bstock" className="num" />]}
+                  />
                 </p>
-                <p className="text-foreground/80">
-                  例：BTC 现货掏出共 2002（币值 2000 + 0.1% 手续费 2），全部卖出到手 2402.40（卖得 2404.80 − 0.1% 手续费 2.40）
-                  → (2402.40 − 2002) ÷ 2002 = 20% = 2 个单位，各 +5 拿 +10；
-                  又掏 1001 买闪迪 bStock（币值 1000 + 手续费 1），全部卖出到手 2002（卖得 2004 − 手续费 2）
-                  → 100% = 10 个单位，第 1 个占掉最后一个 +5 名额、其余 9 个各 +1 → 两个标的合计 +24。
-                </p>
+                <p className="text-foreground/80">{t('campaign.rules.spotExample')}</p>
               </div>
               <p>
-                成交时间一律按<strong className="font-bold text-foreground">实际成交时刻</strong>算
-                （限价单挂单早、成交晚，以成交那一刻为准）。
+                <Trans
+                  ns="community"
+                  i18nKey="campaign.rules.fillTime"
+                  components={[<strong key="fill" className="font-bold text-foreground" />]}
+                />
               </p>
             </CardContent>
           </Card>
@@ -774,14 +803,14 @@ export function Campaign() {
           <Card className="overflow-hidden">
             <CardHeader className="pb-3">
               <CardTitle className="flex items-center gap-2">
-                <Trophy className="w-3.5 h-3.5" />积分榜
+                <Trophy className="w-3.5 h-3.5" />{t('campaign.board.title')}
               </CardTitle>
             </CardHeader>
             <CardContent className="p-0">
               {board.length === 0 ? (
                 <EmptyState
                   icon={boardFailed ? <TriangleAlert /> : <Trophy />}
-                  text={boardFailed ? '榜单加载失败，请刷新重试' : '还没有人上榜，先去挣第一分'}
+                  text={boardFailed ? t('campaign.board.failed') : t('campaign.board.empty')}
                 />
               ) : (
                 board.slice(0, 20).map((s, i) => (

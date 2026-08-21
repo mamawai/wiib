@@ -1,0 +1,12 @@
+{
+  "orderSide": {
+    "openLong": "开多",
+    "openShort": "开空",
+    "closeLong": "平多",
+    "closeShort": "平空",
+    "increaseLong": "加多",
+    "increaseShort": "加空",
+    "buy": "买",
+    "sell": "卖"
+  }
+}

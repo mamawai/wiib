@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Trans, useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { useUserStore } from '../stores/userStore';
 import { useTheme } from '../hooks/useTheme';
@@ -9,12 +10,14 @@ import { Dialog, DialogHeader, DialogContent, DialogFooter } from '../components
 import { useToast } from '../components/ui/use-toast';
 import { NotificationList } from '../components/NotificationList';
 import { ProfilePublicToggle } from '../components/ProfilePublicToggle';
+import { LanguageSettingRow } from '../components/LanguageSwitcher';
 import { useNotificationPanel } from '../hooks/useNotificationPanel';
 import { userApi } from '../api';
 import { Trophy, Gamepad2, Sun, Moon, LogOut, ChevronRight, User, LineChart, Monitor, RotateCcw, MessageSquare, Bell, Receipt, Gift, FlaskConical } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 export function Me() {
+  const { t } = useTranslation(['account', 'common']);
   const navigate = useNavigate();
   const { user, logout, fetchUser } = useUserStore();
   const { toggleTheme, isDark } = useTheme();
@@ -50,9 +53,9 @@ export function Me() {
       await userApi.resetAccount(confirmName);
       closeReset();
       await fetchUser();          // 立刻刷新余额显示
-      toast('账户已重置为初始状态', 'success');
+      toast(t('me.reset.done'), 'success');
     } catch (e) {
-      toast((e as Error).message || '重置失败', 'error');
+      toast((e as Error).message || t('me.reset.failed'), 'error');
     } finally {
       setResetting(false);
     }
@@ -60,16 +63,16 @@ export function Me() {
 
   const items = [
     // 活动同样只有这一个手机端入口（底栏 5 格已满），放第一位——限时的东西藏深了就没人看
-    { icon: Gift, label: 'LDC 瓜分活动', to: '/campaign', color: 'text-amber-400' },
+    { icon: Gift, label: t('me.nav.campaign'), to: '/campaign', color: 'text-amber-400' },
     // 账单没进顶栏/底栏（导航已经满了），手机端只有这一个入口
-    { icon: Receipt, label: '资金账单', to: '/ledger', color: 'text-primary' },
+    { icon: Receipt, label: t('me.nav.ledger'), to: '/ledger', color: 'text-primary' },
     // 移动端底栏只有5槽，策略/模拟盘与排行/游戏一样从这里进（桌面走头部导航）
-    { icon: LineChart, label: '策略', to: '/strategies', color: 'text-violet-400' },
-    { icon: FlaskConical, label: '回测', to: '/backtest', color: 'text-orange-400' },
-    { icon: Monitor, label: '模拟盘', to: '/testnet', color: 'text-sky-400' },
-    { icon: Trophy, label: '排行榜', to: '/ranking', color: 'text-amber-400' },
-    { icon: Gamepad2, label: '游戏中心', to: '/games', color: 'text-pink-400' },
-    { icon: MessageSquare, label: '留言板', to: '/comments', color: 'text-teal-400' },
+    { icon: LineChart, label: t('me.nav.strategies'), to: '/strategies', color: 'text-violet-400' },
+    { icon: FlaskConical, label: t('me.nav.backtest'), to: '/backtest', color: 'text-orange-400' },
+    { icon: Monitor, label: t('me.nav.testnet'), to: '/testnet', color: 'text-sky-400' },
+    { icon: Trophy, label: t('me.nav.ranking'), to: '/ranking', color: 'text-amber-400' },
+    { icon: Gamepad2, label: t('me.nav.games'), to: '/games', color: 'text-pink-400' },
+    { icon: MessageSquare, label: t('me.nav.comments'), to: '/comments', color: 'text-teal-400' },
   ];
 
   // 整页都是本人数据，user 没到之前没什么可显示的（路由已挡住未登录，null 只可能是还在拉）
@@ -107,7 +110,7 @@ export function Me() {
                 </span>
               )}
             </div>
-            <span className="flex-1 text-sm font-medium">通知</span>
+            <span className="flex-1 text-sm font-medium">{t('notif.title')}</span>
             <ChevronRight className={cn(
               "w-4 h-4 text-muted-foreground transition-transform group-hover:text-primary",
               notifOpen && "rotate-90",
@@ -149,6 +152,9 @@ export function Me() {
       {/* 隐私：详情页公开开关。关掉只挡详情页，仍照常上排行榜 */}
       <ProfilePublicToggle />
 
+      {/* 语言切换：手机端唯一的正式入口（顶栏那个图标按钮小屏也在，但设置项才找得着） */}
+      <LanguageSettingRow />
+
       {/* 主题切换 */}
       <Card>
         <CardContent className="pt-5">
@@ -160,7 +166,7 @@ export function Me() {
               {isDark ? <Moon className="w-4 h-4 text-violet-400" /> : <Sun className="w-4 h-4 text-amber-400" />}
             </div>
             <span className="flex-1 text-sm font-medium">
-              {isDark ? '深色模式' : '浅色模式'}
+              {isDark ? t('me.themeDark') : t('me.themeLight')}
             </span>
             <div className={cn(
               "w-11 h-6 rounded-full relative transition-colors",
@@ -181,12 +187,10 @@ export function Me() {
           <CardContent className="pt-5 space-y-3">
             <div className="flex items-center gap-2">
               <RotateCcw className="w-4 h-4 text-destructive" />
-              <h2 className="text-sm font-bold text-destructive">重置账户</h2>
+              <h2 className="text-sm font-bold text-destructive">{t('me.reset.title')}</h2>
             </div>
             <p className="text-xs text-muted-foreground leading-relaxed">
-              清空全部持仓、订单、游戏记录与资产历史，余额恢复为初始资金。
-              留言、禁言状态与已获得的活动积分不受影响。活动期内每周首次重置免费、
-              之后每次扣 30 活动积分；活动结束后每周限 1 次（周一刷新）。
+              {t('me.reset.desc')}
             </p>
             <Button
               variant="ghost"
@@ -194,7 +198,7 @@ export function Me() {
               className="text-destructive hover:text-destructive hover:bg-destructive/8"
               onClick={() => setResetOpen(true)}
             >
-              重置我的账户
+              {t('me.reset.action')}
             </Button>
           </CardContent>
         </Card>
@@ -208,7 +212,7 @@ export function Me() {
           onClick={handleLogout}
         >
           <LogOut className="w-4 h-4" />
-          退出登录
+          {t('me.logout')}
         </Button>
       )}
 
@@ -216,38 +220,42 @@ export function Me() {
       {user && (
         <Dialog open={resetOpen} onClose={closeReset}>
           <DialogHeader>
-            <h2 className="text-lg font-bold text-destructive">确认重置账户</h2>
+            <h2 className="text-lg font-bold text-destructive">{t('me.reset.dialogTitle')}</h2>
           </DialogHeader>
           <DialogContent>
             <div className="space-y-3">
               <p className="text-xs text-muted-foreground leading-relaxed">
-                此操作不可撤销，将清空：现货与合约的全部持仓和订单、预测下注、
-                21点/Mines/视频扑克记录、资产历史、每日 Buff、钱包划转流水。
+                {t('me.reset.warnClears')}
               </p>
               <p className="text-xs leading-relaxed text-warning">
-                活动期内每周第一次重置免费，之后每次扣 30 活动积分（破产自动恢复也计入次数）。
-                已获得的活动积分、签到与投票记录不受重置影响。
+                {t('me.reset.warnCost')}
               </p>
               <p className="text-xs">
-                请输入你的用户名 <strong className="text-foreground">{user.username}</strong> 以确认：
+                {/* 用户名夹在句子中间，中英语序不同，整句交给 Trans 摆位 */}
+                <Trans
+                  ns="account"
+                  i18nKey="me.reset.confirmName"
+                  values={{ name: user.username }}
+                  components={[<strong key="name" className="text-foreground" />]}
+                />
               </p>
               <Input
                 value={confirmName}
                 onChange={e => setConfirmName(e.target.value)}
-                placeholder="输入用户名"
+                placeholder={t('me.reset.namePlaceholder')}
                 autoComplete="off"
               />
             </div>
           </DialogContent>
           <DialogFooter>
-            <Button variant="ghost" size="sm" onClick={closeReset}>取消</Button>
+            <Button variant="ghost" size="sm" onClick={closeReset}>{t('common:cancel')}</Button>
             <Button
               size="sm"
               className="bg-destructive text-white hover:bg-destructive/90"
               disabled={confirmName !== user.username || resetting}
               onClick={handleReset}
             >
-              {resetting ? '重置中…' : '确认重置'}
+              {resetting ? t('me.reset.submitting') : t('me.reset.submit')}
             </Button>
           </DialogFooter>
         </Dialog>

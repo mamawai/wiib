@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import NumberFlow from '@number-flow/react';
 import { authApi, campaignApi } from '../api';
@@ -10,6 +11,7 @@ import { DecryptedText } from '../components/fx/DecryptedText';
 import { DitherSmoke } from '../components/fx/DitherSmoke';
 import { Input } from '../components/ui/input';
 import { Button } from '../components/ui/button';
+import { LanguageSwitcher } from '../components/LanguageSwitcher';
 import { Loader2, BarChart3, Wallet, LineChart, LogIn } from 'lucide-react';
 
 /** LinuxDo 官方三色圆 Logo（取自 linux.do favicon SVG） */
@@ -81,6 +83,7 @@ function LiveQuote({ symbol, name }: { symbol: string; name: string }) {
 }
 
 export function Login() {
+  const { t } = useTranslation('account');
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { toast } = useToast();
@@ -112,7 +115,7 @@ export function Login() {
     if (state !== savedState) {
       // 这里必须把 claiming 落下来：领取回调的初值是 true，不清就永远转圈、错误提示谁也看不见
       setClaiming(false);
-      setError('安全验证失败，请重试');
+      setError(t('login.stateMismatch'));
       return;
     }
     localStorage.removeItem(OAUTH_STATE_KEY);
@@ -124,9 +127,9 @@ export function Login() {
       setClaiming(true);
       try {
         const reward = await campaignApi.claim(code);
-        toast(`领取成功，${fmtNum(reward.ldcAmount)} LDC 已发放`, 'success');
+        toast(t('login.claimOk', { amount: fmtNum(reward.ldcAmount) }), 'success');
       } catch (e: unknown) {
-        toast(e instanceof Error ? e.message : '领取失败', 'error');
+        toast(e instanceof Error ? e.message : t('login.claimFailed'), 'error');
       } finally {
         setClaiming(false);
         navigate('/campaign', { replace: true });
@@ -145,12 +148,12 @@ export function Login() {
         navigate('/');
       }
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : 'LinuxDo 登录失败';
+      const msg = e instanceof Error ? e.message : t('login.linuxDoFailed');
       setError(msg);
     } finally {
       setLoading(false);
     }
-  }, [fetchUser, navigate, setToken, toast]);
+  }, [fetchUser, navigate, setToken, toast, t]);
 
   // 领取回调不能走这条：领取的人本来就是登录状态，弹回首页会把还没跑完的领取请求连页面一起掀掉
   useEffect(() => {
@@ -193,7 +196,7 @@ export function Login() {
         navigate('/');
       }
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : '登录失败';
+      const msg = e instanceof Error ? e.message : t('login.failed');
       setError(msg);
     } finally {
       setLoading(false);
@@ -215,7 +218,7 @@ export function Login() {
         navigate('/');
       }
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : (isRegister ? '注册失败' : '登录失败');
+      const msg = e instanceof Error ? e.message : (isRegister ? t('login.registerFailed') : t('login.failed'));
       setError(msg);
     } finally {
       setLoading(false);
@@ -246,6 +249,11 @@ export function Login() {
         />
       </div>
 
+      {/* 语言切换：登录页不在 Layout 里，顶栏那个到不了这儿，单独摆一个（未登录也能切） */}
+      <div className="absolute top-3 right-3 z-10 pt-[env(safe-area-inset-top)] pr-[env(safe-area-inset-right)]">
+        <LanguageSwitcher />
+      </div>
+
       {/* 左：品牌面板（桌面） */}
       <div className="hidden lg:flex relative flex-col justify-between p-14">
         <div className="flex items-baseline gap-3">
@@ -260,8 +268,7 @@ export function Login() {
             <span className="text-primary"><DecryptedText text="I Bought" speed={45} /></span>
           </h1>
           <p className="text-sm text-muted-foreground max-w-sm leading-relaxed">
-            虚拟资金 · 真实行情。股票、加密货币、永续合约与 AI 量化研判，
-            零风险体验"如果当初买了会怎样"。
+            {t('login.tagline')}
           </p>
           {/* 实时行情角标：未登录也在跳动 */}
           <div className="flex flex-wrap gap-3">
@@ -271,9 +278,9 @@ export function Login() {
         </div>
 
         <div className="flex items-center gap-6 text-[11px] font-semibold text-muted-foreground">
-          <span className="flex items-center gap-1.5"><BarChart3 className="w-3.5 h-3.5" />Binance 实时行情</span>
-          <span className="flex items-center gap-1.5"><Wallet className="w-3.5 h-3.5" />虚拟资金 零风险</span>
-          <span className="flex items-center gap-1.5"><LineChart className="w-3.5 h-3.5" />AI 波动研判</span>
+          <span className="flex items-center gap-1.5"><BarChart3 className="w-3.5 h-3.5" />{t('login.featQuotes')}</span>
+          <span className="flex items-center gap-1.5"><Wallet className="w-3.5 h-3.5" />{t('login.featFunds')}</span>
+          <span className="flex items-center gap-1.5"><LineChart className="w-3.5 h-3.5" />{t('login.featAi')}</span>
         </div>
       </div>
 
@@ -293,7 +300,7 @@ export function Login() {
                 <span className="microlabel font-semibold">TERMINAL ACCESS</span>
               </div>
               <h2 className="text-xl font-extrabold tracking-tight mt-2">
-                {claiming ? '领取活动奖励' : mode?.passwordLoginEnabled && isRegister ? '创建账户' : '登录终端'}
+                {claiming ? t('login.titleClaim') : mode?.passwordLoginEnabled && isRegister ? t('login.titleRegister') : t('login.titleLogin')}
               </h2>
             </div>
 
@@ -307,7 +314,7 @@ export function Login() {
               <div className="h-28 flex flex-col items-center justify-center gap-2 text-muted-foreground">
                 <Loader2 className="w-5 h-5 animate-spin text-primary" />
                 <span className="text-xs font-semibold">
-                  {claiming ? '发放中，最长约 2 分钟，请勿关闭页面...' : loading ? '登录中...' : '加载中...'}
+                  {claiming ? t('login.claiming') : loading ? t('login.loggingIn') : t('login.loading')}
                 </span>
               </div>
             ) : (
@@ -317,16 +324,16 @@ export function Login() {
                     {/* 登录/注册段控件 */}
                     <div className="flex rounded-md border border-border overflow-hidden divide-x divide-border">
                       <button type="button" onClick={() => { setIsRegister(false); setError(''); }} className={segBtn(!isRegister)}>
-                        登录
+                        {t('login.logIn')}
                       </button>
                       <button type="button" onClick={() => { setIsRegister(true); setError(''); }} className={segBtn(isRegister)}>
-                        注册
+                        {t('login.register')}
                       </button>
                     </div>
                     <Input
                       value={username}
                       onChange={e => setUsername(e.target.value)}
-                      placeholder="用户名"
+                      placeholder={t('login.usernamePh')}
                       autoComplete="username"
                       required
                     />
@@ -334,7 +341,7 @@ export function Login() {
                       type="password"
                       value={password}
                       onChange={e => setPassword(e.target.value)}
-                      placeholder={isRegister ? '密码（至少6位）' : '密码'}
+                      placeholder={isRegister ? t('login.passwordNewPh') : t('login.passwordPh')}
                       autoComplete={isRegister ? 'new-password' : 'current-password'}
                       required
                     />
@@ -342,13 +349,13 @@ export function Login() {
                       <Input
                         value={inviteCode}
                         onChange={e => setInviteCode(e.target.value)}
-                        placeholder="邀请码"
+                        placeholder={t('login.invitePh')}
                         required
                       />
                     )}
                     <Button type="submit" className="w-full h-11">
                       <LogIn className="w-4 h-4" />
-                      {isRegister ? '注册并进入' : '登录'}
+                      {isRegister ? t('login.registerSubmit') : t('login.logIn')}
                     </Button>
                   </form>
                 )}
@@ -356,7 +363,7 @@ export function Login() {
                 {mode.passwordLoginEnabled && mode.linuxDoEnabled && (
                   <div className="flex items-center gap-3">
                     <div className="flex-1 h-px bg-border" />
-                    <span className="text-[10px] font-semibold text-muted-foreground tracking-widest">或</span>
+                    <span className="text-[10px] font-semibold text-muted-foreground tracking-widest">{t('login.or')}</span>
                     <div className="flex-1 h-px bg-border" />
                   </div>
                 )}
@@ -364,14 +371,14 @@ export function Login() {
                 {mode.linuxDoEnabled && (
                   <Button variant="outline" className="w-full h-11" onClick={handleLinuxDoLogin}>
                     <LinuxDoLogo className="w-4 h-4" />
-                    使用 LinuxDo 登录
+                    {t('login.linuxDo')}
                   </Button>
                 )}
 
                 {!mode.linuxDoEnabled && !mode.passwordLoginEnabled && (
                   <Button className="w-full h-11" onClick={handleLocalLogin}>
                     <LogIn className="w-4 h-4" />
-                    进入终端
+                    {t('login.enterTerminal')}
                   </Button>
                 )}
               </>

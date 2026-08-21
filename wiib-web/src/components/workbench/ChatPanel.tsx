@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ArrowDown, Bot, ChevronsDownUp, ChevronsUpDown, History, KeyRound, Loader2, Maximize2, Minimize2, PanelLeftClose, PanelLeftOpen, RotateCcw, Square, X } from 'lucide-react';
 import { workbenchApi } from '../../api';
 import { cn } from '../../lib/utils';
@@ -34,6 +35,7 @@ interface ChatPanelProps {
  * 过程条目收进可折叠的工作过程轨。答案是这一屏唯一的主角，所以它不套卡片。
  */
 export function ChatPanel({ onClose, onGoConfig, fullscreen, onToggleFullscreen }: ChatPanelProps) {
+  const { t } = useTranslation(['ai', 'common']);
   const { items, loading, background, sessionId, needsConfig } = useSyncExternalStore(chatStore.subscribe, chatStore.getSnapshot);
   // 在途的那张确认卡（按 requestId 认）。面板里可能同时挂着几张，用一个布尔会把别的卡一起禁掉
   const [hitlBusy, setHitlBusy] = useState<{ requestId: string; approved: boolean } | null>(null);
@@ -159,22 +161,22 @@ export function ChatPanel({ onClose, onGoConfig, fullscreen, onToggleFullscreen 
     try {
       await chatStore.hitlDecide(requestId, approved);
     } catch (err) {
-      chatStore.pushError((err as Error).message || '确认失败，请重试');
+      chatStore.pushError((err as Error).message || t('chat.hitlFailed'));
     } finally {
       // 只收自己那张：同时挂两张卡时，先点那张收尾会把后点那张的转圈一起清掉
       setHitlBusy(cur => (cur?.requestId === requestId ? null : cur));
     }
-  }, []);
+  }, [t]);
 
   /** 删除会话：列表移除；删的是当前会话时 store 一并清空。删了不可恢复，先问一句（站内破坏性操作的既有写法） */
   const removeSession = useCallback(async (s: WorkbenchSessionSummary) => {
-    if (!window.confirm(`删除会话「${s.title}」？${s.messageCount} 条消息与它的续聊上下文会一并清掉，不可恢复。`)) return;
+    if (!window.confirm(t('history.deleteConfirm', { title: s.title, count: s.messageCount }))) return;
     try {
       await workbenchApi.deleteSession(s.sessionId);
       setSessions(prev => prev.filter(x => x.sessionId !== s.sessionId));
       chatStore.clearIfCurrent(s.sessionId);
     } catch { /* 删除失败保持原样 */ }
-  }, []);
+  }, [t]);
 
   const handleNewSession = useCallback(() => {
     chatStore.newSession();
@@ -190,11 +192,11 @@ export function ChatPanel({ onClose, onGoConfig, fullscreen, onToggleFullscreen 
       {/* 面板头 */}
       <div className="flex items-center gap-2 px-4 py-3 border-b border-border shrink-0">
         <Bot className="w-4.5 h-4.5 text-primary shrink-0" />
-        <span className="text-sm font-black shrink-0">研判对话</span>
+        <span className="text-sm font-black shrink-0">{t('chat.title')}</span>
         {/* 副标题吃掉剩余空间并允许截断：面板宽度可拖到 320，而 sm: 判的是视口不是面板，
             不给它 flex-1 + truncate 的话 PC 上窄面板会被这句话把按钮挤出去 */}
         <span className="hidden sm:block flex-1 min-w-0 truncate text-[10px] text-muted-foreground">
-          {title ?? `${HUB_NAME} 调度 · 关窗后台继续`}
+          {title ?? t('chat.subtitle', { hub: HUB_NAME })}
         </span>
         {/* 按钮组自己带 ml-auto 把自己顶到右边：副标题在 <640px 是 hidden、不占 flex 位，
             指望它撑开的话手机上整排按钮会挤到左端 */}
@@ -203,8 +205,8 @@ export function ChatPanel({ onClose, onGoConfig, fullscreen, onToggleFullscreen 
             <button
               onClick={toggleAllRails}
               className="shrink-0 border border-border hover:bg-surface-hover w-7 h-7 rounded-lg flex items-center justify-center text-muted-foreground hover:text-primary"
-              title={anyRailOpen ? '收起全部工作过程' : '展开全部工作过程'}
-              aria-label="全部展开或收起工作过程"
+              title={anyRailOpen ? t('chat.collapseAllRails') : t('chat.expandAllRails')}
+              aria-label={t('chat.toggleAllRails')}
             >
               {anyRailOpen ? <ChevronsDownUp className="w-3.5 h-3.5" /> : <ChevronsUpDown className="w-3.5 h-3.5" />}
             </button>
@@ -217,7 +219,7 @@ export function ChatPanel({ onClose, onGoConfig, fullscreen, onToggleFullscreen 
               'shrink-0 border border-border hover:bg-surface-hover w-7 h-7 rounded-lg flex items-center justify-center hover:text-primary',
               (fullscreen ? sideOpen : showHistory) ? 'text-primary' : 'text-muted-foreground',
             )}
-            title={fullscreen ? (sideOpen ? '收起历史栏' : '展开历史栏') : '历史对话'}
+            title={fullscreen ? (sideOpen ? t('chat.hideHistory') : t('chat.showHistory')) : t('history.title')}
           >
             {fullscreen
               ? (sideOpen ? <PanelLeftClose className="w-3.5 h-3.5" /> : <PanelLeftOpen className="w-3.5 h-3.5" />)
@@ -226,7 +228,7 @@ export function ChatPanel({ onClose, onGoConfig, fullscreen, onToggleFullscreen 
           <button
             onClick={handleNewSession}
             className="shrink-0 border border-border hover:bg-surface-hover w-7 h-7 rounded-lg flex items-center justify-center text-muted-foreground hover:text-primary"
-            title="新会话"
+            title={t('chat.newSession')}
           >
             <RotateCcw className="w-3.5 h-3.5" />
           </button>
@@ -235,8 +237,8 @@ export function ChatPanel({ onClose, onGoConfig, fullscreen, onToggleFullscreen 
             <button
               onClick={onToggleFullscreen}
               className="shrink-0 hidden md:flex border border-border hover:bg-surface-hover w-7 h-7 rounded-lg items-center justify-center text-muted-foreground hover:text-primary"
-              title={fullscreen ? '退出全屏（Esc）' : '全屏'}
-              aria-label={fullscreen ? '退出全屏' : '全屏显示对话面板'}
+              title={fullscreen ? t('chat.exitFullscreen') : t('chat.fullscreen')}
+              aria-label={fullscreen ? t('chat.exitFullscreenAria') : t('chat.fullscreenAria')}
             >
               {fullscreen ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
             </button>
@@ -245,8 +247,8 @@ export function ChatPanel({ onClose, onGoConfig, fullscreen, onToggleFullscreen 
             <button
               onClick={onClose}
               className="shrink-0 border border-border hover:bg-surface-hover w-7 h-7 rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground"
-              title="关闭"
-              aria-label="关闭对话面板"
+              title={t('common:close')}
+              aria-label={t('chat.closeAria')}
             >
               <X className="w-3.5 h-3.5" />
             </button>
@@ -292,8 +294,8 @@ export function ChatPanel({ onClose, onGoConfig, fullscreen, onToggleFullscreen 
                   <div className="w-12 h-12 rounded-full border border-border bg-background flex items-center justify-center text-muted-foreground/60">
                     <Bot className="w-6 h-6" />
                   </div>
-                  <p className="text-sm text-muted-foreground">问点什么——下面的快捷提问可以直接点</p>
-                  <p className="text-[10px] text-muted-foreground/70">行情 · 新闻 · 你的交易员 · 深度研判，都归 {HUB_NAME} 调度</p>
+                  <p className="text-sm text-muted-foreground">{t('chat.emptyTitle')}</p>
+                  <p className="text-[10px] text-muted-foreground/70">{t('chat.emptyHint', { hub: HUB_NAME })}</p>
                 </div>
               )}
               {blocks.map(block => {
@@ -356,8 +358,11 @@ export function ChatPanel({ onClose, onGoConfig, fullscreen, onToggleFullscreen 
                       />
                     );
                   case 'error':
+                    // keyed=前端自己的兜底文案（存的是 key），后端/异常带回来的 message 原样显示
                     return (
-                      <p key={index} className="text-[11px] text-destructive/80 text-center py-1">{item.message}</p>
+                      <p key={index} className="text-[11px] text-destructive/80 text-center py-1">
+                        {item.keyed ? t(item.message) : item.message}
+                      </p>
                     );
                 }
               })}
@@ -366,7 +371,7 @@ export function ChatPanel({ onClose, onGoConfig, fullscreen, onToggleFullscreen 
                   {!streamingNow && (
                     <>
                       <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      {background ? `${HUB_NAME} 在后台继续研判，完成后自动展示答案` : `${HUB_NAME} 分析问题中...`}
+                      {background ? t('chat.background', { hub: HUB_NAME }) : t('chat.thinking', { hub: HUB_NAME })}
                     </>
                   )}
                   {/* 后台轮询态没有可中断的本地轮：补答跑在后台，没有面板可点停止 */}
@@ -375,10 +380,10 @@ export function ChatPanel({ onClose, onGoConfig, fullscreen, onToggleFullscreen 
                       onClick={() => void handleStop()}
                       disabled={stopping}
                       className="inline-flex items-center gap-1 border border-border rounded-full px-2.5 py-0.5 text-[11px] font-bold hover:text-loss hover:border-loss/40 disabled:opacity-50 transition-colors"
-                      title="停止这一轮"
+                      title={t('chat.stopTitle')}
                     >
                       <Square className="w-2.5 h-2.5 fill-current" />
-                      {stopping ? '收尾中' : '停止'}
+                      {stopping ? t('chat.stopping') : t('chat.stop')}
                     </button>
                   )}
                 </div>
@@ -391,7 +396,7 @@ export function ChatPanel({ onClose, onGoConfig, fullscreen, onToggleFullscreen 
                 onClick={scrollToBottom}
                 className="absolute left-1/2 -translate-x-1/2 bottom-2 z-[5] flex items-center gap-1 rounded-full pt-card shadow-lg px-2.5 py-1 text-[10px] font-bold text-muted-foreground hover:text-primary animate-in fade-in"
               >
-                <ArrowDown className="w-3 h-3" /> 回到底部
+                <ArrowDown className="w-3 h-3" /> {t('chat.toBottom')}
               </button>
             )}
           </div>
@@ -403,16 +408,16 @@ export function ChatPanel({ onClose, onGoConfig, fullscreen, onToggleFullscreen 
               fullscreen && 'w-full max-w-3xl mx-auto',
             )}>
               <KeyRound className="w-3.5 h-3.5 text-warning shrink-0" />
-              <span className="text-[11px] font-bold flex-1 text-left">模型配置缺失或不可用</span>
+              <span className="text-[11px] font-bold flex-1 text-left">{t('chat.needsConfig')}</span>
               <button
                 onClick={() => { chatStore.clearNeedsConfig(); onGoConfig?.(); }}
                 className="text-[11px] font-bold text-primary shrink-0 hover:underline"
               >
-                去配置
+                {t('chat.goConfig')}
               </button>
               <button
                 onClick={() => chatStore.clearNeedsConfig()}
-                aria-label="忽略"
+                aria-label={t('chat.dismiss')}
                 className="text-muted-foreground/60 hover:text-foreground shrink-0"
               >
                 <X className="w-3.5 h-3.5" />

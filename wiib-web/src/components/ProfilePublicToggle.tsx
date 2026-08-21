@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Eye, EyeOff } from 'lucide-react';
 import { userApi } from '../api';
 import { Card, CardContent } from './ui/card';
@@ -10,6 +11,7 @@ import { cn } from '../lib/utils';
  * 两处摆同一个组件而不是各写一份——两份状态逻辑迟早只改一边。
  */
 export function ProfilePublicToggle() {
+  const { t } = useTranslation('account');
   const { toast } = useToast();
   // null = 还没拉回来。此时禁用开关，免得先渲染成"关"再跳回"开"闪一下
   const [profilePublic, setProfilePublic] = useState<boolean | null>(null);
@@ -27,10 +29,10 @@ export function ProfilePublicToggle() {
     setProfilePublic(next);
     try {
       await userApi.setProfilePublic(next);
-      toast(next ? '已公开你的持仓与仓位历史' : '已隐藏，别人点不进你的详情页', 'success');
+      toast(next ? t('toggle.on') : t('toggle.off'), 'success');
     } catch (e) {
       setProfilePublic(!next);
-      toast((e as Error).message || '设置失败', 'error');
+      toast((e as Error).message || t('toggle.failed'), 'error');
     } finally {
       setSaving(false);
     }
@@ -50,10 +52,9 @@ export function ProfilePublicToggle() {
             {off ? <EyeOff className="w-4 h-4 text-muted-foreground" /> : <Eye className="w-4 h-4 text-sky-400" />}
           </div>
           <div className="flex-1 min-w-0">
-            <div className="text-sm font-medium">公开我的持仓与仓位历史</div>
+            <div className="text-sm font-medium">{t('toggle.title')}</div>
             <p className="mt-0.5 text-xs text-muted-foreground leading-relaxed">
-              开启后，别人可以从排行榜点进你的主页，看到你的当前持仓、合约仓位历史和成交明细。
-              关掉不影响上榜——榜上只有总资产和收益率。
+              {t('toggle.desc')}
             </p>
           </div>
           <div className={cn(

@@ -1,4 +1,5 @@
 import { useState, type CSSProperties } from 'react';
+import { useTranslation } from 'react-i18next';
 
 /**
  * 合约杠杆滑杆（精密终端版）：机加工细槽 + 风险色净色填充 + 小旋钮，拖拽跟随数值气泡。
@@ -26,6 +27,7 @@ function riskColor(ratio: number): string {
 }
 
 export function LeverageSlider({ value, max, ticks, onChange, min = 1 }: LeverageSliderProps) {
+  const { t } = useTranslation('trade');
   // 仅控制气泡显隐与旋钮跟手（拖拽期关掉 left 过渡），不参与取值
   const [dragging, setDragging] = useState(false);
 
@@ -62,7 +64,7 @@ export function LeverageSlider({ value, max, ticks, onChange, min = 1 }: Leverag
           step={1}
           value={value}
           disabled={disabled}
-          aria-label="杠杆"
+          aria-label={t('lev.label')}
           onChange={e => onChange(Number(e.target.value))}
           onPointerDown={() => setDragging(true)}
           onPointerUp={() => setDragging(false)}

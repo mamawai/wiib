@@ -31,13 +31,17 @@ export type ChatItem =
   // 让位说明行往中间一插、重新生成把尾巴一砍，键就整体错位，收着的轨会自己弹开
   | { kind: 'expert'; rid: number; agent: string; content: string; streaming: boolean }
   | { kind: 'agent'; rid: number; node: string; agent: string }
-  // 长工具阶段进度（深研判等）：最新一条亮着转圈，后续事件到达即熄灭
-  | { kind: 'progress'; rid: number; text: string; active: boolean }
+  // 长工具阶段进度（深研判等）：最新一条亮着转圈，后续事件到达即熄灭。
+  // keyed=true 时 text 存的是 ai 词表的 key（前端自己立的说明行），由视图层渲染时现翻——
+  // store 是纯 ts 模块、条目一存就是一整场会话，存翻好的字面量切了语言会僵在旧语言里。
+  // 后端下发的阶段文案 keyed 为假，原样显示（那是后端数据，不进词表）
+  | { kind: 'progress'; rid: number; text: string; keyed?: boolean; active: boolean }
   // requestId 存在 item 上：hitlDecide 按它取回本条再原样回传，服务端据此确认"点的是哪张卡"
   | { kind: 'hitl'; symbol: string; reason: string; requestId: string; resumeMessage: string; status: 'pending' | 'approved' | 'rejected' }
   // trader 动作表单卡：模型只有弹卡的权，执行权归用户点击。纯前端态不落历史，id 本地发
   | { kind: 'form'; id: string; form: TraderFormKind; prefill?: Record<string, unknown>; status: 'pending' | 'done'; result?: string }
-  | { kind: 'error'; message: string };
+  // keyed 同 progress：前端自己的兜底报错存 key，后端/异常带回来的 message 原样显示
+  | { kind: 'error'; message: string; keyed?: boolean };
 
 export interface ChatState {
   items: ChatItem[];
@@ -51,8 +55,11 @@ export interface ChatState {
 
 const SESSION_KEY = 'wiib-workbench-session';
 const POLL_MS = 3000;
-/** 让位后立在原问题过程轨里的说明行（也当"这个问题已有交代"的标记，防重复插） */
-const DEFERRED_NOTE = '专家仍在取数，这个问题的答案稍后自动补上';
+/**
+ * 让位后立在原问题过程轨里的说明行（也当"这个问题已有交代"的标记，防重复插）。
+ * 存的是词表 key 不是文案：既躲开切语言僵住的坑，标记比对也不会随语言变。
+ */
+const DEFERRED_NOTE = 'rail.deferredNote';
 /** 补答行的标头前缀，与后端 ChatYieldCoordinator.DEFERRED_PREFIX 同值：这类答案不给重新生成 */
 export const DEFERRED_PREFIX = '【补答「';
 /**
@@ -61,8 +68,8 @@ export const DEFERRED_PREFIX = '【补答「';
  * 回放时按这句话认出来还原成过程轨行，否则历史里会多出一句用户从没说过的话。
  */
 const HITL_RESUME_MESSAGE = '已确认，请继续执行深度研判';
-/** 续跑指令在过程轨里的措辞：与 HITL 卡自己的状态行错开，别同一句话连着显示两遍 */
-const HITL_RESUME_NOTE = '正在恢复深度研判的执行';
+/** 续跑指令在过程轨里的措辞（词表 key）：与 HITL 卡自己的状态行错开，别同一句话连着显示两遍 */
+const HITL_RESUME_NOTE = 'rail.hitlResume';
 
 let state: ChatState = {
   items: [],
@@ -125,7 +132,7 @@ function toItems(messages: WorkbenchChatMessage[]): ChatItem[] {
       return { kind: 'assistant' as const, content: m.content, streaming: false, at: m.createdAt, meta: m.meta };
     }
     return m.content === HITL_RESUME_MESSAGE
-      ? { kind: 'progress' as const, rid: nextRid(), text: HITL_RESUME_NOTE, active: false }
+      ? { kind: 'progress' as const, rid: nextRid(), text: HITL_RESUME_NOTE, keyed: true, active: false }
       : { kind: 'user' as const, content: m.content, at: m.createdAt };
   });
 }
@@ -160,7 +167,7 @@ function insertDeferredNote(items: ChatItem[]): ChatItem[] {
     if (!settled) {
       return [
         ...items.slice(0, end),
-        { kind: 'progress', rid: nextRid(), text: DEFERRED_NOTE, active: false },
+        { kind: 'progress', rid: nextRid(), text: DEFERRED_NOTE, keyed: true, active: false },
         ...items.slice(end),
       ];
     }
@@ -353,7 +360,11 @@ async function send(message: string, opts?: { noBubble?: boolean; requeueAs?: Qu
         fellBack = true;
         return;
       }
-      updateItems(prev => [...prev, { kind: 'error', message: (err as Error).message || '连接中断，可直接重问续聊' }]);
+      // e.message 来自后端/网络异常，原样显示；只有兜底那半句是自家文案，存 key 交给视图现翻
+      const errMsg = (err as Error).message;
+      updateItems(prev => [...prev, errMsg
+        ? { kind: 'error', message: errMsg }
+        : { kind: 'error', message: 'err.disconnected', keyed: true }]);
       // 配置类错误光显一行红字没用，用户得知道去哪儿改——置标记让面板亮"去配置"引导条
       if (code === CHAT_ERROR.CONFIG_MISSING || code === CHAT_ERROR.CONFIG_INVALID) {
         set({ needsConfig: true });
@@ -420,12 +431,14 @@ async function regenerate() {
       const restore = snapshot;
       if (restore && !answered) updateItems(() => restore);
       const code = err instanceof ApiError ? err.code : 0;
-      updateItems(prev => [...prev, {
-        kind: 'error',
-        message: code === CHAT_ERROR.REGENERATE_UNAVAILABLE
-          ? '这条回答无法重新生成（它不在会话末尾，或上下文已被压缩）'
-          : (err as Error).message || '重新生成失败',
-      }]);
+      const msg = (err as Error).message;
+      updateItems(prev => [...prev,
+        code === CHAT_ERROR.REGENERATE_UNAVAILABLE
+          ? { kind: 'error', message: 'err.regenUnavailable', keyed: true }
+          : msg
+            ? { kind: 'error', message: msg }
+            : { kind: 'error', message: 'err.regenFailed', keyed: true },
+      ]);
       if (code === CHAT_ERROR.CONFIG_MISSING || code === CHAT_ERROR.CONFIG_INVALID) {
         set({ needsConfig: true });
       }
@@ -527,7 +540,7 @@ async function hitlDecide(requestId: string, approved: boolean) {
   if (!approved) return;
   // 续跑指令是批准这个动作的一部分，不是用户打的字：立在工作过程轨里，
   // 用 noBubble 发出去不上气泡——否则历史里会多出一句用户从没说过的话
-  updateItems(prev => [...prev, { kind: 'progress', rid: nextRid(), text: HITL_RESUME_NOTE, active: false }]);
+  updateItems(prev => [...prev, { kind: 'progress', rid: nextRid(), text: HITL_RESUME_NOTE, keyed: true, active: false }]);
   await send(item.resumeMessage, { noBubble: true });
 }
 

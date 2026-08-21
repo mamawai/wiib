@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { Trans, useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { rankingApi } from '../api';
 import { Card, CardContent } from '../components/ui/card';
@@ -85,16 +86,16 @@ function Cell({ label, className, children }: { label: string; className?: strin
   );
 }
 
-const PLACE_LABEL = ['冠军', '亚军', '季军'];
+const PLACE_LABEL_KEY = ['ranking.place.first', 'ranking.place.second', 'ranking.place.third'];
 
-const SORT_TABS: { key: RankingSort; label: string; hint: string }[] = [
-  { key: 'ASSETS', label: '总资产', hint: '账上所有钱：现金 + 持仓市值 − 借款' },
-  { key: 'TRADING_PROFIT', label: '交易盈利', hint: '只看靠交易赚到的钱：合约 + 现货 + 预测，不含优惠券和游戏' },
+const SORT_TABS: { key: RankingSort; labelKey: string; hintKey: string }[] = [
+  { key: 'ASSETS', labelKey: 'ranking.metric.assets', hintKey: 'ranking.hint.assets' },
+  { key: 'TRADING_PROFIT', labelKey: 'ranking.metric.profit', hintKey: 'ranking.hint.profit' },
 ];
 
-const METRIC_LABEL: Record<RankingSort, string> = {
-  ASSETS: '总资产',
-  TRADING_PROFIT: '交易盈利',
+const METRIC_LABEL_KEY: Record<RankingSort, string> = {
+  ASSETS: 'ranking.metric.assets',
+  TRADING_PROFIT: 'ranking.metric.profit',
 };
 
 const ALL_METRICS: RankingSort[] = ['ASSETS', 'TRADING_PROFIT'];
@@ -117,12 +118,13 @@ function MetricValue({ metric, item, className }: { metric: RankingSort; item: R
 function TopCard({ item, place, sort, onOpen }: {
   item: RankingItem; place: 0 | 1 | 2; sort: RankingSort; onOpen: () => void;
 }) {
+  const { t } = useTranslation('community');
   const champion = place === 0;
   return (
     <button
       type="button"
       onClick={onOpen}
-      title={`查看 ${item.username} 的持仓与仓位历史`}
+      title={t('ranking.rowTitle', { name: item.username })}
       className={cn(
         'relative overflow-hidden rounded-lg pt-card text-left p-2.5 sm:p-3.5 transition-colors group',
         'hover:bg-accent/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
@@ -150,18 +152,18 @@ function TopCard({ item, place, sort, onOpen }: {
           <div className="text-[12px] sm:text-[13px] font-bold truncate group-hover:text-primary transition-colors">
             {item.username}
           </div>
-          <div className="microlabel">{PLACE_LABEL[place]}</div>
+          <div className="microlabel">{t(PLACE_LABEL_KEY[place])}</div>
         </div>
       </div>
 
       <div className="mt-2.5 sm:mt-3 pt-2.5 sm:pt-3 border-t border-border/40 space-y-1.5">
         {/* 主数字 = 当前排序维度，其余维度降到下面的明细行 */}
         <div className="text-center sm:text-left">
-          <div className="microlabel">{METRIC_LABEL[sort]}</div>
+          <div className="microlabel">{t(METRIC_LABEL_KEY[sort])}</div>
           <MetricValue metric={sort} item={item} className="block text-[15px] sm:text-lg font-bold leading-tight truncate" />
         </div>
         <div className="flex items-center justify-center sm:justify-between gap-2">
-          <span className="microlabel hidden sm:inline">收益率</span>
+          <span className="microlabel hidden sm:inline">{t('ranking.metric.return')}</span>
           <Pct value={item.profitPct} className="text-[12px] font-semibold" />
         </div>
 
@@ -169,12 +171,12 @@ function TopCard({ item, place, sort, onOpen }: {
         <div className="hidden sm:block space-y-1.5">
           {ALL_METRICS.filter(m => m !== sort).map(m => (
             <div key={m} className="flex items-center justify-between gap-2">
-              <span className="microlabel">{METRIC_LABEL[m]}</span>
+              <span className="microlabel">{t(METRIC_LABEL_KEY[m])}</span>
               <MetricValue metric={m} item={item} className="text-[12px] font-semibold" />
             </div>
           ))}
           <div className="flex items-center justify-between gap-2 pt-1 border-t border-border/25">
-            <span className="microlabel">余额 / 游戏</span>
+            <span className="microlabel">{t('ranking.metric.wallet')}</span>
             <span className="num text-[10px] text-muted-foreground truncate">
               {fmtCompact(item.balanceWallet)} / {fmtCompact(item.gameWallet)}
             </span>
@@ -186,11 +188,12 @@ function TopCard({ item, place, sort, onOpen }: {
 }
 
 function RankRow({ item, sort, onOpen }: { item: RankingItem; sort: RankingSort; onOpen: () => void }) {
+  const { t } = useTranslation('community');
   return (
     <button
       type="button"
       onClick={onOpen}
-      title={`查看 ${item.username} 的持仓与仓位历史`}
+      title={t('ranking.rowTitle', { name: item.username })}
       className={cn(GRID, 'w-full text-left px-3 sm:px-4 py-2.5 border-b border-border/25 last:border-b-0',
         'hover:bg-accent/25 transition-colors group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset')}
     >
@@ -210,22 +213,22 @@ function RankRow({ item, sort, onOpen }: { item: RankingItem; sort: RankingSort;
         </span>
       </div>
 
-      <Cell label="总资产" className={cn('md:text-right', sort === 'ASSETS' && 'text-primary')}>
+      <Cell label={t('ranking.metric.assets')} className={cn('md:text-right', sort === 'ASSETS' && 'text-primary')}>
         <span className="num text-[13px] font-bold">
           <span className="md:hidden">{fmtCompact(item.totalAssets)}</span>
           <span className="hidden md:inline">{fmt(item.totalAssets)}</span>
         </span>
       </Cell>
 
-      <Cell label="收益率" className="md:text-right">
+      <Cell label={t('ranking.metric.return')} className="md:text-right">
         <Pct value={item.profitPct} className="text-[12px] font-semibold" />
       </Cell>
 
-      <Cell label="交易盈利" className={cn('md:text-right', sort === 'TRADING_PROFIT' && 'text-primary')}>
+      <Cell label={t('ranking.metric.profit')} className={cn('md:text-right', sort === 'TRADING_PROFIT' && 'text-primary')}>
         <TradingProfit value={item.tradingProfit} className="text-[12px] font-semibold" />
       </Cell>
 
-      <Cell label="余额 / 游戏" className="md:text-right">
+      <Cell label={t('ranking.metric.wallet')} className="md:text-right">
         <span className="num text-[11px] text-muted-foreground truncate">
           {fmtCompact(item.balanceWallet)} / {fmtCompact(item.gameWallet)}
         </span>
@@ -239,6 +242,7 @@ function RankRow({ item, sort, onOpen }: { item: RankingItem; sort: RankingSort;
 }
 
 export function Ranking() {
+  const { t } = useTranslation('community');
   const navigate = useNavigate();
   const [ranking, setRanking] = useState<RankingItem[]>([]);
   const [sort, setSort] = useState<RankingSort>('ASSETS');
@@ -290,35 +294,42 @@ export function Ranking() {
               <span className="p-1.5 rounded-xl bg-primary/10 text-primary">
                 <Trophy className="w-4 h-4" />
               </span>
-              资产排行榜
+              {t('ranking.title')}
             </h1>
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
               <span className="flex items-center gap-1.5">
                 <span className="led" />
                 <Clock className="w-3 h-3" />
-                交易时段每 10 分钟更新
+                {t('ranking.updateHint')}
               </span>
-              <span>仅统计有过成交的用户 · 共 <span className="num text-foreground">{total}</span> 人</span>
-              <span>点任意一行可以查看该用户的持仓与仓位历史</span>
+              <span>
+                <Trans
+                  ns="community"
+                  i18nKey="ranking.totalUsers"
+                  values={{ total }}
+                  components={[<span key="total" className="num text-foreground" />]}
+                />
+              </span>
+              <span>{t('ranking.rowHint')}</span>
             </div>
           </div>
 
           {/* 排序维度：换维度名次跟着重算，01 就是该维度第一 */}
           <div className="mt-3.5 flex items-center gap-1 p-1 rounded-lg bg-card-2 border border-border/50">
-            {SORT_TABS.map(t => (
+            {SORT_TABS.map(tab => (
               <button
-                key={t.key}
+                key={tab.key}
                 type="button"
-                onClick={() => switchSort(t.key)}
-                title={t.hint}
+                onClick={() => switchSort(tab.key)}
+                title={t(tab.hintKey)}
                 className={cn(
                   'flex-1 py-1.5 px-2 rounded-md text-xs font-medium transition-colors whitespace-nowrap',
-                  sort === t.key
+                  sort === tab.key
                     ? 'bg-card text-foreground border border-border shadow-[inset_0_2px_0_var(--color-primary)]'
                     : 'text-muted-foreground hover:text-foreground hover:bg-surface-hover',
                 )}
               >
-                {t.label}
+                {t(tab.labelKey)}
               </button>
             ))}
           </div>
@@ -335,7 +346,7 @@ export function Ranking() {
           </CardContent></Card>
         </>
       ) : ranking.length === 0 ? (
-        <Card><CardContent className="p-0"><EmptyState icon={<Trophy />} text="暂无排行数据" /></CardContent></Card>
+        <Card><CardContent className="p-0"><EmptyState icon={<Trophy />} text={t('ranking.empty')} /></CardContent></Card>
       ) : (
         <>
           {/* 前三名：并排等高，不做台阶。名次靠序号和高光条区分 */}
@@ -353,12 +364,16 @@ export function Ranking() {
                 {/* 表头只在宽屏出现，窄屏每格自带微标签 */}
                 <div className={cn(GRID, 'hidden md:grid px-4 py-2 bg-card-2 border-b border-border/30')}>
                   <span className="microlabel font-bold">#</span>
-                  <span className="microlabel font-bold">用户</span>
-                  <span className={cn('microlabel font-bold text-right', sort === 'ASSETS' && 'text-primary')}>总资产</span>
-                  <span className="microlabel font-bold text-right">收益率</span>
+                  <span className="microlabel font-bold">{t('ranking.metric.user')}</span>
+                  <span className={cn('microlabel font-bold text-right', sort === 'ASSETS' && 'text-primary')}>
+                    {t('ranking.metric.assets')}
+                  </span>
+                  <span className="microlabel font-bold text-right">{t('ranking.metric.return')}</span>
                   <span className={cn('microlabel font-bold text-right', sort === 'TRADING_PROFIT' && 'text-primary')}
-                    title="合约 + 现货 + 预测的净盈亏，不含优惠券">交易盈利</span>
-                  <span className="microlabel font-bold text-right" title="账户现金构成，不含持仓市值">余额 / 游戏</span>
+                    title={t('ranking.hint.profitCol')}>{t('ranking.metric.profit')}</span>
+                  <span className="microlabel font-bold text-right" title={t('ranking.hint.walletCol')}>
+                    {t('ranking.metric.wallet')}
+                  </span>
                   <span />
                 </div>
 
@@ -372,7 +387,12 @@ export function Ranking() {
           {pages > 1 && (
             <div className="flex items-center justify-between px-1">
               <span className="text-xs text-muted-foreground">
-                第 <span className="num">{page}</span> / <span className="num">{pages}</span> 页
+                <Trans
+                  ns="community"
+                  i18nKey="ranking.page"
+                  values={{ page, pages }}
+                  components={[<span key="page" className="num" />, <span key="pages" className="num" />]}
+                />
               </span>
               <div className="flex items-center gap-1">
                 <Button variant="ghost" size="sm" className="h-8 w-8 p-0"

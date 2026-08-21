@@ -5,6 +5,7 @@ import {
   type ISeriesMarkersPluginApi, type SeriesMarker, type Time, type UTCTimestamp,
 } from 'lightweight-charts';
 import { Eye, EyeOff, Magnet, Trash2 } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { useIsDark } from '../../hooks/useIsDark';
 import { useDrawings } from '../chart/useDrawings';
 import { DrawToolPicker } from '../chart/DrawToolPicker';
@@ -97,6 +98,7 @@ export function BacktestChart({ bars, marks, cursor, symbol, decimals = 2, heigh
   const blindBaseRef = useRef<number | null>(null);
   blindBaseRef.current = blindBaseMs ?? null;
   const isDark = useIsDark();
+  const { t } = useTranslation('strategy');
 
   const {
     attach: attachDrawings, tool, setTool, magnet, setMagnet, hiddenAll, setHiddenAll,
@@ -115,6 +117,11 @@ export function BacktestChart({ bars, marks, cursor, symbol, decimals = 2, heigh
     return fmtDateTime((sec + TZ) * 1000);
   };
 
+  // 进场箭头的缺省文字先查出来再进 useMemo：切语言时这两个串会变，memo 跟着重算整份 markers。
+  // 这里不写 i18n.language——useMemo 里它不参与计算，exhaustive-deps 会判成多余依赖报 warning
+  const longText = t('side.long');
+  const shortText = t('side.short');
+
   // markers 预排序：按所在 bar 升序，游标推进时按可见数量切片
   const allMarkers = useMemo(() => {
     const gain = isDark ? '#0abf95' : '#089981';
@@ -125,7 +132,7 @@ export function BacktestChart({ bars, marks, cursor, symbol, decimals = 2, heigh
         ? {
           time: toBarTime(m.time), position: isLong ? 'belowBar' : 'aboveBar',
           shape: isLong ? 'arrowUp' : 'arrowDown', color: isLong ? gain : loss,
-          text: m.label ?? (isLong ? '多' : '空'),
+          text: m.label ?? (isLong ? longText : shortText),
         }
         : {
           time: toBarTime(m.time), position: isLong ? 'aboveBar' : 'belowBar',
@@ -135,7 +142,7 @@ export function BacktestChart({ bars, marks, cursor, symbol, decimals = 2, heigh
       return { atBar: m.barIndex, marker };
     });
     return out.sort((a, b) => a.atBar - b.atBar);
-  }, [marks, isDark]);
+  }, [marks, isDark, longText, shortText]);
 
   // 建图（主题/高度/币种变化时重建，颜色 token 才能生效；画线层 attach/detach 同一 effect 成对做）
   useEffect(() => {
@@ -282,16 +289,16 @@ export function BacktestChart({ bars, marks, cursor, symbol, decimals = 2, heigh
         <DrawToolPicker tool={tool} onSelect={setTool} />
         <div className="flex rounded-md border border-border overflow-hidden divide-x divide-border">
           <button type="button" onClick={() => setMagnet(!magnet)} className={iconCls(magnet)}
-            title={magnet ? '磁吸开：端点自动贴住最近的开/高/低/收' : '磁吸关：自由落点'}>
+            title={magnet ? t('chart.magnetOn') : t('chart.magnetOff')}>
             <Magnet className="w-3.5 h-3.5" />
           </button>
           <button type="button" onClick={() => setHiddenAll(!hiddenAll)} disabled={!drawCount}
-            title={hiddenAll ? '画线已隐藏，点击恢复显示' : '隐藏当前所有画线（不删除）'}
+            title={hiddenAll ? t('chart.showDrawings') : t('chart.hideDrawings')}
             className={`${iconCls(hiddenAll)} disabled:opacity-30 disabled:cursor-default disabled:hover:bg-transparent disabled:hover:text-muted-foreground`}>
             {hiddenAll ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
           </button>
           <button type="button" onClick={trash} disabled={!hasSelection && !drawCount}
-            title={hasSelection ? '删除选中（Del）' : '清空本币种全部画线'}
+            title={hasSelection ? t('chart.deleteSelected') : t('chart.clearAll')}
             className={`${iconCls(false)} disabled:opacity-30 disabled:cursor-default disabled:hover:bg-transparent disabled:hover:text-muted-foreground`}>
             <Trash2 className="w-3.5 h-3.5" />
           </button>
@@ -302,7 +309,7 @@ export function BacktestChart({ bars, marks, cursor, symbol, decimals = 2, heigh
       <div className="relative w-full" style={{ height: h }}>
         <div ref={containerRef} className="absolute inset-0" />
         {textEdit && (
-          <input autoFocus placeholder="标注文字，回车确认"
+          <input autoFocus placeholder={t('chart.textPlaceholder')}
             onKeyDown={e => {
               if (e.key === 'Enter') commitText(e.currentTarget.value);
               else if (e.key === 'Escape') cancelText();

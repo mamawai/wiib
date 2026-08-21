@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { bstockApi } from '../api';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
@@ -23,6 +24,7 @@ const fmtCap = (v?: number) => {
 
 export function BStockList() {
   const navigate = useNavigate();
+  const { t } = useTranslation(['market', 'common']);
   const { toast } = useToast();
   const [stocks, setStocks] = useState<BStock[]>([]);
   const [loaded, setLoaded] = useState(false);
@@ -33,9 +35,9 @@ export function BStockList() {
   const load = useCallback((silent = false) => {
     bstockApi.list()
       .then(setStocks)
-      .catch(() => { if (!silent) toast('获取 bStock 列表失败', 'error', { description: '请稍后重试' }); })
+      .catch(() => { if (!silent) toast(t('bstockList.loadFailed'), 'error', { description: t('bstockList.loadFailedHint') }); })
       .finally(() => setLoaded(true));
-  }, [toast]);
+  }, [toast, t]);
 
   useEffect(() => {
     load();
@@ -73,29 +75,29 @@ export function BStockList() {
               <div className="p-1.5 rounded-lg bg-primary/10">
                 <Landmark className="w-4 h-4 text-primary" />
               </div>
-              股票 · bStock
-              <span className="text-xs text-muted-foreground font-normal ml-2">代币化美股 · 共 {stocks.length} 支</span>
+              {t('bstockList.title')}
+              <span className="text-xs text-muted-foreground font-normal ml-2">{t('bstockList.subtitle', { count: stocks.length })}</span>
             </CardTitle>
 
             <div className="flex items-center gap-2">
               <div className="relative flex-1 sm:w-64">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                <Input value={query} onChange={e => setQuery(e.target.value)} placeholder="搜索名称 / 代码 / 行业" className="pl-9 pr-9 h-9" />
+                <Input value={query} onChange={e => setQuery(e.target.value)} placeholder={t('bstockList.searchPlaceholder')} className="pl-9 pr-9 h-9" />
                 {query.trim() && (
-                  <button type="button" onClick={() => setQuery('')} className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-md hover:bg-surface-hover transition-colors" aria-label="清空搜索">
+                  <button type="button" onClick={() => setQuery('')} className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-md hover:bg-surface-hover transition-colors" aria-label={t('bstockList.clearSearch')}>
                     <X className="w-4 h-4 text-muted-foreground" />
                   </button>
                 )}
               </div>
-              <Button variant="outline" size="icon" className="h-9 w-9 shrink-0" onClick={() => { load(); toast('已刷新', 'info'); }}>
+              <Button variant="outline" size="icon" className="h-9 w-9 shrink-0" onClick={() => { load(); toast(t('bstockList.refreshed'), 'info'); }}>
                 <RefreshCcw className="w-4 h-4" />
               </Button>
             </div>
           </div>
 
           <div className="flex items-center gap-2 overflow-x-auto pb-1 mt-4">
-            <span className="text-sm text-muted-foreground whitespace-nowrap shrink-0">排序：</span>
-            {([['cap', '市值'], ['price', '价格'], ['change', '涨跌幅'], ['default', '默认']] as [SortField, string][]).map(([f, label]) => (
+            <span className="text-sm text-muted-foreground whitespace-nowrap shrink-0">{t('bstockList.sortLabel')}</span>
+            {([['cap', t('bstockList.sortCap')], ['price', t('bstockList.sortPrice')], ['change', t('bstockList.sortChange')], ['default', t('bstockList.sortDefault')]] as [SortField, string][]).map(([f, label]) => (
               <Button key={f} variant={sortField === f ? 'secondary' : 'ghost'} size="sm" className="h-8 text-xs gap-1 shrink-0" onClick={() => f === 'default' ? setSortField('default') : toggleSort(f)}>
                 {label}
                 {sortField === f && f !== 'default' && <ArrowUpDown className="w-3 h-3" />}
@@ -138,7 +140,7 @@ export function BStockList() {
                         </div>
                         <div className="flex items-center gap-2 text-xs text-muted-foreground">
                           {s.industry && <><span>{s.industry}</span><span className="text-border">·</span></>}
-                          <span>市值 {fmtCap(s.marketCap)}</span>
+                          <span>{t('bstockList.cap', { value: fmtCap(s.marketCap) })}</span>
                           {s.peRatio != null && <><span className="text-border">·</span><span>PE {s.peRatio}</span></>}
                         </div>
                       </div>
@@ -159,8 +161,8 @@ export function BStockList() {
           ) : (
             <div className="p-12 text-center text-muted-foreground flex flex-col items-center gap-2">
               <Search className="w-8 h-8 opacity-20" />
-              <p>{query.trim() ? '未找到相关股票' : '暂无数据'}</p>
-              {query.trim() && <Button variant="link" size="sm" onClick={() => setQuery('')}>清除搜索条件</Button>}
+              <p>{query.trim() ? t('bstockList.empty') : t('common:noData')}</p>
+              {query.trim() && <Button variant="link" size="sm" onClick={() => setQuery('')}>{t('bstockList.clearFilter')}</Button>}
             </div>
           )}
         </CardContent>

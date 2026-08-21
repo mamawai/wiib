@@ -1,5 +1,6 @@
 import * as echarts from 'echarts';
 import { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { cn } from '../lib/utils';
 import type { AssetSnapshot } from '../types';
 import { useIsDark } from '../hooks/useIsDark';
@@ -9,22 +10,23 @@ interface Props {
 }
 
 // 五分类收益曲线：crypto 含币合约，大宗商品含金/油合约
+// 常量在组件外拿不到 t，存词表 key，画图时再查——存翻译结果会在模块加载那一刻定死，切语言不跟着变
 const CUMULATIVE_CONFIG = [
-  { key: 'profit', name: '总收益', color: '#635bff' },
-  { key: 'cryptoProfit', name: '加密货币', color: '#f97316' },
-  { key: 'commodityProfit', name: '大宗商品', color: '#eab308' },
-  { key: 'bstockProfit', name: 'bStock', color: '#0ea5e9' },
-  { key: 'predictionProfit', name: '预测', color: '#a855f7' },
-  { key: 'gameProfit', name: '游戏', color: '#ef4444' },
+  { key: 'profit', nameKey: 'cat.totalProfit', color: '#635bff' },
+  { key: 'cryptoProfit', nameKey: 'cat.crypto', color: '#f97316' },
+  { key: 'commodityProfit', nameKey: 'cat.commodity', color: '#eab308' },
+  { key: 'bstockProfit', nameKey: 'cat.bstock', color: '#0ea5e9' },
+  { key: 'predictionProfit', nameKey: 'cat.prediction', color: '#a855f7' },
+  { key: 'gameProfit', nameKey: 'cat.game', color: '#ef4444' },
 ] as const;
 
 const DAILY_CONFIG = [
-  { key: 'dailyProfit', name: '日收益', color: '#635bff' },
-  { key: 'dailyCryptoProfit', name: '加密货币', color: '#f97316' },
-  { key: 'dailyCommodityProfit', name: '大宗商品', color: '#eab308' },
-  { key: 'dailyBstockProfit', name: 'bStock', color: '#0ea5e9' },
-  { key: 'dailyPredictionProfit', name: '预测', color: '#a855f7' },
-  { key: 'dailyGameProfit', name: '游戏', color: '#ef4444' },
+  { key: 'dailyProfit', nameKey: 'cat.dailyProfit', color: '#635bff' },
+  { key: 'dailyCryptoProfit', nameKey: 'cat.crypto', color: '#f97316' },
+  { key: 'dailyCommodityProfit', nameKey: 'cat.commodity', color: '#eab308' },
+  { key: 'dailyBstockProfit', nameKey: 'cat.bstock', color: '#0ea5e9' },
+  { key: 'dailyPredictionProfit', nameKey: 'cat.prediction', color: '#a855f7' },
+  { key: 'dailyGameProfit', nameKey: 'cat.game', color: '#ef4444' },
 ] as const;
 
 export function ProfitChart({ data }: Props) {
@@ -32,6 +34,7 @@ export function ProfitChart({ data }: Props) {
   const [mode, setMode] = useState<'cumulative' | 'daily'>('cumulative');
   const [dailyRange, setDailyRange] = useState<7 | 14 | 30>(7);
   const isDark = useIsDark();
+  const { t, i18n } = useTranslation('portfolio');
 
   const filteredData = mode === 'daily' ? data.slice(-dailyRange) : data;
 
@@ -46,7 +49,7 @@ export function ProfitChart({ data }: Props) {
     const lossColor = isDark ? '#ff5a68' : '#f23645';
 
     const series: echarts.SeriesOption[] = config.map(cfg => ({
-      name: cfg.name,
+      name: t(cfg.nameKey),
       type: 'line',
       data: filteredData.map(d => d[cfg.key as keyof AssetSnapshot] as number ?? 0),
       smooth: true,
@@ -123,12 +126,13 @@ export function ProfitChart({ data }: Props) {
       window.removeEventListener('resize', onResize);
       chart.dispose();
     };
-  }, [filteredData, mode, isDark]);
+    // 依赖里必须带 i18n.language：少了它切语言后 option 不重算，图例还是旧文案
+  }, [filteredData, mode, isDark, t, i18n.language]);
 
   if (data.length === 0) {
     return (
       <div className="w-full h-48 sm:h-56 flex items-center justify-center text-sm text-muted-foreground">
-        暂无历史数据，每日零点自动快照
+        {t('chart.noHistory')}
       </div>
     );
   }
@@ -146,7 +150,7 @@ export function ProfitChart({ data }: Props) {
                 dailyRange === d ? "bg-primary/15 text-primary" : "text-muted-foreground hover:text-foreground bg-muted/50"
               )}
             >
-              {d}天
+              {t('chart.range', { days: d })}
             </button>
           ))}
         </div>
@@ -158,7 +162,7 @@ export function ProfitChart({ data }: Props) {
               mode === 'cumulative' ? "bg-primary/15 text-primary" : "text-muted-foreground hover:text-foreground bg-muted/50"
             )}
           >
-            累计
+            {t('chart.cumulative')}
           </button>
           <button
             onClick={() => setMode('daily')}
@@ -167,7 +171,7 @@ export function ProfitChart({ data }: Props) {
               mode === 'daily' ? "bg-primary/15 text-primary" : "text-muted-foreground hover:text-foreground bg-muted/50"
             )}
           >
-            日收益
+            {t('cat.dailyProfit')}
           </button>
         </div>
       </div>

@@ -7,6 +7,7 @@
  * 时段用「相对交易日 D 的墙钟锚点」声明（见 MARKETS），代码把锚点放回**市场时区**
  * 解析成绝对时刻 —— 夏令时切换自动跟着走，不需要写死 UTC 偏移。
  */
+import i18n from '../i18n';
 
 export type SessionKind = 'pre' | 'open' | 'post' | 'overnight' | 'closed';
 export type MarketId = 'US' | 'KRX';
@@ -47,12 +48,13 @@ const MARKETS: Record<MarketId, MarketDef> = {
   },
 };
 
+/** 走 getter 现查词表：存成字面量的话切语言后不变（调用方直接读 .label/.liquidity，不改签名） */
 export const SESSION_META: Record<SessionKind, { label: string; liquidity: string }> = {
-  pre: { label: '盘前', liquidity: '高流动性' },
-  open: { label: '开盘', liquidity: '高流动性' },
-  post: { label: '盘后', liquidity: '中等流动性' },
-  overnight: { label: '夜盘', liquidity: '中等流动性' },
-  closed: { label: '非交易时段', liquidity: '低流动性' },
+  pre: { get label() { return i18n.t('market:session.pre'); }, get liquidity() { return i18n.t('market:session.liqHigh'); } },
+  open: { get label() { return i18n.t('market:session.open'); }, get liquidity() { return i18n.t('market:session.liqHigh'); } },
+  post: { get label() { return i18n.t('market:session.post'); }, get liquidity() { return i18n.t('market:session.liqMid'); } },
+  overnight: { get label() { return i18n.t('market:session.overnight'); }, get liquidity() { return i18n.t('market:session.liqMid'); } },
+  closed: { get label() { return i18n.t('market:session.closed'); }, get liquidity() { return i18n.t('market:session.liqLow'); } },
 };
 
 /** 图例展示顺序：按一天里的自然推进排，跟 anchors 的声明顺序无关 */
@@ -260,13 +262,17 @@ export function fmtMinOfDay(min: number): string {
   return `${String(Math.floor(min / 60) % 24).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`;
 }
 
-/** 剩余时长 → "5小时46分" / "46分" / "1天3小时" */
+/**
+ * 剩余时长 → "5时46分" / "46分" / "1天3时"，最多两级单位（调用方按分钟级刷新，不给秒）。
+ * 复用 common 的 duration 词条：中英两套的单位间距不一样（英文两级之间要空格），
+ * 拿"数字+单位"拼一定错一头，所以每种组合一条完整词条。
+ */
 export function fmtDuration(ms: number): string {
   const total = Math.max(0, Math.floor(ms / 60000));
   const d = Math.floor(total / 1440);
   const h = Math.floor((total % 1440) / 60);
   const m = total % 60;
-  if (d > 0) return `${d}天${h}小时`;
-  if (h > 0) return `${h}小时${m}分`;
-  return `${m}分`;
+  if (d > 0) return h > 0 ? i18n.t('duration.dh', { d, h }) : i18n.t('duration.d', { d });
+  if (h > 0) return m > 0 ? i18n.t('duration.hm', { h, m }) : i18n.t('duration.h', { h });
+  return i18n.t('duration.m', { m });
 }

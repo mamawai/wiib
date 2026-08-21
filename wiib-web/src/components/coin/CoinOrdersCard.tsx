@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { RefreshCw, ChevronLeft, ChevronRight, X } from 'lucide-react';
 import { cryptoOrderApi, futuresApi } from '../../api';
 import { useToast } from '../ui/use-toast';
@@ -9,41 +10,34 @@ import { Badge } from '../ui/badge';
 import { Skeleton } from '../ui/skeleton';
 import { fmtNum, fmtDateTime } from '../../lib/utils';
 import { formatCoinPrice } from '../../lib/coinConfig';
+import { orderSideView } from '../../lib/orderSide';
 import type { CryptoOrder, FuturesOrder, PageResult } from '../../types';
 
+// 筛选/状态表都存词表 key（模块常量拿不到 t，渲染时现查，切语言才跟着变）
 const ORDER_STATUS_FILTERS = [
-  { label: '全部', value: '' },
-  { label: '待成交', value: 'PENDING' },
-  { label: '已成交', value: 'FILLED' },
-  { label: '已取消', value: 'CANCELLED' },
+  { labelKey: 'common:all', value: '' },
+  { labelKey: 'status.pending', value: 'PENDING' },
+  { labelKey: 'status.filled', value: 'FILLED' },
+  { labelKey: 'status.cancelled', value: 'CANCELLED' },
 ];
 
 const FUTURES_ORDER_FILTERS = [
-  { label: '全部', value: '' },
-  { label: '待成交', value: 'PENDING' },
-  { label: '处理中', value: 'PROCESSING' },
-  { label: '已成交', value: 'FILLED' },
-  { label: '已取消', value: 'CANCELLED' },
+  { labelKey: 'common:all', value: '' },
+  { labelKey: 'status.pending', value: 'PENDING' },
+  { labelKey: 'status.processing', value: 'PROCESSING' },
+  { labelKey: 'status.filled', value: 'FILLED' },
+  { labelKey: 'status.cancelled', value: 'CANCELLED' },
 ];
 
-const FUTURES_SIDE_MAP: Record<string, { label: string; color: string }> = {
-  OPEN_LONG: { label: '多头开仓', color: 'text-gain' },
-  OPEN_SHORT: { label: '空头开仓', color: 'text-loss' },
-  CLOSE_LONG: { label: '多头平仓', color: 'text-loss' },
-  CLOSE_SHORT: { label: '空头平仓', color: 'text-gain' },
-  INCREASE_LONG: { label: '多头加仓', color: 'text-gain' },
-  INCREASE_SHORT: { label: '空头加仓', color: 'text-loss' },
-};
-
-const STATUS_MAP: Record<string, { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline' | 'success' | 'warning' }> = {
-  PENDING: { label: '待成交', variant: 'warning' },
-  TRIGGERED: { label: '已触发', variant: 'default' },
-  PROCESSING: { label: '处理中', variant: 'warning' },
-  FILLED: { label: '已成交', variant: 'success' },
-  CANCELLED: { label: '已取消', variant: 'secondary' },
-  LIQUIDATED: { label: '已强平', variant: 'destructive' },
-  STOP_LOSS: { label: '已止损', variant: 'warning' },
-  TAKE_PROFIT: { label: '已止盈', variant: 'success' },
+const STATUS_MAP: Record<string, { labelKey: string; variant: 'default' | 'secondary' | 'destructive' | 'outline' | 'success' | 'warning' }> = {
+  PENDING: { labelKey: 'status.pending', variant: 'warning' },
+  TRIGGERED: { labelKey: 'status.triggered', variant: 'default' },
+  PROCESSING: { labelKey: 'status.processing', variant: 'warning' },
+  FILLED: { labelKey: 'status.filled', variant: 'success' },
+  CANCELLED: { labelKey: 'status.cancelled', variant: 'secondary' },
+  LIQUIDATED: { labelKey: 'status.liquidated', variant: 'destructive' },
+  STOP_LOSS: { labelKey: 'status.stopLoss', variant: 'warning' },
+  TAKE_PROFIT: { labelKey: 'status.takeProfit', variant: 'success' },
 };
 
 /** 详情弹窗里的一行：标签左、值右 */
@@ -70,8 +64,19 @@ export function CoinOrdersCard({ symbol, mode, spotRefreshKey, futuresRefreshKey
   spotRefreshKey: number;
   futuresRefreshKey: number;
 }) {
+  const { t } = useTranslation(['trade', 'common']);
   const { toast } = useToast();
   const fmtPrice = (n?: number | null) => formatCoinPrice(symbol, n);
+  /** 状态徽标：认不出的状态原样显示后端值 */
+  const statusOf = (status: string) => {
+    const st = STATUS_MAP[status];
+    return st ? { label: t(st.labelKey), variant: st.variant } : { label: status, variant: 'outline' as const };
+  };
+  /** 方向：与首页最新成交、成交页同一份口径（orderSideView 自带语言感知与涨跌色） */
+  const sideOf = (orderSide: string) => {
+    const v = orderSideView(orderSide);
+    return { label: v.label, color: v.tone === 'buy' ? 'text-gain' : 'text-loss' };
+  };
 
   // 现货订单
   const [orderFilter, setOrderFilter] = useState('');
@@ -131,20 +136,20 @@ export function CoinOrdersCard({ symbol, mode, spotRefreshKey, futuresRefreshKey
   const handleCancel = async (orderId: number) => {
     try {
       await cryptoOrderApi.cancel(orderId);
-      toast('已取消', 'success');
+      toast(t('toast.cancelled'), 'success');
       fetchOrders(orderFilter, orderPage);
     } catch (e: unknown) {
-      toast((e as Error).message || '取消失败', 'error');
+      toast((e as Error).message || t('toast.cancelFailed'), 'error');
     }
   };
 
   const handleFuturesCancel = async (orderId: number) => {
     try {
       await futuresApi.cancel(orderId);
-      toast('已取消', 'success');
+      toast(t('toast.cancelled'), 'success');
       fetchFuturesOrders(futuresOrderFilter, futuresOrderPage);
     } catch (e: unknown) {
-      toast((e as Error).message || '取消失败', 'error');
+      toast((e as Error).message || t('toast.cancelFailed'), 'error');
     }
   };
 
@@ -156,8 +161,8 @@ export function CoinOrdersCard({ symbol, mode, spotRefreshKey, futuresRefreshKey
         {/* 手机上标题+5个筛选钮一行放不下：允许换行，筛选组自身也可换行 */}
         <div className="flex flex-wrap items-center justify-between gap-2">
           <CardTitle className="text-base flex items-center gap-2">
-            {isFutures ? '合约订单' : '订单'}
-            <button onClick={() => isFutures ? fetchFuturesOrders(futuresOrderFilter, futuresOrderPage) : fetchOrders(orderFilter, orderPage)} className="text-muted-foreground hover:text-foreground transition-colors" title="刷新">
+            {isFutures ? t('orders.titleFutures') : t('orders.titleSpot')}
+            <button onClick={() => isFutures ? fetchFuturesOrders(futuresOrderFilter, futuresOrderPage) : fetchOrders(orderFilter, orderPage)} className="text-muted-foreground hover:text-foreground transition-colors" title={t('common:refresh')}>
               <RefreshCw className={`w-3.5 h-3.5 ${(isFutures ? futuresOrdersLoading : ordersLoading) ? 'animate-spin' : ''}`} />
             </button>
           </CardTitle>
@@ -165,13 +170,13 @@ export function CoinOrdersCard({ symbol, mode, spotRefreshKey, futuresRefreshKey
             {isFutures ? (
               FUTURES_ORDER_FILTERS.map(f => (
                 <Button key={f.value} variant={futuresOrderFilter === f.value ? 'default' : 'ghost'} size="sm" className="h-9 sm:h-7 px-2.5 text-xs" onClick={() => { setFuturesOrderFilter(f.value); setFuturesOrderPage(1); }}>
-                  {f.label}
+                  {t(f.labelKey)}
                 </Button>
               ))
             ) : (
               ORDER_STATUS_FILTERS.map(f => (
                 <Button key={f.value} variant={orderFilter === f.value ? 'default' : 'ghost'} size="sm" className="h-9 sm:h-7 px-2.5 text-xs" onClick={() => { setOrderFilter(f.value); setOrderPage(1); }}>
-                  {f.label}
+                  {t(f.labelKey)}
                 </Button>
               ))
             )}
@@ -184,14 +189,14 @@ export function CoinOrdersCard({ symbol, mode, spotRefreshKey, futuresRefreshKey
           futuresOrdersLoading && futuresOrders.length === 0 ? (
             <div className="p-4"><Skeleton className="w-full h-32" /></div>
           ) : futuresOrders.length === 0 ? (
-            <div className="p-8 text-center text-sm text-muted-foreground">暂无合约订单</div>
+            <div className="p-8 text-center text-sm text-muted-foreground">{t('orders.emptyFutures')}</div>
           ) : (
             <>
               {/* 手机：紧凑行，点行看详情 */}
               <div className="sm:hidden divide-y divide-border/40">
                 {futuresOrders.map(o => {
-                  const sm = FUTURES_SIDE_MAP[o.orderSide] || { label: o.orderSide, color: 'text-foreground' };
-                  const st = STATUS_MAP[o.status] || { label: o.status, variant: 'outline' as const };
+                  const sm = sideOf(o.orderSide);
+                  const st = statusOf(o.status);
                   return (
                     <button
                       key={o.orderId}
@@ -216,28 +221,28 @@ export function CoinOrdersCard({ symbol, mode, spotRefreshKey, futuresRefreshKey
                 <table className="w-full min-w-[640px] text-xs">
                   <thead>
                     <tr className="border-b border-border/50 text-muted-foreground">
-                      <th className="text-left px-4 py-2.5 font-medium">时间</th>
-                      <th className="text-left px-2 py-2.5 font-medium">方向</th>
-                      <th className="text-left px-2 py-2.5 font-medium">类型</th>
-                      <th className="text-right px-2 py-2.5 font-medium">数量</th>
-                      <th className="text-right px-2 py-2.5 font-medium">杠杆</th>
-                      <th className="text-right px-2 py-2.5 font-medium">限价</th>
-                      <th className="text-right px-2 py-2.5 font-medium">成交价</th>
-                      <th className="text-right px-2 py-2.5 font-medium">盈亏</th>
-                      <th className="text-center px-2 py-2.5 font-medium">状态</th>
-                      <th className="text-center px-4 py-2.5 font-medium">操作</th>
+                      <th className="text-left px-4 py-2.5 font-medium">{t('col.time')}</th>
+                      <th className="text-left px-2 py-2.5 font-medium">{t('col.side')}</th>
+                      <th className="text-left px-2 py-2.5 font-medium">{t('col.type')}</th>
+                      <th className="text-right px-2 py-2.5 font-medium">{t('col.qty')}</th>
+                      <th className="text-right px-2 py-2.5 font-medium">{t('col.leverage')}</th>
+                      <th className="text-right px-2 py-2.5 font-medium">{t('col.limit')}</th>
+                      <th className="text-right px-2 py-2.5 font-medium">{t('col.fillPrice')}</th>
+                      <th className="text-right px-2 py-2.5 font-medium">{t('col.pnl')}</th>
+                      <th className="text-center px-2 py-2.5 font-medium">{t('col.status')}</th>
+                      <th className="text-center px-4 py-2.5 font-medium">{t('col.actions')}</th>
                     </tr>
                   </thead>
                   <tbody>
                     {futuresOrders.map(o => {
-                      const sm = FUTURES_SIDE_MAP[o.orderSide] || { label: o.orderSide, color: 'text-foreground' };
-                      const st = STATUS_MAP[o.status] || { label: o.status, variant: 'outline' as const };
+                      const sm = sideOf(o.orderSide);
+                      const st = statusOf(o.status);
                       const hasPnl = o.realizedPnl != null && o.realizedPnl !== 0;
                       return (
                         <tr key={o.orderId} className="border-b border-border/30 hover:bg-surface-hover transition-colors">
                           <td className="px-4 py-2.5 text-muted-foreground whitespace-nowrap">{fmtDateTime(o.createdAt)}</td>
                           <td className={`px-2 py-2.5 font-medium ${sm.color}`}>{sm.label}</td>
-                          <td className="px-2 py-2.5">{o.orderType === 'MARKET' ? '市价' : '限价'}</td>
+                          <td className="px-2 py-2.5">{o.orderType === 'MARKET' ? t('orderType.market') : t('orderType.limit')}</td>
                           <td className="px-2 py-2.5 text-right font-mono">{o.quantity}</td>
                           <td className="px-2 py-2.5 text-right font-mono">{o.leverage}x</td>
                           <td className="px-2 py-2.5 text-right font-mono">{o.limitPrice != null ? fmtPrice(o.limitPrice) : '-'}</td>
@@ -248,7 +253,7 @@ export function CoinOrdersCard({ symbol, mode, spotRefreshKey, futuresRefreshKey
                           <td className="px-2 py-2.5 text-center"><Badge variant={st.variant}>{st.label}</Badge></td>
                           <td className="px-4 py-2.5 text-center">
                             {o.status === 'PENDING' ? (
-                              <button onClick={() => handleFuturesCancel(o.orderId)} className="text-muted-foreground hover:text-loss transition-colors" title="取消"><X className="w-3.5 h-3.5 inline" /></button>
+                              <button onClick={() => handleFuturesCancel(o.orderId)} className="text-muted-foreground hover:text-loss transition-colors" title={t('common:cancel')}><X className="w-3.5 h-3.5 inline" /></button>
                             ) : <span className="text-muted-foreground/30">-</span>}
                           </td>
                         </tr>
@@ -259,7 +264,7 @@ export function CoinOrdersCard({ symbol, mode, spotRefreshKey, futuresRefreshKey
               </div>
               {futuresOrderPages > 1 && (
                 <div className="flex items-center justify-between px-4 py-3 border-t border-border/30">
-                  <span className="text-xs text-muted-foreground">共 {futuresOrderTotal} 条</span>
+                  <span className="text-xs text-muted-foreground">{t('orders.total', { total: futuresOrderTotal })}</span>
                   <div className="flex items-center gap-1">
                     <Button variant="ghost" size="sm" className="h-7 w-7 p-0" disabled={futuresOrderPage <= 1} onClick={() => setFuturesOrderPage(p => p - 1)}>
                       <ChevronLeft className="w-3.5 h-3.5" />
@@ -278,14 +283,14 @@ export function CoinOrdersCard({ symbol, mode, spotRefreshKey, futuresRefreshKey
           ordersLoading && orders.length === 0 ? (
             <div className="p-4"><Skeleton className="w-full h-32" /></div>
           ) : orders.length === 0 ? (
-            <div className="p-8 text-center text-sm text-muted-foreground">暂无订单</div>
+            <div className="p-8 text-center text-sm text-muted-foreground">{t('orders.emptySpot')}</div>
           ) : (
             <>
               {/* 手机：紧凑行，点行看详情 */}
               <div className="sm:hidden divide-y divide-border/40">
                 {orders.map(o => {
-                  const isBuy = o.orderSide === 'BUY';
-                  const st = STATUS_MAP[o.status] || { label: o.status, variant: 'outline' as const };
+                  const sm = sideOf(o.orderSide);
+                  const st = statusOf(o.status);
                   return (
                     <button
                       key={o.orderId}
@@ -293,8 +298,8 @@ export function CoinOrdersCard({ symbol, mode, spotRefreshKey, futuresRefreshKey
                       className="w-full flex items-center justify-between gap-3 px-4 py-3 text-left hover:bg-surface-hover transition-colors cursor-pointer"
                     >
                       <span className="min-w-0">
-                        <span className={`block text-xs font-bold ${isBuy ? 'text-gain' : 'text-loss'}`}>
-                          {isBuy ? '买入' : '卖出'}{o.leverage > 1 ? ` · ${o.leverage}x` : ''}
+                        <span className={`block text-xs font-bold ${sm.color}`}>
+                          {sm.label}{o.leverage > 1 ? ` · ${o.leverage}x` : ''}
                         </span>
                         <span className="block text-[10px] text-muted-foreground mt-0.5">{fmtDateTime(o.createdAt)}</span>
                       </span>
@@ -312,26 +317,26 @@ export function CoinOrdersCard({ symbol, mode, spotRefreshKey, futuresRefreshKey
                 <table className="w-full min-w-[560px] text-xs">
                   <thead>
                     <tr className="border-b border-border/50 text-muted-foreground">
-                      <th className="text-left px-4 py-2.5 font-medium">时间</th>
-                      <th className="text-left px-2 py-2.5 font-medium">方向</th>
-                      <th className="text-left px-2 py-2.5 font-medium">类型</th>
-                      <th className="text-right px-2 py-2.5 font-medium">数量</th>
-                      <th className="text-right px-2 py-2.5 font-medium">挂单价</th>
-                      <th className="text-right px-2 py-2.5 font-medium">触发价</th>
-                      <th className="text-right px-2 py-2.5 font-medium">金额</th>
-                      <th className="text-center px-2 py-2.5 font-medium">状态</th>
-                      <th className="text-center px-4 py-2.5 font-medium">操作</th>
+                      <th className="text-left px-4 py-2.5 font-medium">{t('col.time')}</th>
+                      <th className="text-left px-2 py-2.5 font-medium">{t('col.side')}</th>
+                      <th className="text-left px-2 py-2.5 font-medium">{t('col.type')}</th>
+                      <th className="text-right px-2 py-2.5 font-medium">{t('col.qty')}</th>
+                      <th className="text-right px-2 py-2.5 font-medium">{t('col.orderPrice')}</th>
+                      <th className="text-right px-2 py-2.5 font-medium">{t('col.triggerPrice')}</th>
+                      <th className="text-right px-2 py-2.5 font-medium">{t('col.amount')}</th>
+                      <th className="text-center px-2 py-2.5 font-medium">{t('col.status')}</th>
+                      <th className="text-center px-4 py-2.5 font-medium">{t('col.actions')}</th>
                     </tr>
                   </thead>
                   <tbody>
                     {orders.map(o => {
-                      const isBuy = o.orderSide === 'BUY';
-                      const st = STATUS_MAP[o.status] || { label: o.status, variant: 'outline' as const };
+                      const sm = sideOf(o.orderSide);
+                      const st = statusOf(o.status);
                       return (
                         <tr key={o.orderId} className="border-b border-border/30 hover:bg-surface-hover transition-colors">
                           <td className="px-4 py-2.5 text-muted-foreground whitespace-nowrap">{fmtDateTime(o.createdAt)}</td>
-                          <td className={`px-2 py-2.5 font-medium ${isBuy ? 'text-gain' : 'text-loss'}`}>{isBuy ? '买入' : '卖出'}</td>
-                          <td className="px-2 py-2.5">{o.orderType === 'MARKET' ? '市价' : '限价'}{o.leverage > 1 ? ` ${o.leverage}x` : ''}</td>
+                          <td className={`px-2 py-2.5 font-medium ${sm.color}`}>{sm.label}</td>
+                          <td className="px-2 py-2.5">{o.orderType === 'MARKET' ? t('orderType.market') : t('orderType.limit')}{o.leverage > 1 ? ` ${o.leverage}x` : ''}</td>
                           <td className="px-2 py-2.5 text-right font-mono">{o.quantity}</td>
                           <td className="px-2 py-2.5 text-right font-mono">{o.limitPrice != null ? fmtPrice(o.limitPrice) : '-'}</td>
                           <td className="px-2 py-2.5 text-right font-mono">{o.triggerPrice != null ? fmtPrice(o.triggerPrice) : '-'}</td>
@@ -339,7 +344,7 @@ export function CoinOrdersCard({ symbol, mode, spotRefreshKey, futuresRefreshKey
                           <td className="px-2 py-2.5 text-center"><Badge variant={st.variant}>{st.label}</Badge></td>
                           <td className="px-4 py-2.5 text-center">
                             {o.status === 'PENDING' ? (
-                              <button onClick={() => handleCancel(o.orderId)} className="text-muted-foreground hover:text-loss transition-colors" title="取消"><X className="w-3.5 h-3.5 inline" /></button>
+                              <button onClick={() => handleCancel(o.orderId)} className="text-muted-foreground hover:text-loss transition-colors" title={t('common:cancel')}><X className="w-3.5 h-3.5 inline" /></button>
                             ) : <span className="text-muted-foreground/30">-</span>}
                           </td>
                         </tr>
@@ -350,7 +355,7 @@ export function CoinOrdersCard({ symbol, mode, spotRefreshKey, futuresRefreshKey
               </div>
               {orderPages > 1 && (
                 <div className="flex items-center justify-between px-4 py-3 border-t border-border/30">
-                  <span className="text-xs text-muted-foreground">共 {orderTotal} 条</span>
+                  <span className="text-xs text-muted-foreground">{t('orders.total', { total: orderTotal })}</span>
                   <div className="flex items-center gap-1">
                     <Button variant="ghost" size="sm" className="h-7 w-7 p-0" disabled={orderPage <= 1} onClick={() => setOrderPage(p => p - 1)}>
                       <ChevronLeft className="w-3.5 h-3.5" />
@@ -370,34 +375,34 @@ export function CoinOrdersCard({ symbol, mode, spotRefreshKey, futuresRefreshKey
       {/* 手机端订单详情弹窗 */}
       <Dialog open={detail != null} onClose={() => setDetail(null)} className="max-w-sm">
         <DialogHeader>
-          <span className="text-sm font-bold">订单详情</span>
+          <span className="text-sm font-bold">{t('orders.detail')}</span>
         </DialogHeader>
         <DialogContent>
           {detail?.kind === 'futures' && (() => {
             const o = detail.o;
-            const sm = FUTURES_SIDE_MAP[o.orderSide] || { label: o.orderSide, color: 'text-foreground' };
-            const st = STATUS_MAP[o.status] || { label: o.status, variant: 'outline' as const };
+            const sm = sideOf(o.orderSide);
+            const st = statusOf(o.status);
             const hasPnl = o.realizedPnl != null && o.realizedPnl !== 0;
             return (
               <div className="pb-2">
-                <DRow k="时间" v={fmtDateTime(o.createdAt)} />
-                <DRow k="方向" v={<span className={sm.color}>{sm.label}</span>} />
-                <DRow k="类型" v={o.orderType === 'MARKET' ? '市价' : '限价'} />
-                <DRow k="数量" v={o.quantity} />
-                <DRow k="杠杆" v={`${o.leverage}x`} />
-                <DRow k="限价" v={o.limitPrice != null ? fmtPrice(o.limitPrice) : '-'} />
-                <DRow k="成交价" v={o.filledPrice != null ? fmtPrice(o.filledPrice) : '-'} />
-                <DRow k="盈亏" v={hasPnl
+                <DRow k={t('col.time')} v={fmtDateTime(o.createdAt)} />
+                <DRow k={t('col.side')} v={<span className={sm.color}>{sm.label}</span>} />
+                <DRow k={t('col.type')} v={o.orderType === 'MARKET' ? t('orderType.market') : t('orderType.limit')} />
+                <DRow k={t('col.qty')} v={o.quantity} />
+                <DRow k={t('col.leverage')} v={`${o.leverage}x`} />
+                <DRow k={t('col.limit')} v={o.limitPrice != null ? fmtPrice(o.limitPrice) : '-'} />
+                <DRow k={t('col.fillPrice')} v={o.filledPrice != null ? fmtPrice(o.filledPrice) : '-'} />
+                <DRow k={t('col.pnl')} v={hasPnl
                   ? <span className={o.realizedPnl! > 0 ? 'text-gain' : 'text-loss'}>{o.realizedPnl! > 0 ? '+' : ''}{fmtNum(o.realizedPnl!)}</span>
                   : '-'} />
-                <DRow k="状态" v={<Badge variant={st.variant}>{st.label}</Badge>} />
+                <DRow k={t('col.status')} v={<Badge variant={st.variant}>{st.label}</Badge>} />
                 {o.status === 'PENDING' && (
                   <Button
                     variant="destructive"
                     className="w-full mt-4"
                     onClick={async () => { await handleFuturesCancel(o.orderId); setDetail(null); }}
                   >
-                    撤销订单
+                    {t('orders.cancelOrder')}
                   </Button>
                 )}
               </div>
@@ -405,25 +410,25 @@ export function CoinOrdersCard({ symbol, mode, spotRefreshKey, futuresRefreshKey
           })()}
           {detail?.kind === 'spot' && (() => {
             const o = detail.o;
-            const isBuy = o.orderSide === 'BUY';
-            const st = STATUS_MAP[o.status] || { label: o.status, variant: 'outline' as const };
+            const sm = sideOf(o.orderSide);
+            const st = statusOf(o.status);
             return (
               <div className="pb-2">
-                <DRow k="时间" v={fmtDateTime(o.createdAt)} />
-                <DRow k="方向" v={<span className={isBuy ? 'text-gain' : 'text-loss'}>{isBuy ? '买入' : '卖出'}</span>} />
-                <DRow k="类型" v={`${o.orderType === 'MARKET' ? '市价' : '限价'}${o.leverage > 1 ? ` ${o.leverage}x` : ''}`} />
-                <DRow k="数量" v={o.quantity} />
-                <DRow k="挂单价" v={o.limitPrice != null ? fmtPrice(o.limitPrice) : '-'} />
-                <DRow k="触发价" v={o.triggerPrice != null ? fmtPrice(o.triggerPrice) : '-'} />
-                <DRow k="金额" v={o.filledAmount != null ? fmtNum(o.filledAmount) : '-'} />
-                <DRow k="状态" v={<Badge variant={st.variant}>{st.label}</Badge>} />
+                <DRow k={t('col.time')} v={fmtDateTime(o.createdAt)} />
+                <DRow k={t('col.side')} v={<span className={sm.color}>{sm.label}</span>} />
+                <DRow k={t('col.type')} v={`${o.orderType === 'MARKET' ? t('orderType.market') : t('orderType.limit')}${o.leverage > 1 ? ` ${o.leverage}x` : ''}`} />
+                <DRow k={t('col.qty')} v={o.quantity} />
+                <DRow k={t('col.orderPrice')} v={o.limitPrice != null ? fmtPrice(o.limitPrice) : '-'} />
+                <DRow k={t('col.triggerPrice')} v={o.triggerPrice != null ? fmtPrice(o.triggerPrice) : '-'} />
+                <DRow k={t('col.amount')} v={o.filledAmount != null ? fmtNum(o.filledAmount) : '-'} />
+                <DRow k={t('col.status')} v={<Badge variant={st.variant}>{st.label}</Badge>} />
                 {o.status === 'PENDING' && (
                   <Button
                     variant="destructive"
                     className="w-full mt-4"
                     onClick={async () => { await handleCancel(o.orderId); setDetail(null); }}
                   >
-                    撤销订单
+                    {t('orders.cancelOrder')}
                   </Button>
                 )}
               </div>

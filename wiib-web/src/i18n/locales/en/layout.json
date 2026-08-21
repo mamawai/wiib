@@ -1,0 +1,47 @@
+{
+  "nav": {
+    "home": "Home",
+    "markets": "Markets",
+    "portfolio": "Portfolio",
+    "ledger": "Ledger",
+    "ai": "AI",
+    "arena": "Arena",
+    "ranking": "Leaderboard",
+    "games": "Games",
+    "testnet": "Testnet",
+    "strategies": "Strategies",
+    "backtest": "Backtest",
+    "campaign": "Campaign",
+    "comments": "Comments",
+    "me": "Me"
+  },
+  "marketMenu": {
+    "stocks": "Stocks",
+    "crypto": "Crypto",
+    "commodity": "Commodities",
+    "tradfi": "TradFi futures"
+  },
+  "header": {
+    "logoHome": "Back to home",
+    "toLight": "Switch to light mode",
+    "toDark": "Switch to dark mode",
+    "login": "Log in"
+  },
+  "led": {
+    "ok": "OK",
+    "warn": "Degraded",
+    "down": "Disconnected",
+    "unknown": "Unknown"
+  },
+  "offline": "Network disconnected. Market data has stopped updating.",
+  "tour": {
+    "skip": "Skip tour",
+    "prev": "Previous",
+    "next": "Next",
+    "done": "Done"
+  },
+  "helpTip": "Help",
+  "toast": {
+    "close": "Close notification"
+  }
+}

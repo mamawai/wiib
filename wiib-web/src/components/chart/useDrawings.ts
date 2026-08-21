@@ -24,6 +24,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { CrosshairMode, type DeepPartial, type HandleScrollOptions, type IChartApi, type ISeriesApi } from 'lightweight-charts';
+import i18n from '../../i18n';
 import { DrawingLayer } from './DrawingLayer';
 import {
   coordToTime, DRAW_COLOR, finalizePoints, loadDrawings, magnetPrice, newId, PLACE_POINTS, saveDrawings,
@@ -89,6 +90,14 @@ export function useDrawings() {
   const touchRef = useRef<Touch | null>(null);
 
   useEffect(() => { magnetRef.current = magnet; }, [magnet]);
+
+  // 切语言后画布上的中文标签（止盈/止损/多空/根数）要重画：canvas 不跟 React 重渲染走，
+  // 而下面那些回调必须保持引用稳定（add/removeEventListener 要配对），词表不能进它们的依赖
+  useEffect(() => {
+    const redraw = () => liveRef.current?.layer.update();
+    i18n.on('languageChanged', redraw);
+    return () => { i18n.off('languageChanged', redraw); };
+  }, []);
 
   // 眼睛开关：同步图层 + 清选中都在事件回调里做（不进 effect，避免级联渲染）
   const setHiddenAllSync = useCallback((v: boolean) => {
@@ -193,7 +202,7 @@ export function useDrawings() {
   /** 中央"已完成"提示（触屏用）：淡入停留后自删，纯装饰不进 React 树 */
   const flashDone = useCallback((host: HTMLElement) => {
     const tip = document.createElement('div');
-    tip.textContent = '已完成';
+    tip.textContent = i18n.t('market:draw.done');
     Object.assign(tip.style, {
       position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%,-50%)',
       zIndex: '8', padding: '8px 18px', borderRadius: '10px',
@@ -514,7 +523,7 @@ export function useDrawings() {
     const L = live.layer;
     if (L.selectedId) { dropSelected(live); return; }
     if (!L.drawings.length) return;
-    if (!window.confirm(`清空 ${live.symbol} 的全部 ${L.drawings.length} 条画线？`)) return;
+    if (!window.confirm(i18n.t('market:draw.clearConfirm', { symbol: live.symbol, count: L.drawings.length }))) return;
     L.drawings = [];
     persist(live);
     L.update();

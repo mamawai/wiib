@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { ChevronRight, Flame } from 'lucide-react';
 import { futuresApi } from '../api';
 import { Skeleton } from './ui/skeleton';
@@ -11,6 +12,7 @@ const POLL_MS = 30_000;
 
 /** 首页爆仓入口卡：只带最新一条做点缀，整卡可点跳 /force-orders 全量页 */
 export function ForceOrdersCard() {
+  const { t } = useTranslation('home');
   // undefined=加载中 null=无记录
   const [latest, setLatest] = useState<ForceOrder | null | undefined>(undefined);
 
@@ -36,13 +38,13 @@ export function ForceOrdersCard() {
         <Flame className="w-4 h-4 text-loss" />
       </div>
       <div className="min-w-0 flex-1">
-        <div className="text-sm font-bold leading-none">爆仓动态</div>
+        <div className="text-sm font-bold leading-none">{t('force.title')}</div>
         {latest === undefined ? (
           <Skeleton className="h-3.5 w-44 mt-1.5" />
         ) : latest ? (
           <div className="flex items-center gap-1.5 text-xs text-muted-foreground mt-1.5 min-w-0">
             <span className={`font-medium px-1.5 py-px rounded shrink-0 ${isLongLiq ? 'bg-loss/10 text-loss' : 'bg-gain/10 text-gain'}`}>
-              {isLongLiq ? '多爆' : '空爆'}
+              {isLongLiq ? t('force.longLiq') : t('force.shortLiq')}
             </span>
             <span className="font-medium text-foreground shrink-0">{latest.symbol.replace('USDT', '')}</span>
             <span className="font-mono tabular-nums truncate">${formatCoinPrice(latest.symbol, latest.price)}</span>
@@ -52,11 +54,11 @@ export function ForceOrdersCard() {
             <span className="shrink-0 hidden sm:inline">{fmtDateTime(latest.tradeTime)}</span>
           </div>
         ) : (
-          <div className="text-xs text-muted-foreground mt-1.5">Binance 全网强平实时记录</div>
+          <div className="text-xs text-muted-foreground mt-1.5">{t('force.hint')}</div>
         )}
       </div>
       <span className="flex items-center gap-0.5 text-xs font-bold text-muted-foreground shrink-0">
-        查看全部 <ChevronRight className="w-3.5 h-3.5" />
+        {t('force.viewAll')} <ChevronRight className="w-3.5 h-3.5" />
       </span>
     </Link>
   );

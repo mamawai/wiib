@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Trans, useTranslation } from 'react-i18next';
 import {
   AlertTriangle, ArrowDownRight, ArrowUpRight, Bot, CheckCircle2, ChevronLeft, ChevronRight,
   CircleSlash, Crosshair, Gauge, History, Hourglass, Loader2, LogOut, Pause, Play,
@@ -22,17 +23,22 @@ const POLL_MS = 800;
 const ACCENT: Record<string, string> = {
   FIBO: '#F97316', LIQFADE: '#3b82f6', SQZMOM: '#a855f7', TURTLE: '#10b981',
 };
-/** 回放速度档：bar/秒（5m bar：120/s ≈ 10小时行情每秒） */
+/** 回放速度档：bar/秒（5m bar：120/s ≈ 10小时行情每秒）。表里存词表 key，渲染时现查 */
 const SPEEDS = [
-  { label: '慢', bps: 30 }, { label: '中', bps: 120 }, { label: '快', bps: 600 }, { label: '极速', bps: 3000 },
+  { labelKey: 'backtest.speed.slow', bps: 30 }, { labelKey: 'backtest.speed.normal', bps: 120 },
+  { labelKey: 'backtest.speed.fast', bps: 600 }, { labelKey: 'backtest.speed.turbo', bps: 3000 },
 ];
+/** 后端枚举 → 词表 key；认不出的原样显示后端值 */
 const REJECT_REASON: Record<string, string> = {
-  DIRECTIONAL: '方向失效', GAPPED_BEYOND_STOP: '跳空越过止损', RR_TOO_LOW: '盈亏比不足',
-  QTY_ZERO: '数量为 0', BALANCE_REJECTED: '余额不足', PRICE_INVALID: '价格无效',
+  DIRECTIONAL: 'backtest.reject.directional', GAPPED_BEYOND_STOP: 'backtest.reject.gappedBeyondStop',
+  RR_TOO_LOW: 'backtest.reject.rrTooLow', QTY_ZERO: 'backtest.reject.qtyZero',
+  BALANCE_REJECTED: 'backtest.reject.balanceRejected', PRICE_INVALID: 'backtest.reject.priceInvalid',
 };
 const EXIT_LABEL: Record<string, string> = {
-  SL: '止损', TP: '止盈', SIGNAL_CLOSE: '信号平仓', TIME_EXIT: '时间出场',
-  TIMEOUT: '超时', TRAILING_STOP: '追踪止损', FORCE_CLOSE: '收尾强平', LIQUIDATION: '强平',
+  SL: 'backtest.exit.sl', TP: 'backtest.exit.tp', SIGNAL_CLOSE: 'backtest.exit.signalClose',
+  TIME_EXIT: 'backtest.exit.timeExit', TIMEOUT: 'backtest.exit.timeout',
+  TRAILING_STOP: 'backtest.exit.trailingStop', FORCE_CLOSE: 'backtest.exit.forceClose',
+  LIQUIDATION: 'backtest.exit.liquidation',
 };
 
 const dayStartUtc = (yyyyMmDd: string) => Date.parse(`${yyyyMmDd}T00:00:00Z`);
@@ -42,44 +48,52 @@ const toDateInput = (ms: number) => new Date(ms).toISOString().slice(0, 10);
 
 /** 单条事件卡：类型定图标与色，正文一行主信息 + 一行细节 */
 function EventCard({ e, onJump }: { e: BacktestEvent; onJump: (barTimeMs: number) => void }) {
+  const { t } = useTranslation('strategy');
   const d: Record<string, unknown> = e.data;
   const num = (v: unknown) => (v == null ? '—' : fmtNum(Number(v)));
-  const sideText = (s: unknown) => (s === 'LONG' ? '多' : '空');
+  const sideText = (s: unknown) => (s === 'LONG' ? t('side.long') : t('side.short'));
   const sideCls = (s: unknown) => (s === 'LONG' ? 'text-gain' : 'text-loss');
+  /** 后端枚举先查词表，查不到原样吐后端值 */
+  const enumText = (map: Record<string, string>, v: unknown) => {
+    const raw = String(v);
+    return map[raw] ? t(map[raw]) : raw;
+  };
 
   let icon: React.ReactNode; let rail = 'bg-border'; let title: React.ReactNode; let detail: React.ReactNode = null;
   switch (e.type) {
     case 'TASK_START':
       icon = <Radar className="w-3.5 h-3.5 text-primary" />; rail = 'bg-primary';
-      title = <span className="font-bold">任务启动</span>;
-      detail = <>共 <b className="num">{String(d['bars'])}</b> 根 · 预热 <b className="num">{String(d['warmupBars'])}</b> 根 · 杠杆 <b className="num">{String(d['leverage'])}x</b></>;
+      title = <span className="font-bold">{t('backtest.ev.taskStart')}</span>;
+      detail = <Trans ns="strategy" i18nKey="backtest.ev.taskStartDetail"
+        values={{ bars: String(d['bars']), warmup: String(d['warmupBars']), leverage: String(d['leverage']) }}
+        components={[<b className="num" key="b" />, <b className="num" key="w" />, <b className="num" key="l" />]} />;
       break;
     case 'SIGNAL':
       icon = <Crosshair className="w-3.5 h-3.5 text-primary" />; rail = 'bg-primary';
       title = <>
-        <span className="font-bold">信号</span> {String(d['orderType'])}
+        <span className="font-bold">{t('backtest.ev.signal')}</span> {String(d['orderType'])}
         <b className={sideCls(d['side'])}> {sideText(d['side'])}</b> @ <b className="num">{num(d['entryRef'])}</b>
       </>;
       detail = <>SL <span className="num text-loss">{num(d['sl'])}</span> · TP <span className="num text-gain">{num(d['tp'])}</span>{d['reason'] != null && <> · {String(d['reason'])}</>}</>;
       break;
     case 'ORDER_CANCELLED':
       icon = <CircleSlash className="w-3.5 h-3.5 text-muted-foreground" />;
-      title = <span className="text-muted-foreground"><span className="font-bold">撤单</span> {String(d['orderType'])} {sideText(d['side'])} @ <span className="num">{num(d['entryRef'])}</span></span>;
+      title = <span className="text-muted-foreground"><span className="font-bold">{t('backtest.ev.cancelled')}</span> {String(d['orderType'])} {sideText(d['side'])} @ <span className="num">{num(d['entryRef'])}</span></span>;
       break;
     case 'ENTRY_FILL': {
       const long = d['side'] === 'LONG';
       icon = long ? <ArrowUpRight className="w-3.5 h-3.5 text-gain" /> : <ArrowDownRight className="w-3.5 h-3.5 text-loss" />;
       rail = long ? 'bg-gain' : 'bg-loss';
       title = <>
-        <span className="font-bold">进场</span>
+        <span className="font-bold">{t('backtest.ev.entry')}</span>
         <b className={sideCls(d['side'])}> {sideText(d['side'])} {String(d['leverage'])}x</b> @ <b className="num">{num(d['price'])}</b>
       </>;
-      detail = <>数量 <span className="num">{num(d['qty'])}</span> · {String(d['orderType'])} · SL <span className="num text-loss">{num(d['sl'])}</span> · TP <span className="num text-gain">{num(d['tp'])}</span></>;
+      detail = <>{t('backtest.ev.qty')} <span className="num">{num(d['qty'])}</span> · {String(d['orderType'])} · SL <span className="num text-loss">{num(d['sl'])}</span> · TP <span className="num text-gain">{num(d['tp'])}</span></>;
       break;
     }
     case 'ENTRY_REJECTED':
       icon = <AlertTriangle className="w-3.5 h-3.5 text-warning" />; rail = 'bg-warning';
-      title = <><span className="font-bold">拒单</span> · {REJECT_REASON[String(d['reason'])] ?? String(d['reason'])}</>;
+      title = <><span className="font-bold">{t('backtest.ev.rejected')}</span> · {enumText(REJECT_REASON, d['reason'])}</>;
       detail = <>{String(d['orderType'])} {sideText(d['side'])} @ <span className="num">{num(d['price'])}</span></>;
       break;
     case 'EXIT': {
@@ -88,20 +102,22 @@ function EventCard({ e, onJump }: { e: BacktestEvent; onJump: (barTimeMs: number
       icon = <LogOut className={cn('w-3.5 h-3.5', win ? 'text-gain' : 'text-loss')} />;
       rail = win ? 'bg-gain' : 'bg-loss';
       title = <>
-        <span className="font-bold">{EXIT_LABEL[String(d['reason'])] ?? String(d['reason'])}</span>
+        <span className="font-bold">{enumText(EXIT_LABEL, d['reason'])}</span>
         <b className={cn('num ml-1', win ? 'text-gain' : 'text-loss')}>{win ? '+' : ''}{fmtNum(pnl)}</b>
         {d['rMultiple'] != null && <span className="num text-muted-foreground"> ({Number(d['rMultiple']) >= 0 ? '+' : ''}{Number(d['rMultiple']).toFixed(2)}R)</span>}
       </>;
-      detail = <><span className="num">{num(d['entry'])}</span> → <span className="num">{num(d['exit'])}</span> · 持仓 <span className="num">{String(d['holdBars'])}</span> 根</>;
+      detail = <Trans ns="strategy" i18nKey="backtest.ev.exitDetail"
+        values={{ entry: num(d['entry']), exit: num(d['exit']), bars: String(d['holdBars']) }}
+        components={[<span className="num" key="i" />, <span className="num" key="o" />, <span className="num" key="h" />]} />;
       break;
     }
     case 'TASK_DONE':
       icon = <CheckCircle2 className="w-3.5 h-3.5 text-gain" />; rail = 'bg-gain';
-      title = <span className="font-bold">回测完成 · {String(d['totalTrades'])} 笔</span>;
+      title = <span className="font-bold">{t('backtest.ev.done', { count: Number(d['totalTrades']) })}</span>;
       break;
     case 'TASK_FAILED':
       icon = <XCircle className="w-3.5 h-3.5 text-loss" />; rail = 'bg-loss';
-      title = <span className="font-bold text-loss">回测失败</span>;
+      title = <span className="font-bold text-loss">{t('backtest.failed')}</span>;
       detail = <span className="text-loss/90 whitespace-normal break-all">{String(d['message'])}</span>;
       break;
     default:
@@ -145,6 +161,7 @@ function StatTile({ label, value, sub, tone }: {
 // ==================== 模式1面板 ====================
 
 export function StrategyBacktestPanel() {
+  const { t } = useTranslation('strategy');
   const { toast } = useToast();
 
   // ---- 配置 ----
@@ -265,7 +282,7 @@ export function StrategyBacktestPanel() {
         } catch (e) {
           // 任务不存在（服务重启）：清存档提示重跑
           if (!active) return;
-          toast((e as Error).message || '回测任务查询失败', 'error');
+          toast((e as Error).message || t('backtest.toast.pollFailed'), 'error');
           sessionStorage.removeItem(STORE_KEY);
           setTask(null);
           setStatus(null);
@@ -276,7 +293,7 @@ export function StrategyBacktestPanel() {
     })();
 
     return () => { active = false; };
-  }, [task, loadKlines, toast]);
+  }, [task, loadKlines, toast, t]);
 
   // ---- 回放 rAF ----
   useEffect(() => {
@@ -321,7 +338,7 @@ export function StrategyBacktestPanel() {
     const fromMs = dayStartUtc(fromDate);
     const toMs = dayStartUtc(toDate) + 86_400_000;   // 含结束日全天
     if (!Number.isFinite(fromMs) || !Number.isFinite(toMs) || fromMs >= toMs) {
-      toast('时间范围无效', 'error');
+      toast(t('backtest.toast.badRange'), 'error');
       return;
     }
     const bal = Number(balance) || 100000;
@@ -346,11 +363,11 @@ export function StrategyBacktestPanel() {
       sessionStorage.setItem(STORE_KEY, JSON.stringify({ taskId: tid, balance: bal }));
       setTask({ id: tid });
     } catch (e) {
-      toast((e as Error).message || '提交失败', 'error');
+      toast((e as Error).message || t('backtest.toast.submitFailed'), 'error');
     } finally {
       setSubmitting(false);
     }
-  }, [fromDate, toDate, balance, leverage, strategyId, symbol, toast]);
+  }, [fromDate, toDate, balance, leverage, strategyId, symbol, toast, t]);
 
   // ---- 跳转（事件卡/成交行 → 图表游标） ----
   const jumpToTime = useCallback((t: number) => {
@@ -367,13 +384,14 @@ export function StrategyBacktestPanel() {
   }, [result]);
 
   // ---- 图表通用标记：每笔 trade 拆成进场箭头 + 出场圆点 ----
-  const marks = useMemo<ChartTradeMark[]>(() => (result?.trades ?? []).flatMap(t => [
-    { barIndex: t.openBarIndex, time: t.openTime, side: t.side, kind: 'entry' as const },
+  // 循环变量避开 t：与 i18n 的 t 同名会遮蔽；依赖带 t，切语言时出场标记文字跟着换
+  const marks = useMemo<ChartTradeMark[]>(() => (result?.trades ?? []).flatMap(tr => [
+    { barIndex: tr.openBarIndex, time: tr.openTime, side: tr.side, kind: 'entry' as const },
     {
-      barIndex: t.closeBarIndex, time: t.closeTime, side: t.side, kind: 'exit' as const,
-      pnl: t.pnl, label: EXIT_LABEL[t.exitReason] ?? t.exitReason,
+      barIndex: tr.closeBarIndex, time: tr.closeTime, side: tr.side, kind: 'exit' as const,
+      pnl: tr.pnl, label: EXIT_LABEL[tr.exitReason] ? t(EXIT_LABEL[tr.exitReason]) : tr.exitReason,
     },
-  ]), [result]);
+  ]), [result, t]);
 
   // ---- 显示周期聚合：撮合/回放游标仍在 5m 空间，仅图表按所选周期展示 ----
   // 5m 时 aggregateBars 原样返回同引用，图表增量更新路径不受影响
@@ -445,7 +463,7 @@ export function StrategyBacktestPanel() {
         {/* 参数行 */}
         <div className="flex flex-wrap items-end gap-3">
           <div>
-            <div className="microlabel uppercase mb-1">币种</div>
+            <div className="microlabel uppercase mb-1">{t('backtest.form.symbol')}</div>
             <div className="flex rounded-md border border-border overflow-hidden">
               {['BTCUSDT', 'ETHUSDT'].map(sym => (
                 <button key={sym} type="button" disabled={busy}
@@ -458,25 +476,25 @@ export function StrategyBacktestPanel() {
             </div>
           </div>
           <div>
-            <div className="microlabel uppercase mb-1">开始日期</div>
+            <div className="microlabel uppercase mb-1">{t('backtest.form.from')}</div>
             <input type="date" value={fromDate} disabled={busy}
               onChange={e => setFromDate(e.target.value)}
               className="h-9 px-2.5 rounded-md border border-border bg-input text-xs num disabled:opacity-60" />
           </div>
           <div>
-            <div className="microlabel uppercase mb-1">结束日期</div>
+            <div className="microlabel uppercase mb-1">{t('backtest.form.to')}</div>
             <input type="date" value={toDate} disabled={busy}
               onChange={e => setToDate(e.target.value)}
               className="h-9 px-2.5 rounded-md border border-border bg-input text-xs num disabled:opacity-60" />
           </div>
           <div>
-            <div className="microlabel uppercase mb-1">初始资金</div>
+            <div className="microlabel uppercase mb-1">{t('backtest.form.balance')}</div>
             <input type="number" min={1} value={balance} disabled={busy}
               onChange={e => setBalance(e.target.value)}
               className="h-9 w-28 px-2.5 rounded-md border border-border bg-input text-xs num disabled:opacity-60" />
           </div>
           <div>
-            <div className="microlabel uppercase mb-1">杠杆</div>
+            <div className="microlabel uppercase mb-1">{t('backtest.form.leverage')}</div>
             <input type="number" min={1} max={100} value={leverage} disabled={busy}
               onChange={e => setLeverage(e.target.value)}
               className="h-9 w-16 px-2.5 rounded-md border border-border bg-input text-xs num disabled:opacity-60" />
@@ -492,7 +510,7 @@ export function StrategyBacktestPanel() {
             )}
           >
             {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
-            {queued ? '排队中…' : running ? '回测中…' : '跑回测'}
+            {queued ? t('backtest.run.queued') : running ? t('backtest.run.running') : t('backtest.run.start')}
           </button>
         </div>
 
@@ -500,7 +518,10 @@ export function StrategyBacktestPanel() {
         {queued && status && (
           <div className="flex items-center gap-2 rounded-md border border-border bg-card-2 px-3 py-2 text-[11px] text-muted-foreground">
             <Hourglass className="w-3.5 h-3.5 text-primary animate-pulse shrink-0" />
-            <span>排队中 · 第 <b className="num text-foreground">{status.queuePos}</b> 位 —— 相同参数的回测会直接复用结果，无需等待</span>
+            <span>
+              <Trans ns="strategy" i18nKey="backtest.queueHint" values={{ pos: status.queuePos }}
+                components={[<b className="num text-foreground" key="p" />]} />
+            </span>
           </div>
         )}
 
@@ -513,14 +534,14 @@ export function StrategyBacktestPanel() {
                 style={{ width: `${progressPct}%` }} />
             </div>
             <span className="text-[10px] num text-muted-foreground shrink-0">
-              {fmtNum(status.barsDone, 0)} / {fmtNum(status.totalBars, 0)} 根 · {progressPct}%
+              {t('backtest.progress', { done: fmtNum(status.barsDone, 0), total: fmtNum(status.totalBars, 0), pct: progressPct })}
             </span>
           </div>
         )}
         {status?.state === 'FAILED' && (
           <div className="flex items-start gap-2 rounded-md border border-loss/30 bg-loss/5 px-3 py-2 text-[11px] text-loss">
             <XCircle className="w-3.5 h-3.5 mt-px shrink-0" />
-            <span className="leading-snug">{status.error || '回测失败'}</span>
+            <span className="leading-snug">{status.error || t('backtest.failed')}</span>
           </div>
         )}
       </div>
@@ -539,7 +560,7 @@ export function StrategyBacktestPanel() {
                       onClick={() => {
                         if (o.min === ivMin) return;
                         setIvMin(o.min);
-                        if (bars.length > 0) toast(`已切换到 ${o.label}，回放将按 ${o.label} K线展示`, 'info');
+                        if (bars.length > 0) toast(t('backtest.toast.ivSwitched', { iv: o.label }), 'info');
                       }}
                       className={cn('px-1.5 h-6 text-[10px] font-bold transition-colors num',
                         ivMin === o.min ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground')}>
@@ -548,10 +569,10 @@ export function StrategyBacktestPanel() {
                   ))}
                 </div>
                 {cursorTime != null && (
-                  <span className="text-[10px] num text-primary font-bold">回放 @ {fmtDateTime(cursorTime)}</span>
+                  <span className="text-[10px] num text-primary font-bold">{t('backtest.replayAt', { time: fmtDateTime(cursorTime) })}</span>
                 )}
                 <span className="ml-auto text-[10px] text-muted-foreground num">
-                  {bars.length > 0 ? `${fmtNum(bars.length, 0)} 根已载入` : '等待K线…'}
+                  {bars.length > 0 ? t('backtest.barsLoaded', { bars: fmtNum(bars.length, 0) }) : t('backtest.waitingBars')}
                 </span>
               </div>
 
@@ -565,7 +586,7 @@ export function StrategyBacktestPanel() {
                     type="button"
                     onClick={() => setPlaying(p => !p)}
                     className="w-10 h-10 md:w-8 md:h-8 rounded-lg border border-border hover:bg-surface-hover flex items-center justify-center text-primary machined"
-                    aria-label={playing ? '暂停' : '播放'}
+                    aria-label={playing ? t('player.pause') : t('player.play')}
                   >
                     {playing ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
                   </button>
@@ -573,8 +594,8 @@ export function StrategyBacktestPanel() {
                     type="button"
                     onClick={() => { setPlaying(false); setCursor(null); }}
                     className="w-10 h-10 md:w-8 md:h-8 rounded-lg border border-border hover:bg-surface-hover flex items-center justify-center text-muted-foreground hover:text-primary"
-                    aria-label="复位到全量"
-                    title="复位到全量"
+                    aria-label={t('player.reset')}
+                    title={t('player.reset')}
                   >
                     <RotateCcw className="w-3.5 h-3.5" />
                   </button>
@@ -584,7 +605,7 @@ export function StrategyBacktestPanel() {
                       <button key={sp.bps} type="button" onClick={() => setSpeed(sp.bps)}
                         className={cn('px-2 h-7 rounded text-[10px] font-bold transition-colors',
                           speed === sp.bps ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground')}>
-                        {sp.label}
+                        {t(sp.labelKey)}
                       </button>
                     ))}
                   </div>
@@ -595,7 +616,7 @@ export function StrategyBacktestPanel() {
                     value={sliderCursor}
                     onChange={e => { setPlaying(false); setCursor(Number(e.target.value)); }}
                     className="flex-1 min-w-[120px] accent-(--color-primary)"
-                    aria-label="回放进度"
+                    aria-label={t('player.progress')}
                   />
                 </div>
               )}
@@ -604,7 +625,7 @@ export function StrategyBacktestPanel() {
             {/* 权益曲线 */}
             {equityPoints.length > 0 && (
               <div className="rounded-lg pt-card p-3 md:p-4">
-                <div className="microlabel uppercase mb-1">权益曲线（相对初始资金）</div>
+                <div className="microlabel uppercase mb-1">{t('backtest.equityTitle')}</div>
                 <EquityChart points={equityPoints} />
               </div>
             )}
@@ -614,8 +635,8 @@ export function StrategyBacktestPanel() {
           <div className="rounded-lg pt-card p-3 flex flex-col min-w-0 lg:max-h-[640px] max-h-[420px]">
             <div className="flex items-center gap-1.5 pb-2 border-b border-border/40 shrink-0">
               <ScrollText className="w-3.5 h-3.5 text-primary" />
-              <span className="text-[11px] font-black">策略工作记录</span>
-              <span className="ml-auto text-[10px] text-muted-foreground num">{visibleEvents.length} 条</span>
+              <span className="text-[11px] font-black">{t('backtest.timeline.title')}</span>
+              <span className="ml-auto text-[10px] text-muted-foreground num">{t('backtest.timeline.count', { count: visibleEvents.length })}</span>
             </div>
             <div
               ref={timelineRef}
@@ -628,7 +649,7 @@ export function StrategyBacktestPanel() {
               {visibleEvents.length === 0 ? (
                 <div className="flex flex-col items-center justify-center gap-2 py-12 text-muted-foreground">
                   <History className="w-5 h-5 opacity-60" />
-                  <span className="text-[11px]">等待事件…</span>
+                  <span className="text-[11px]">{t('backtest.timeline.waiting')}</span>
                 </div>
               ) : (
                 visibleEvents.map(e => <EventCard key={e.seq} e={e} onJump={jumpToTime} />)
@@ -641,21 +662,21 @@ export function StrategyBacktestPanel() {
       {/* ===== 汇总指标 ===== */}
       {s && (
         <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2.5">
-          <StatTile label="净利" tone={s.netProfit >= 0 ? 'gain' : 'loss'}
+          <StatTile label={t('backtest.stat.netProfit')} tone={s.netProfit >= 0 ? 'gain' : 'loss'}
             value={`${s.netProfit >= 0 ? '+' : ''}${fmtNum(s.netProfit)}`}
             sub={`${(s.returnPct * 100).toFixed(1)}%`} />
-          <StatTile label="胜率" tone={s.totalTrades > 0 ? (s.winRate >= 0.5 ? 'gain' : 'loss') : undefined}
+          <StatTile label={t('backtest.stat.winRate')} tone={s.totalTrades > 0 ? (s.winRate >= 0.5 ? 'gain' : 'loss') : undefined}
             value={s.totalTrades > 0 ? `${(s.winRate * 100).toFixed(1)}%` : '—'}
-            sub={`${s.wins}胜${s.losses}负`} />
-          <StatTile label="盈亏比 PF" value={s.profitFactor >= 9999 ? '∞' : s.profitFactor.toFixed(2)}
+            sub={t('backtest.stat.winLoss', { wins: s.wins, losses: s.losses })} />
+          <StatTile label={t('backtest.stat.pf')} value={s.profitFactor >= 9999 ? '∞' : s.profitFactor.toFixed(2)}
             sub={`Sharpe ${s.sharpeRatio.toFixed(2)}`} />
-          <StatTile label="最大回撤" tone="loss" value={`${(s.maxDrawdownPct * 100).toFixed(1)}%`} />
-          <StatTile label="平均 R" tone={s.avgR >= 0 ? 'gain' : 'loss'}
+          <StatTile label={t('backtest.stat.maxDd')} tone="loss" value={`${(s.maxDrawdownPct * 100).toFixed(1)}%`} />
+          <StatTile label={t('backtest.stat.avgR')} tone={s.avgR >= 0 ? 'gain' : 'loss'}
             value={`${s.avgR >= 0 ? '+' : ''}${s.avgR.toFixed(2)}`}
-            sub={`持仓 ${(s.avgHoldBars * 5 / 60).toFixed(1)}h`} />
-          <StatTile label="手续费" value={fmtNum(s.totalFees)} />
-          <StatTile label="交易笔数" value={s.totalTrades} />
-          <StatTile label="最终权益" tone={s.finalEquity >= balanceRef.current ? 'gain' : 'loss'}
+            sub={t('backtest.stat.hold', { hours: (s.avgHoldBars * 5 / 60).toFixed(1) })} />
+          <StatTile label={t('backtest.stat.fees')} value={fmtNum(s.totalFees)} />
+          <StatTile label={t('backtest.stat.trades')} value={s.totalTrades} />
+          <StatTile label={t('backtest.stat.finalEquity')} tone={s.finalEquity >= balanceRef.current ? 'gain' : 'loss'}
             value={fmtNum(s.finalEquity, 0)} />
         </div>
       )}
@@ -664,42 +685,43 @@ export function StrategyBacktestPanel() {
       {trades.length > 0 && (
         <div className="rounded-lg pt-card p-4 md:p-5 space-y-1">
           <div className="text-[11px] font-black text-muted-foreground tracking-wide flex items-center gap-1.5 pb-1">
-            <History className="w-3.5 h-3.5" /> 成交明细
-            <span className="ml-auto font-bold num">{trades.length} 笔</span>
+            <History className="w-3.5 h-3.5" /> {t('backtest.trades.title')}
+            <span className="ml-auto font-bold num">{t('backtest.trades.count', { count: trades.length })}</span>
           </div>
-          {pagedTrades.map((t: BacktestTrade, i: number) => {
-            const isLong = t.side === 'LONG';
-            const win = t.pnl >= 0;
+          {/* 循环变量避开 t：与 i18n 的 t 同名会遮蔽 */}
+          {pagedTrades.map((tr: BacktestTrade, i: number) => {
+            const isLong = tr.side === 'LONG';
+            const win = tr.pnl >= 0;
             return (
               <button
                 key={page * TRADES_PAGE + i}
                 type="button"
-                onClick={() => jumpToTime(t.closeTime)}
-                title="点击定位到图表"
+                onClick={() => jumpToTime(tr.closeTime)}
+                title={t('backtest.trades.jumpTip')}
                 className="w-full text-left flex items-center gap-2.5 py-2 px-2 -mx-2 rounded-lg text-[11px] border-b border-border/40 last:border-0 hover:bg-surface-hover/50 transition-colors"
               >
                 <span className={cn('w-1 self-stretch rounded-full shrink-0', isLong ? 'bg-gain' : 'bg-loss')} />
                 <div className="min-w-0 shrink-0">
                   <div className="font-bold leading-tight">
-                    <span className={cn('text-[10px] font-black', isLong ? 'text-gain' : 'text-loss')}>{isLong ? '多' : '空'}</span>
-                    <span className="ml-1 text-[10px] text-muted-foreground">{t.leverage}x</span>
+                    <span className={cn('text-[10px] font-black', isLong ? 'text-gain' : 'text-loss')}>{isLong ? t('side.long') : t('side.short')}</span>
+                    <span className="ml-1 text-[10px] text-muted-foreground">{tr.leverage}x</span>
                     <span className="ml-1.5 text-[9px] font-bold px-1 py-px rounded bg-muted text-muted-foreground">
-                      {EXIT_LABEL[t.exitReason] ?? t.exitReason}
+                      {EXIT_LABEL[tr.exitReason] ? t(EXIT_LABEL[tr.exitReason]) : tr.exitReason}
                     </span>
                   </div>
                   <div className="text-[10px] text-muted-foreground num leading-tight mt-0.5">
-                    {fmtNum(t.entryPrice)} → {fmtNum(t.exitPrice)}
+                    {fmtNum(tr.entryPrice)} → {fmtNum(tr.exitPrice)}
                   </div>
                 </div>
                 <div className="hidden sm:block text-[10px] text-muted-foreground num shrink-0">
-                  {fmtDateTime(t.openTime)}
+                  {fmtDateTime(tr.openTime)}
                 </div>
                 <div className="ml-auto text-right shrink-0">
                   <span className={cn('font-black num block leading-tight', win ? 'text-gain' : 'text-loss')}>
-                    {win ? '+' : ''}{fmtNum(t.pnl)}
+                    {win ? '+' : ''}{fmtNum(tr.pnl)}
                   </span>
                   <span className="text-[9px] text-muted-foreground/70 num leading-tight mt-0.5 block">
-                    {t.rMultiple != null ? `${t.rMultiple >= 0 ? '+' : ''}${Number(t.rMultiple).toFixed(2)}R · ` : ''}{((t.closeBarIndex - t.openBarIndex) * 5 / 60).toFixed(1)}h
+                    {tr.rMultiple != null ? `${tr.rMultiple >= 0 ? '+' : ''}${Number(tr.rMultiple).toFixed(2)}R · ` : ''}{((tr.closeBarIndex - tr.openBarIndex) * 5 / 60).toFixed(1)}h
                   </span>
                 </div>
               </button>
@@ -709,13 +731,13 @@ export function StrategyBacktestPanel() {
             <div className="flex items-center justify-center gap-3 pt-2">
               <button disabled={page === 0} onClick={() => setTradePage(page - 1)}
                 className="border border-border hover:bg-surface-hover w-8 h-8 rounded-lg flex items-center justify-center text-muted-foreground hover:text-primary disabled:opacity-40"
-                aria-label="上一页">
+                aria-label={t('pager.prev')}>
                 <ChevronLeft className="w-3.5 h-3.5" />
               </button>
               <span className="text-[11px] font-bold text-muted-foreground num">{page + 1} / {pageCount}</span>
               <button disabled={page >= pageCount - 1} onClick={() => setTradePage(page + 1)}
                 className="border border-border hover:bg-surface-hover w-8 h-8 rounded-lg flex items-center justify-center text-muted-foreground hover:text-primary disabled:opacity-40"
-                aria-label="下一页">
+                aria-label={t('pager.next')}>
                 <ChevronRight className="w-3.5 h-3.5" />
               </button>
             </div>

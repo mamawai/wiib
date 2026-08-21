@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { Trans, useTranslation } from 'react-i18next';
 import { Bot, KeyRound, Loader2, MessagesSquare, Pencil, Plus, Rocket, Sparkles, Star, Trash2, X } from 'lucide-react';
 import { llmEndpointApi, traderApi } from '../api';
 import { LlmEndpointForm, type LlmEndpointValue } from './LlmEndpointForm';
 import { LlmEndpointSelect } from './LlmEndpointSelect';
 import { Button } from './ui/button';
 import { useToast } from './ui/use-toast';
+import i18n from '../i18n';
 import { cn } from '../lib/utils';
 import type { LlmBindings, LlmEndpointView, LlmPurpose, TraderOwnerView } from '../types';
 
@@ -17,6 +19,7 @@ interface Usage { label: string; viaDefault: boolean; }
 /**
  * 计算每条端点的用途标签。绑定优先，没绑的用途落到默认端点；
  * 复盘教练不落库（复盘配置台每局现选），默认端点上标一条"复盘教练"提示它是缺省项。
+ * 标签在函数体里现查词表：存模块级常量的话切语言后它不会变。
  */
 function usagesOf(e: LlmEndpointView, bindings: LlmBindings, hasTrader: boolean): Usage[] {
   const out: Usage[] = [];
@@ -25,10 +28,10 @@ function usagesOf(e: LlmEndpointView, bindings: LlmBindings, hasTrader: boolean)
     if (bound === e.id) out.push({ label, viaDefault: false });
     else if (bound == null && fallbackToDefault && e.isDefault) out.push({ label, viaDefault: true });
   };
-  hit('CHAT_MAIN', '对话·主模型', true);
-  hit('CHAT_LIGHT', '对话·轻模型', false);   // 轻模型不绑=复用主模型，不算落到默认
-  if (hasTrader) hit('TRADER', '交易员', true);
-  if (e.isDefault) out.push({ label: '复盘教练', viaDefault: true });
+  hit('CHAT_MAIN', i18n.t('ai:model.usageChat'), true);
+  hit('CHAT_LIGHT', i18n.t('ai:model.usageChatLight'), false);   // 轻模型不绑=复用主模型，不算落到默认
+  if (hasTrader) hit('TRADER', i18n.t('ai:term.trader'), true);
+  if (e.isDefault) out.push({ label: i18n.t('ai:model.coach'), viaDefault: true });
   return out;
 }
 
@@ -39,6 +42,7 @@ function usagesOf(e: LlmEndpointView, bindings: LlmBindings, hasTrader: boolean)
  */
 export function ModelConfig() {
   const { toast } = useToast();
+  const { t } = useTranslation(['ai', 'common']);
   const [endpoints, setEndpoints] = useState<LlmEndpointView[]>([]);
   const [bindings, setBindings] = useState<LlmBindings>({});
   const [trader, setTrader] = useState<TraderOwnerView | null>(null);
@@ -78,11 +82,11 @@ export function ModelConfig() {
     try {
       if (editing?.id != null) await llmEndpointApi.update(editing.id, form);
       else await llmEndpointApi.create(form);
-      toast(editing?.id != null ? '端点已更新' : '端点已添加', 'success');
+      toast(editing?.id != null ? t('toast.endpointUpdated') : t('toast.endpointAdded'), 'success');
       setEditing(null);
       load();
     } catch (e) {
-      toast((e as Error).message || '保存失败', 'error');
+      toast((e as Error).message || t('toast.saveFailed'), 'error');
     } finally {
       setSaving(false);
     }
@@ -95,7 +99,7 @@ export function ModelConfig() {
       toast(okMsg, 'success');
       load();
     } catch (e) {
-      toast((e as Error).message || '操作失败', 'error');
+      toast((e as Error).message || t('toast.actionFailed'), 'error');
     } finally {
       setBusyId(null);
     }
@@ -103,9 +107,9 @@ export function ModelConfig() {
 
   const remove = (e: LlmEndpointView) => {
     const used = usagesOf(e, bindings, trader != null).map(u => u.label);
-    const warn = used.length ? `\n正在被 ${used.join(' / ')} 使用，删除后这些用途回落到默认端点。` : '';
-    if (!window.confirm(`删除端点「${e.name}」（${e.model}）？${warn}`)) return;
-    void run(e.id, () => llmEndpointApi.remove(e.id), '端点已删除');
+    const warn = used.length ? t('model.removeWarn', { used: used.join(' / ') }) : '';
+    if (!window.confirm(t('model.removeConfirm', { name: e.name, model: e.model, warn }))) return;
+    void run(e.id, () => llmEndpointApi.remove(e.id), t('toast.endpointRemoved'));
   };
 
   const bind = async (purpose: LlmPurpose, id: number | null) => {
@@ -117,7 +121,7 @@ export function ModelConfig() {
         return next;
       });
     } catch (e) {
-      toast((e as Error).message || '绑定失败', 'error');
+      toast((e as Error).message || t('toast.bindFailed'), 'error');
     }
   };
 
@@ -131,7 +135,7 @@ export function ModelConfig() {
   if (!loaded) {
     return (
       <div className="flex items-center gap-2 py-8 justify-center text-xs text-muted-foreground">
-        <Loader2 className="w-4 h-4 animate-spin" /> 加载配置...
+        <Loader2 className="w-4 h-4 animate-spin" /> {t('loadingConfig')}
       </div>
     );
   }
@@ -142,22 +146,21 @@ export function ModelConfig() {
       <div className="rounded-lg pt-card p-4 sm:p-5 space-y-3">
         <div className="flex items-center gap-2 flex-wrap">
           <KeyRound className="w-4 h-4 text-primary" />
-          <span className="text-sm font-black">模型端点（BYOK）</span>
-          <span className="text-[10px] text-muted-foreground">{endpoints.length} 条 · 费用记在你自己的账上，平台不经手</span>
+          <span className="text-sm font-black">{t('model.title')}</span>
+          <span className="text-[10px] text-muted-foreground">{t('model.count', { count: endpoints.length })}</span>
           <Button size="sm" className="ml-auto" onClick={startCreate} disabled={editing != null && editing.id == null}>
-            <Plus className="w-3.5 h-3.5 mr-1" /> 新增端点
+            <Plus className="w-3.5 h-3.5 mr-1" /> {t('model.add')}
           </Button>
         </div>
         <p className="text-[11px] text-muted-foreground">
-          一条端点 = 协议 + Base URL + API Key + 模型（+ 思考档位）。对话、交易员、复盘教练都从这里选；
-          没按用途指定的地方用「默认」那条——只配一条时它就是全局配置。同一个 key 想给不同地方用不同模型，就多建几条。
+          {t('model.intro')}
         </p>
 
         {endpoints.length === 0 && editing == null && (
           <div className="rounded-lg border border-dashed border-border bg-card-2/50 py-8 px-4 flex flex-col items-center gap-2.5 text-center">
             <Bot className="w-8 h-8 text-muted-foreground/50" />
-            <p className="text-xs text-muted-foreground">还没有端点——先加一条，对话 / 交易员 / 复盘教练就都能用了</p>
-            <Button size="sm" onClick={startCreate}><Plus className="w-3.5 h-3.5 mr-1" /> 新增端点</Button>
+            <p className="text-xs text-muted-foreground">{t('model.empty')}</p>
+            <Button size="sm" onClick={startCreate}><Plus className="w-3.5 h-3.5 mr-1" /> {t('model.add')}</Button>
           </div>
         )}
 
@@ -175,21 +178,23 @@ export function ModelConfig() {
                       <span className="text-[11px] num text-primary font-bold truncate">{e.model}</span>
                       {e.isDefault && (
                         <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-primary/10 text-primary flex items-center gap-1">
-                          <Star className="w-3 h-3" /> 默认
+                          <Star className="w-3 h-3" /> {t('model.default')}
                         </span>
                       )}
                     </div>
                     <div className="text-[10px] text-muted-foreground num truncate mt-0.5">
-                      {e.apiProtocol} · {e.baseUrl} · 档位 {e.reasoningEffort || '默认'} · key 尾号 {e.apiKeyTail}
+                      {e.apiProtocol} · {e.baseUrl} · {t('model.effortTail', {
+                        effort: e.reasoningEffort || t('effort.default'), tail: e.apiKeyTail,
+                      })}
                     </div>
                     {/* 用途：谁在用这条端点。经默认落上来的标"默认"，提醒改默认会连带影响 */}
                     <div className="flex items-center gap-1.5 flex-wrap mt-1.5">
                       {usages.length === 0
-                        ? <span className="text-[10px] text-muted-foreground/70">未被任何用途使用</span>
+                        ? <span className="text-[10px] text-muted-foreground/70">{t('model.unused')}</span>
                         : usages.map(u => (
                           <span key={u.label} className={cn('text-[10px] font-bold px-1.5 py-0.5 rounded',
                             u.viaDefault ? 'bg-muted text-muted-foreground' : 'bg-primary/10 text-primary')}>
-                            {u.label}{u.viaDefault ? '（默认）' : ''}
+                            {u.label}{u.viaDefault ? t('model.viaDefault') : ''}
                           </span>
                         ))}
                     </div>
@@ -197,17 +202,17 @@ export function ModelConfig() {
                   <div className="flex items-center gap-1 shrink-0">
                     {!e.isDefault && (
                       <button type="button" disabled={busyId === e.id}
-                        onClick={() => void run(e.id, () => llmEndpointApi.setDefault(e.id), `「${e.name}」已设为默认`)}
-                        title="设为默认：没按用途指定的地方都用它"
+                        onClick={() => void run(e.id, () => llmEndpointApi.setDefault(e.id), t('toast.setDefault', { name: e.name }))}
+                        title={t('model.setDefaultTitle')}
                         className="h-8 px-2 rounded-md border border-border text-[11px] font-bold text-muted-foreground hover:text-foreground hover:bg-surface-hover flex items-center gap-1 disabled:opacity-50">
-                        <Star className="w-3.5 h-3.5" /> 设为默认
+                        <Star className="w-3.5 h-3.5" /> {t('model.setDefault')}
                       </button>
                     )}
-                    <button type="button" onClick={() => (isEditing ? setEditing(null) : startEdit(e))} title="编辑"
+                    <button type="button" onClick={() => (isEditing ? setEditing(null) : startEdit(e))} title={t('common:edit')}
                       className="w-8 h-8 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-surface-hover flex items-center justify-center">
                       {isEditing ? <X className="w-3.5 h-3.5" /> : <Pencil className="w-3.5 h-3.5" />}
                     </button>
-                    <button type="button" onClick={() => remove(e)} disabled={busyId === e.id} title="删除"
+                    <button type="button" onClick={() => remove(e)} disabled={busyId === e.id} title={t('common:delete')}
                       className="w-8 h-8 rounded-md border border-border text-muted-foreground hover:text-loss hover:bg-surface-hover flex items-center justify-center disabled:opacity-50">
                       {busyId === e.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
                     </button>
@@ -225,9 +230,9 @@ export function ModelConfig() {
                       onTest={() => llmEndpointApi.test(form, e.id)}
                     />
                     <div className="flex justify-end gap-2">
-                      <Button size="sm" variant="outline" onClick={() => setEditing(null)}>取消</Button>
+                      <Button size="sm" variant="outline" onClick={() => setEditing(null)}>{t('common:cancel')}</Button>
                       <Button size="sm" disabled={saving} onClick={() => void save()}>
-                        {saving && <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" />} 保存
+                        {saving && <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" />} {t('common:save')}
                       </Button>
                     </div>
                   </div>
@@ -242,8 +247,8 @@ export function ModelConfig() {
           <div className="rounded-lg border border-primary/60 bg-card-2/50 p-3 space-y-3">
             <div className="flex items-center gap-2">
               <Plus className="w-3.5 h-3.5 text-primary" />
-              <span className="text-xs font-black">新增端点</span>
-              {endpoints.length === 0 && <span className="text-[10px] text-muted-foreground">第一条会自动成为默认</span>}
+              <span className="text-xs font-black">{t('model.add')}</span>
+              {endpoints.length === 0 && <span className="text-[10px] text-muted-foreground">{t('model.firstIsDefault')}</span>}
             </div>
             <LlmEndpointForm
               value={form}
@@ -252,9 +257,9 @@ export function ModelConfig() {
               onTest={() => llmEndpointApi.test(form)}
             />
             <div className="flex justify-end gap-2">
-              <Button size="sm" variant="outline" onClick={() => setEditing(null)}>取消</Button>
+              <Button size="sm" variant="outline" onClick={() => setEditing(null)}>{t('common:cancel')}</Button>
               <Button size="sm" disabled={saving} onClick={() => void save()}>
-                {saving && <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" />} 保存
+                {saving && <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" />} {t('common:save')}
               </Button>
             </div>
           </div>
@@ -265,51 +270,56 @@ export function ModelConfig() {
       <div className="rounded-lg pt-card p-4 sm:p-5 space-y-3">
         <div className="flex items-center gap-2">
           <MessagesSquare className="w-4 h-4 text-primary" />
-          <span className="text-sm font-black">谁用哪条</span>
+          <span className="text-sm font-black">{t('model.bindTitle')}</span>
         </div>
         <div className="grid sm:grid-cols-2 gap-3">
           <label className="space-y-1 text-xs">
-            <span className="text-muted-foreground font-bold flex items-center gap-1"><MessagesSquare className="w-3 h-3" /> 对话 · 主模型</span>
+            <span className="text-muted-foreground font-bold flex items-center gap-1"><MessagesSquare className="w-3 h-3" /> {t('model.chatMain')}</span>
             <LlmEndpointSelect endpoints={endpoints} value={bindings.CHAT_MAIN ?? null}
               onChange={id => void bind('CHAT_MAIN', id)} className="w-full" />
-            <span className="text-[10px] text-muted-foreground/70 block">研判对话的最终回答与对话里触发的深研判走它</span>
+            <span className="text-[10px] text-muted-foreground/70 block">{t('model.chatMainHint')}</span>
           </label>
           <label className="space-y-1 text-xs">
-            <span className="text-muted-foreground font-bold flex items-center gap-1"><MessagesSquare className="w-3 h-3" /> 对话 · 轻模型</span>
+            <span className="text-muted-foreground font-bold flex items-center gap-1"><MessagesSquare className="w-3 h-3" /> {t('model.chatLight')}</span>
             <LlmEndpointSelect endpoints={endpoints} value={bindings.CHAT_LIGHT ?? null}
               onChange={id => void bind('CHAT_LIGHT', id)} className="w-full"
-              followLabel={chatMain ? `同主模型（${chatMain.name} · ${chatMain.model}）` : '同主模型'} />
-            <span className="text-[10px] text-muted-foreground/70 block">调度、专家取数、历史压缩走它；挑条便宜的能省不少</span>
+              followLabel={chatMain
+                ? t('model.sameAsMain', { name: chatMain.name, model: chatMain.model })
+                : t('model.sameAsMainPlain')} />
+            <span className="text-[10px] text-muted-foreground/70 block">{t('model.chatLightHint')}</span>
           </label>
           <div className="space-y-1 text-xs">
-            <span className="text-muted-foreground font-bold flex items-center gap-1"><Rocket className="w-3 h-3" /> 交易员</span>
+            <span className="text-muted-foreground font-bold flex items-center gap-1"><Rocket className="w-3 h-3" /> {t('term.trader')}</span>
             {trader ? (
               <div className="h-9 rounded-lg border border-border bg-card-2 px-2.5 flex items-center gap-2 text-xs">
                 <span className="font-bold truncate">
-                  {traderEndpoint ? `${traderEndpoint.name} · ${traderEndpoint.model}` : '（无可用端点）'}
-                  {bindings.TRADER == null && traderEndpoint ? '（默认）' : ''}
+                  {traderEndpoint ? `${traderEndpoint.name} · ${traderEndpoint.model}` : t('model.noEndpoint')}
+                  {bindings.TRADER == null && traderEndpoint ? t('model.viaDefault') : ''}
                 </span>
-                <Link to="/my-trader" className="ml-auto text-primary font-bold hover:underline shrink-0">在我的交易员里改</Link>
+                <Link to="/my-trader" className="ml-auto text-primary font-bold hover:underline shrink-0">{t('model.editInMyTrader')}</Link>
               </div>
             ) : (
               <div className="h-9 rounded-lg border border-border bg-card-2 px-2.5 flex items-center text-xs text-muted-foreground">
-                还没有 AI 交易员，<Link to="/my-trader" className="text-primary font-bold hover:underline mx-1">去创建</Link>时再选
+                <Trans ns="ai" i18nKey="model.noTrader"
+                       components={[<Link to="/my-trader" className="text-primary font-bold hover:underline mx-1" />]} />
               </div>
             )}
-            <span className="text-[10px] text-muted-foreground/70 block">「{trader?.pub.name ?? '交易员'}」每次唤醒、每日复盘、同侪学习都烧这条</span>
+            <span className="text-[10px] text-muted-foreground/70 block">
+              {t('model.traderHint', { name: trader?.pub.name ?? t('term.trader') })}
+            </span>
           </div>
           <div className="space-y-1 text-xs">
-            <span className="text-muted-foreground font-bold flex items-center gap-1"><Sparkles className="w-3 h-3" /> 复盘教练</span>
+            <span className="text-muted-foreground font-bold flex items-center gap-1"><Sparkles className="w-3 h-3" /> {t('model.coach')}</span>
             <div className="h-9 rounded-lg border border-border bg-card-2 px-2.5 flex items-center text-xs text-muted-foreground">
-              每局开始前在回测页配置台现选，缺省用默认端点
+              {t('model.coachValue')}
             </div>
-            <span className="text-[10px] text-muted-foreground/70 block">手动复盘里的 AI 盘面提示与结算后评估</span>
+            <span className="text-[10px] text-muted-foreground/70 block">{t('model.coachHint')}</span>
           </div>
         </div>
       </div>
 
       <p className="text-[10px] text-muted-foreground/70 px-1">
-        行为分析由平台模型提供，不使用你的 key。
+        {t('model.behaviorNote')}
       </p>
     </div>
   );

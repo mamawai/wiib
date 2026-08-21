@@ -1,4 +1,5 @@
 import { NavLink, useNavigate, useLocation } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { useClickOutside } from '../hooks/useClickOutside';
 import { useState, useRef } from 'react';
 import { useUserStore } from '../stores/userStore';
@@ -6,6 +7,7 @@ import { useTheme } from '../hooks/useTheme';
 import { useSystemHealth, type HealthLevel } from '../hooks/useSystemHealth';
 import { Button } from './ui/button';
 import { NotificationBell } from './NotificationBell';
+import { LanguageSwitcher } from './LanguageSwitcher';
 import { TickerStrip } from './TickerStrip';
 import { OfflineBanner } from './OfflineBanner';
 import { ChatDock } from './workbench/ChatDock';
@@ -20,19 +22,22 @@ interface Props { children: React.ReactNode }
 
 const MARKET_PATHS = ['/bstock', '/coin', '/commodity', '/tradfi'];
 
-const LED_LABEL: Record<HealthLevel, string> = {
-  ok: '正常', warn: '降级', down: '断连', unknown: '未知',
+/** 模块级常量存 key 不存文案：存文案的话切语言不会变 */
+const LED_LABEL_KEY: Record<HealthLevel, string> = {
+  ok: 'led.ok', warn: 'led.warn', down: 'led.down', unknown: 'led.unknown',
 };
 
 /** 三服务状态灯组：feed(行情上游) / quant(量化) / sim(交易主进程)，悬停看明细 */
 function SystemLeds() {
   const { feed, quant, sim } = useSystemHealth();
+  const { t } = useTranslation('layout');
   const cls = (l: HealthLevel) =>
     l === 'ok' ? 'led' : l === 'warn' ? 'led led-warn' : l === 'down' ? 'led led-down' : 'led led-off';
   return (
     <div
       className="flex items-center gap-1.5 h-6 px-2.5 rounded-full border border-border bg-background"
-      title={`feed ${LED_LABEL[feed]} · quant ${LED_LABEL[quant]} · sim ${LED_LABEL[sim]}`}
+      // feed / quant / sim 是服务名，不翻
+      title={`feed ${t(LED_LABEL_KEY[feed])} · quant ${t(LED_LABEL_KEY[quant])} · sim ${t(LED_LABEL_KEY[sim])}`}
     >
       <span className={cls(feed)} />
       <span className={cls(quant)} />
@@ -61,6 +66,7 @@ export function Layout({ children }: Props) {
   const location = useLocation();
   const { user, token, logout } = useUserStore();
   const { toggleTheme, isDark } = useTheme();
+  const { t } = useTranslation('layout');
 
   const handleLogout = async () => { await logout(); navigate('/login'); };
   const isMarketActive = MARKET_PATHS.some(p => location.pathname === p || location.pathname.startsWith(p + '/'));
@@ -76,7 +82,7 @@ export function Layout({ children }: Props) {
             type="button"
             className="flex items-center gap-2 cursor-pointer shrink-0 focus-visible:outline-none"
             onClick={() => navigate('/')}
-            aria-label="返回首页"
+            aria-label={t('header.logoHome')}
             title="WhatIfIBought"
           >
             <TrendingUp className="w-4.5 h-4.5 text-primary" />
@@ -87,22 +93,22 @@ export function Layout({ children }: Props) {
 
           {/* Desktop Nav */}
           <nav className="hidden md:flex items-center gap-4 h-full whitespace-nowrap">
-            <HeaderNavItem to="/" label="首页" />
+            <HeaderNavItem to="/" label={t('nav.home')} />
             <MarketDropdown isActive={isMarketActive} />
-            <HeaderNavItem to="/portfolio" label="持仓" />
+            <HeaderNavItem to="/portfolio" label={t('nav.portfolio')} />
             {/* 账单：桌面端唯一入口（手机端在「我的」页里）。原先挂在持仓页当按钮，
                 资金流水跟持仓是两件事，藏在别的页面里找不着 */}
-            <HeaderNavItem to="/ledger" label="账单" />
-            <HeaderNavItem to="/ai" label="AI" />
-            <HeaderNavItem to="/arena" label="竞技场" />
-            <HeaderNavItem to="/ranking" label="排行" />
-            <HeaderNavItem to="/games" label="游戏" />
-            <HeaderNavItem to="/testnet" label="模拟盘" />
-            <HeaderNavItem to="/strategies" label="策略" />
-            <HeaderNavItem to="/backtest" label="回测" />
+            <HeaderNavItem to="/ledger" label={t('nav.ledger')} />
+            <HeaderNavItem to="/ai" label={t('nav.ai')} />
+            <HeaderNavItem to="/arena" label={t('nav.arena')} />
+            <HeaderNavItem to="/ranking" label={t('nav.ranking')} />
+            <HeaderNavItem to="/games" label={t('nav.games')} />
+            <HeaderNavItem to="/testnet" label={t('nav.testnet')} />
+            <HeaderNavItem to="/strategies" label={t('nav.strategies')} />
+            <HeaderNavItem to="/backtest" label={t('nav.backtest')} />
             {/* 活动：桌面端入口。手机端底部 Tab 只有 5 格且已满，收在「我的」页里 */}
-            <HeaderNavItem to="/campaign" label="活动" />
-            <HeaderNavItem to="/comments" label="留言" />
+            <HeaderNavItem to="/campaign" label={t('nav.campaign')} />
+            <HeaderNavItem to="/comments" label={t('nav.comments')} />
           </nav>
 
           {/* Actions */}
@@ -111,12 +117,14 @@ export function Layout({ children }: Props) {
 
             <GitHubLink className="hidden lg:inline-flex" />
 
+            <LanguageSwitcher />
+
             <Button
               variant="ghost"
               size="icon"
               onClick={toggleTheme}
               className="w-8 h-8"
-              aria-label={isDark ? '切换到亮色模式' : '切换到暗色模式'}
+              aria-label={isDark ? t('header.toLight') : t('header.toDark')}
             >
               {isDark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
             </Button>
@@ -134,7 +142,7 @@ export function Layout({ children }: Props) {
             ) : !token && (
               <Button size="sm" onClick={() => navigate('/login')}>
                 <LogIn className="w-3.5 h-3.5" />
-                登录
+                {t('header.login')}
               </Button>
             )}
           </div>
@@ -142,12 +150,13 @@ export function Layout({ children }: Props) {
           {/* 移动端右侧：GitHub + 主题切换，其余入口在底部 Tab 和「我的」页 */}
           <div className="flex md:hidden items-center ml-auto">
             <GitHubLink className="inline-flex" />
+            <LanguageSwitcher />
             <Button
               variant="ghost"
               size="icon"
               onClick={toggleTheme}
               className="w-8 h-8"
-              aria-label={isDark ? '切换到亮色模式' : '切换到暗色模式'}
+              aria-label={isDark ? t('header.toLight') : t('header.toDark')}
             >
               {isDark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
             </Button>
@@ -165,11 +174,11 @@ export function Layout({ children }: Props) {
 
       {/* ===== 移动端底部 Tab：贴边实条 ===== */}
       <nav className="fixed bottom-0 inset-x-0 md:hidden z-50 flex items-stretch border-t border-border bg-card pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]">
-        <BottomNavItem to="/" icon={<Home className="w-5 h-5" />} label="首页" />
-        <BottomNavItem to="/bstock" icon={<BarChart3 className="w-5 h-5" />} label="市场" forceActive={isMarketActive} />
-        <BottomNavItem to="/portfolio" icon={<Briefcase className="w-5 h-5" />} label="持仓" />
-        <BottomNavItem to="/me" icon={<User className="w-5 h-5" />} label="我的" />
-        <BottomNavItem to="/ai" icon={<Brain className="w-5 h-5" />} label="AI" />
+        <BottomNavItem to="/" icon={<Home className="w-5 h-5" />} label={t('nav.home')} />
+        <BottomNavItem to="/bstock" icon={<BarChart3 className="w-5 h-5" />} label={t('nav.markets')} forceActive={isMarketActive} />
+        <BottomNavItem to="/portfolio" icon={<Briefcase className="w-5 h-5" />} label={t('nav.portfolio')} />
+        <BottomNavItem to="/me" icon={<User className="w-5 h-5" />} label={t('nav.me')} />
+        <BottomNavItem to="/ai" icon={<Brain className="w-5 h-5" />} label={t('nav.ai')} />
       </nav>
 
       {/* 全站悬浮研判对话（BYOK）：对话要登录，游客不给气泡 */}
@@ -200,6 +209,7 @@ function HeaderNavItem({ to, label }: { to: string; label: string }) {
 function MarketDropdown({ isActive }: { isActive: boolean }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const { t } = useTranslation('layout');
 
   useClickOutside(ref, () => setOpen(false));
 
@@ -214,7 +224,7 @@ function MarketDropdown({ isActive }: { isActive: boolean }) {
             : "text-muted-foreground font-medium hover:text-foreground"
         )}
       >
-        市场
+        {t('nav.markets')}
         <ChevronDown className={cn("w-3.5 h-3.5 transition-transform", open && "rotate-180")} />
       </button>
 
@@ -222,10 +232,10 @@ function MarketDropdown({ isActive }: { isActive: boolean }) {
         // z-50 不能省：NumberFlow 的 transform 会创建层叠上下文，副条数字会盖到面板上
         <div className="absolute top-full left-0 mt-1 w-44 rounded-lg pt-card shadow-lg py-1 z-50 animate-in fade-in slide-in-from-top-2">
           {[
-            { to: '/bstock', icon: <List className="w-4 h-4" />, label: '股票' },
-            { to: '/coin', icon: <DollarSign className="w-4 h-4" />, label: '币种' },
-            { to: '/commodity', icon: <Gem className="w-4 h-4" />, label: '大宗商品' },
-            { to: '/tradfi', icon: <Globe className="w-4 h-4" />, label: 'TradFi 合约' },
+            { to: '/bstock', icon: <List className="w-4 h-4" />, label: t('marketMenu.stocks') },
+            { to: '/coin', icon: <DollarSign className="w-4 h-4" />, label: t('marketMenu.crypto') },
+            { to: '/commodity', icon: <Gem className="w-4 h-4" />, label: t('marketMenu.commodity') },
+            { to: '/tradfi', icon: <Globe className="w-4 h-4" />, label: t('marketMenu.tradfi') },
           ].map(({ to, icon, label }) => (
             <NavLink
               key={to}

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { walletApi } from '../api';
 import { useUserStore } from '../stores/userStore';
 import { useToast } from './ui/use-toast';
@@ -21,6 +22,7 @@ interface Props {
 
 /** 余额钱包 ⇌ 游戏钱包 双向划转弹窗，各页面共用 */
 export function WalletTransferModal({ open, onClose, onSuccess }: Props) {
+  const { t } = useTranslation(['trade', 'common']);
   const user = useUserStore(s => s.user);
   const fetchUser = useUserStore(s => s.fetchUser);
   const { toast } = useToast();
@@ -59,18 +61,21 @@ export function WalletTransferModal({ open, onClose, onSuccess }: Props) {
   // allowed=false 时禁提交，preview 还没回来不拦（后端最终还会兜底校验）
   const transferBlocked = toGame && preview != null && preview.restricted && !preview.allowed;
 
+  // 目标钱包名：toast、方向行、提交按钮共用一份
+  const targetWallet = toGame ? t('wallet.gameWallet') : t('wallet.balanceWallet');
+
   const handleSubmit = async () => {
     if (submitting || amt <= 0) return;
     setSubmitting(true);
     try {
       await walletApi.transfer(direction, amt);
-      toast(`已划转 ${fmtNum(amt)}，到账 ${fmtNum(receiveAmt)} 至${toGame ? '游戏钱包' : '余额钱包'}`, 'success');
+      toast(t('toast.transferOk', { amount: fmtNum(amt), received: fmtNum(receiveAmt), target: targetWallet }), 'success');
       setAmount('');
       await fetchUser();
       onSuccess?.();
       onClose();
     } catch (e: unknown) {
-      toast((e as Error).message || '划转失败', 'error');
+      toast((e as Error).message || t('toast.transferFailed'), 'error');
     } finally {
       setSubmitting(false);
     }
@@ -79,7 +84,7 @@ export function WalletTransferModal({ open, onClose, onSuccess }: Props) {
   return (
     <Dialog open={open} onClose={onClose}>
       <DialogHeader>
-        <h2 className="text-lg font-bold">钱包划转</h2>
+        <h2 className="text-lg font-bold">{t('wallet.title')}</h2>
       </DialogHeader>
       <DialogContent>
         <div className="space-y-4">
@@ -87,35 +92,37 @@ export function WalletTransferModal({ open, onClose, onSuccess }: Props) {
           <div className="flex items-stretch gap-2">
             <div className="relative flex-1 rounded-md border border-border bg-card-2 p-3 text-center">
               <span className={`absolute top-1.5 right-1.5 text-[9px] font-bold px-1.5 py-0.5 rounded-full ${toGame ? 'bg-primary/10 text-primary' : 'bg-gain/10 text-gain'}`}>
-                {toGame ? '转出' : '转入'}
+                {toGame ? t('wallet.out') : t('wallet.in')}
               </span>
               <div className="text-xs text-muted-foreground flex items-center justify-center gap-1">
-                <Wallet className="w-3 h-3" /> 余额钱包
+                <Wallet className="w-3 h-3" /> {t('wallet.balanceWallet')}
               </div>
               <div className="text-base font-bold tabular-nums mt-1">{fmtNum(balance)}</div>
             </div>
             <button
               onClick={() => setDirection(d => d === 'TO_GAME' ? 'TO_BALANCE' : 'TO_GAME')}
               className="self-center px-2 py-1.5 rounded-full border border-border bg-card hover:bg-surface-hover text-primary transition-colors flex flex-col items-center gap-0.5"
-              title="点击切换划转方向"
-              aria-label="切换划转方向"
+              title={t('wallet.switchDirTitle')}
+              aria-label={t('wallet.switchDir')}
             >
               {toGame ? <ArrowRight className="w-4 h-4" /> : <ArrowLeft className="w-4 h-4" />}
-              <span className="text-[9px] font-bold leading-none">换向</span>
+              <span className="text-[9px] font-bold leading-none">{t('wallet.flip')}</span>
             </button>
             <div className="relative flex-1 rounded-md border border-border bg-card-2 p-3 text-center">
               <span className={`absolute top-1.5 right-1.5 text-[9px] font-bold px-1.5 py-0.5 rounded-full ${toGame ? 'bg-gain/10 text-gain' : 'bg-primary/10 text-primary'}`}>
-                {toGame ? '转入' : '转出'}
+                {toGame ? t('wallet.in') : t('wallet.out')}
               </span>
               <div className="text-xs text-muted-foreground flex items-center justify-center gap-1">
-                <Gamepad2 className="w-3 h-3" /> 游戏钱包
+                <Gamepad2 className="w-3 h-3" /> {t('wallet.gameWallet')}
               </div>
               <div className="text-base font-bold tabular-nums mt-1">{fmtNum(gameBalance)}</div>
             </div>
           </div>
 
           <div className="text-xs text-muted-foreground text-center">
-            {toGame ? '余额钱包 → 游戏钱包' : '游戏钱包 → 余额钱包'}
+            {toGame
+              ? `${t('wallet.balanceWallet')} → ${t('wallet.gameWallet')}`
+              : `${t('wallet.gameWallet')} → ${t('wallet.balanceWallet')}`}
           </div>
 
           {/* 金额输入 + 全部（全部=源钱包全额，手续费从转出额里扣，不预留） */}
@@ -123,7 +130,7 @@ export function WalletTransferModal({ open, onClose, onSuccess }: Props) {
             <Input
               type="number"
               min={0}
-              placeholder="划转金额"
+              placeholder={t('wallet.amountPlaceholder')}
               value={amount}
               onChange={e => setAmount(e.target.value)}
               className="flex-1 text-right font-mono tabular-nums"
@@ -134,13 +141,13 @@ export function WalletTransferModal({ open, onClose, onSuccess }: Props) {
               className="h-11 px-4"
               onClick={() => setAmount(String(Math.floor(sourceBalance * 100) / 100))}
             >
-              全部
+              {t('wallet.max')}
             </Button>
           </div>
 
           {amt > 0 && (
             <div className="text-xs text-muted-foreground text-center tabular-nums">
-              手续费 1%：{fee.toFixed(2)} ｜ 到账：{receiveAmt.toFixed(2)}
+              {t('wallet.feeLine', { fee: fee.toFixed(2), received: receiveAmt.toFixed(2) })}
             </div>
           )}
 
@@ -149,12 +156,17 @@ export function WalletTransferModal({ open, onClose, onSuccess }: Props) {
             preview.allowed ? (
               <div className="rounded-md border border-border bg-card-2 p-3 space-y-1.5 text-xs">
                 <div className="flex justify-between">
-                  <span className="text-muted-foreground">划转后账户净值</span>
+                  <span className="text-muted-foreground">{t('wallet.equityAfter')}</span>
                   <span className="font-mono tabular-nums">{fmtNum(preview.equityAfter)}</span>
                 </div>
                 {preview.positions?.map(p => (
                   <div key={p.positionId} className="flex justify-between">
-                    <span className="text-muted-foreground">{p.symbol} {p.side === 'LONG' ? '多' : '空'} 新强平价</span>
+                    <span className="text-muted-foreground">
+                      {t('wallet.newLiq', {
+                        symbol: p.symbol,
+                        dir: p.side === 'LONG' ? t('sideShort.long') : t('sideShort.short'),
+                      })}
+                    </span>
                     <span className="font-mono tabular-nums text-yellow-500">
                       {p.estLiqPrice > 0 ? formatCoinPrice(p.symbol, p.estLiqPrice) : 'N/A'}
                     </span>
@@ -162,7 +174,7 @@ export function WalletTransferModal({ open, onClose, onSuccess }: Props) {
                 ))}
                 {preview.maxTransferable != null && (
                   <div className="flex justify-between items-center pt-1 border-t border-border/40">
-                    <span className="text-muted-foreground">最大可转</span>
+                    <span className="text-muted-foreground">{t('wallet.maxTransferable')}</span>
                     <button
                       type="button"
                       className="font-mono tabular-nums text-primary hover:underline underline-offset-2"
@@ -175,7 +187,7 @@ export function WalletTransferModal({ open, onClose, onSuccess }: Props) {
               </div>
             ) : (
               <div className="rounded-md border border-border bg-card-2 p-3 text-xs text-loss">
-                超出可用额度，余额已被全仓仓位占用，最多可转{' '}
+                {t('wallet.overLimit')}{' '}
                 <button
                   type="button"
                   className="font-mono tabular-nums text-primary hover:underline underline-offset-2"
@@ -189,13 +201,13 @@ export function WalletTransferModal({ open, onClose, onSuccess }: Props) {
         </div>
       </DialogContent>
       <DialogFooter>
-        <Button variant="ghost" size="sm" onClick={onClose}>取消</Button>
+        <Button variant="ghost" size="sm" onClick={onClose}>{t('common:cancel')}</Button>
         <Button
           size="sm"
           onClick={handleSubmit}
           disabled={submitting || amt <= 0 || amt > sourceBalance || transferBlocked}
         >
-          {submitting ? '划转中...' : `划转到${toGame ? '游戏钱包' : '余额钱包'}`}
+          {submitting ? t('wallet.submitting') : t('wallet.transferTo', { target: targetWallet })}
         </Button>
       </DialogFooter>
     </Dialog>

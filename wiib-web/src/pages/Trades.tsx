@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { publicTradeApi } from '../api';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
@@ -14,21 +15,23 @@ import type { PageResult, PublicTrade } from '../types';
 const PAGE_SIZE = 20;
 
 const SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'DOGEUSDT', 'XRPUSDT', 'BNBUSDT'] as const;
+// 静态数组存词表 key 不存文案，渲染时才 t()
 const KINDS = [
-  { value: undefined, label: '全部' },
-  { value: 'SPOT' as const, label: '现货' },
-  { value: 'FUTURES' as const, label: '合约' },
+  { key: 'all', value: undefined, labelKey: 'common:all' },
+  { key: 'spot', value: 'SPOT' as const, labelKey: 'trades.spot' },
+  { key: 'futures', value: 'FUTURES' as const, labelKey: 'trades.futures' },
 ];
 
 const EMPTY: PageResult<PublicTrade> = { records: [], total: 0, size: PAGE_SIZE, current: 1, pages: 0 };
 
 /** 假名胶囊。策略账户是机器人不是人，单独标出来比一串假名有信息量 */
 function Trader({ alias, isAi }: { alias: string; isAi: boolean }) {
+  const { t } = useTranslation('portfolio');
   if (isAi) {
     return (
       <span className="inline-flex items-center gap-1 text-[11px] font-medium px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
         <Bot className="w-3 h-3" />
-        AI 策略
+        {t('trades.aiTrader')}
       </span>
     );
   }
@@ -40,6 +43,8 @@ function Trader({ alias, isAi }: { alias: string; isAi: boolean }) {
 }
 
 function SideTag({ orderSide }: { orderSide: string }) {
+  // 方向词表在 labels ns（orderSideView 里查），这里订一份 t 只为切语言时跟着重渲染
+  useTranslation('labels');
   const { label, tone } = orderSideView(orderSide);
   return (
     <span className={cn(
@@ -53,6 +58,7 @@ function SideTag({ orderSide }: { orderSide: string }) {
 
 export function Trades() {
   const navigate = useNavigate();
+  const { t } = useTranslation(['portfolio', 'common']);
 
   const [symbol, setSymbol] = useState<string | undefined>(undefined);
   const [kind, setKind] = useState<'SPOT' | 'FUTURES' | undefined>(undefined);
@@ -75,7 +81,7 @@ export function Trades() {
   }, [requestKey, symbol, kind, page]);
 
   const records = result.records;
-  const go = (t: PublicTrade) => navigate(tradeHref(t.symbol));
+  const go = (row: PublicTrade) => navigate(tradeHref(row.symbol));
 
   return (
     <div className="page-shell p-4 md:p-6 space-y-4">
@@ -87,14 +93,11 @@ export function Trades() {
                 <span className="p-1.5 rounded-xl bg-primary/10 text-primary">
                   <Activity className="w-4 h-4" />
                 </span>
-                全站成交
+                {t('trades.title')}
               </CardTitle>
               <p className="flex items-start gap-1.5 text-xs text-muted-foreground leading-relaxed">
                 <Shield className="w-3.5 h-3.5 mt-0.5 shrink-0" />
-                <span>
-                  所有人的现货与合约成交，按时间倒序混排。交易明细照实展示，
-                  交易者只给一个固定代号——同一个代号是同一个人，但看不出是谁。
-                </span>
+                <span>{t('trades.desc')}</span>
               </p>
             </div>
             <Button
@@ -104,14 +107,14 @@ export function Trades() {
               onClick={() => setRefreshNonce(n => n + 1)}
             >
               <RefreshCw className={cn('w-4 h-4', loading && 'animate-spin')} />
-              刷新
+              {t('common:refresh')}
             </Button>
           </div>
 
           <div className="flex flex-wrap items-center gap-1.5 pt-1">
             {KINDS.map(k => (
               <button
-                key={k.label}
+                key={k.key}
                 onClick={() => { setKind(k.value); setPage(1); }}
                 className={cn(
                   'px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors',
@@ -120,7 +123,7 @@ export function Trades() {
                     : 'bg-card border-border text-foreground hover:bg-surface-hover',
                 )}
               >
-                {k.label}
+                {t(k.labelKey)}
               </button>
             ))}
             <span className="w-px h-5 bg-border mx-1" />
@@ -133,7 +136,7 @@ export function Trades() {
                   : 'bg-card border-border text-foreground hover:bg-surface-hover',
               )}
             >
-              全币种
+              {t('trades.allSymbols')}
             </button>
             {SYMBOLS.map(s => (
               <button
@@ -160,7 +163,7 @@ export function Trades() {
               {[...Array(8)].map((_, i) => <Skeleton key={i} className="h-14 w-full rounded-lg" />)}
             </div>
           ) : records.length === 0 ? (
-            <EmptyState icon={<Activity />} text="该条件下暂无成交" />
+            <EmptyState icon={<Activity />} text={t('trades.empty')} />
           ) : (
             <>
               {/* 桌面：表格 */}
@@ -168,40 +171,40 @@ export function Trades() {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-border/50 text-muted-foreground">
-                      <th className="px-5 py-3 text-left font-bold">时间</th>
-                      <th className="px-4 py-3 text-left font-bold">交易者</th>
-                      <th className="px-4 py-3 text-left font-bold">标的</th>
-                      <th className="px-4 py-3 text-left font-bold">方向</th>
-                      <th className="px-4 py-3 text-right font-bold">成交价</th>
-                      <th className="px-4 py-3 text-right font-bold">数量</th>
-                      <th className="px-5 py-3 text-right font-bold">成交额</th>
+                      <th className="px-5 py-3 text-left font-bold">{t('field.time')}</th>
+                      <th className="px-4 py-3 text-left font-bold">{t('field.trader')}</th>
+                      <th className="px-4 py-3 text-left font-bold">{t('field.symbol')}</th>
+                      <th className="px-4 py-3 text-left font-bold">{t('field.side')}</th>
+                      <th className="px-4 py-3 text-right font-bold">{t('field.price')}</th>
+                      <th className="px-4 py-3 text-right font-bold">{t('field.qty')}</th>
+                      <th className="px-5 py-3 text-right font-bold">{t('field.amount')}</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {records.map(t => (
+                    {records.map(row => (
                       <tr
-                        key={`${t.kind}-${t.tradeId}`}
-                        onClick={() => go(t)}
+                        key={`${row.kind}-${row.tradeId}`}
+                        onClick={() => go(row)}
                         className="border-b border-border/30 hover:bg-accent/30 transition-colors cursor-pointer"
                       >
                         <td className="px-5 py-3 num text-xs text-muted-foreground whitespace-nowrap">
-                          {fmtDateTime(t.createdAt, true)}
+                          {fmtDateTime(row.createdAt, true)}
                         </td>
-                        <td className="px-4 py-3"><Trader alias={t.alias} isAi={t.isAi} /></td>
+                        <td className="px-4 py-3"><Trader alias={row.alias} isAi={row.isAi} /></td>
                         <td className="px-4 py-3">
-                          <span className="font-bold">{tradeSymbolName(t.symbol)}</span>
-                          {t.kind === 'FUTURES' && (
-                            <span className="ml-1.5 text-[10px] text-muted-foreground">合约</span>
+                          <span className="font-bold">{tradeSymbolName(row.symbol)}</span>
+                          {row.kind === 'FUTURES' && (
+                            <span className="ml-1.5 text-[10px] text-muted-foreground">{t('trades.futures')}</span>
                           )}
                         </td>
-                        <td className="px-4 py-3"><SideTag orderSide={t.orderSide} /></td>
+                        <td className="px-4 py-3"><SideTag orderSide={row.orderSide} /></td>
                         <td className="px-4 py-3 text-right num font-bold">
-                          {formatCoinPrice(t.symbol, t.filledPrice)}
+                          {formatCoinPrice(row.symbol, row.filledPrice)}
                         </td>
                         <td className="px-4 py-3 text-right num text-muted-foreground">
-                          {fmtNum(t.quantity, 4)}
+                          {fmtNum(row.quantity, 4)}
                         </td>
-                        <td className="px-5 py-3 text-right num font-bold">${fmtNum(t.filledAmount)}</td>
+                        <td className="px-5 py-3 text-right num font-bold">${fmtNum(row.filledAmount)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -210,29 +213,29 @@ export function Trades() {
 
               {/* 手机：卡片列表 */}
               <div className="md:hidden divide-y divide-border/30">
-                {records.map(t => (
+                {records.map(row => (
                   <button
-                    key={`${t.kind}-${t.tradeId}`}
+                    key={`${row.kind}-${row.tradeId}`}
                     type="button"
-                    onClick={() => go(t)}
+                    onClick={() => go(row)}
                     className="w-full text-left px-4 py-3 space-y-2 hover:bg-accent/30 active:bg-accent/50 transition-colors"
                   >
                     <div className="flex items-center justify-between gap-2">
                       <div className="flex items-center gap-1.5 min-w-0">
-                        <SideTag orderSide={t.orderSide} />
-                        <span className="font-bold text-[13px] truncate">{tradeSymbolName(t.symbol)}</span>
-                        {t.kind === 'FUTURES' && (
-                          <span className="text-[10px] text-muted-foreground shrink-0">合约</span>
+                        <SideTag orderSide={row.orderSide} />
+                        <span className="font-bold text-[13px] truncate">{tradeSymbolName(row.symbol)}</span>
+                        {row.kind === 'FUTURES' && (
+                          <span className="text-[10px] text-muted-foreground shrink-0">{t('trades.futures')}</span>
                         )}
                       </div>
-                      <span className="num text-[13px] font-bold shrink-0">${fmtNum(t.filledAmount)}</span>
+                      <span className="num text-[13px] font-bold shrink-0">${fmtNum(row.filledAmount)}</span>
                     </div>
                     <div className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
-                      <Trader alias={t.alias} isAi={t.isAi} />
+                      <Trader alias={row.alias} isAi={row.isAi} />
                       <span className="num">
-                        {fmtNum(t.quantity, 4)} @ {formatCoinPrice(t.symbol, t.filledPrice)}
+                        {fmtNum(row.quantity, 4)} @ {formatCoinPrice(row.symbol, row.filledPrice)}
                       </span>
-                      <span className="num shrink-0">{fmtDateTime(t.createdAt)}</span>
+                      <span className="num shrink-0">{fmtDateTime(row.createdAt)}</span>
                     </div>
                   </button>
                 ))}
@@ -240,7 +243,9 @@ export function Trades() {
 
               <div className="flex items-center justify-between px-4 py-3 border-t border-border/30">
                 <span className="text-xs text-muted-foreground">
-                  第 {result.current} / {Math.max(result.pages, 1)} 页 · 共 {result.total} 笔
+                  {t('pager.page', { page: result.current, pages: Math.max(result.pages, 1) })}
+                  {' · '}
+                  {t('trades.total', { count: result.total })}
                 </span>
                 <div className="flex items-center gap-1">
                   <Button

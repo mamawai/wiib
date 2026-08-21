@@ -1,5 +1,6 @@
 import { fmtNum } from '../lib/utils';
 import { useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ArrowLeftRight } from 'lucide-react';
 import { Button } from './ui/button';
 
@@ -31,6 +32,8 @@ function compact(n: number): string {
 }
 
 export function PortfolioWallet({ totalAssets, balance, gameBalance, username, assets, ready = true, onTransfer }: Props) {
+  const { t } = useTranslation('portfolio');
+
   const cards = useMemo(() => {
     type C = {
       key: string; name: string; label: string;
@@ -43,7 +46,7 @@ export function PortfolioWallet({ totalAssets, balance, gameBalance, username, a
     const balanceCard: C = {
       key: 'balance',
       name: username,
-      label: '余额钱包',
+      label: t('overview.balanceWallet'),
       detail: 'USDT',
       masked: `≈ ${compact(balance)}`,
       full: fmtNum(balance),
@@ -54,7 +57,7 @@ export function PortfolioWallet({ totalAssets, balance, gameBalance, username, a
     const gameCard: C = {
       key: 'game',
       name: 'GAME',
-      label: '游戏钱包',
+      label: t('overview.gameWallet'),
       detail: 'USDT',
       masked: `≈ ${compact(gameBalance)}`,
       full: fmtNum(gameBalance),
@@ -64,7 +67,7 @@ export function PortfolioWallet({ totalAssets, balance, gameBalance, username, a
     const assetCards: C[] = assets.slice(0, 1).map(a => ({
       key: a.name,
       name: a.name,
-      label: '总持仓',
+      label: t('wallet.totalPosition'),
       detail: a.count,
       masked: `≈ ${compact(a.value)}`,
       full: fmtNum(a.value),
@@ -73,7 +76,7 @@ export function PortfolioWallet({ totalAssets, balance, gameBalance, username, a
     }));
 
     return [...assetCards, gameCard, balanceCard];
-  }, [assets, balance, gameBalance, username]);
+  }, [assets, balance, gameBalance, username, t]);
 
   const count = cards.length;
   const stackGap = Math.min(25, Math.max(15, Math.floor(75 / Math.max(count - 1, 1))));
@@ -169,7 +172,7 @@ export function PortfolioWallet({ totalAssets, balance, gameBalance, username, a
               <div className="balance-stars">******</div>
               <div className="balance-real">{fmtNum(totalAssets)}</div>
             </div>
-            <div style={{ color: '#698263', fontSize: 12, fontWeight: 500 }}>总资产</div>
+            <div style={{ color: '#698263', fontSize: 12, fontWeight: 500 }}>{t('overview.totalAssets')}</div>
             <div className="eye-icon-wrapper">
               <svg
                 className="eye-icon eye-slash"
@@ -196,7 +199,7 @@ export function PortfolioWallet({ totalAssets, balance, gameBalance, username, a
       {onTransfer && (
         <Button variant="outline" size="sm" onClick={onTransfer}>
           <ArrowLeftRight className="w-3.5 h-3.5" />
-          划转
+          {t('wallet.transfer')}
         </Button>
       )}
     </div>

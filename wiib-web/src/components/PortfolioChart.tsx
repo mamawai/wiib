@@ -1,5 +1,6 @@
 import * as echarts from 'echarts';
 import { useEffect, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { getCoin } from '../lib/coinConfig';
 import { useIsDark } from '../hooks/useIsDark';
 
@@ -32,10 +33,14 @@ interface Props {
 export function PortfolioChart({ cryptoPositions = [], bstockRows = [], futuresRows = [], balance, gameBalance = 0 }: Props) {
   const chartRef = useRef<HTMLDivElement>(null);
   const isDark = useIsDark();
+  const { t, i18n } = useTranslation('portfolio');
 
   useEffect(() => {
     if (!chartRef.current) return;
     const chart = echarts.init(chartRef.current, isDark ? 'dark' : 'light');
+
+    // 扇区名同时是 tooltip 里认游戏钱包的判据，先取出来，别在 formatter 里再查一次
+    const gameWalletName = t('overview.gameWallet');
 
     const data = [
       ...cryptoPositions
@@ -65,8 +70,8 @@ export function PortfolioChart({ cryptoPositions = [], bstockRows = [], futuresR
             itemStyle: { color: coin.chartColor },
           };
         }),
-      { name: '余额钱包', value: balance, itemStyle: { color: '#22c55e' } },
-      ...(gameBalance > 0 ? [{ name: '游戏钱包', value: gameBalance, itemStyle: { color: '#d946ef' } }] : [])
+      { name: t('overview.balanceWallet'), value: balance, itemStyle: { color: '#22c55e' } },
+      ...(gameBalance > 0 ? [{ name: gameWalletName, value: gameBalance, itemStyle: { color: '#d946ef' } }] : [])
     ];
 
     const textColor = isDark ? '#878b96' : '#71737b'; // muted-foreground token
@@ -81,8 +86,8 @@ export function PortfolioChart({ cryptoPositions = [], bstockRows = [], futuresR
         textStyle: { color: isDark ? '#eceef0' : '#17181a' },
         formatter: (params: { marker: string; name: string; value: number; percent: number }) => {
            // 游戏钱包计入总资产但不能直接下单交易，tooltip 里说清楚免得误解
-           const note = params.name === '游戏钱包'
-             ? '<br/><span style="font-size:0.8em;opacity:0.7">不可直接交易，需划转至余额钱包</span>' : '';
+           const note = params.name === gameWalletName
+             ? `<br/><span style="font-size:0.8em;opacity:0.7">${t('chart.gameWalletNote')}</span>` : '';
            return `${params.marker}${params.name}<br/>
                    <span style="font-weight:bold; font-size:1.1em">${params.value.toFixed(2)}</span> (${params.percent}%)${note}`;
         }
@@ -98,7 +103,7 @@ export function PortfolioChart({ cryptoPositions = [], bstockRows = [], futuresR
       },
       series: [
         {
-          name: '资产分布',
+          name: t('chart.assetAllocation'),
           type: 'pie',
           radius: ['45%', '70%'],
           center: ['50%', '42%'],
@@ -140,7 +145,8 @@ export function PortfolioChart({ cryptoPositions = [], bstockRows = [], futuresR
       window.removeEventListener('resize', onResize);
       chart.dispose();
     };
-  }, [cryptoPositions, bstockRows, futuresRows, balance, gameBalance, isDark]);
+    // 依赖里必须带 i18n.language：少了它切语言后 option 不重算，图上还是旧文案
+  }, [cryptoPositions, bstockRows, futuresRows, balance, gameBalance, isDark, t, i18n.language]);
 
   return <div ref={chartRef} className="w-full h-56 sm:h-64 transition-colors duration-300" />;
 }

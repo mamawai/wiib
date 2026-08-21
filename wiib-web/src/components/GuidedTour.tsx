@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import { cn } from '../lib/utils';
@@ -32,6 +33,8 @@ export function GuidedTour({ steps, open, onClose }: {
   const [target, setTarget] = useState<HTMLElement | null>(null);
   const [bubble, setBubble] = useState<HTMLDivElement | null>(null);
   const scrolledFor = useRef<string>('');
+  // 壳文案归本组件；步骤 title/body 由调用方翻好了传进来
+  const { t } = useTranslation('layout');
 
   const step = steps[idx];
   const pos = useAnchoredPosition(target, bubble, open && rect != null, 'bottom', 12);
@@ -64,12 +67,12 @@ export function GuidedTour({ steps, open, onClose }: {
     }
     // rAF 而非直接调：effect 体内同步 setState 会被判为级联渲染
     const raf = requestAnimationFrame(measure);
-    const t = window.setTimeout(measure, 400); // 等平滑滚动落定再校一次
+    const settle = window.setTimeout(measure, 400); // 等平滑滚动落定再校一次
     window.addEventListener('resize', measure);
     window.addEventListener('scroll', measure, true);
     return () => {
       cancelAnimationFrame(raf);
-      window.clearTimeout(t);
+      window.clearTimeout(settle);
       window.removeEventListener('resize', measure);
       window.removeEventListener('scroll', measure, true);
     };
@@ -146,7 +149,7 @@ export function GuidedTour({ steps, open, onClose }: {
       >
         <div className="flex items-start gap-2">
           <span className="text-xs font-extrabold flex-1">{step.title}</span>
-          <button onClick={close} aria-label="跳过引导"
+          <button onClick={close} aria-label={t('tour.skip')}
                   className="text-muted-foreground hover:text-foreground shrink-0">
             <X className="w-3.5 h-3.5" />
           </button>
@@ -158,12 +161,12 @@ export function GuidedTour({ steps, open, onClose }: {
             {idx > 0 && (
               <button onClick={() => setIdx(i => i - 1)}
                       className="border border-border hover:bg-surface-hover rounded-lg px-2.5 py-1 text-[11px] font-bold text-muted-foreground">
-                上一步
+                {t('tour.prev')}
               </button>
             )}
             <button onClick={next}
                     className="border border-primary/60 bg-card-2 text-primary hover:bg-surface-hover rounded-lg px-2.5 py-1 text-[11px] font-bold">
-              {idx >= steps.length - 1 ? '完成' : '下一步'}
+              {idx >= steps.length - 1 ? t('tour.done') : t('tour.next')}
             </button>
           </div>
         </div>

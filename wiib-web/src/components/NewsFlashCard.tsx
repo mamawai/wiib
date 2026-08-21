@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Newspaper, ExternalLink } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Skeleton } from './ui/skeleton';
@@ -15,6 +16,7 @@ function fmtTime(t: string): string {
  * 数据走 quant 侧内存缓存（未过期不打上游），前端 60s 轻轮询。
  */
 export function NewsFlashCard() {
+  const { t } = useTranslation('home');
   const [items, setItems] = useState<NewsFlashItem[] | null>(null);
 
   useEffect(() => {
@@ -32,7 +34,7 @@ export function NewsFlashCard() {
       <CardHeader className="pb-2">
         <CardTitle className="flex items-center gap-2">
           <Newspaper className="w-3.5 h-3.5 text-primary" />
-          实时快讯
+          {t('news.title')}
           <span className="led ml-1" />
         </CardTitle>
       </CardHeader>
@@ -42,7 +44,7 @@ export function NewsFlashCard() {
             {Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-8" />)}
           </div>
         ) : items.length === 0 ? (
-          <div className="py-10 text-center text-sm text-muted-foreground">暂无快讯</div>
+          <div className="py-10 text-center text-sm text-muted-foreground">{t('news.empty')}</div>
         ) : (
           // overflow-x-hidden + break-words：正文全文展示后，长链接/无空格长串不能把卡顶出横向滚动条
           <div className="max-h-96 overflow-y-auto overflow-x-hidden -mx-1 px-1">

@@ -1,6 +1,7 @@
 import { fmtNum, fmtDateTime, fmtTime } from '../lib/utils';
 import { HelpTip } from '../components/HelpTip';
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import * as echarts from 'echarts';
 import { predictionApi } from '../api';
 import { useUserStore } from '../stores/userStore';
@@ -92,6 +93,7 @@ function fmtCountdown(sec: number): string {
 }
 
 export function Prediction() {
+  const { t, i18n } = useTranslation(['community', 'common']);
   const user = useUserStore(s => s.user);
   const fetchUser = useUserStore(s => s.fetchUser);
   const isDark = useIsDark();
@@ -243,7 +245,7 @@ export function Prediction() {
           ]) },
           markLine: startPrice != null ? {
             silent: true, symbol: 'none',
-            data: [{ yAxis: startPrice, lineStyle: { color: '#666', type: 'dashed', width: 1 }, label: { formatter: '目标价: $' + fmtNum(startPrice), fontSize: 10, position: 'insideStartTop', color: '#888' } }]
+            data: [{ yAxis: startPrice, lineStyle: { color: '#666', type: 'dashed', width: 1 }, label: { formatter: t('prediction.chartTarget', { price: fmtNum(startPrice) }), fontSize: 10, position: 'insideStartTop', color: '#888' } }]
           } : undefined,
         },
         {
@@ -261,7 +263,8 @@ export function Prediction() {
         return `${fmtTime(arr[0].data[0], true)}<br/><b>$${fmtNum(arr[0].data[1])}</b>`;
       }},
     }, false);
-  }, [priceHistory, round?.startPrice, isDark]);
+    // 依赖带 i18n.language：切语言后 option 要重算，否则目标价那条线的标签还留着上一门语言
+  }, [priceHistory, round?.startPrice, isDark, t, i18n.language]);
 
   useEffect(() => () => {
     chartInst.current?.dispose();
@@ -274,41 +277,44 @@ export function Prediction() {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
+  // UP / DOWN 是盘口方向代号，只有露给人看的地方换成"看涨 / 看跌"
+  const sideLabel = side === 'UP' ? t('prediction.up') : t('prediction.down');
+
   const handleBuy = async () => {
     const amt = parseFloat(amount);
-    if (!amt || amt <= 0) { toast('请输入有效金额', 'error'); return; }
+    if (!amt || amt <= 0) { toast(t('prediction.toast.enterAmount'), 'error'); return; }
     setSubmitting(true);
     try {
       await predictionApi.buy({ side, amount: amt });
-      toast(`买入 ${side === 'UP' ? '看涨' : '看跌'} 成功`, 'success');
+      toast(t('prediction.toast.buyOk', { side: sideLabel }), 'success');
       setAmount('');
       fetchBets();
       fetchUser();
       fetchRound();
     } catch (e: unknown) {
-      toast((e as Error).message || '买入失败', 'error');
+      toast((e as Error).message || t('prediction.toast.buyFailed'), 'error');
     } finally { setSubmitting(false); }
   };
 
   const handleSell = async (betId: number) => {
     try {
       await predictionApi.sell(betId);
-      toast('已卖出', 'success');
+      toast(t('prediction.toast.sold'), 'success');
       fetchBets();
       fetchUser();
     } catch (e: unknown) {
-      toast((e as Error).message || '卖出失败', 'error');
+      toast((e as Error).message || t('prediction.toast.sellFailed'), 'error');
     }
   };
 
   const handleSellSide = async () => {
     const target = parseFloat(shares) || 0;
-    if (target <= 0) { toast('请输入卖出份数', 'error'); return; }
+    if (target <= 0) { toast(t('prediction.toast.enterShares'), 'error'); return; }
     const activeBets = bets.filter(b => b.status === 'ACTIVE' && b.side === side);
-    if (activeBets.length === 0) { toast('暂无持仓', 'error'); return; }
+    if (activeBets.length === 0) { toast(t('prediction.toast.noPosition'), 'error'); return; }
     const available = activeBets.reduce((sum, b) => sum + parseFloat(String(b.contracts ?? 0)), 0);
     if (target > available + 1e-8) {
-      toast(`最多可卖出 ${available.toFixed(2)} 份`, 'error');
+      toast(t('prediction.toast.maxSellable', { qty: available.toFixed(2) }), 'error');
       return;
     }
     setSubmitting(true);
@@ -322,12 +328,12 @@ export function Prediction() {
         await predictionApi.sell(bet.id, sellContracts);
         remaining -= sellContracts;
       }
-      toast(`卖出 ${side === 'UP' ? '看涨' : '看跌'} 成功`, 'success');
+      toast(t('prediction.toast.sellOk', { side: sideLabel }), 'success');
       setShares('');
       fetchBets();
       fetchUser();
     } catch (e: unknown) {
-      toast((e as Error).message || '卖出失败', 'error');
+      toast((e as Error).message || t('prediction.toast.sellFailed'), 'error');
     } finally { setSubmitting(false); }
   };
 
@@ -359,7 +365,7 @@ export function Prediction() {
 
       <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-600 dark:text-amber-400 text-xs font-bold">
         <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
-        新玩法测试中 — 预测BTC 5分钟涨跌，基于 polymarket.com 实时数据 手续费等相关费用收取可能会不同
+        {t('prediction.beta')}
       </div>
 
       {/* ── Hero: 标题 + 倒计时 + 价格 + 图表 ── */}
@@ -372,14 +378,14 @@ export function Prediction() {
                 <span className="text-lg font-black text-amber-500">B</span>
               </div>
               <div>
-                <h1 className="text-base font-bold leading-tight">BTC 5分钟涨跌预测</h1>
+                <h1 className="text-base font-bold leading-tight">{t('prediction.title')}</h1>
                 <span className="text-[10px] text-muted-foreground font-mono">
                   5min &middot; {round?.windowStart ?? Math.floor((Date.now() + serverClockOffsetMs) / 1000 / WINDOW_SECONDS) * WINDOW_SECONDS}
                 </span>
               </div>
             </div>
             <div className="flex items-center gap-3">
-              {round?.status === 'LOCKED' && <Badge variant="outline" className="text-amber-500 border-amber-500/50 text-[10px] px-1.5 py-0">已锁定</Badge>}
+              {round?.status === 'LOCKED' && <Badge variant="outline" className="text-amber-500 border-amber-500/50 text-[10px] px-1.5 py-0">{t('prediction.locked')}</Badge>}
               <div className="flex items-center gap-1.5">
                 <Clock className={`w-3.5 h-3.5 text-muted-foreground ${countdownColor}`} />
                 <RollingNumber value={fmtCountdown(countdown)} className={`font-mono text-xl font-black tabular-nums ${countdownColor}`} />
@@ -408,8 +414,8 @@ export function Prediction() {
             </div>
             <span className="px-2.5 py-1 rounded bg-muted text-xs font-bold font-mono tabular-nums text-muted-foreground flex items-center gap-1">
               {startPrice != null
-                ? <><HelpTip side="top" iconClassName="w-3 h-3" text="回合开始时的BTC基准价，结束时高于此价为涨，低于为跌" />目标价 ${fmtNum(startPrice)}</>
-                : <><Loader2 className="w-3 h-3 animate-spin" />目标价获取中</>}
+                ? <><HelpTip side="top" iconClassName="w-3 h-3" text={t('prediction.targetTip')} />{t('prediction.targetPrice', { price: fmtNum(startPrice) })}</>
+                : <><Loader2 className="w-3 h-3 animate-spin" />{t('prediction.targetLoading')}</>}
             </span>
           </div>
 
@@ -431,11 +437,11 @@ export function Prediction() {
               <div className="flex mb-5 bg-muted rounded-lg p-0.5">
                 <button onClick={() => { setTradeTab('buy'); setShares(''); }}
                         className={`flex-1 text-sm font-bold py-2 rounded-md transition-all ${tradeTab === 'buy' ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
-                  买入
+                  {t('prediction.buy')}
                 </button>
                 <button onClick={() => { setTradeTab('sell'); setAmount(''); }}
                         className={`flex-1 text-sm font-bold py-2 rounded-md transition-all ${tradeTab === 'sell' ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
-                  卖出
+                  {t('prediction.sell')}
                 </button>
               </div>
 
@@ -444,7 +450,7 @@ export function Prediction() {
                 <button onClick={() => setSide('UP')}
                         className={`relative rounded-xl border p-4 text-center transition-all ${side === 'UP' ? 'border-green-500 bg-green-500/10 shadow-[0_0_12px_-3px_rgba(34,197,94,0.3)]' : 'border-border hover:border-green-500/40'}`}>
                   <TrendingUp className="mx-auto w-5 h-5 text-green-500 mb-1.5" />
-                  <div className="text-[10px] text-muted-foreground tracking-wider mb-0.5 flex items-center justify-center gap-0.5">看涨 <HelpTip side="top" iconClassName="w-3 h-3" text="概率价格：50¢ = 市场认为50%概率上涨。价格越高代表越看好" /></div>
+                  <div className="text-[10px] text-muted-foreground tracking-wider mb-0.5 flex items-center justify-center gap-0.5">{t('prediction.up')} <HelpTip side="top" iconClassName="w-3 h-3" text={t('prediction.upTip')} /></div>
                   <div className="text-2xl font-black text-green-500 tabular-nums">
                     {tradeTab === 'buy'
                       ? (displayUpAsk != null ? `${(displayUpAsk * 100).toFixed(0)}¢` : '--')
@@ -454,7 +460,7 @@ export function Prediction() {
                 <button onClick={() => setSide('DOWN')}
                         className={`relative rounded-xl border p-4 text-center transition-all ${side === 'DOWN' ? 'border-red-500 bg-red-500/10 shadow-[0_0_12px_-3px_rgba(239,68,68,0.3)]' : 'border-border hover:border-red-500/40'}`}>
                   <TrendingDown className="mx-auto w-5 h-5 text-red-500 mb-1.5" />
-                  <div className="text-[10px] text-muted-foreground tracking-wider mb-0.5 flex items-center justify-center gap-0.5">看跌 <HelpTip side="top" iconClassName="w-3 h-3" text="概率价格：50¢ = 市场认为50%概率下跌。价格越高代表越看空" /></div>
+                  <div className="text-[10px] text-muted-foreground tracking-wider mb-0.5 flex items-center justify-center gap-0.5">{t('prediction.down')} <HelpTip side="top" iconClassName="w-3 h-3" text={t('prediction.downTip')} /></div>
                   <div className="text-2xl font-black text-red-500 tabular-nums">
                     {tradeTab === 'buy'
                       ? (displayDownAsk != null ? `${(displayDownAsk * 100).toFixed(0)}¢` : '--')
@@ -469,13 +475,13 @@ export function Prediction() {
                     {/* 预测下注走游戏钱包，不是交易余额 */}
                     <span className="text-xs text-muted-foreground flex items-center gap-1">
                       <Wallet className="w-3 h-3" />
-                      游戏钱包 {user ? `${fmtNum(user.gameBalance)} USDT` : '--'}
+                      {t('prediction.gameWallet')} {user ? `${fmtNum(user.gameBalance)} USDT` : '--'}
                       <Button size="sm" variant="outline" onClick={() => setTransferOpen(true)} className="text-[10px] h-6 px-2 ml-1">
-                        <ArrowLeftRight className="w-3 h-3" />划转
+                        <ArrowLeftRight className="w-3 h-3" />{t('prediction.transfer')}
                       </Button>
                     </span>
                     <div className="flex items-center gap-1.5">
-                      <span className="text-xs text-muted-foreground">金额</span>
+                      <span className="text-xs text-muted-foreground">{t('prediction.amount')}</span>
                       <Input type="number" placeholder="0.00" value={amount}
                              onChange={e => setAmount(e.target.value)}
                              className="w-28 h-8 text-sm text-right font-mono tabular-nums" />
@@ -491,25 +497,25 @@ export function Prediction() {
                     ))}
                     <Button variant="outline" size="sm" className="flex-1 h-9 sm:h-7 text-xs font-semibold"
                             onClick={() => setAmount(user?.gameBalance ? String(Math.floor(parseFloat(String(user.gameBalance)) / 1.02 * 100) / 100) : '0')}>
-                      全部
+                      {t('prediction.max')}
                     </Button>
                   </div>
                   <div className="flex items-center justify-between py-2.5 px-3 mb-4 rounded-lg bg-muted/50">
-                    <span className="text-xs text-muted-foreground flex items-center gap-1">预计收益 <HelpTip side="top" iconClassName="w-3 h-3" text="若预测正确，每份合约按$1结算。收益 = 金额 ÷ 概率价格" /></span>
+                    <span className="text-xs text-muted-foreground flex items-center gap-1">{t('prediction.estPayout')} <HelpTip side="top" iconClassName="w-3 h-3" text={t('prediction.estPayoutTip')} /></span>
                     <span className="text-sm font-bold font-mono tabular-nums">${toWin > 0 ? toWin.toFixed(2) : '--'}</span>
                   </div>
                   <Button onClick={handleBuy} disabled={submitting || !user}
                           className={`w-full h-11 font-bold text-sm ${side === 'UP' ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'} text-white`}>
-                    {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : `买入 ${side === 'UP' ? '看涨' : '看跌'}`}
+                    {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : t('prediction.buySide', { side: sideLabel })}
                   </Button>
-                  {!user && <p className="text-[11px] text-muted-foreground mt-2 text-center">请登录后交易</p>}
+                  {!user && <p className="text-[11px] text-muted-foreground mt-2 text-center">{t('prediction.loginToTrade')}</p>}
                 </>
               ) : (
                 <>
                   <div className="flex items-center justify-between mb-2.5">
-                    <span className="text-xs text-muted-foreground flex items-center gap-1">持仓份数 <HelpTip side="top" iconClassName="w-3 h-3" text="持有的合约数量，预测正确时每份值$1" />: <span className="font-bold text-foreground">{totalShares.toFixed(2)}</span></span>
+                    <span className="text-xs text-muted-foreground flex items-center gap-1">{t('prediction.myShares')} <HelpTip side="top" iconClassName="w-3 h-3" text={t('prediction.mySharesTip')} />: <span className="font-bold text-foreground">{totalShares.toFixed(2)}</span></span>
                     <div className="flex items-center gap-1.5">
-                      <span className="text-xs text-muted-foreground">份数</span>
+                      <span className="text-xs text-muted-foreground">{t('prediction.shares')}</span>
                       <Input type="number" placeholder="0" value={shares}
                              onChange={e => setShares(e.target.value)}
                              className="w-28 h-8 text-sm text-right font-mono tabular-nums" />
@@ -525,18 +531,18 @@ export function Prediction() {
                     ))}
                     <Button variant="outline" size="sm" className="flex-1 h-9 sm:h-7 text-xs font-semibold"
                             onClick={() => setShares(String(totalShares))}>
-                      全部
+                      {t('prediction.max')}
                     </Button>
                   </div>
                   <div className="flex items-center justify-between py-2.5 px-3 mb-4 rounded-lg bg-muted/50">
-                    <span className="text-xs text-muted-foreground flex items-center gap-1">预计到账 <HelpTip side="top" iconClassName="w-3 h-3" text="按当前卖出价计算的到手金额（已扣手续费）" /></span>
+                    <span className="text-xs text-muted-foreground flex items-center gap-1">{t('prediction.estProceeds')} <HelpTip side="top" iconClassName="w-3 h-3" text={t('prediction.estProceedsTip')} /></span>
                     <span className="text-sm font-bold font-mono tabular-nums">${youllReceive > 0 ? youllReceive.toFixed(2) : '--'}</span>
                   </div>
                   <Button onClick={handleSellSide} disabled={submitting || activeBetsForSide.length === 0}
                           className={`w-full h-11 font-bold text-sm ${side === 'UP' ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'} text-white`}>
-                    {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : `卖出 ${side === 'UP' ? '看涨' : '看跌'}`}
+                    {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : t('prediction.sellSide', { side: sideLabel })}
                   </Button>
-                  {activeBetsForSide.length === 0 && <p className="text-[11px] text-muted-foreground mt-2 text-center">暂无 {side === 'UP' ? '看涨' : '看跌'} 持仓</p>}
+                  {activeBetsForSide.length === 0 && <p className="text-[11px] text-muted-foreground mt-2 text-center">{t('prediction.noSidePosition', { side: sideLabel })}</p>}
                 </>
               )}
             </CardContent>
@@ -546,10 +552,10 @@ export function Prediction() {
         {/* Live Trades */}
         <Card className="flex flex-col min-h-[200px]">
           <div className="px-4 pt-4 pb-2">
-            <span className="text-[10px] text-muted-foreground font-semibold tracking-widest uppercase">实时交易--(拉取真的实时交易数据)</span>
+            <span className="text-[10px] text-muted-foreground font-semibold tracking-widest uppercase">{t('prediction.liveTrades')}</span>
           </div>
           <CardContent className="flex-1 overflow-hidden px-1.5 pb-1.5 relative">
-            {activities.length === 0 && <p className="text-xs text-muted-foreground text-center py-8">等待交易...</p>}
+            {activities.length === 0 && <p className="text-xs text-muted-foreground text-center py-8">{t('prediction.waitingTrades')}</p>}
             <div className="absolute bottom-0 left-0 right-0 px-1.5 flex flex-col-reverse gap-px overflow-hidden" style={{ maxHeight: '100%' }}>
               {activities.map((a, i) => {
                 const up = a.outcome === 'Up' || a.side === 'UP';
@@ -588,18 +594,18 @@ export function Prediction() {
           <div className="flex border-b">
             <button onClick={() => { setTab('bets'); setBetsPage(1); fetchBets(1); }}
                     className={`px-5 py-3 text-sm font-medium transition-colors ${tab === 'bets' ? 'border-b-2 border-primary text-primary' : 'text-muted-foreground hover:text-foreground'}`}>
-              我的下注
+              {t('prediction.tabBets')}
             </button>
             <button onClick={() => { setTab('rounds'); setRoundsPage(1); fetchRounds(1); }}
                     className={`px-5 py-3 text-sm font-medium transition-colors ${tab === 'rounds' ? 'border-b-2 border-primary text-primary' : 'text-muted-foreground hover:text-foreground'}`}>
-              往期回合
+              {t('prediction.tabRounds')}
             </button>
           </div>
 
           <div className="p-4">
             {tab === 'bets' && (
               <div className="space-y-1.5">
-                {bets.length === 0 && <p className="text-xs text-muted-foreground text-center py-6">暂无下注记录</p>}
+                {bets.length === 0 && <p className="text-xs text-muted-foreground text-center py-6">{t('prediction.noBets')}</p>}
                 {bets.map(b => {
                   const ws = b.windowStart;
                   const timeRange = ws ? (() => {
@@ -628,7 +634,7 @@ export function Prediction() {
                       </span>
                     )}
                     {b.status === 'ACTIVE' && round?.status === 'OPEN' && (
-                      <Button size="sm" variant="outline" onClick={() => handleSell(b.id)} className="text-[10px] h-6 px-2">卖出</Button>
+                      <Button size="sm" variant="outline" onClick={() => handleSell(b.id)} className="text-[10px] h-6 px-2">{t('prediction.sell')}</Button>
                     )}
                   </div>
                   );
@@ -637,11 +643,11 @@ export function Prediction() {
                   <div className="flex items-center justify-center gap-3 pt-3">
                     <Button variant="outline" size="sm" className="h-7 text-xs"
                             disabled={betsPage <= 1}
-                            onClick={() => { const p = betsPage - 1; setBetsPage(p); fetchBets(p); }}>上一页</Button>
+                            onClick={() => { const p = betsPage - 1; setBetsPage(p); fetchBets(p); }}>{t('prediction.prevPage')}</Button>
                     <span className="text-xs text-muted-foreground">{betsPage} / {betsTotalPages}</span>
                     <Button variant="outline" size="sm" className="h-7 text-xs"
                             disabled={betsPage >= betsTotalPages}
-                            onClick={() => { const p = betsPage + 1; setBetsPage(p); fetchBets(p); }}>下一页</Button>
+                            onClick={() => { const p = betsPage + 1; setBetsPage(p); fetchBets(p); }}>{t('prediction.nextPage')}</Button>
                   </div>
                 )}
               </div>
@@ -649,7 +655,7 @@ export function Prediction() {
 
             {tab === 'rounds' && (
               <div className="space-y-1.5">
-                {rounds.length === 0 && <p className="text-xs text-muted-foreground text-center py-6">暂无回合记录</p>}
+                {rounds.length === 0 && <p className="text-xs text-muted-foreground text-center py-6">{t('prediction.noRounds')}</p>}
                 {rounds.map(r => (
                   <div key={r.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs py-2.5 px-3 rounded-lg hover:bg-muted/40 transition-colors">
                     <span className="text-muted-foreground font-mono tabular-nums text-[11px]">
@@ -661,7 +667,7 @@ export function Prediction() {
                     <span className="font-mono tabular-nums">${fmtNum(r.endPrice)}</span>
                     <span className="ml-auto">
                       <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${r.outcome === 'UP' ? 'bg-green-500/12 text-green-500' : r.outcome === 'DOWN' ? 'bg-red-500/12 text-red-500' : 'bg-muted text-muted-foreground'}`}>
-                        {r.outcome === 'VOID' ? '作废' : (r.outcome || '--')}
+                        {r.outcome === 'VOID' ? t('prediction.void') : (r.outcome || '--')}
                       </span>
                     </span>
                   </div>
@@ -670,11 +676,11 @@ export function Prediction() {
                   <div className="flex items-center justify-center gap-3 pt-3">
                     <Button variant="outline" size="sm" className="h-7 text-xs"
                             disabled={roundsPage <= 1}
-                            onClick={() => { const p = roundsPage - 1; setRoundsPage(p); fetchRounds(p); }}>上一页</Button>
+                            onClick={() => { const p = roundsPage - 1; setRoundsPage(p); fetchRounds(p); }}>{t('prediction.prevPage')}</Button>
                     <span className="text-xs text-muted-foreground">{roundsPage} / {roundsTotalPages}</span>
                     <Button variant="outline" size="sm" className="h-7 text-xs"
                             disabled={roundsPage >= roundsTotalPages}
-                            onClick={() => { const p = roundsPage + 1; setRoundsPage(p); fetchRounds(p); }}>下一页</Button>
+                            onClick={() => { const p = roundsPage + 1; setRoundsPage(p); fetchRounds(p); }}>{t('prediction.nextPage')}</Button>
                   </div>
                 )}
               </div>

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import {
   Activity, ArrowDownRight, ArrowUpRight, Bot, ChevronLeft, ChevronRight, Crosshair,
   History, Loader2, PowerOff, Radar, RefreshCcw, TrendingUp, Wallet, X,
@@ -17,11 +18,11 @@ const ADMIN_USER_ID = 1;
 const REFRESH_MS = 60_000;
 
 /** 策略展示名与一句话说明（id 来自 TradingStrategySpi.id()）+ 专属点缀色（图标底/识别用，不入图表） */
-const STRATEGY_META: Record<string, { name: string; desc: string; accent: string }> = {
-  FIBO: { name: 'Fibo 回撤', desc: '斐波那契回撤挂单', accent: '#F97316' },
-  LIQFADE: { name: 'Liq Fade', desc: '清算级联反向', accent: '#3b82f6' },
-  SQZMOM: { name: 'Sqz Momentum', desc: '挤压动量突破', accent: '#a855f7' },
-  TURTLE: { name: 'Turtle 突破', desc: '4H 90/15 通道突破', accent: '#10b981' },
+const STRATEGY_META: Record<string, { nameKey: string; descKey: string; accent: string }> = {
+  FIBO: { nameKey: 'strategies.name.fibo', descKey: 'strategies.desc.fibo', accent: '#F97316' },
+  LIQFADE: { nameKey: 'strategies.name.liqfade', descKey: 'strategies.desc.liqfade', accent: '#3b82f6' },
+  SQZMOM: { nameKey: 'strategies.name.sqzmom', descKey: 'strategies.desc.sqzmom', accent: '#a855f7' },
+  TURTLE: { nameKey: 'strategies.name.turtle', descKey: 'strategies.desc.turtle', accent: '#10b981' },
 };
 
 
@@ -41,6 +42,7 @@ function PositionCard({ pos, canClose, closing, onClose }: {
   closing: boolean;
   onClose: (pos: FuturesPosition) => void;
 }) {
+  const { t } = useTranslation('strategy');
   const isLong = pos.side === 'LONG';
   const sl = pos.stopLosses?.[0]?.price;
   const tp = pos.takeProfits?.[0]?.price;
@@ -52,21 +54,21 @@ function PositionCard({ pos, canClose, closing, onClose }: {
           : <ArrowDownRight className="w-3.5 h-3.5 text-loss shrink-0" />}
         <span className="text-xs font-black">{pos.symbol}</span>
         <span className={cn('text-[10px] font-bold px-1.5 py-0.5 rounded', isLong ? 'bg-gain/15 text-gain' : 'bg-loss/15 text-loss')}>
-          {isLong ? '多' : '空'} {pos.leverage}x
+          {isLong ? t('side.long') : t('side.short')} {pos.leverage}x
         </span>
         <span className="ml-auto text-[10px] text-muted-foreground">{fmtDateTime(pos.createdAt)}</span>
       </div>
       <div className="grid grid-cols-3 gap-1.5 text-[11px]">
-        <span className="text-muted-foreground">数量 <span className="font-bold text-foreground tabular-nums">{pos.quantity}</span></span>
-        <span className="text-muted-foreground">开仓 <span className="font-bold text-foreground tabular-nums">{fmtNum(pos.entryPrice)}</span></span>
-        <span className="text-muted-foreground">标记 <span className="font-bold text-foreground tabular-nums">{fmtNum(pos.markPrice)}</span></span>
-        <span className="text-muted-foreground">保证金 <span className="font-bold text-foreground tabular-nums">{fmtNum(pos.margin)}</span></span>
+        <span className="text-muted-foreground">{t('strategies.pos.qty')} <span className="font-bold text-foreground tabular-nums">{pos.quantity}</span></span>
+        <span className="text-muted-foreground">{t('strategies.pos.entry')} <span className="font-bold text-foreground tabular-nums">{fmtNum(pos.entryPrice)}</span></span>
+        <span className="text-muted-foreground">{t('strategies.pos.mark')} <span className="font-bold text-foreground tabular-nums">{fmtNum(pos.markPrice)}</span></span>
+        <span className="text-muted-foreground">{t('strategies.pos.margin')} <span className="font-bold text-foreground tabular-nums">{fmtNum(pos.margin)}</span></span>
         {sl != null && <span className="text-muted-foreground">SL <span className="font-bold text-loss tabular-nums">{fmtNum(sl)}</span></span>}
         {tp != null && <span className="text-muted-foreground">TP <span className="font-bold text-gain tabular-nums">{fmtNum(tp)}</span></span>}
       </div>
       <div className="flex items-center justify-between">
         <span className="text-xs">
-          浮动盈亏 <PnlText value={pos.unrealizedPnl} className="font-black tabular-nums" />
+          {t('strategies.pos.unrealized')} <PnlText value={pos.unrealizedPnl} className="font-black tabular-nums" />
           {pos.unrealizedPnlPct != null && (
             <span className={cn('text-[10px] ml-1', pos.unrealizedPnl >= 0 ? 'text-gain' : 'text-loss')}>
               ({pos.unrealizedPnl >= 0 ? '+' : ''}{pos.unrealizedPnlPct.toFixed(1)}%)
@@ -79,7 +81,7 @@ function PositionCard({ pos, canClose, closing, onClose }: {
             onClick={() => onClose(pos)}
             className="border border-border hover:bg-surface-hover px-2.5 py-1 rounded-lg text-[11px] font-bold text-loss flex items-center gap-1 disabled:opacity-50"
           >
-            {closing ? <Loader2 className="w-3 h-3 animate-spin" /> : <X className="w-3 h-3" />} 平仓
+            {closing ? <Loader2 className="w-3 h-3 animate-spin" /> : <X className="w-3 h-3" />} {t('strategies.pos.close')}
           </button>
         )}
       </div>
@@ -122,6 +124,7 @@ function EmptyState({ icon: Icon, title, hint, className }: {
 }
 
 function TradeRow({ t }: { t: StrategyClosedPosition }) {
+  const { t: tr } = useTranslation('strategy');
   const isLong = t.side === 'LONG';
   return (
     <div className="flex items-center gap-2.5 py-2 px-2 -mx-2 rounded-lg text-[11px] border-b border-border/40 last:border-0 hover:bg-surface-hover/50 transition-colors">
@@ -129,8 +132,8 @@ function TradeRow({ t }: { t: StrategyClosedPosition }) {
       <div className="min-w-0 shrink-0">
         <div className="font-bold leading-tight">
           {t.symbol.replace('USDT', '')}
-          <span className={cn('ml-1 text-[9px] font-black', isLong ? 'text-gain' : 'text-loss')}>{isLong ? '多' : '空'}</span>
-          {t.status === 'LIQUIDATED' && <span className="ml-1 text-[9px] font-bold px-1 py-px rounded bg-loss/15 text-loss">强平</span>}
+          <span className={cn('ml-1 text-[9px] font-black', isLong ? 'text-gain' : 'text-loss')}>{isLong ? tr('side.long') : tr('side.short')}</span>
+          {t.status === 'LIQUIDATED' && <span className="ml-1 text-[9px] font-bold px-1 py-px rounded bg-loss/15 text-loss">{tr('strategies.trades.liquidated')}</span>}
         </div>
         <div className="text-[10px] text-muted-foreground tabular-nums leading-tight mt-0.5">
           {fmtNum(t.entryPrice)} → {fmtNum(t.closedPrice)}
@@ -152,7 +155,12 @@ function StrategyColumn({ view, signals, canClose, closingId, onClose }: {
   closingId: number | null;
   onClose: (strategyId: string, pos: FuturesPosition) => void;
 }) {
-  const meta = STRATEGY_META[view.strategyId] || { name: view.strategyId, desc: '', accent: '#F97316' };
+  const { t } = useTranslation('strategy');
+  const meta = STRATEGY_META[view.strategyId];
+  // 认不出的策略 id 直接把 id 当名字显示（后端新增策略时不至于空白）
+  const metaName = meta ? t(meta.nameKey) : view.strategyId;
+  const metaDesc = meta ? t(meta.descKey) : '';
+  const accent = meta?.accent ?? '#F97316';
   const [tradePage, setTradePage] = useState(0);
 
   // 收益曲线：已平仓 closedPnl 按平仓时间升序累加（testnet 页同口径，从 0 起）
@@ -178,21 +186,21 @@ function StrategyColumn({ view, signals, canClose, closingId, onClose }: {
       <div className="flex items-center gap-3">
         <div
           className="w-10 h-10 rounded-lg border border-border bg-card flex items-center justify-center shrink-0"
-          style={{ background: `${meta.accent}1f`, color: meta.accent }}
+          style={{ background: `${accent}1f`, color: accent }}
         >
           <Bot className="w-5 h-5" />
         </div>
         <div className="min-w-0">
-          <div className="text-sm font-black truncate">{meta.name}</div>
-          <div className="text-[10px] text-muted-foreground truncate">{meta.desc} · quant-{view.strategyId}</div>
+          <div className="text-sm font-black truncate">{metaName}</div>
+          <div className="text-[10px] text-muted-foreground truncate">{metaDesc} · quant-{view.strategyId}</div>
         </div>
         {!view.available && (
-          <span className="ml-auto text-[10px] font-bold px-2 py-0.5 rounded-full bg-muted text-muted-foreground shrink-0">离线</span>
+          <span className="ml-auto text-[10px] font-bold px-2 py-0.5 rounded-full bg-muted text-muted-foreground shrink-0">{t('strategies.offline')}</span>
         )}
       </div>
 
       {!view.available ? (
-        <EmptyState icon={PowerOff} title="账户不可用" hint="sim 未启动或尚未开仓过，启动后自动恢复" />
+        <EmptyState icon={PowerOff} title={t('strategies.unavailable.title')} hint={t('strategies.unavailable.hint')} />
       ) : (
         <>
           {/* Stats：内凹"仪表窗"，主数字加大一档，标签退后 */}
@@ -200,34 +208,34 @@ function StrategyColumn({ view, signals, canClose, closingId, onClose }: {
             <div className="rounded-md border border-border bg-card-2 px-3 py-2.5">
               <div className="text-lg font-black tabular-nums truncate leading-tight">${fmtNum(view.equity)}</div>
               <div className="text-[10px] text-muted-foreground flex items-center gap-1 mt-1">
-                <Wallet className="w-3 h-3" /> 权益 · 可用 ${fmtNum(view.balance, 0)}
+                <Wallet className="w-3 h-3" /> {t('strategies.stats.equity', { available: fmtNum(view.balance, 0) })}
               </div>
             </div>
             <div className="rounded-md border border-border bg-card-2 px-3 py-2.5">
               <div className="text-lg font-black tabular-nums truncate leading-tight"><PnlText value={view.cumPnl} /></div>
               <div className="text-[10px] text-muted-foreground flex items-center gap-1 mt-1">
-                <TrendingUp className="w-3 h-3" /> 累计已实现 · {view.tradeCount} 笔
+                <TrendingUp className="w-3 h-3" /> {t('strategies.stats.realized', { count: view.tradeCount })}
               </div>
             </div>
             <div className="rounded-md border border-border bg-card-2 px-3 py-2.5">
               <div className={cn('text-lg font-black tabular-nums leading-tight', view.tradeCount > 0 && view.winRate >= 0.5 ? 'text-gain' : view.tradeCount > 0 ? 'text-loss' : '')}>
                 {view.tradeCount > 0 ? `${(view.winRate * 100).toFixed(1)}%` : '—'}
               </div>
-              <div className="text-[10px] text-muted-foreground mt-1">胜率 · {view.winCount}/{view.tradeCount}</div>
+              <div className="text-[10px] text-muted-foreground mt-1">{t('strategies.stats.winRate', { wins: view.winCount, total: view.tradeCount })}</div>
             </div>
             <div className="rounded-md border border-border bg-card-2 px-3 py-2.5">
               <div className="text-lg font-black tabular-nums truncate leading-tight"><PnlText value={view.unrealizedPnl} /></div>
-              <div className="text-[10px] text-muted-foreground mt-1">持仓浮盈 · {view.positions.length} 仓</div>
+              <div className="text-[10px] text-muted-foreground mt-1">{t('strategies.stats.unrealized', { count: view.positions.length })}</div>
             </div>
           </div>
 
           {/* 实时信号状态：每根5m收盘随策略评估更新，证明策略在跑 */}
           <div className="space-y-2 pt-1 border-t border-border/40">
             <div className="text-[11px] font-black text-muted-foreground tracking-wide pt-1.5 flex items-center gap-1">
-              <Radar className="w-3 h-3" /> 实时信号状态
+              <Radar className="w-3 h-3" /> {t('strategies.signals.title')}
             </div>
             {signals.length === 0 ? (
-              <EmptyState icon={Radar} title="信号快照不可用" hint="quant 策略运行时未启用或该策略未激活" className="py-6" />
+              <EmptyState icon={Radar} title={t('strategies.signals.empty')} hint={t('strategies.signals.emptyHint')} className="py-6" />
             ) : (
               signals.map(s => <SignalStateRow key={s.symbol} sig={s} />)
             )}
@@ -239,14 +247,14 @@ function StrategyColumn({ view, signals, canClose, closingId, onClose }: {
               <EquityChart points={equityPoints} />
             </div>
           ) : (
-            <EmptyState icon={TrendingUp} title="暂无收益曲线" hint="首笔平仓后自动出现" className="py-8" />
+            <EmptyState icon={TrendingUp} title={t('strategies.equity.empty')} hint={t('strategies.equity.emptyHint')} className="py-8" />
           )}
 
           {/* 持仓 */}
           <div className="space-y-2 pt-1 border-t border-border/40">
-            <div className="text-[11px] font-black text-muted-foreground tracking-wide pt-1.5">当前持仓</div>
+            <div className="text-[11px] font-black text-muted-foreground tracking-wide pt-1.5">{t('strategies.positions.title')}</div>
             {view.positions.length === 0 ? (
-              <EmptyState icon={Crosshair} title="空仓 · 等待新信号" className="py-6" />
+              <EmptyState icon={Crosshair} title={t('strategies.positions.empty')} className="py-6" />
             ) : (
               view.positions.map(p => (
                 <PositionCard key={p.id} pos={p} canClose={canClose} closing={closingId === p.id}
@@ -257,9 +265,9 @@ function StrategyColumn({ view, signals, canClose, closingId, onClose }: {
 
           {/* 交易记录 */}
           <div className="space-y-1 pt-1 border-t border-border/40">
-            <div className="text-[11px] font-black text-muted-foreground tracking-wide pt-1.5">交易记录</div>
+            <div className="text-[11px] font-black text-muted-foreground tracking-wide pt-1.5">{t('strategies.trades.title')}</div>
             {view.closedPositions.length === 0 ? (
-              <EmptyState icon={History} title="暂无交易记录" className="py-6" />
+              <EmptyState icon={History} title={t('strategies.trades.empty')} className="py-6" />
             ) : (
               <>
                 {trades.map(t => <TradeRow key={t.id} t={t} />)}
@@ -269,18 +277,18 @@ function StrategyColumn({ view, signals, canClose, closingId, onClose }: {
                       disabled={page === 0}
                       onClick={() => setTradePage(page - 1)}
                       className="border border-border hover:bg-surface-hover w-7 h-7 rounded-lg flex items-center justify-center text-muted-foreground hover:text-primary disabled:opacity-40"
-                      aria-label="上一页"
+                      aria-label={t('pager.prev')}
                     >
                       <ChevronLeft className="w-3.5 h-3.5" />
                     </button>
                     <span className="text-[11px] font-bold text-muted-foreground tabular-nums">
-                      {page + 1} / {pageCount} · 共 {view.closedPositions.length} 笔
+                      {t('strategies.trades.pageInfo', { page: page + 1, pages: pageCount, total: view.closedPositions.length })}
                     </span>
                     <button
                       disabled={page >= pageCount - 1}
                       onClick={() => setTradePage(page + 1)}
                       className="border border-border hover:bg-surface-hover w-7 h-7 rounded-lg flex items-center justify-center text-muted-foreground hover:text-primary disabled:opacity-40"
-                      aria-label="下一页"
+                      aria-label={t('pager.next')}
                     >
                       <ChevronRight className="w-3.5 h-3.5" />
                     </button>
@@ -300,6 +308,7 @@ function StrategyColumn({ view, signals, canClose, closingId, onClose }: {
  * PC 2×2 田字格对比，移动端竖排。平仓按钮仅 userId=1 渲染，后端二次校验才是真正的门。
  */
 export function Strategies() {
+  const { t } = useTranslation(['strategy', 'common']);
   const { toast } = useToast();
   const user = useUserStore(s => s.user);
   const isAdmin = user?.id === ADMIN_USER_ID;
@@ -320,11 +329,11 @@ export function Strategies() {
       setViews(overview);
       setSignals(sigs);
     } catch (e) {
-      toast((e as Error).message || '加载策略账户失败', 'error');
+      toast((e as Error).message || t('strategies.toast.loadFailed'), 'error');
     } finally {
       setLoading(false);
     }
-  }, [toast]);
+  }, [toast, t]);
 
   useEffect(() => {
     void load();
@@ -338,14 +347,14 @@ export function Strategies() {
     setClosingId(pos.id);
     try {
       await strategyAccountApi.close(strategyId, pos.id);
-      toast('平仓指令已执行', 'success');
+      toast(t('strategies.toast.closed'), 'success');
       void load();
     } catch (e) {
-      toast((e as Error).message || '平仓失败', 'error');
+      toast((e as Error).message || t('strategies.toast.closeFailed'), 'error');
     } finally {
       setClosingId(null);
     }
-  }, [closingId, load, toast]);
+  }, [closingId, load, toast, t]);
 
   return (
     <div className="page-shell p-4 md:p-6 space-y-5">
@@ -356,16 +365,16 @@ export function Strategies() {
             <Activity className="w-5.5 h-5.5 text-primary" />
           </div>
           <div>
-            <h1 className="text-xl font-black tracking-tight">策略账户</h1>
-            <p className="text-[11px] text-muted-foreground">四策略独立账户 · 本平台模拟盘执行 · 决策价与撮合价同源</p>
+            <h1 className="text-xl font-black tracking-tight">{t('strategies.title')}</h1>
+            <p className="text-[11px] text-muted-foreground">{t('strategies.subtitle')}</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
           <Link to="/testnet" className="border border-border hover:bg-surface-hover px-3 py-1.5 rounded-lg text-[11px] font-bold text-muted-foreground hover:text-primary">
-            Testnet 监测 →
+            {t('strategies.testnetLink')} →
           </Link>
           <button onClick={() => { void load(); }}
-            className="border border-border hover:bg-surface-hover w-9 h-9 rounded-lg flex items-center justify-center text-muted-foreground hover:text-primary" aria-label="刷新">
+            className="border border-border hover:bg-surface-hover w-9 h-9 rounded-lg flex items-center justify-center text-muted-foreground hover:text-primary" aria-label={t('common:refresh')}>
             <RefreshCcw className={cn('w-4 h-4', loading && 'animate-spin')} />
           </button>
         </div>
@@ -373,7 +382,7 @@ export function Strategies() {
 
       {loading && views.length === 0 ? (
         <div className="flex items-center justify-center py-20 gap-2 text-sm text-muted-foreground">
-          <Loader2 className="w-4 h-4 animate-spin" /> 加载策略账户...
+          <Loader2 className="w-4 h-4 animate-spin" /> {t('strategies.loading')}
         </div>
       ) : (
         <div className="grid gap-5 md:grid-cols-2">
