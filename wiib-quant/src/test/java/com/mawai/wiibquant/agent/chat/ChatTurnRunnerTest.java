@@ -3,6 +3,7 @@ package com.mawai.wiibquant.agent.chat;
 import com.mawai.wiibcommon.enums.AgentLang;
 import com.mawai.wiibquant.agent.llm.ChatEndpoints;
 import com.mawai.wiibquant.agent.analysis.DeepAnalysisService;
+import com.mawai.wiibquant.agent.behavior.BehaviorAnalysisService;
 import com.mawai.wiibquant.agent.toolkit.MarketToolkit;
 import com.mawai.wiibquant.agent.toolkit.NewsToolkit;
 import com.mawai.wiibquant.agent.trader.TraderChatService;
@@ -115,7 +116,7 @@ class ChatTurnRunnerTest {
         when(chatModelFactory.modelsFor(any())).thenReturn(new ChatModelFactory.Models(deep, light));
         ChatEndpoints llmConfig = ChatTestEndpoints.eps(1L, "gpt-5");   // 叶子指纹含 userId（trader 工具按它认人）
         return new ChatAgentFactory(chatModelFactory, mock(MarketToolkit.class), newsToolkit,
-                mock(DeepAnalysisService.class), traderChatService,
+                mock(DeepAnalysisService.class), mock(BehaviorAnalysisService.class), traderChatService,
                 mock(WorkbenchRunRegistry.class),
                 registry, ChatTestEndpoints.PROMPTS, ChatTestEndpoints.TOOLS,
                 LIMIT, NO_COMPRESSION, 6, "X")

@@ -39,3 +39,16 @@ behavior:
     blackjack-stats: Blackjack stats (hands played, total won, total lost, biggest win, points converted out today)
     mines-stats: Mines stats (rounds played, net PnL)
     videopoker-stats: Video Poker stats (rounds played, net PnL)
+
+  # Stage progress: the tool now runs inside the chat, so these two are pushed over SSE for the user
+  # to see. They used to be log lines only, which is why they were hardcoded Chinese.
+  progress:
+    collecting: Collecting your behaviour data {{done}}/{{total}}
+    analyzing: Data is in, writing the behaviour report
+
+  # Failure replies from the admission layer. They go back to the model, which explains them to the user.
+  error:
+    busy: Too many analyses running right now, try again shortly
+    runFailed: "Analysis failed to run: {{msg}}"
+    parseFailed: Could not parse the analysis result
+    incomplete: The analysis came back incomplete, please retry

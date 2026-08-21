@@ -68,6 +68,19 @@ public class WorkbenchRunRegistry {
         return publish(sessionId, "form_request", data);
     }
 
+    /**
+     * 工具侧：把一份结构化行为分析报告推给前端渲染成卡片。
+     * <p>
+     * 返回值同 {@link #publishForm} 不能省：推不出去时调用方必须如实告诉模型"卡没上屏"，
+     * 好让它把结论用文字讲一遍——否则模型说"报告已展示"，用户屏幕上一片空白。
+     * <p>
+     * 整份报告只经这条通道给前端，回模型的是裁剪版（见 {@code BehaviorToolkit}）：
+     * 30 天逐日快照对模型是纯噪音，对卡片却是那条资产曲线。
+     */
+    public boolean publishBehaviorReport(String sessionId, JSONObject report) {
+        return publish(sessionId, "behavior_report", new JSONObject().fluentPut("report", report));
+    }
+
     /** 统一出口：会话已结束、补答轮无通道、通道已断连，三种都返回 false。 */
     private boolean publish(String sessionId, String event, JSONObject data) {
         Emitter emitter = runs.get(sessionId);

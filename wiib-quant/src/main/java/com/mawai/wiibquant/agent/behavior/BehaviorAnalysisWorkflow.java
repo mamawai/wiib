@@ -40,9 +40,18 @@ public class BehaviorAnalysisWorkflow {
     private final BehaviorDataCollector collector;
     private final PromptCatalog prompts;
 
-    /** 跑完整个 workflow，返回模型原文（可能带 ```json 围栏，调用方按老规矩 extractJson）。 */
+    /**
+     * 跑完整个 workflow，返回模型原文（可能带 ```json 围栏，调用方按老规矩 extractJson）。
+     *
+     * @param chatModel  由调用方给：现在唯一入口是对话轨的工具，用的是这个用户 BYOK 的深模型
+     * @param onProgress 阶段文案（已按 lang 取好词），推给对话的 SSE 通道让用户看见进度；可空
+     */
     public String run(ChatModel chatModel, long userId, AgentLang lang, Consumer<String> onProgress) {
-        List<Section> sections = collector.collect(userId, onProgress);
+        List<Section> sections = collector.collect(userId, (done, total) -> progress(onProgress,
+                prompts.get(lang, "behavior.progress.collecting",
+                        Map.of("done", done, "total", total))));
+        // 数据齐了之后是一次大模型调用，静默数十秒——不报一声用户会以为卡死
+        progress(onProgress, prompts.get(lang, "behavior.progress.analyzing"));
 
         String system = prompts.get(lang, "behavior.system", Map.of("schema", OUTPUT_SCHEMA));
         ChatResponse response = chatService(chatModel, system)
@@ -54,6 +63,13 @@ public class BehaviorAnalysisWorkflow {
             throw new IllegalStateException("行为分析未返回有效内容");
         }
         return text;
+    }
+
+    /** 进度是尽力而为：没给回调就静默跳过，不影响正确性 */
+    private static void progress(Consumer<String> onProgress, String text) {
+        if (onProgress != null) {
+            onProgress.accept(text);
+        }
     }
 
     /**

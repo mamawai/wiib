@@ -51,7 +51,7 @@ class NewsEventCollectorTest {
 
     private void runtimeReady() {
         when(runtimeManager.current()).thenReturn(
-                new AiAgentRuntime(mock(ChatModel.class), mock(ChatModel.class), "light-model"));
+                new AiAgentRuntime(mock(ChatModel.class), "light-model"));
     }
 
     @Test

@@ -9,6 +9,7 @@ import { groupBlocks, HUB_NAME } from './chatView';
 import { ChatComposer } from './ChatComposer';
 import { SessionHistory } from './SessionHistory';
 import { TraderFormCard } from './TraderFormCards';
+import { BehaviorReportCard } from './BehaviorReportCard';
 import type { WorkbenchSessionSummary } from '../../types';
 
 /** 会话标题截断长度：与后端 ChatHistoryService.TITLE_MAX 同口径，历史列表与面板头对得上 */
@@ -357,6 +358,8 @@ export function ChatPanel({ onClose, onGoConfig, fullscreen, onToggleFullscreen 
                         onCancel={() => chatStore.closeForm(item.id)}
                       />
                     );
+                  case 'behavior':
+                    return <BehaviorReportCard key={index} report={item.report} />;
                   case 'error':
                     // keyed=前端自己的兜底文案（存的是 key），后端/异常带回来的 message 原样显示
                     return (

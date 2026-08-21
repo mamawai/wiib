@@ -623,6 +623,9 @@ export type WorkbenchEvent =
   // 模型请求给用户弹一张待填的表单卡；执行权在用户点击，模型只能开卡不能动手。
   // prefill 是模型草拟的初值（留言正文与轮次），可能整个缺席
   | { type: 'form_request'; form: TraderFormKind; prefill?: Record<string, unknown> }
+  // 行为分析报告：整份结构化数据只走这条通道给前端渲染成卡片，模型手里是裁剪版
+  //（少了 overview.trend 那 30 天逐日快照——对模型是噪音，对卡片是那条资产曲线）
+  | { type: 'behavior_report'; report: BehaviorAnalysisReport }
   // deferred=true：让位收尾（专家还在取数就来了新消息），answer 只是过渡话术；
   // 真答案由后端补答轮落历史，前端靠 status 轮询等它落库后整体回放补显
   // meta 是本轮读数，让位收尾那条 done 不带（答案还没出，无账可报）。

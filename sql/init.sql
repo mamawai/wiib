@@ -566,7 +566,7 @@ CREATE TABLE IF NOT EXISTS ai_model_assignment (
 );
 
 COMMENT ON TABLE ai_model_assignment IS '功能位→LLM配置指针（模型名归属ai_runtime_config）';
-COMMENT ON COLUMN ai_model_assignment.function_name IS '功能名称：behavior/sim（sim=wiib-sim行情/新闻生成，自读DB）';
+COMMENT ON COLUMN ai_model_assignment.function_name IS '功能名称：news-tagging（quant后台批量打标）/sim（wiib-sim行情新闻生成，自读DB）；面向用户的功能位已全量BYOK，behavior等残行是孤儿不影响使用';
 COMMENT ON COLUMN ai_model_assignment.config_id IS '关联ai_runtime_config.id';
 
 -- ============ kline_history：回测/评估用 5m 基础 K 线落库（research，可复现） ============

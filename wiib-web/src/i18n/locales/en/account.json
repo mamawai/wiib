@@ -125,7 +125,6 @@
     "title": "Task management",
     "actionFailed": "Action failed",
     "fn": {
-      "behavior": "Behavior analysis",
       "newsTagging": "News tagging"
     },
     "rate": {

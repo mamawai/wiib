@@ -9,7 +9,6 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.Consumer;
 
 /**
  * 行为分析的数据采集：并发拉 sim 的 10 个 {@code /internal/behavior} 端点（{@link SimInternalClient}），
@@ -33,15 +32,23 @@ public class BehaviorDataCollector {
     public record Section(String endpoint, String json) {
     }
 
+    /**
+     * 采集进度回调：只报数，不报文案——文案要按语言取词表，而这里连 lang 都不该知道
+     * （见类注释"只出数据不出文案"）。拼字的活归 {@link BehaviorAnalysisWorkflow}。
+     * <p>会被多个线程回调，实现方自己保证线程安全。
+     */
+    public interface ProgressSink {
+        void onCollected(int done, int total);
+    }
+
     private final SimInternalClient simClient;
 
     /**
      * 并发拉齐全部 10 段。单段失败不抛——{@link SimInternalClient#getJson} 失败返回错误 JSON，
      * 这里原样带走：一个端点挂了只该让模型知道这块没有数据，不该整份报告作废。
      * <p>10 个都是纯阻塞 HTTP（连接 1s / 读 5s），虚拟线程直接一段一根，总耗时按最慢的那段算。
-     * <p>{@code onProgress} 会被多个线程回调，实现方自己保证线程安全。
      */
-    public List<Section> collect(long userId, Consumer<String> onProgress) {
+    public List<Section> collect(long userId, ProgressSink onProgress) {
         AtomicInteger done = new AtomicInteger();
         try (ExecutorService pool = Executors.newVirtualThreadPerTaskExecutor()) {
             List<CompletableFuture<Section>> tasks = ENDPOINTS.stream()
@@ -53,10 +60,10 @@ public class BehaviorDataCollector {
         }
     }
 
-    private Section fetch(long userId, String endpoint, AtomicInteger done, Consumer<String> onProgress) {
+    private Section fetch(long userId, String endpoint, AtomicInteger done, ProgressSink onProgress) {
         String json = simClient.getJson("/internal/behavior/" + userId + "/" + endpoint);
         if (onProgress != null) {
-            onProgress.accept("已采集 " + done.incrementAndGet() + "/" + ENDPOINTS.size() + "：" + endpoint);
+            onProgress.onCollected(done.incrementAndGet(), ENDPOINTS.size());
         }
         return new Section(endpoint, json);
     }

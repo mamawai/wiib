@@ -1,5 +1,4 @@
 {
-  "disclaimer": "Trading carries risk. This analysis is for reference only, not advice.",
   "loadingConfig": "Loading config",
   "effort": {
     "default": "Default"
@@ -18,15 +17,11 @@
     "reject": "Reject"
   },
   "tab": {
-    "config": "Model config",
-    "behavior": "Behavior analysis"
+    "config": "Model config"
   },
   "behavior": {
     "title": "Behavior analysis",
-    "intro": "A full read on your trading style from your entire trade history, game records and risk appetite.",
-    "start": "Start analysis",
-    "analyzing": "Analyzing",
-    "reanalyze": "Run again",
+    "detail": "Breakdown",
     "overview": "Asset overview",
     "totalAssets": "Total assets",
     "totalReturn": "Total return",

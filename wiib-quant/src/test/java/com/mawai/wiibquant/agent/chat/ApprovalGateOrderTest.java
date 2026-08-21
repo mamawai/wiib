@@ -3,6 +3,7 @@ package com.mawai.wiibquant.agent.chat;
 import com.mawai.wiibcommon.enums.AgentLang;
 import com.mawai.wiibquant.agent.llm.ChatEndpoints;
 import com.mawai.wiibquant.agent.analysis.DeepAnalysisService;
+import com.mawai.wiibquant.agent.behavior.BehaviorAnalysisService;
 import com.mawai.wiibquant.agent.llm.ModelCallLimiter;
 import com.mawai.wiibquant.agent.llm.ResilientChatService;
 import com.mawai.wiibquant.agent.toolkit.MarketToolkit;
@@ -146,7 +147,7 @@ class ApprovalGateOrderTest {
         when(chatModelFactory.modelsFor(any())).thenReturn(new ChatModelFactory.Models(deep, light));
         return new ChatAgentFactory(chatModelFactory,
                 mock(MarketToolkit.class), mock(NewsToolkit.class),
-                mock(DeepAnalysisService.class), mock(TraderChatService.class),
+                mock(DeepAnalysisService.class), mock(BehaviorAnalysisService.class), mock(TraderChatService.class),
                 mock(WorkbenchRunRegistry.class), registry,
                 ChatTestEndpoints.PROMPTS, ChatTestEndpoints.TOOLS,
                 // summarizeThresholdTokens 给足，别让历史压缩掺进来干扰

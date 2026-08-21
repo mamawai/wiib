@@ -1,5 +1,5 @@
 import { ApiError, workbenchApi } from '../../api';
-import type { TraderFormKind, TurnMeta, WorkbenchChatMessage, WorkbenchEvent } from '../../types';
+import type { BehaviorAnalysisReport, TraderFormKind, TurnMeta, WorkbenchChatMessage, WorkbenchEvent } from '../../types';
 
 /** 与后端 ErrorCode 对齐：2200 段是研判工作台（1600 段是 Crypto，别复用） */
 export const CHAT_ERROR = {
@@ -40,6 +40,9 @@ export type ChatItem =
   | { kind: 'hitl'; symbol: string; reason: string; requestId: string; resumeMessage: string; status: 'pending' | 'approved' | 'rejected' }
   // trader 动作表单卡：模型只有弹卡的权，执行权归用户点击。纯前端态不落历史，id 本地发
   | { kind: 'form'; id: string; form: TraderFormKind; prefill?: Record<string, unknown>; status: 'pending' | 'done'; result?: string }
+  // 行为分析报告卡：模型调 analyze_my_behavior 后随 SSE 到。同样不落历史——
+  // 报告在服务端缓存 30 分钟，刷新后想再看一眼再问一句就是了，不值得为它开一张表
+  | { kind: 'behavior'; report: BehaviorAnalysisReport }
   // keyed 同 progress：前端自己的兜底报错存 key，后端/异常带回来的 message 原样显示
   | { kind: 'error'; message: string; keyed?: boolean };
 
@@ -232,6 +235,10 @@ function handleEvent(e: WorkbenchEvent) {
       updateItems(prev => [...prev, {
         kind: 'form', id: nextFormId(), form: e.form, prefill: e.prefill, status: 'pending',
       }]);
+      break;
+    case 'behavior_report':
+      // 报告卡先上屏，模型紧接着会就着它讲两句——卡是数据、答案是解读，两者互补不重复
+      updateItems(prev => [...deactivateProgress(prev), { kind: 'behavior', report: e.report }]);
       break;
     case 'done':
       if (e.deferred) {

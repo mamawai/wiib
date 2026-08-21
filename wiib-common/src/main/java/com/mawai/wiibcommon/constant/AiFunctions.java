@@ -2,12 +2,12 @@ package com.mawai.wiibcommon.constant;
 
 /**
  * AI 功能位名（ai_model_assignment.function_name 的契约值），现只有 quant 进程使用。
- * 前端 Admin.tsx 的 FUNCTION_LABELS 需与此同步。
+ * 前端 Admin.tsx 的 FUNCTION_LABEL_KEYS 需与此同步。
+ * <p>
+ * 只剩打标这一位：面向用户的功能位（对话、交易员、行为分析）全部走用户自带 key，
+ * 见 user_llm_endpoint。库里 behavior 等残行是孤儿，无害——白名单只认这里。
  */
 public final class AiFunctions {
-
-    /** 行为分析（对话轨已全量 BYOK，见 user_llm_endpoint，平台不再为对话建模型） */
-    public static final String BEHAVIOR = "behavior";
 
     /** 快讯打标：NewsEventCollector 后台批量打标用的轻模型，内部调用不走用户 key */
     public static final String NEWS_TAGGING = "news-tagging";

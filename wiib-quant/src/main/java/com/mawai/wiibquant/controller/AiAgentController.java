@@ -4,8 +4,6 @@ import com.mawai.wiibcommon.annotation.CurrentUserId;
 import com.mawai.wiibcommon.dto.NewsEventItem;
 import com.mawai.wiibcommon.enums.AgentLang;
 import com.mawai.wiibcommon.util.Result;
-import com.mawai.wiibquant.agent.behavior.BehaviorAnalysisReport;
-import com.mawai.wiibquant.agent.behavior.BehaviorAnalysisService;
 import com.mawai.wiibquant.agent.i18n.UserLangResolver;
 import com.mawai.wiibquant.market.service.NewsCache;
 import com.mawai.wiibquant.market.service.NewsFlashLocalizer;
@@ -20,9 +18,11 @@ import org.springframework.web.bind.annotation.*;
 import java.util.List;
 
 /**
- * AI Agent 查询接口：behavior 分析 + 快讯。
+ * AI Agent 查询接口：现只剩快讯两条。
  * 深研判查询端点已随 AI 页市场研判 tab 下线（2026-08）：研判只在对话里触发时看，
  * 生成与落库仍在 DeepAnalysisToolkit/DeepAnalysisService。
+ * 行为分析端点同理下线（2026-08）：它已是对话轨的 analyze_my_behavior 工具，
+ * 报告以卡片形式出现在对话里，生成与准入在 BehaviorToolkit/BehaviorAnalysisService。
  * 预测端点（snapshots/scorecard/series）已随预测管线下线（2026-08：生产验证无前瞻信息），
  * 对话入口在 {@link com.mawai.wiibquant.agent.chat.ChatWorkbenchController}。
  */
@@ -33,17 +33,10 @@ import java.util.List;
 @RequiredArgsConstructor
 public class AiAgentController {
 
-    private final BehaviorAnalysisService behaviorAnalysisService;
     private final NewsCache newsCache;
     private final NewsFlashLocalizer newsFlashLocalizer;
     private final NewsEventMapper newsEventMapper;
     private final UserLangResolver userLangResolver;
-
-    @PostMapping("/analyze-behavior")
-    @Operation(summary = "用户行为分析")
-    public Result<BehaviorAnalysisReport> analyzeBehavior(@CurrentUserId long userId) {
-        return behaviorAnalysisService.analyze(userId);
-    }
 
     /**
      * 快讯条目：正文脱 HTML 的纯文本，前端直接展示。

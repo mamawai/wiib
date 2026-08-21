@@ -1,5 +1,4 @@
 {
-  "disclaimer": "投资有风险，当前分析结果仅供参考不构成任何建议",
   "loadingConfig": "加载配置...",
   "effort": {
     "default": "默认"
@@ -18,15 +17,11 @@
     "reject": "拒绝"
   },
   "tab": {
-    "config": "模型配置",
-    "behavior": "行为分析"
+    "config": "模型配置"
   },
   "behavior": {
     "title": "用户行为分析",
-    "intro": "基于你的全部历史交易数据、游戏记录、风险偏好等维度，全面分析你的投资行为特征",
-    "start": "开始分析",
-    "analyzing": "正在分析中...",
-    "reanalyze": "重新分析",
+    "detail": "明细",
     "overview": "资产概览",
     "totalAssets": "总资产",
     "totalReturn": "总收益率",

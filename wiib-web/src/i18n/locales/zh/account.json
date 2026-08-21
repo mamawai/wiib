@@ -121,7 +121,6 @@
     "title": "任务管理",
     "actionFailed": "操作失败",
     "fn": {
-      "behavior": "行为分析",
       "newsTagging": "新闻打标"
     },
     "rate": {

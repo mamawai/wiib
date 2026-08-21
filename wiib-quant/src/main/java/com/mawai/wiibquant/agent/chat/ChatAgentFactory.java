@@ -7,6 +7,7 @@ import com.mawai.wiibquant.agent.i18n.PromptCatalog;
 import com.mawai.wiibquant.agent.llm.AgentGraphs;
 import com.mawai.wiibquant.agent.llm.ChatEndpoints;
 import com.mawai.wiibquant.agent.analysis.DeepAnalysisService;
+import com.mawai.wiibquant.agent.behavior.BehaviorAnalysisService;
 import com.mawai.wiibquant.agent.llm.ConversationSummarizer;
 import com.mawai.wiibquant.agent.llm.MessagesSchema;
 import com.mawai.wiibquant.agent.llm.ModelCallLimiter;
@@ -102,6 +103,8 @@ public class ChatAgentFactory {
     private final MarketToolkit marketToolkit;
     private final NewsToolkit newsToolkit;
     private final DeepAnalysisService deepAnalysisService;
+    /** 行为分析的准入层（缓存/负缓存/并发闸门都在它那儿），工具只经它跑 */
+    private final BehaviorAnalysisService behaviorAnalysisService;
     /** 对话轨读写 trader 的唯一入口；两条 agent 链路只经它与 DB 打交道，从不互相对话 */
     private final TraderChatService traderChatService;
     private final WorkbenchRunRegistry runRegistry;
@@ -143,6 +146,7 @@ public class ChatAgentFactory {
                             MarketToolkit marketToolkit,
                             NewsToolkit newsToolkit,
                             DeepAnalysisService deepAnalysisService,
+                            BehaviorAnalysisService behaviorAnalysisService,
                             TraderChatService traderChatService,
                             WorkbenchRunRegistry runRegistry,
                             ApprovalRegistry approvalRegistry,
@@ -156,6 +160,7 @@ public class ChatAgentFactory {
         this.marketToolkit = marketToolkit;
         this.newsToolkit = newsToolkit;
         this.deepAnalysisService = deepAnalysisService;
+        this.behaviorAnalysisService = behaviorAnalysisService;
         this.traderChatService = traderChatService;
         this.runRegistry = runRegistry;
         this.approvalRegistry = approvalRegistry;
@@ -336,8 +341,11 @@ public class ChatAgentFactory {
                 .streaming(true) // 答案要逐字推给前端
                 .tools(localizedTools.of(lang,
                         new DeepAnalysisToolkit(deep, deepAnalysisService, runRegistry, prompts, lang),
-                        // 可以多次给：两套工具分别是"研判"与"对 trader 动手"，合成一个类只会让职责糊掉
-                        new TraderActionToolkit(runRegistry, userId, prompts, lang)))
+                        // 可以多次给：三套工具分别是"研判"、"对 trader 动手"、"分析本人行为"，
+                        // 合成一个类只会让职责糊掉
+                        new TraderActionToolkit(runRegistry, userId, prompts, lang),
+                        // 行为分析的模型也是这份 deep：平台 behavior 功能位已退休，账记在用户自己的 key 上
+                        new BehaviorToolkit(deep, behaviorAnalysisService, runRegistry, userId, lang)))
                 .addCallModelHook(wrapBefore(new ConversationSummarizer(
                         light, summarizeThresholdTokens, summarizeKeepMessages, prompts, lang)));
         for (EdgeHook.WrapCall<MessagesState<Message>> hook :

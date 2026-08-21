@@ -196,7 +196,7 @@ export function ChatDock() {
 
   const goConfig = useCallback(() => {
     setOpenBoth(false);
-    navigate('/ai?tab=config');
+    navigate('/ai');
   }, [setOpenBoth, navigate]);
 
   /* ===== 悬浮球拖拽：按住挪走 → 松手吸最近的左右边；位移没过阈值才算点击 ===== */

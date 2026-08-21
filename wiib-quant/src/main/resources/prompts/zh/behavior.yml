@@ -34,3 +34,16 @@ behavior:
     blackjack-stats: Blackjack统计（总局数、净赢、净输、最大赢、当日已转出积分）
     mines-stats: Mines统计（参与次数、净盈亏）
     videopoker-stats: Video Poker统计（参与次数、净盈亏）
+
+  # 阶段进度：工具跑在对话里，这两条推给 SSE 让用户看见跑到哪了（原来只进日志，随口写中文即可，
+  # 现在是给用户看的字，得跟语言走）
+  progress:
+    collecting: 正在采集你的行为数据 {{done}}/{{total}}
+    analyzing: 数据已齐，正在生成行为分析报告
+
+  # 准入层的失败回执。它既回给模型（据此向用户解释），也可能被模型原样引用
+  error:
+    busy: 当前分析人数已满，请稍后再试
+    runFailed: 分析执行失败：{{msg}}
+    parseFailed: 分析结果解析失败
+    incomplete: 分析结果不完整，请重试

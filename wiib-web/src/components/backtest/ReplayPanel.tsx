@@ -142,7 +142,7 @@ export function ReplayPanel() {
     llmEndpointApi.list().then(setEndpoints).catch(() => setEndpoints([]));
     return () => aiAbortRef.current?.abort();
   }, []);
-  const goConfig = useCallback(() => navigate('/ai?tab=config'), [navigate]);
+  const goConfig = useCallback(() => navigate('/ai'), [navigate]);
 
   /** 当前周期视图：open < startMs 的桶算上下文（开局即揭示），其余为可播放段 */
   const derived = useMemo(() => {

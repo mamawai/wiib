@@ -414,7 +414,7 @@ export function MyTrader() {
         <div data-tour="byok" className="space-y-1.5 text-xs">
           <div className="flex items-baseline justify-between gap-2 flex-wrap">
             <span className="text-muted-foreground font-bold">{t('cfg.endpoint')}</span>
-            <Link to="/ai?tab=config" className="text-[10px] text-primary font-bold hover:underline">{t('cfg.manageEndpoints')}</Link>
+            <Link to="/ai" className="text-[10px] text-primary font-bold hover:underline">{t('cfg.manageEndpoints')}</Link>
           </div>
           <LlmEndpointSelect endpoints={endpoints} value={form.llmEndpointId}
             onChange={id => set({ llmEndpointId: id })} className="w-full sm:w-auto sm:min-w-[320px]" />

@@ -141,15 +141,33 @@ class BehaviorAnalysisWorkflowTest {
         verify(chatModel, times(2)).call(any(Prompt.class));
     }
 
-    /** 采集是并发的，进度按"完成一段推一次"给；改造前每次工具调用推一次，这个能力不能悄悄丢 */
+    /**
+     * 采集是并发的，进度按"完成一段推一次"给，末尾再补一条"开始生成报告"——
+     * 那一条盖住的是最长的一段静默（一次大 prompt 的模型调用），丢了用户会以为卡死。
+     * <p>进度现在推给对话 SSE 给用户看（以前只进日志），所以文案必须按语言取词，见下一条。
+     */
     @Test
-    void 每采完一段推一次进度() {
+    void 每采完一段推一次进度_最后补一条生成中() {
         List<String> steps = Collections.synchronizedList(new ArrayList<>());
 
         workflow.run(chatModel, USER, AgentLang.ZH, steps::add);
 
-        assertThat(steps).hasSize(ENDPOINTS.size());
-        assertThat(steps).allMatch(s -> s.contains("/" + ENDPOINTS.size()));
+        assertThat(steps).hasSize(ENDPOINTS.size() + 1);
+        assertThat(steps.subList(0, ENDPOINTS.size()))
+                .allMatch(s -> s.contains("/" + ENDPOINTS.size()));
+        assertThat(steps.getLast()).isEqualTo("数据已齐，正在生成行为分析报告");
+    }
+
+    /** 进度文案是给用户看的字，英文用户不许收到中文 */
+    @Test
+    void 英文用户的进度文案里不许有一个中文字() {
+        List<String> steps = Collections.synchronizedList(new ArrayList<>());
+
+        workflow.run(chatModel, USER, AgentLang.EN, steps::add);
+
+        assertThat(steps).hasSize(ENDPOINTS.size() + 1);
+        assertThat(steps).allMatch(s -> !hasChinese(s), "英文进度里混进了中文");
+        assertThat(steps.getLast()).isEqualTo("Data is in, writing the behaviour report");
     }
 
     /** 输出结构全靠系统提示里的 JSON Schema，掉了就只剩一段自由发挥的文本 */

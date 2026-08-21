@@ -8,6 +8,7 @@ import com.mawai.wiibquant.agent.llm.ChatEndpoints;
 import com.mawai.wiibquant.agent.llm.LlmEndpointService;
 import com.mawai.wiibcommon.util.Result;
 import com.mawai.wiibquant.agent.analysis.DeepAnalysisService;
+import com.mawai.wiibquant.agent.behavior.BehaviorAnalysisService;
 import com.mawai.wiibquant.agent.toolkit.MarketToolkit;
 import com.mawai.wiibquant.agent.toolkit.NewsToolkit;
 import com.mawai.wiibquant.agent.trader.TraderChatService;
@@ -145,7 +146,8 @@ class ChatWorkbenchHitlTest {
 
         ChatEndpoints llmConfig = ChatTestEndpoints.eps(1L, "gpt-5");   // 叶子指纹含 userId（trader 工具按它认人）
         return new ChatAgentFactory(chatModelFactory, mock(MarketToolkit.class), mock(NewsToolkit.class),
-                deepAnalysisService, mock(TraderChatService.class), mock(WorkbenchRunRegistry.class),
+                deepAnalysisService, mock(BehaviorAnalysisService.class),
+                mock(TraderChatService.class), mock(WorkbenchRunRegistry.class),
                 registry, ChatTestEndpoints.PROMPTS, ChatTestEndpoints.TOOLS,
                 PRODUCTION_LIMIT, NO_COMPRESSION, 6, "X")
                 .leavesFor(llmConfig, AgentLang.ZH);

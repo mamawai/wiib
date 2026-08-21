@@ -24,7 +24,7 @@ export function LlmEndpointSelect({
     return (
       <span className={cn('text-xs text-muted-foreground', className)}>
         <Trans ns="ai" i18nKey="endpoint.selectEmpty"
-               components={[<Link to="/ai?tab=config" className="text-primary font-bold hover:underline" />]} />
+               components={[<Link to="/ai" className="text-primary font-bold hover:underline" />]} />
       </span>
     );
   }
