@@ -228,7 +228,10 @@ class PromptI18nTest {
         assertThat(full).contains("听主人的").contains("不在可覆盖范围");
         assertThat(full.indexOf("主人的留言"))
                 .as("⑦ 主人留言压轴（在风格指令之后）").isGreaterThan(full.indexOf("主人的交易风格指令"));
-        assertThat(full).contains("本次之后还会出现 1 次").contains("不是常驻规则");
+        assertThat(full).contains("本次之后还会出现 1 次")
+                .as("⑦ 合理则履行、不许忽视；观点不成立才可不听（旧「不是常驻规则」等于允许忽视）")
+                .contains("尽量考虑履行").contains("不可以忽视").contains("观点不成立")
+                .doesNotContain("不是常驻规则");
     }
 
     /** reviewer 的防自夸三件套 */

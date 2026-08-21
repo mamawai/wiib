@@ -263,6 +263,8 @@ public class TraderWakeupRunner {
         List<AiTraderPlan> plans = planStore.cleanupStale(trader.getId(), trader.getRoundNo(), liveKeys, boundaryTime);
 
         List<AiTraderRequest> decided = requestService.decidedUnnotified(trader.getId(), trader.getRoundNo());
+        // assemble 会立刻消费留言（最后一轮还会把内存里的正文清掉），开场白要不要加指针必须先记下
+        boolean hasOwnerNote = trader.getOwnerNote() != null && !trader.getOwnerNote().isBlank();
         // 系统提示词跟着 trader 主人的语言走：ai_trader.user_id → user.lang（取不到回落中文）
         String prompt = promptAssembler.assemble(trader,
                 accountStateJson(prompts, lang, equity, positions, pendingOrders, plans, boundaryTime,
@@ -281,8 +283,8 @@ public class TraderWakeupRunner {
                 .compile();
 
         String instruction = trigger != null
-                ? alertInstruction(trader, trigger, recent, lang)
-                : routineInstruction(trader, boundaryTime, marketSnapshot(whitelist, lang), lang);
+                ? alertInstruction(trader, trigger, recent, lang, hasOwnerNote)
+                : routineInstruction(trader, boundaryTime, marketSnapshot(whitelist, lang), lang, hasOwnerNote);
         RunnableConfig config = RunnableConfig.builder()
                 .threadId("trader-" + trader.getId() + "-" + boundaryTime).build();
 
@@ -352,8 +354,11 @@ public class TraderWakeupRunner {
      * 收尾标记取 {@code trader.mark.conclusion}，与系统提示词同一条 key——两处必须同源。
      * <p>
      * 包私有非 private：标记同源那条钉子（{@code WakeInstructionI18nTest}）要拿它的成文比对。
+     *
+     * @param hasOwnerNote 本轮有待读留言——末尾追加指针，见 {@link #ownerNoteHint}
      */
-    String routineInstruction(AiTrader trader, long boundaryTime, String snapshot, AgentLang lang) {
+    String routineInstruction(AiTrader trader, long boundaryTime, String snapshot, AgentLang lang,
+                              boolean hasOwnerNote) {
         return prompts.get(lang, "trader.wake.routineHeader", Map.of(
                 "interval", trader.getIntervalCode(),
                 "time", TIME_FMT.format(Instant.ofEpochMilli(boundaryTime))))
@@ -363,7 +368,8 @@ public class TraderWakeupRunner {
                 + sleepNotice(prompts, lang, WakeWindow.of(trader), boundaryTime,
                         TraderScheduler.INTERVAL_MS.getOrDefault(trader.getIntervalCode(), 300_000L), nowMs.getAsLong())
                 + prompts.get(lang, "trader.wake.routineQuestion",
-                        Map.of("mark", prompts.get(lang, "trader.mark.conclusion")));
+                        Map.of("mark", prompts.get(lang, "trader.mark.conclusion")))
+                + ownerNoteHint(lang, hasOwnerNote);
     }
 
     /**
@@ -392,9 +398,11 @@ public class TraderWakeupRunner {
      * 警报唤醒开场白：事实全代码注入（振幅/方向/上次唤醒时间/距例行还有多久），
      * 反锚定是灵魂——被波动惊醒正是恐慌平仓的高发场景，必须明说"未收盘不作数、
      * 止损在岗、不因被叫醒而必须动作"。
+     *
+     * @param hasOwnerNote 本轮有待读留言——末尾追加指针，见 {@link #ownerNoteHint}
      */
     String alertInstruction(AiTrader trader, AlertTrigger trig, List<AiTraderDecision> recent,
-                            AgentLang lang) {
+                            AgentLang lang, boolean hasOwnerNote) {
         long intervalMs = TraderScheduler.INTERVAL_MS.getOrDefault(trader.getIntervalCode(), 3_600_000L);
         long toNextMin = Math.max(1, (intervalMs - Math.floorMod(trig.triggeredAt(), intervalMs)) / 60_000);
         String lastWake = recent.isEmpty() ? prompts.get(lang, "trader.wake.alertNoWake")
@@ -412,7 +420,17 @@ public class TraderWakeupRunner {
                 + prompts.get(lang, "trader.wake.alertNotice",
                         Map.of("interval", trader.getIntervalCode())) + "\n"
                 + prompts.get(lang, "trader.wake.alertQuestion",
-                        Map.of("mark", prompts.get(lang, "trader.mark.conclusion")));
+                        Map.of("mark", prompts.get(lang, "trader.mark.conclusion")))
+                + ownerNoteHint(lang, hasOwnerNote);
+    }
+
+    /**
+     * 有待读留言才加：开场白是 user 消息，比 system 末尾更近因，提留言权重要打在这儿。
+     * 指针与反重放一起给——只喊"尽量履行"而把"做过的一次性动作别再做"留在 system 里，
+     * 多轮留言就会被最近因位置一路催着重放。assemble 已消费留言，调用方必须事先记下。
+     */
+    private String ownerNoteHint(AgentLang lang, boolean hasOwnerNote) {
+        return hasOwnerNote ? "\n" + prompts.get(lang, "trader.wake.ownerNoteHint") : "";
     }
 
     /**

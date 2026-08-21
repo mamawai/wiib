@@ -142,6 +142,37 @@ class TraderPromptAssemblerTest {
     }
 
     /**
+     * 留言权重：情况允许且内容合理就尽量履行，不可以忽视；
+     * 内容不合理或观点不成立才可以不履行。旧「不是常驻规则」等于允许当没看见，必须绝迹。
+     */
+    @Test
+    void 留言合理则履行观点不成立可不听() {
+        AiTrader t = trader();
+        t.setId(7L);
+        t.setOwnerNote("今晚仓位放轻");
+        t.setOwnerNoteRounds(1);
+
+        String prompt = assembler.assemble(t, "{}", List.of(), AgentLang.ZH);
+
+        assertThat(prompt)
+                .contains("今晚仓位放轻")
+                .contains("尽量考虑履行")
+                .contains("不可以忽视")
+                .contains("观点不成立")
+                .doesNotContain("不是常驻规则");
+
+        AiTrader en = trader();
+        en.setId(8L);
+        en.setOwnerNote("keep size light");
+        en.setOwnerNoteRounds(1);
+        assertThat(assembler.assemble(en, "{}", List.of(), AgentLang.EN))
+                .contains("try to act on it")
+                .contains("do not ignore")
+                .contains("does not hold")
+                .doesNotContain("not a standing rule");
+    }
+
+    /**
      * 迁移半途的存量行：ALTER 跑了、回填 UPDATE 漏跑，库里就是"有正文、轮次 0/null"。
      * 必须退化成一次性留言——拆箱 NPE 会让 assemble 抛异常，每轮唤醒写一条 ERROR 行、
      * 连败 5 次后 trader 被自动暂停，用户看到的是"它莫名其妙停了"。

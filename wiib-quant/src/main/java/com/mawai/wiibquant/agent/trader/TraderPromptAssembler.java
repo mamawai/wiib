@@ -31,7 +31,7 @@ import java.util.Map;
  * ④ 检验先于发明——先对上一轮的承诺（等待条件/失效条件）做检验，再考虑新机会，治翻烙饼；
  * ⑤ 固定收尾格式——结论块既是公开展示单元，也是下一轮回注后的检验基准；
  * ⑥ 用户风格指令放最后（近因权重最高）且明示优先级：风格冲突听主人的，硬规格不可覆盖；
- * ⑦ 主人留言压轴：阶段性的临时交代，比常驻风格指令更近因，按剩余轮次逐轮注入、减到 0 清空。
+ * ⑦ 主人留言压轴：阶段性交代，比常驻风格更近因；情况允许且合理则尽量履行、不许忽视，观点不成立可以不听但要写理由，按剩余轮次逐轮注入、减到 0 清空。
  * 这七条是 agent 行为的决定因素，不是文案——加语言时逐条对照着写，不是逐字翻译。
  * <p>
  * ⑧ 输出语言硬收尾排在⑦之后：⑥⑦是主人亲笔、不翻译，可能与平台模板不同语言，且近因权重最高。
@@ -117,8 +117,8 @@ public class TraderPromptAssembler {
             sb.append('\n').append(prompts.get(lang, "trader.label.ownerNote", Map.of("rounds", roundsText)))
                     .append('\n').append(prompts.get(lang, "trader.label.ownerWritten")).append('\n')
                     .append(note).append('\n')
-                    // 明说还剩几次，是要模型把它当持续叮嘱而不是"现在就执行一次"的动作指令——
-                    // 多轮注入最大的风险就是"把 ETH 平掉"被念三次平三次，在措辞这一层掐掉
+                    // 明说还剩几次：持续叮嘱，不是"现在就执行一次"。footer 另管两件事——
+                    // 合理则履行、观点不成立可不听；一次性动作做过不要再做（防"平 ETH"念三次平三次）
                     .append(prompts.get(lang, "trader.label.ownerNoteFooter")).append('\n');
             consumeOwnerNote(trader, note, left);
         }

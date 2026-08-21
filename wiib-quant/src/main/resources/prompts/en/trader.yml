@@ -171,9 +171,9 @@ trader:
     ownerNote: ————— A message from your owner ({{rounds}}) —————
     ownerNoteOnce: shown only at this wake-up, and you will never see it again
     ownerNoteMore: it will show up {{left}} more time(s) after this one
-    # Spelling out how many times are left, plus "not a standing rule": the big risk of multi-round
-    # injection is "close ETH" being read three times and acted on three times — killed here, in the wording.
-    ownerNoteFooter: (This is something your owner is saying for the time being, not a standing rule; the position spec and the hard rules are still enforced by the system.)
+    # If sound and the situation allows, try to act — do not ignore; decline only if the view does not hold.
+    # "Do not repeat a one-shot action" is what stops "close ETH" being done three times.
+    ownerNoteFooter: "(If the situation allows and the message is sound, try to act on it — do not ignore it. Decline only if the content is unsound or the view does not hold, and say why in [ROUND CONCLUSION]. Do not repeat a one-shot action already taken. The position spec and hard rules are still enforced by the system.)"
     # Sits right before each section the owner wrote themselves (custom instructions, notes). Those are
     # never translated and may be in a different language from the platform template
     ownerWritten: (The section below was written by your owner and may be in another language; do what it means, and keep your own output language unchanged.)
@@ -188,6 +188,10 @@ trader:
     snapshotHeader: "Market snapshot (check the details yourself with the tools):"
     snapshotRow: "- {{symbol}} mark price {{price}}, funding rate {{funding}}"
     routineQuestion: This round you only have to answer one question - now that this candle has closed, does your plan need to change? Test the waiting condition from last round's {{mark}} and every position's invalidation condition first, then look at new opportunities; close with the fixed {{mark}} format, as discipline requires.
+    # Only appended when a note is pending: the user turn is more recent than the end of the system prompt.
+    # The anti-replay half rides along: push "act on it" from the most recent position while
+    # "do not redo what is done" sits back in the system prompt, and a multi-round note gets replayed.
+    ownerNoteHint: Your owner left a message this wake-up — see your owner's message section in the system prompt. If the situation allows and the message is sound, try to act on it — do not ignore it; decline only if the content is unsound or the view does not hold, and say why in the conclusion. Do not repeat a one-shot action from the message that you have already taken.
     # Sleep notice on the last wake-up inside the window: facts only, and it says outright that the sleep itself is no reason to act in any direction
     sleepNotice: "Routine wake-ups inside this window ({{window}}) end with the {{lastBar}} candle; the next routine wake-up is at {{next}} (Beijing time, about {{hours}} hours from now). In between there are no routine wake-ups and no volatility alerts, while stop-loss and take-profit orders keep firing automatically. This is nothing but a fact about elapsed time: the sleep itself is not a reason to close or tighten a stop, nor a reason to squeeze in one more trade before it; with no invalidation condition triggered, the sleep calls for no action at all."
     # Alert opening: the anti-anchoring is the whole point — being woken by a spike is exactly when panic closing happens
