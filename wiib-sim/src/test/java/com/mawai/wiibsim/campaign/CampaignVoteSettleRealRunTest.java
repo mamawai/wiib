@@ -23,9 +23,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * 投票结算那几条注解 SQL 的真跑验收（非单测）：起完整 Spring 上下文、真连本地 PG、<b>真写
  * campaign_vote</b>。
  * <p>
- * 【这个类要证什么】{@code listUnsettled} / {@code sumScoreByUser} / {@code settle} 是上一任务
- * 加进 mapper 的，加完一次都没真发出去过；{@code sumScoreUpTo} 是本任务新加的。
- * 静态检查最多能排掉列名拼错，下面这几件只有真跑才见分晓：
+ * 这个类要证的是四条 mapper SQL 在真库上真干它声称的活，只有真跑才见分晓的有：
  * <ol>
  *   <li>{@code LocalDate} ↔ PG {@code DATE} 的绑定 —— 类型映射不对的话 vote_date 条件永远不命中，
  *       结算天天报"无待结算票"，静默不发分；</li>
@@ -38,15 +36,9 @@ import static org.assertj.core.api.Assertions.assertThat;
  *       猜错就是 ClassCastException，而 mock 测里 key 和类型都是自己造的，永远猜得对。</li>
  * </ol>
  * <p>
- * 【为什么不整段跑 settleDay 而是直接调 mapper】两个理由，都不是图省事：
- * <ul>
- *   <li>本机被 Binance 按地区拒（451），{@code resolveOutcome} 必然返回 null，
- *       {@code settleDay} 会按设计"整天不结算"直接返回 —— 一条 UPDATE 都发不出去，
- *       那样这个类什么也证不了。就算换台机器能连上，"昨天 BTC 涨没涨"也不该决定测试红绿。</li>
- *   <li>{@code settleDay} 结的是<b>全场</b>那一天的待结算票，连的又是所有者的真实开发库 ——
- *       真跑一次会把别人的真票也按当时的行情结掉，而 CAS 让这事没法回退。</li>
- * </ul>
- * 所以本类只钉"只有真库才证得了"的那一半（四条 SQL 真发得出去、真干它声称的活），
+ * 直接调 mapper 不整段跑 settleDay：本机拿不到行情（settleDay 会整天不结、什么都证不了），
+ * 且 settleDay 结的是全场的票，真跑会把真库里别人的票按当时行情结掉、CAS 后回不了头。
+ * 所以本类只钉"只有真库才证得了"的那一半，
  * 另一半（谁赢谁输、每票分多少、拿不到价时一行都不写）由
  * {@link com.mawai.wiibsim.campaign.service.CampaignVoteSettleTest} 用 mock 钉。
  * 与 {@link CampaignVoteRealRunTest} / {@link CampaignCheckinRealRunTest} 同一分工。
@@ -60,9 +52,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  * <p>
  * 前置：{@code sql/campaign.sql} 已落库且库里有一场 RUNNING 活动。
  * <p>
- * 【写真库的自律】user_id 一律取<b>负数</b>（真 user.id 是自增正数，负号保证绝不与真人撞车），
- * vote_date 取 2020 年（活动 2026 年才开赛，那两天真库里绝无第二个人的票，
- * listUnsettled 的结果才能比死而不是比增量），跑完在 {@link #清掉本次写进库的投票行()} 里删干净。
+ * 写真库的自律：user_id 一律取负数、vote_date 取 2020 年（真库里绝无别人的票，断言才能比死），
+ * 跑完在 {@link #清掉本次写进库的投票行()} 里删干净。
  */
 @SpringBootTest
 @EnabledIfEnvironmentVariable(named = "WIIB_REAL_RUN", matches = "1")

@@ -12,10 +12,8 @@ import java.util.function.LongSupplier;
  * 会话级贵操作授权闸（HITL）：工具被调时登记 pending → SSE 弹确认卡 → 用户 approve 后
  * 授权带 TTL，同一工具+同一标的再被调时放行。
  * <p>
- * 授权键是三元组 {@code (sessionId, 工具名, 标的)} 而不是光一个 sessionId——
- * 用户批准的是一个**具体操作**，不是十分钟内的通用票。判断做在
- * {@link ApprovalGate}（executeTools hook）里，因为只有那一层同时看得到
- * sessionId（来自 RunnableConfig）和工具名/参数（来自 tool_call）。
+ * 授权键是三元组 {@code (sessionId, 工具名, 标的)}：用户批准的是具体操作，不是十分钟通用票。
+ * 判断做在 {@link ApprovalGate}（executeTools hook）——只有那一层同时看得到 sessionId 和工具名/参数。
  * <p>
  * 授权状态短 TTL、进程内存级即可，不持久化；对话上下文的恢复是 {@link ChatContextStore} 的事。
  */

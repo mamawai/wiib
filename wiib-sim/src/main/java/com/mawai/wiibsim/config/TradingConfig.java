@@ -20,10 +20,10 @@ public class TradingConfig {
     /** crypto现货手续费率（默认0.1%，用于现货加密货币交易） */
     private BigDecimal cryptoCommissionRate = new BigDecimal("0.001");
 
-    /** 合约maker手续费率（默认0.02%，兼容旧配置名） */
+    /** 合约开仓手续费率（maker口径，默认0.02%） */
     private BigDecimal futuresOpenCommissionRate = new BigDecimal("0.0002");
 
-    /** 合约maker手续费率（默认0.02%，兼容旧配置名） */
+    /** 合约平仓手续费率（maker口径，默认0.02%） */
     private BigDecimal futuresCloseCommissionRate = new BigDecimal("0.0002");
 
     /** 合约taker手续费率（默认0.04%，市价/强平成交） */

@@ -133,21 +133,11 @@ public interface FuturesPositionMapper extends BaseMapper<FuturesPosition> {
 
     /**
      * 仓位历史分页：已平/已强平的仓位 + 它名下全部成交单的聚合。
-     * <p>
-     * 【为什么非聚合不可】仓位表的 closed_pnl 只是最后一次全平那笔的盈亏、quantity 只剩最后平掉那一段，
-     * 部分平仓过的仓位这两列都是残值。真实的已平仓量/平仓均价/已实现盈亏只能从订单表加出来。
-     * <p>
-     * 【子查询里也带 user_id】不带就是先对整张 futures_order 分组再 JOIN，人一多全表扫；
-     * 带上才走得了 idx_fo_user，只扫这个人的单。
-     * <p>
-     * 【状态四选】FILLED 手动成交、STOP_LOSS/TAKE_PROFIT 止盈止损触发、LIQUIDATED 强平，
-     * 这四个是订单的终态。漏一个就少算一段盈亏（早先 sumRealizedPnlByPositionIds 漏了 LIQUIDATED）。
-     * <p>
-     * 已实现盈亏在 SQL 里就减完手续费和资金费，投资回报率同理——这是聚合的自然延伸，
-     * 拆回 Java 再算一遍等于让 DTO 同时背着原料和成品两套字段。
-     * <p>
-     * 【symbol 可选过滤】(? IS NULL OR p.symbol = ?) 代替 &lt;if&gt; 拼接：访问路径是 user_id 索引，
-     * symbol 只是叠加的残余过滤（symbol 索引不带用户维度，对本查询永远不是优选），计划中性。
+     * 非聚合不可：部分平仓后仓位表的 closed_pnl/quantity 是残值，真实数字只能从订单表加出来。
+     * 子查询里也带 user_id，走 idx_fo_user 只扫这个人的单。
+     * 状态四选（FILLED/STOP_LOSS/TAKE_PROFIT/LIQUIDATED 是订单终态），漏一个少算一段盈亏。
+     * 已实现盈亏与 ROI 在 SQL 里减完手续费和资金费一步到位。
+     * symbol 可选过滤用 (? IS NULL OR p.symbol = ?)：访问路径是 user_id 索引，计划中性；
      * null 才是"不筛"，空串由 PositionHistoryService 归一。
      */
     @Select("""

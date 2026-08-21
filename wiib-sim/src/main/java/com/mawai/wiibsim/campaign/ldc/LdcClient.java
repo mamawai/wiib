@@ -47,12 +47,8 @@ public class LdcClient {
     private final LdcProperties props;
 
     /**
-     * 【必须 NEVER】服务端约 50% 的请求会被误路由到前端返回 307，
-     * 跟过去只能拿到一坨登录页 HTML —— 那时根本分不清"没发出去"还是"发出去了没读到响应"。
-     * 拒绝跟随，307 才能被识别成"请求压根没到后端"，从而安全重试。
-     * <p>
-     * JDK 的默认值本就是 NEVER（不同于 RestTemplate/WebClient 这类会跟随的客户端），
-     * 这行是把"依赖它"写成明面上的约定，别人顺手删掉时能看见代价。
+     * 必须 NEVER：服务端会把请求误路由到前端返回 307，拒绝跟随才能把它识别成
+     * "请求没到后端"从而安全重试。JDK 默认就是 NEVER，写明是把依赖变成约定。
      */
     private final HttpClient http = HttpClient.newBuilder()
             .followRedirects(HttpClient.Redirect.NEVER)
@@ -136,22 +132,10 @@ public class LdcClient {
      * 200 且 trade_no 非空 → 成功；非 200 且含 {@code duplicate key} → 此前已发放，也算成功；
      * 其余 → 失败，记原文不重试。
      * <p>
-     * 【顺序不能反，别"顺手简化"成先扫 duplicate key】那个扫描是对整个响应体做子串匹配的，
-     * 而 trade_no 是 17 位雪花数，正常流水号里本就可能含 "23505"（约 0.013%/次）。
-     * 先扫就会把一笔真发成功的判成 alreadySent()——它的 tradeNo 是 null，
-     * campaign_reward 于是记下 SUCCESS 却没有 external_ref：
-     * 唯一对不上 LinuxDo 侧账的那笔，恰恰是钱真发出去了的那笔。
-     * 幂等报错实测恒为 HTTP 400，只在非 200 分支查它不是取巧，就是接口契约本身。
-     * <p>
-     * 【判据只认 duplicate key，别再"顺手加回" || 23505】两种误判的代价根本不对称：
-     * <ul>
-     *   <li>漏判（真幂等判成 FAILED）安全 —— 同单号重发照样撞唯一索引，服务端保证不会重复发</li>
-     *   <li>误判（没发成功却判成 alreadySent）不可恢复 —— 落库是 SUCCESS + external_ref=NULL，
-     *       与真幂等命中逐字节一致，对账时分不出来，用户就这么静悄悄地少拿一份</li>
-     * </ul>
-     * 所以判据只能往窄了收。裸 "23505" 是五个字符的子串，网关错误页的 ray id、时间戳
-     * 都可能撞上；而 {@code duplicate key} 是 PostgreSQL 自己的报错原文，真幂等响应两者都含
-     * （见 LdcClientTest 的桩），删掉后一个不改变任何已知场景。
+     * 顺序不能反：duplicate key 只许在非 200 分支扫——trade_no 是雪花数，
+     * 对 200 响应体做子串匹配会把真发成功的误判成 alreadySent（SUCCESS 却无 external_ref）。
+     * 判据只认 {@code duplicate key} 不加 "23505"：漏判安全（同单号重发照样撞唯一索引），
+     * 误判不可恢复（静默少发一份），所以只能往窄了收。
      */
     private LdcResult judge(int status, String body, String outTradeNo) {
         String raw = body == null ? "" : body;

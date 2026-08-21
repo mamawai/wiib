@@ -91,11 +91,8 @@ public class FuturesTradingServiceImpl implements FuturesTradingService {
     }
 
     /**
-     * 【账本标注为什么落在这一层】三条开仓分支（市价并入 / 市价新开 / 限价挂单）的执行方法
-     * executeMarketMerge / executeMarketOpen / createLimitOpenOrder 全是私有 + 同类自调用，
-     * @Ledger 标它们是完全的空操作。本方法是 protected 且经 getAopProxy 真走代理调进来的，
-     * AOP 拦得到，所以方法级语义（兜底 + 挂 symbol）只能落在这儿；每笔的精确类型由三个执行方法内
-     * 动钱之前的 LedgerCtx.mark 覆盖。
+     * @Ledger 只能标在这层：三条开仓执行方法是私有自调用、AOP 拦不到，
+     * 本方法经 getAopProxy 真走代理；每笔精确类型由执行方法内的 LedgerCtx.mark 覆盖。
      */
     @Transactional(rollbackFor = Exception.class)
     @Ledger(FUTURES_OPEN_MARGIN)

@@ -44,8 +44,7 @@ import java.util.concurrent.TimeoutException;
  * ReactAgent + 唯一只读工具 peer_insights → 一份完整学习笔记 →
  * LEARN 决策行公开上时间线、全文覆盖 ai_trader.learning_notes。
  * <p>
- * 为什么这个必须是 agent 而不是 ReviewRunner 那样的单次调用：复盘的素材由代码算齐，模型只解读；
- * 学习面对的是一堆<b>需要甄别</b>的材料——看谁、看多深、值不值得学，下一步取决于上一步看到了什么，
+ * 做成 agent 而非单次调用：看谁、看多深、值不值得学，下一步取决于上一步看到了什么，
  * 写不成固定步骤，正是 ReAct 循环的用武之地。
  * <p>
  * 失败语义：ERROR 行留痕、不动 learning_notes、不计连败——学习失败没有资金风险，不值得暂停机制。
@@ -200,8 +199,7 @@ public class LearningRunner {
                         new PeerInsightToolkit(peerInsightService, trader.getId(), lang)))
                 .addExecuteToolsHook(new ModelCallLimiter(MAX_MODEL_CALLS))
                 .addExecuteToolsHook(trace)
-                // 不强制首轮调工具：排行榜已随开场白注入，首轮该做的正是"挑谁值得深看"这步推理。
-                // trader 那边强制是因为"不看行情不许决策"，这里没有这个前提
+                // 不强制首轮调工具：排行榜已随开场白注入，首轮该做的正是"挑谁值得深看"这步推理
                 .build(ResilientChatService.builder().model(model).asFactory())
                 .compile();
 

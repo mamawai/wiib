@@ -308,8 +308,7 @@ public class AssetSnapshotServiceImpl implements AssetSnapshotService {
                 heldMv.merge(sets.classify(cp.getSymbol()), mv, BigDecimal::add);
             }
         }
-        // 现货真实盈亏 = 在持市值 + 全史净现金流(卖出净得−买入净付)，与排行榜同口径。
-        // 曾用"浮盈+(卖−买)"：在持成本被双扣，买入即显示巨亏，已废弃
+        // 现货真实盈亏 = 在持市值 + 全史净现金流(卖出净得−买入净付)，与排行榜同口径
         Map<String, BigDecimal> netCash = new HashMap<>();
         for (Map<String, Object> row : cryptoOrderMapper.sumNetCashBySymbol(userId)) {
             netCash.merge(sets.classify((String) row.get("symbol")), (BigDecimal) row.get("amount"), BigDecimal::add);

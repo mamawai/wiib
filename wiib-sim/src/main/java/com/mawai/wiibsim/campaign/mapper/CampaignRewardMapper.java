@@ -19,9 +19,7 @@ public interface CampaignRewardMapper extends BaseMapper<CampaignReward> {
     /**
      * CAS 抢领取权：只有 PENDING 或 FAILED 能进 CLAIMED。
      * <p>
-     * 【为什么允许 FAILED 重来】发放失败多半是收款人不存在之类的可修问题，
-     * 修好了应该能再领一次；而 out_trade_no 不变，就算上次其实发出去了，
-     * 重发也会撞唯一索引被判成功，不会重复给钱。
+     * 允许 FAILED 重来：失败多是可修问题；单号不变，重发撞唯一索引不会重复给钱。
      */
     @Update("UPDATE campaign_reward SET status = 'CLAIMED', linux_do_id = #{linuxDoId}, " +
             "username = #{username}, updated_at = NOW() " +

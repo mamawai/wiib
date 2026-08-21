@@ -44,7 +44,7 @@ class ChatWorkbenchRealRunTest {
 
     private static final Logger log = LoggerFactory.getLogger(ChatWorkbenchRealRunTest.class);
 
-    /** 挑 1 号不再是因为门只对管理员开（已对全体登录用户开放），纯粹因为真跑要烧的那份 BYOK 配在它名下 */
+    /** 挑 1 号：真跑要烧的那份 BYOK 配在它名下 */
     private static final long ADMIN_USER_ID = 1L;
 
     @Autowired

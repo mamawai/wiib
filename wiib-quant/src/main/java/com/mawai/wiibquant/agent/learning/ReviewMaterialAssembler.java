@@ -284,7 +284,7 @@ public class ReviewMaterialAssembler {
      * markPrice 会越过挂单价，不能按相等判。保护单实时监控在先，带内成交只能是主动平仓
      * （模型自平或审批执行）。全平不清保护单列表（sim 只在部分平仓时改写），closed 行上的列表
      * 就是了结时在岗的那组。
-     * <p>码与文案分家，是因为竞技场要拿它做判断（"主动平仓才挂平仓决策"），比中文文案换语言就失效。
+     * <p>码与文案分家：竞技场按码做判断（"主动平仓才挂平仓决策"），码不随语言变。
      */
     public static String closeMannerKey(FuturesPositionDTO p) {
         if ("LIQUIDATED".equals(p.getStatus())) {
@@ -496,9 +496,7 @@ public class ReviewMaterialAssembler {
 
     /**
      * 找结论块：先认当前语言的标记，认不到再试别的语言。
-     * <p>两门语言都认，是因为决策行是<b>写入时那门语言</b>落库的——用户中途切了语言，
-     * 只认当前这套会把整段历史判成"没有结论块"，观望对账当场失去全部原料。
-     * 两套标记字面不同，多认一套不会误伤。
+     * 决策行按写入时的语言落库，中途切语言不能丢历史；两套标记字面不同，多认一套不误伤。
      */
     private Conclusion locateConclusion(String reasoning, AgentLang lang) {
         Conclusion hit = matchConclusion(reasoning, lang);

@@ -53,8 +53,7 @@ public class LedgerAspect {
 
     /**
      * 资金出口：UserMapper 的原子资金方法。
-     * 抽成命名 pointcut 是因为下面落账与丢标注两条 advice 必须切在<b>完全相同</b>的一组方法上——
-     * 各写一份表达式，哪天只改了一边，另一条路径的标注就又开始泄漏。
+     * 抽成命名 pointcut，这么写为了落账与丢标注两条 advice 切在完全相同的一组方法上。
      */
     @Pointcut("execution(* com.mawai.wiibsim.mapper.UserMapper.atomic*(..))")
     void walletMutation() {}
@@ -62,12 +61,8 @@ public class LedgerAspect {
     /** 资金变动落账。返回 null 表示 SQL 条件不满足、没改成，不记 */
     @AfterReturning(pointcut = "walletMutation()", returning = "ret")
     public void recordUserWallet(JoinPoint point, Object ret) {
-        // 【取标注必须是第一句，不能等到 ret != null 之后】
-        // 一次性标注的语义是"标给下一次资金调用"，那次调用无论成功还是返 null 都算把它消费掉了。
-        // ret == null 不是异常路径而是设计上的正常分支（资金费支付方就是靠返 null 判定余额不够、
-        // 转去扣仓位保证金），另有约 10 个调用点直接丢弃返回值。放在判空之后取，
-        // 这些路径的 mark 就泄漏到再下一笔上——资金费是单线程 for 循环逐仓位跑的，
-        // 泄漏的 mark 会带着上一个仓位的 refType/refId 安到下一个用户头上，错标比无标更难查。
+        // 取标注必须是第一句：无论成功还是返 null（正常分支）这次调用都要把 mark 消费掉，
+        // 放在判空之后取会泄漏到下一笔、把 A 的语义安到 B 的账本上
         LedgerCtx.Mark mark = LedgerCtx.takeMark();
         if (ret == null) return;
 
@@ -120,10 +115,8 @@ public class LedgerAspect {
      */
     @AfterReturning(pointcut = "positionMarginMutation()", returning = "marginAfter")
     public void recordFundingFeeFromMargin(JoinPoint point, BigDecimal marginAfter) {
-        // 【取标注必须是第一句】理由同 recordUserWallet，而且这里更险：保证金不够时返 null 是正常分支
-        // （紧接着还有"扣光全部保证金"那一枪），标注留着就会漏到下一个仓位——资金费是单线程 for 循环
-        // 逐仓位跑的，下一个仓位若是全仓，它的 CROSS_SETTLE 会被漏下来的标注顶掉，
-        // 连 userId/refId 都还是上一个仓位的，等于把 A 的语义安到 B 的账本上。
+        // 取标注必须是第一句，理由同 recordUserWallet：保证金不够返 null 是正常分支，
+        // 标注留着会漏到下一个仓位头上
         LedgerCtx.Mark mark = LedgerCtx.takeMark();
         if (marginAfter == null) return;
 

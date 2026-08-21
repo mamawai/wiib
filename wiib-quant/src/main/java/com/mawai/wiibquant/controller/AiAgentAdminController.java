@@ -150,7 +150,7 @@ public class AiAgentAdminController {
             if (target == null) {
                 return Result.fail("LLM配置不存在(id=" + req.getConfigId() + ")");
             }
-            // 空model的配置建不出模型（历史遗留行可能缺model），提前拦截别等refresh才炸
+            // 空model的配置建不出模型，提前拦截别等refresh才炸
             if (target.getModel() == null || target.getModel().isBlank()) {
                 return Result.fail("LLM配置'" + target.getConfigName() + "'缺模型名，请先在「配置LLM」里补全");
             }

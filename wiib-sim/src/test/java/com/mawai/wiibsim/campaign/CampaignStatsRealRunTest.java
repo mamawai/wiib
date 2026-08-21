@@ -26,9 +26,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 /**
  * 活动只读聚合的真跑验收。跑在真库上，不 mock。
  * <p>
- * 【最要紧的那条断言】listClosedPositions 算出的 ROI 必须与
- * FuturesPositionMapper.selectPositionHistory（即用户在「仓位历史」页看到的那个数）
- * 逐仓位相等。两套 SQL 各写各的，对得上才说明口径真的抄对了；对不上就是积分要发错。
+ * 最要紧的断言：listClosedPositions 的 ROI 必须与 selectPositionHistory（仓位历史页那个数）
+ * 逐仓位相等——两套 SQL 各写各的，对得上才说明口径真的抄对了。
  * <p>
  * 跑法（项目根）：
  * <pre>
@@ -39,8 +38,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * <p>
  * 本测试只读不写，不造数据也不清数据 —— 真库里已有的成交就是最好的样本。
  * <p>
- * 【库里没数据时用 Assumptions 而不是 return】静默 return 会让用例报"通过"，
- * 而它其实什么都没验证 —— 那是在骗人。assumeTrue 报的是"跳过"，一眼能看出这次没验到。
+ * 库里没数据时用 Assumptions 不用 return：assumeTrue 报"跳过"，静默 return 是假"通过"。
  */
 @SpringBootTest
 @EnabledIfEnvironmentVariable(named = "WIIB_REAL_RUN", matches = "1")

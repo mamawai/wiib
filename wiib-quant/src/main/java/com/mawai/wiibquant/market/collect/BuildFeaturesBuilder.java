@@ -1,6 +1,5 @@
 package com.mawai.wiibquant.market.collect;
 
-import org.bsc.langgraph4j.state.AgentState;
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
@@ -21,20 +20,20 @@ import java.util.function.Supplier;
 import static com.mawai.wiibquant.market.collect.IndicatorValues.toBd;
 
 /**
- * 特征工程节点：从原始市场数据构建FeatureSnapshot。
+ * 特征工程：从原始市场数据构建FeatureSnapshot。
  * 复用CryptoIndicatorCalculator.calcAll()，额外计算盘口微结构和波动率特征。
  */
 @Slf4j
-final class BuildFeaturesBuilder {
+public final class BuildFeaturesBuilder {
 
     private final OrderFlowAggregator orderFlowAggregator;
     private final Supplier<KlineInterval> decisionIntervalSupplier;
 
-    BuildFeaturesBuilder(OrderFlowAggregator orderFlowAggregator, KlineInterval decisionInterval) {
+    public BuildFeaturesBuilder(OrderFlowAggregator orderFlowAggregator, KlineInterval decisionInterval) {
         this(orderFlowAggregator, () -> decisionInterval);
     }
 
-    BuildFeaturesBuilder(OrderFlowAggregator orderFlowAggregator, Supplier<KlineInterval> decisionIntervalSupplier) {
+    public BuildFeaturesBuilder(OrderFlowAggregator orderFlowAggregator, Supplier<KlineInterval> decisionIntervalSupplier) {
         this.orderFlowAggregator = orderFlowAggregator;
         this.decisionIntervalSupplier = decisionIntervalSupplier;
     }
@@ -44,29 +43,7 @@ final class BuildFeaturesBuilder {
             {"1h", "15m", "4"}, {"4h", "1h", "4"}, {"24h", "1h", "24"},
     };
 
-    Map<String, Object> apply(AgentState state) {
-        String symbol = (String) state.value("target_symbol").orElse("BTCUSDT");
-        Map<String, Object> rawData = new HashMap<>();
-        rawData.put("kline_map", state.value("kline_map").orElse(Map.of()));
-        rawData.put("spot_kline_map", state.value("spot_kline_map").orElse(Map.of()));
-        rawData.put("ticker_map", state.value("ticker_map").orElse(Map.of()));
-        rawData.put("spot_ticker_map", state.value("spot_ticker_map").orElse(Map.of()));
-        rawData.put("funding_rate_map", state.value("funding_rate_map").orElse(Map.of()));
-        rawData.put("funding_rate_hist_map", state.value("funding_rate_hist_map").orElse(Map.of()));
-        rawData.put("orderbook_map", state.value("orderbook_map").orElse(Map.of()));
-        rawData.put("spot_orderbook_map", state.value("spot_orderbook_map").orElse(Map.of()));
-        rawData.put("oi_hist_map", state.value("oi_hist_map").orElse(Map.of()));
-        rawData.put("long_short_ratio_map", state.value("long_short_ratio_map").orElse(Map.of()));
-        rawData.put("force_orders_map", state.value("force_orders_map").orElse(Map.of()));
-        rawData.put("top_trader_position_map", state.value("top_trader_position_map").orElse(Map.of()));
-        rawData.put("taker_long_short_map", state.value("taker_long_short_map").orElse(Map.of()));
-        rawData.put("fear_greed_data", state.value("fear_greed_data").orElse("{}"));
-        rawData.put("dvol_data", state.value("dvol_data").orElse(null));
-        rawData.put("option_book_summary", state.value("option_book_summary").orElse(null));
-        return buildFeatures(symbol, rawData);
-    }
-
-    /** 独立于 StateGraph 的特征构建入口，供测试和工具复用。 */
+    /** 特征构建入口；rawData 缺键按空值兜底，缺什么打什么质量标记。 */
     @SuppressWarnings("unchecked")
     public Map<String, Object> buildFeatures(String symbol, Map<String, Object> rawData) {
         long startMs = System.currentTimeMillis();

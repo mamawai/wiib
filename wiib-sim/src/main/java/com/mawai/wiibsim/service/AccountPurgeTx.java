@@ -16,8 +16,7 @@ import java.math.BigDecimal;
  * 账户清除的事务段：重置路径先固化活动遗留积分，再 12 张用户表清空 + user 复位；
  * 销户路径清表后直接删行。全成功或全回滚。
  * <p>
- * 单独成 bean 而不是放 {@link AccountResetService} 里，是因为 @Transactional 走 Spring 代理，
- * 同类内部自调用会绕过代理导致事务根本不生效——这种 bug 平时看不出来，只在出错回滚时才暴露。
+ * 单独成 bean，这么写为了 @Transactional 走 Spring 代理（同类自调用会绕过代理，事务不生效）。
  */
 @Component
 @RequiredArgsConstructor

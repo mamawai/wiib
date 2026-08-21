@@ -32,11 +32,7 @@ public class RankingController {
     private final PositionHistoryService positionHistoryService;
 
     /**
-     * 排行榜分页。
-     * <p>
-     * 【破坏性改动】原来返 List，现在返分页对象。榜要能翻页，而排名是全局的
-     * （必须先算完整榜才有名次），所以分页只能在整榜上切片，返回体形状必须跟着变。
-     * 全站只有前端排行页一个消费者，一并改掉，不留双轨接口。
+     * 排行榜分页。排名是全局的（先算完整榜才有名次），分页在整榜上切片。
      */
     @GetMapping
     @Operation(summary = "排行榜分页（只含有过成交的用户；sort=ASSETS/TRADING_PROFIT，pageSize 服务端封顶 100）")
@@ -62,10 +58,8 @@ public class RankingController {
 
     /**
      * 用户成交历史分页。
-     * <p>
-     * 【为什么不复用 /api/trades/public 加个 userId 参数】那个接口是全站匿名流，
-     * 给它开 userId 入口等于让人枚举 userId 反查假名，匿名当场失效。
-     * 按人查这条路必须单独走、且必须过隐私门控——就是本方法。
+     * 不复用 /api/trades/public 加 userId 参数：那会让人枚举 userId 反查假名；
+     * 按人查必须单独走这条路并过隐私门控。
      */
     @GetMapping("/users/{targetUserId}/trades")
     @Operation(summary = "指定用户的成交历史（对方关闭公开时返回 403）")

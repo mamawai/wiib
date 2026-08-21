@@ -38,15 +38,8 @@ public interface CampaignVoteMapper extends BaseMapper<CampaignVote> {
     /**
      * 全场还没结算的投票日，升序去重。<b>结算前的放行条件就是它返回空。</b>
      * <p>
-     * 【为什么结算必须等它空】未结算的票 score 为 NULL，按 0 计入榜单
-     * （{@link #sumScoreByUser}）—— 拿这份榜去分池子，那些人的 vote_score 被永久少算，
-     * 而发放是 CAS 幂等的，发完纠不回来。
-     * <p>
-     * 【为什么按天返回而不是只给个数】
-     * {@link com.mawai.wiibsim.campaign.service.CampaignVoteService#settleDay} 只结<b>已经过完</b>的
-     * UTC 日，而票投的是<b>明天</b>：最后一批票盖的是活动结束当天的 UTC 日戳，那一天要到 endAt
-     * 之后才过得完 —— TZ=+8 时得等到活动结束<b>次日</b>的 UTC 00:05 那次回扫，约 32 小时。
-     * 运营看到具体是哪几天没结，才知道是"再等等"还是"某天一直取不到日线，得去查"。
+     * 结算必须等它空：未结算的票按 0 计入榜单，拿去分池子就永久少算。
+     * 按天返回不只给个数：运营看到具体日期才分得清"再等等"还是"取日线卡住了"。
      */
     @Select("SELECT vote_date FROM campaign_vote " +
             "WHERE campaign_id = #{campaignId} AND result IS NULL " +
@@ -56,8 +49,7 @@ public interface CampaignVoteMapper extends BaseMapper<CampaignVote> {
     /**
      * 按用户汇总投票得分，未结算的票按 0 计。<b>不卡日期</b> —— 榜单要的是全场总分。
      * <p>
-     * 【别拿它当参与名单】这里不筛 result IS NOT NULL，只投过票还没结算的人也会出一行、total=0。
-     * 总分是对的，但"出现在结果里"不等于"拿过分"。
+     * 别拿它当参与名单：不筛 result，只投过票还没结算的人也出一行、total=0。
      */
     @Select("SELECT user_id, COALESCE(SUM(COALESCE(score, 0)), 0) AS total " +
             "FROM campaign_vote WHERE campaign_id = #{campaignId} GROUP BY user_id")
@@ -66,11 +58,7 @@ public interface CampaignVoteMapper extends BaseMapper<CampaignVote> {
     /**
      * 截至某投票日（含）已发出的投票分总额，用于反推当日可分池。
      * <p>
-     * 【为什么必须卡 vote_date 而不是全场求和】不卡的话这个式子只在"按日期顺序结算"时才对：
-     * 漏结的那天隔几天补跑时，后面几天的分已经计进来了，
-     * {@code 100×已过天数 − 已发} 会算成负数、被夹到 0，补结的那天全员发 0 分 —— CAS 之后不可逆。
-     * 卡上日期，每天的池就只跟它自己和它<b>之前</b>的日子有关，什么时候补跑结果都一样。
-     * 顺序结算时这两种写法逐位相同（后面的日子还没结，本来就没分可加）。
+     * 卡 vote_date 不全场求和：每天的池只跟它自己和之前的日子有关，漏结的那天什么时候补跑结果都一样。
      */
     @Select("SELECT COALESCE(SUM(COALESCE(score, 0)), 0) FROM campaign_vote " +
             "WHERE campaign_id = #{campaignId} AND vote_date <= #{voteDate}")

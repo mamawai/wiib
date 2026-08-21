@@ -3,12 +3,8 @@ import { ModelConfig } from '../components/ModelConfig';
 import { KeyRound } from 'lucide-react';
 
 /**
- * 「配置」页：只剩 BYOK 模型端点这一件事，所以没有 tab 壳。
- * <p>
- * 原来同页还有「行为分析」tab，已搬进对话——它现在是 analyze_my_behavior 工具，
- * 报告以卡片形式出现在对话流里（见 workbench/BehaviorReportCard），
- * 顺带把平台那个 behavior 功能位一起退休了，这次调用记在用户自己的 key 上。
- * 「市场研判」tab 更早下线（研判只在对话里触发时看）。
+ * 「配置」页：只有 BYOK 模型端点这一件事，所以没有 tab 壳。
+ * 行为分析在对话里（analyze_my_behavior 工具，见 workbench/BehaviorReportCard）。
  */
 export function AiAgent() {
   const { t } = useTranslation('ai');

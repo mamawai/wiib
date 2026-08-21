@@ -16,10 +16,7 @@ import java.util.List;
 
 /**
  * 全站成交时间线。交易细节照实给，交易者换成稳定假名。
- * <p>
- * 【匿名的边界】这里挡住的是"顺着页面看出谁是谁"。它不是密码学意义的匿名——
- * 拿到源码和盐就能把 userId 空间（几十个整数）全跑一遍反查出对应关系。
- * 对一个模拟盘的展示页，这个强度够了；真要更强得换成随机分配并落库的假名。
+ * 匿名边界：挡的是"顺着页面看出谁是谁"，不是密码学匿名（拿到盐可反查），模拟盘展示页够用。
  */
 @Service
 @RequiredArgsConstructor
@@ -57,10 +54,8 @@ public class PublicTradeService {
     }
 
     /**
-     * 指定用户的成交分页。
-     * <p>
-     * 【调用方必须先过隐私门控】本方法只管查，不判 profile_public——判断留在 controller，
-     * 因为"看自己永远放行"这条得知道当前登录人是谁。
+     * 指定用户的成交分页。调用方必须先过隐私门控——判断留在 controller，
+     * "看自己永远放行"要知道当前登录人是谁。
      */
     public Page<PublicTradeDTO> pageByUser(Long userId, int pageNum, int pageSize) {
         int safeNum = Math.max(pageNum, 1);

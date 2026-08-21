@@ -18,9 +18,8 @@ import java.util.concurrent.CompletableFuture;
  * 深研判工具（仅对话轨）：贵操作——Bull∥Bear + Judge 共 3 次深模型调用
  * （新闻上下文是缓存拼接，零 LLM）。
  * <p>
- * <b>这里没有 HITL 判断</b>：授权闸门在 {@link ApprovalGate}（工具执行边上的 hook），
- * 因为只有那一层同时看得到 sessionId 和本次 tool_call 的参数。工具方法体两样都看不到，
- * 判断做在这里就只能绑 sessionId、绑不住标的。
+ * <b>这里没有 HITL 判断</b>：授权闸门在 {@link ApprovalGate}——
+ * 只有那一层同时看得到 sessionId 和本次 tool_call 的参数。
  * <p>
  * 模型建图时构造注入（同配置的用户共享同一张图和同一个模型实例）；
  * sessionId 是请求级的，从 {@link ToolRunContext} 取，只用来推进度。

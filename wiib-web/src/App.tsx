@@ -44,8 +44,8 @@ declare global {
 
 /**
  * 全站唯一登录守卫，挂在 /* 上。
- * 判 token 不判 user：token 是 localStorage 同步恢复的，user 要等 fetchUser 异步回来，
- * 判 user 会让每次刷新都先被弹一下。页面内要用 user 的自己判 null 等它到（见 Portfolio）
+ * 判 token 不判 user，这么写为了刷新不闪登录页（token 同步恢复、user 异步）；
+ * 页面内要用 user 的自己判 null 等它到（见 Portfolio）
  */
 function RequireAuth({ children }: { children: ReactNode }) {
   const token = useUserStore(s => s.token);

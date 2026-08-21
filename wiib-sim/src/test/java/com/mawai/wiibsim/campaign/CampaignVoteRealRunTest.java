@@ -25,7 +25,7 @@ import static org.assertj.core.api.Assertions.tuple;
 /**
  * 多空投票的真跑验收（非单测）：起完整 Spring 上下文、真连本地 PG、<b>真写 campaign_vote</b>。
  * <p>
- * 【这个类要证的两件事】
+ * 这个类要证的两件事：
  * <ol>
  *   <li>"多空二选一"的执行者是 uk_campaign_vote 唯一索引，而
  *       {@link CampaignVoteService#vote} 是靠 catch {@link DuplicateKeyException} 接住它的。
@@ -41,14 +41,10 @@ import static org.assertj.core.api.Assertions.tuple;
  *       猜错大小写就是 NPE，而 mock 测里 key 是自己造的，永远猜得对。</li>
  * </ol>
  * <p>
- * 【为什么不走 vote() 而是直接调 mapper 插】同
- * {@link CampaignCheckinRealRunTest}：requireRunning 带时间窗 [startAt, endAt)，
- * 而种子活动排期是 2026-08-03 ~ 2026-08-17 —— 排期外的日子跑本类，vote 会先被闸门挡住，
- * 走不到唯一索引那一步；另插一场覆盖"此刻"的活动又会改掉真库上 current() 的答案。
- * 所以本类只钉"只有真库才证得了"的那一半（约束在、异常翻译对、注解 SQL 与列名对），
- * 另一半（DuplicateKeyException → BizException("今天已经投过 X 了，多空二选一")）由
- * {@link com.mawai.wiibsim.campaign.service.CampaignVoteServiceTest} 用 mock 钉。
- * 两半合起来覆盖完整链条，且都不依赖"今天是几号"。
+ * 直接调 mapper 插不走 vote()（同 {@link CampaignCheckinRealRunTest}）：
+ * 排期外的日子 vote 会先被时间窗闸门挡住，走不到唯一索引那一步。
+ * 本类只钉"只有真库才证得了"的那一半（约束在、异常翻译对、注解 SQL 与列名对），
+ * 另一半由 {@link com.mawai.wiibsim.campaign.service.CampaignVoteServiceTest} 用 mock 钉。
  * <p>
  * 跑法（项目根）：
  * <pre>
@@ -59,9 +55,8 @@ import static org.assertj.core.api.Assertions.tuple;
  * <p>
  * 前置：{@code sql/campaign.sql} 已落库且库里有一场 RUNNING 活动。
  * <p>
- * 【写真库的自律】连的是所有者真实开发库，所以 user_id 一律取<b>负数</b>
- * （真 user.id 是自增正数，负号保证绝不与真人撞车），并在
- * {@link #清掉本次写进库的投票行()} 里按这个 id 删干净。
+ * 写真库的自律：user_id 一律取负数（绝不与自增正数的真人撞车），
+ * 并在 {@link #清掉本次写进库的投票行()} 里按这个 id 删干净。
  */
 @SpringBootTest
 @EnabledIfEnvironmentVariable(named = "WIIB_REAL_RUN", matches = "1")

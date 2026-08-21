@@ -26,8 +26,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * 结算与领取那八条注解 SQL 的真跑验收（非单测）：起完整 Spring 上下文、真连本地 PG、
  * <b>真写 campaign / campaign_reward / campaign_vote</b>（全是合成行，跑完删干净）。
  * <p>
- * 【这个类要证什么】这八条 SQL 全是本任务新加的，加完一次都没真发出去过，而它们守着的是真金白银。
- * 静态检查最多排掉列名拼错，下面这几件只有真库才见分晓：
+ * 这个类要证八条守着真金白银的 SQL 在真库上真干它声称的活，只有真库才见分晓的有：
  * <ol>
  *   <li><b>{@code selectActive} 的 {@code status IN ('RUNNING','SETTLING')}</b> —— 少收 SETTLING
  *       的话，活动一结算就查不到，所有人的领取入口静默消失；多收 DONE 的话，收摊的老活动会诈尸。</li>
@@ -44,10 +43,9 @@ import static org.assertj.core.api.Assertions.assertThat;
  *       引号掉了就整条报错，而它是领取时唯一的身份核对。</li>
  * </ol>
  * <p>
- * 【为什么不整段跑 settle() 而是直接调 mapper】同 {@link CampaignVoteSettleRealRunTest} 的分工，
- * 但理由更硬：{@code settle()} 会给<b>真库里的真实用户</b>按当下积分生成奖励行、并把种子活动
- * 不可逆地翻成 SETTLING。那是所有者的开发库和所有者的钱，测试不该碰。
- * 分配算法（总额恰好等于奖池、0.00 不落行、拒绝结算的几种情形）由
+ * 直接调 mapper 不整段跑 settle()（同 {@link CampaignVoteSettleRealRunTest} 的分工）：
+ * settle() 会给真库真实用户生成奖励行、把种子活动不可逆翻成 SETTLING，测试不该碰。
+ * 分配算法由
  * {@link com.mawai.wiibsim.campaign.service.CampaignSettleServiceTest} 用 mock 钉，
  * 本类只钉"只有真库才证得了"的那一半。
  * <p>
@@ -58,10 +56,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  *   -Dtest=CampaignRewardRealRunTest -Dsurefire.failIfNoSpecifiedTests=false
  * </pre>
  * <p>
- * 【写真库的自律】活动码带 {@code __TEST__} 前缀且 user_id 一律取<b>负数</b>（真 user.id 是自增正数），
- * 投票日取 2020 年（活动 2026 年才开赛），奖励行全挂在合成活动名下 ——
- * 于是每一处断言都能比死而不是比增量。跑完在 {@link #清掉本次写进库的合成行()} 里按
- * campaign_id / user_id 整批删除。
+ * 写真库的自律：活动码带 {@code __TEST__} 前缀、user_id 取负数、投票日取 2020 年，
+ * 奖励行全挂在合成活动名下让断言能比死。跑完在 {@link #清掉本次写进库的合成行()} 里整批删除。
  */
 @SpringBootTest
 @EnabledIfEnvironmentVariable(named = "WIIB_REAL_RUN", matches = "1")
@@ -109,9 +105,8 @@ class CampaignRewardRealRunTest {
      * 合成活动的 start_at 取 2099 年，好让它稳稳压过种子活动赢下
      * {@code ORDER BY start_at DESC LIMIT 1} —— 否则 SETTLING 到底收不收，从返回值上看不出来。
      * <p>
-     * 【RUNNING → SETTLING → DONE 顺着走一遍】这三步正是活动真实的一生：
-     * SETTLING 必须还查得到（结算后活动页要显示榜单与领取入口），
-     * DONE 必须查不到（收摊了，入口就该消失，此时应当露出种子那场）。
+     * RUNNING → SETTLING → DONE 顺着走一遍：SETTLING 必须还查得到（结算后要显示榜单与领取入口），
+     * DONE 必须查不到（收摊后入口消失，露出种子那场）。
      */
     @Test
     void selectActive收RUNNING与SETTLING但不收DONE() {

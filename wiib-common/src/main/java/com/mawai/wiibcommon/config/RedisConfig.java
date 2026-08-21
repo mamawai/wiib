@@ -18,9 +18,8 @@ public class RedisConfig {
 
         template.setKeySerializer(new StringRedisSerializer());
 
-        // Jackson3 版（Jackson2 版 SDR 4.0 起废弃）。default typing 必须开：getObject/getList 是泛型读，
-        // 只能靠 JSON 里的 @class 认出原类型，不开就全读成 LinkedHashMap。
-        // unsafe 指放行任意类型，与旧版 LaissezFaire 校验器等价；写出的 JSON 也一样，老缓存照读
+        // default typing 必须开：getObject/getList 是泛型读，靠 JSON 里的 @class 认出原类型，
+        // 不开就全读成 LinkedHashMap；unsafe = 放行任意类型
         GenericJacksonJsonRedisSerializer serializer = GenericJacksonJsonRedisSerializer.builder()
                 .enableUnsafeDefaultTyping()
                 .build();

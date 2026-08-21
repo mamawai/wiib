@@ -18,19 +18,10 @@ import java.util.stream.Collectors;
  * 交易任务与罚分。分两步：先把每个用户各积分项的<b>达成次数</b>数出来（countAll），
  * 再由次数算分（toItems）。
  * <p>
- * 【为什么是"次数制"而不是逐笔判分】所有任务的得分都能从达成<b>次数</b>直接算出：
- * 普通阶梯只看"第几次"（ScoreRules 各 tier），ROI 占位制从四个阈值的累计笔数派生占位结果
- * （ScoreRules.roiLadder），现货用流水重放出的单位数走 spotTier —— 次数就是充分统计量。
- * 这么拆的直接受益者是<b>重置遗留</b>：重置账户会删掉仓位/订单/预测注单，
- * 重置事务里把 countAll 的结果累加进 campaign_carryover（只存次数），算分时同 code 相加、
- * 按合并后的总次数从头重算 —— 高分档接着数、一次性档天然封顶，一周重置两次也刷不出第二份。
- * 快照与日常算分共用同一个 countAll，两边口径永远一致。
- * <p>
- * 【合约三分类为什么不复用 CategorySets】AssetSnapshotServiceImpl 那个是 private record，
- * 包外取不到；更要紧的是它做的是五分类盈亏归集（tradfi 并进 bstock 桶），
- * 而这里要的是合约三分类（加密/黄金原油/美股永续）。两边的<b>唯一真相</b>都是
- * BinanceProperties 的 commoditySymbols / tradfiSymbols 两个配置列表，
- * 读同一份配置不构成第二套口径，不会漂移。
+ * 次数制：所有任务得分都从达成<b>次数</b>算出，次数是充分统计量。
+ * 这么拆为了重置遗留——重置事务把 countAll 结果累加进 campaign_carryover（只存次数），
+ * 算分时同 code 相加从头重算，重置刷不出第二份分；快照与日常算分共用 countAll，口径一致。
+ * 合约三分类不复用 CategorySets（那是五分类盈亏归集），两边唯一真相都是 BinanceProperties 的配置列表。
  */
 @Component
 @RequiredArgsConstructor
@@ -188,13 +179,8 @@ public class TradeScorer {
      * 一个 (用户, 标的) 的现货达标单位数：按成交时间重放全历史流水，每笔成交后算一次
      * 已实现收益率 =（累计卖出净得 − 累计买入总付）÷ 累计买入总付（买卖均含手续费），
      * 取<b>活动窗口内</b>的成交时刻里摸到过的最高台阶（每 10% 一档，向下取整）。
-     * <p>
-     * 【高水位只进不退】先摸到 10% 拿了分，之后加仓亏回去不回收；想再拿分要爬上下一个台阶。
-     * 正因为只算已实现、比率只在成交那一刻变化，高水位能从流水确定性重放出来，不用另存状态，
-     * 全量重算保持幂等。窗口外的时刻不取数：活动前的辉煌不算成绩，但它沉淀的成本一直在分母里。
-     * <p>
-     * 【分母是全历史买入总付】单笔收益率能靠"只卖赚的、亏的扛着"造假，全历史净现金流造不了假 ——
-     * 代价是想拿分基本要把这个标的卖干净（卖出净得超过总投入）。
+     * 高水位只进不退，从流水确定性重放、不另存状态，全量重算幂等。
+     * 分母是全历史买入总付：单笔收益率能靠"只卖赚的"造假，全历史净现金流造不了假。
      */
     static int countSpotUnits(List<SpotOrderRow> rows, LocalDateTime start, LocalDateTime end) {
         BigDecimal buy = BigDecimal.ZERO;

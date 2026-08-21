@@ -383,7 +383,7 @@ const MAX_BARS = 5000;
 
 /**
  * 手机纵向滑动交还给页面滚动（否则想下滑页面却在拖图表）；横向平移/捏合缩放保留。
- * 提到模块级是因为画线拖拽期间要临时把 handleScroll 整个关掉，松手后得原样恢复这一份。
+ * 提到模块级：画线拖拽期间要临时关掉 handleScroll，松手后原样恢复这一份。
  */
 const SCROLL_OPTS: DeepPartial<HandleScrollOptions> =
   { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false };
@@ -483,8 +483,7 @@ export function CandleChart({ symbol, interval, limit = 300, visibleBars = 110, 
   }), []);
 
   // 显示/定位气泡（用 ref，避免闭包读到过期 isDark/props）。
-  // 【钉对侧，不跟光标】看右半边的 K 线，面板停在左侧；看左半边，面板停在右侧（贴价格轴内侧）——
-  // 面板永远不挡正在看的那几根蜡烛。纵向跟随光标居中，夹在图内。
+  // 钉对侧不跟光标：面板停在光标另一半边（贴价格轴内侧），永远不挡正在看的蜡烛；纵向跟随光标居中，夹在图内。
   const showTip = (bar: Bar, px: number, py: number) => {
     const tip = tipRef.current, wrap = wrapRef.current; if (!tip || !wrap) return;
     tip.innerHTML = tooltipHtml(bar, barsRef.current, idxRef.current, decimals, base, interval);
@@ -764,8 +763,7 @@ export function CandleChart({ symbol, interval, limit = 300, visibleBars = 110, 
 
   // 仓位参考线：入场实线（多=涨色/空=跌色）、TP 虚线、SL 疏点线、强平橙色大虚线。
   // 多空双开靠色系区分：一个仓位的整组线共用其方向色，强平线例外——那是危险信号，统一橙色。
-  // 【信息写在线上，不落 y 轴】轴标签一多就和刻度、最新价框互相盖；这里每条线配一个
-  // 悬浮小签（「多10x 入场 63000」）贴在价格轴左侧的线尾上，定位由 250ms 循环维护。
+  // 信息写在线上不落 y 轴（轴标签一多互相盖）：每条线配一个悬浮小签贴在价格轴左侧线尾，定位由 250ms 循环维护。
   useEffect(() => {
     const series = candleRef.current, wrap = wrapRef.current;
     if (!series || !wrap || !showPosLines || !positionOverlays?.length) return;

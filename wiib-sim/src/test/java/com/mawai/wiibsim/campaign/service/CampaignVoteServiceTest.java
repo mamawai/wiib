@@ -32,22 +32,14 @@ import static org.mockito.Mockito.when;
 /**
  * 多空投票的下票与看板。不起 Spring、不连库。
  * <p>
- * 【为什么 CampaignService 用真的、只 mock 它底下的 CampaignMapper】同
- * {@link CampaignCheckinServiceTest}：投票的时间窗闸门就在
- * {@link CampaignService#requireRunning()} 里，mock 掉它等于把被测的闸一起 mock 掉。
- * 顺带这也把"时钟"变得可控——不动系统时间，改喂进去那场活动的窗口就行。
+ * CampaignService 用真的、只 mock 它底下的 CampaignMapper（同 {@link CampaignCheckinServiceTest}：
+ * 时间窗闸门就在 requireRunning() 里，mock 掉它等于把被测的闸一起 mock 掉）。
+ * "多空二选一"由数据库唯一索引执行，那条由
+ * {@link com.mawai.wiibsim.campaign.CampaignVoteRealRunTest} 在真库上钉；本类管 Java 侧
+ * （投票日是不是明天的 UTC 日、锁盘窗口两端、看板拼装）。
  * <p>
- * 【这里能测什么、不能测什么】"多空二选一"这条铁律真正的执行者是数据库的 uk_campaign_vote
- * 唯一索引，mock 的 mapper 证不了它 —— 那条由
- * {@link com.mawai.wiibsim.campaign.CampaignVoteRealRunTest} 在真库上钉。
- * 本类管 Java 这一侧：闸门放不放行、插的行对不对（尤其投票日是不是<b>明天</b>的 UTC 日）、
- * 锁盘窗口卡在哪两端、DuplicateKeyException 有没有被翻成人话、看板怎么把两条 SQL 的结果拼起来。
- * <p>
- * 【时刻从参数递进去】下票那几条走 {@code vote(..., Instant)} 这个包内重载：
- * 投票日与锁盘都由"现在几点"决定，拿真时钟测的话边界那几秒根本摸不到，
- * 而且 UTC 23:55-00:05 是 SGT 早上 07:55-08:05 —— 真在那时候跑一次全套，好几条会集体变红。
- * 活动时间窗那道闸仍然吃真时钟（{@link CampaignService#requireRunning()} 用
- * {@code LocalDateTime.now()}），所以喂进去的 Instant 与活动窗口无关，两者互不干涉。
+ * 时刻从参数递进去（vote(..., Instant) 包内重载）：投票日与锁盘都由"现在几点"决定，
+ * 真时钟测不到边界。活动时间窗那道闸仍吃真时钟，与喂进去的 Instant 互不干涉。
  */
 class CampaignVoteServiceTest {
 
@@ -80,17 +72,8 @@ class CampaignVoteServiceTest {
     /**
      * ★ 插的行必须是"本场活动 + 我 + <b>明天</b>的 UTC 日 + 标的 + 方向"。★
      * <p>
-     * 【为什么是明天不是今天】结算比的是<b>该投票日</b>的日线收盘 vs 前日收盘。
-     * 盖今天的戳，那根 K 线在平台自己的图上就看得见 —— UTC 23:55 才投的人照着答案填，稳赢，
-     * §2.3 那套共享池反向赔率也就不存在了。盖明天的戳，收票在这一天开始之前就截止了，
-     * 谁都没有前瞻信息。
-     * <p>
-     * 【voteDate 为什么必须是 UTC 日】结算按 Binance 的 1d K 线走，那条线就是 UTC 日切；
-     * 跟着服务器本地日（Asia/Singapore）盖戳的话，边界那批票永远对不上当日收盘。
-     * <p>
-     * 【这条用例的射程】时刻是喂进去的，期望值是测试自己按 UTC 算的 —— 与实现无关，
-     * 也不挑跑测试的时辰。实现写成 {@code LocalDate.now()}（本地日）或忘了 {@code plusDays(1)}，
-     * 这里当场红。
+     * 投明天不投今天（防照当日 K 线填答案）、voteDate 必须是 UTC 日（结算按 UTC 日切的日线走）。
+     * 期望值是测试自己按 UTC 算的，实现写成本地日或忘了 plusDays(1) 这里当场红。
      */
     @Test
     void 投票插入本场活动我明天UTC日的记录() {
@@ -238,10 +221,8 @@ class CampaignVoteServiceTest {
      * 同一标的投第二次：唯一索引顶回来的 DuplicateKeyException 翻成人话，
      * 且提示里带的是展示名（"BTC" / "黄金"）不是 symbol，用户不认识 XAUUSDT。
      * <p>
-     * 【为什么提示里要带日期】投的是明天，点按钮的那一刻和这票管的那一天不是同一天；
-     * 只说"今天已经投过了"，UTC 16:00 之后（本地已经翻页）的人会以为自己投的是别的日子。
-     * <p>
-     * 这里若退回"先查后插"或捕获后重试，双击就能把多空各投一票、白拿一份投票分。
+     * 提示里带日期：投的是明天，只说"今天已经投过了"会让人以为投的是别的日子。
+     * 这里若退回"先查后插"或捕获后重试，双击就能多空各投一票。
      */
     @Test
     void 重复投同一标的报多空二选一且不再插第二次() {
@@ -294,7 +275,7 @@ class CampaignVoteServiceTest {
      * 看板按 SYMBOLS 的顺序一标的一条（顺序即前端卡片顺序），票数各取各标的的行，
      * myDirection 只在我投过的标的上有值。
      * <p>
-     * 【顺带钉住"看板读的是明天"】三条 stub 全按 {@link #tomorrowUtc()} 挂 ——
+     * 顺带钉住"看板读的是明天"：三条 stub 全按 {@link #tomorrowUtc()} 挂——
      * 实现里还读今天的话，一条都命中不了，票数全成 0、myDirection 全成 null，这条当场红。
      * 下票与看板必须是同一天，否则"我投了没"和"两边多少票"会各说各话。
      * <p>

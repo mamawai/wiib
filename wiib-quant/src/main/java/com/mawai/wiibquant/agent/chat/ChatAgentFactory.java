@@ -40,9 +40,7 @@ import java.util.function.Supplier;
  * 每个都是独立编译的 ReactAgent。
  * <p>
  * <b>这里只管"造"，不管"怎么用"</b>：派谁、派几轮、结果怎么拼、历史怎么存，全在
- * {@link ChatTurnRunner} 的平铺 Java 循环里。曾经的父 StateGraph 编排已退役——
- * 图带来的全部东西（条件边、并行 fan-in、回环）在这个链路上都能用几十行普通代码写清楚，
- * 而图额外附赠了一堆代价：hook 内联丢失、迭代硬顶算账、并行分支拿不到子流。
+ * {@link ChatTurnRunner} 的平铺 Java 循环里。
  * <p>
  * 模型是建叶子时绑死的（工具方法体里拿不到用户身份，{@code ChatService.execute} 的签名里
  * 没有 RunnableConfig），所以叶子按配置指纹缓存，见 {@link #leavesFor}。
@@ -323,11 +321,9 @@ public class ChatAgentFactory {
      * 派谁、还要不要再派，全归 {@link ChatTurnRunner} 的显式循环管，这里一个字都不提——
      * 角色单一，模型不会再纠结"该作答还是该派发"（那正是之前无限循环的病根）。
      * <p>
-     * 三个 hook 就挂在框架自己的挂载点上：叶子是独立 {@code compile()} 的，
-     * {@code addCallModelHook} 落到模型节点、{@code addExecuteToolsHook} 落到工具边，
-     * 都真执行（从前挂不上是因为这张图会被 {@code addNode(id, StateGraph)} 内联进父图，
-     * 内联只搬 nodes/edges）。工具边那两个按 {@link #summarizerToolHooks} 的列表顺序注册，
-     * 末尾的保险丝因此在最外层。
+     * 三个 hook 挂在框架自己的挂载点上：叶子是独立 {@code compile()} 的，
+     * {@code addCallModelHook} 落到模型节点、{@code addExecuteToolsHook} 落到工具边。
+     * 工具边那两个按 {@link #summarizerToolHooks} 的列表顺序注册，末尾的保险丝因此在最外层。
      *
      * @param light  压缩用浅模型：摘要是简单活，用深模型纯烧钱
      * @param userId 动作类工具烤死的归属；查询归专家，动手归汇总者，理由见 {@link TraderActionToolkit}

@@ -20,8 +20,7 @@ import java.util.function.BiPredicate;
 public class WorkbenchRunRegistry {
 
     /**
-     * 事件出口：返回 true=真推出去了。用 BiPredicate 而不是 BiConsumer，是因为"推没推出去"
-     * 必须能一路答给调用方——表单卡最怕的就是回模型一句"已弹出"，而用户那边什么都没有。
+     * 事件出口：返回 true=真推出去了。用 BiPredicate 为了把"推没推出去"答给调用方。
      */
     public interface Emitter extends BiPredicate<String, JSONObject> {
     }

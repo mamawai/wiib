@@ -16,8 +16,7 @@ import java.util.Map;
  * 执行走 REST 打到 TraderActionService。所以模型没有能力唤醒、复盘或落库留言——
  * 这正是这层存在的意义，误触最多是多弹一张卡。
  * <p>
- * <b>为什么挂汇总者而不是挂 trader 专家</b>：这三件事是替用户完成请求的收尾动作，
- * 本就该由写最终回答的那个人去做。查询归专家，动手归汇总者。
+ * 挂在汇总者不挂 trader 专家：查询归专家，动手归汇总者——收尾动作由写最终回答的那个人做。
  * <p>
  * 会话号从 {@link ToolRunContext} 取（工具方法体拿不到 RunnableConfig），
  * 而它由 {@link ApprovalGate#passThrough} 在工具边上设进去——闸门虽然只管深研判了，但不能摘。

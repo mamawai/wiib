@@ -19,12 +19,10 @@ import java.util.List;
 /**
  * 资金账单。纯读，没有业务逻辑，所以直接吃 mapper 不再套一层 service（同 NotificationController）。
  * <p>
- * 【只能查自己的】userId 一律从登录态取，请求参数里不许出现任何能顶替它的入口——
- * 开一个 userId 参数就等于让任何登录用户翻别人的账单。这条由
- * LedgerControllerTest#请求参数里不许出现userId入口 的反射守卫钉着。
- * <p>
- * 【翻页契约】id 倒序，最新在前。下一页把本页最后一条的 id 传回 beforeId，返回空数组即到底。
- * limit 会被服务端封顶到 100，所以传超过 100 时"返回条数 &lt; limit"不能当到底的判据。
+ * 只能查自己的：userId 一律从登录态取，请求参数不许出现能顶替它的入口
+ * （由 LedgerControllerTest 的反射守卫钉着）。
+ * 翻页契约：id 倒序最新在前，下一页传 beforeId，返回空数组即到底；
+ * limit 服务端封顶 100，"返回条数 &lt; limit"不能当到底的判据。
  */
 @Tag(name = "资金账单")
 @RestController

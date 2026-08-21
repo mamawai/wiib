@@ -586,7 +586,7 @@ CREATE TABLE IF NOT EXISTS kline_history (
 );
 CREATE INDEX IF NOT EXISTS idx_kline_symbol_time ON kline_history (symbol, interval_code, open_time);
 
--- （Slice3 融合：research 链下序列已并入 factor_history 表，不再单建 market_series_history）
+-- （research 链下序列统一存 factor_history 表，不单建序列表）
 
 -- ============ quant_deep_analysis：深研判（工作台对话触发，Bull∥Bear→Judge 产物） ============
 CREATE TABLE IF NOT EXISTS quant_deep_analysis (

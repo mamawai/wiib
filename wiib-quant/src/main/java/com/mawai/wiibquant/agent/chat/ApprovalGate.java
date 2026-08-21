@@ -30,24 +30,13 @@ import java.util.concurrent.CompletableFuture;
  * 在卡上点击，再批准一次等于让用户确认两遍，第一道毫无信息量。
  * <p>
  * <b>但每个工具都得从这里走一趟</b>：{@link #passThrough} 里的 {@link ToolRunContext#set} 是
- * 工具方法体拿 sessionId 的唯一来源，受不受管辖都一样。绕开它，弹表单的工具就不知道
- * 该往哪个会话推 SSE，卡片哪儿也去不了。
+ * 工具方法体拿 sessionId 的唯一来源，受不受管辖都一样。
+ * 判断做在这一层，这么写为了同时拿到 sessionId 和 tool_call 的 name/arguments（工具方法体看不到 sessionId）。
  * <p>
- * <b>为什么在这一层而不在工具里</b>：授权要绑到"哪个会话、批准了哪个工具的哪个标的"。
- * 工具方法体看不到 sessionId（框架的 ChatService 签名里没有 RunnableConfig，
- * 而 ToolContext 是建图时算死的静态值），所以判断只能做在这里——
- * hook 同时拿得到 config.threadId() 和 tool_call 的 name/arguments。
+ * 挂在 summarizer 叶子的工具边（addExecuteToolsHook），且<b>必须先于 ModelCallLimiter 注册</b>——
+ * WrapCall 后注册的在外层先执行，保险丝必须在外层。
  * <p>
- * <b>挂在哪</b>：summarizer 叶子的工具边，走 {@code ReactAgent.Builder.addExecuteToolsHook}
- * 直接注册（叶子是独立 {@code compile()} 的，官方挂载点真生效）。
- * <p>
- * <b>挂载顺序</b>：必须先于 {@link com.mawai.wiibquant.agent.llm.ModelCallLimiter} 注册。
- * langgraph4j 的 WrapCall 是 reduce 左折叠，<b>后注册的在外层先执行</b>，
- * 保险丝必须在外层——否则会出现"卡片弹了但模型没配额告诉用户"的窗口。
- * <p>
- * <b>拒绝标记跨轮活着，而且必须如此</b>：卡片是一轮结束时才发出去的，用户点拒绝必然发生在
- * 两轮之间，下一轮模型重提同一件事时才轮到这里回执。它是一次性的——被读走就没了，
- * 所以用户改主意重新问不会被上一次的拒绝挡住。
+ * 拒绝标记跨轮活着（用户点拒绝发生在两轮之间）且一次性——被读走就没了，改主意重新问不被挡。
  */
 @Slf4j
 public class ApprovalGate implements EdgeHook.WrapCall<MessagesState<Message>> {

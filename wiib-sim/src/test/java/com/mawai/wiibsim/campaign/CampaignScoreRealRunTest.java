@@ -29,7 +29,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 /**
  * 积分总表的真跑验收：真库 + 真 Redis。
  * <p>
- * 【这里要证的三件事，都是 mock 测证不了的】
+ * 这里要证的三件事，都是 mock 测证不了的：
  * <ol>
  *   <li><b>七条注解 SQL 一起发得出去、结果拼得成一张表。</b>
  *       {@link CampaignScoreService#scoreBoard()} 是全站唯一把交易 / 签到 / 投票三路汇到一起的
@@ -52,9 +52,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  * <p>
  * 前置：{@code sql/campaign.sql} 已落库且库里有一场 RUNNING 活动。
  * <p>
- * 【写 Redis 的自律】本测试只读库。往 Redis 写的只有两个键：往返用例用的是带 nanoTime 的
- * 合成键，绝不与真键撞；{@code campaign:board:{id}} 这个真键的名字由活动 id 决定、换不掉，
- * 所以前后各删一次 —— 跑之前删是为了逼出一次真算，跑完删是为了不给真环境留下一份测试时刻的快照。
+ * 写 Redis 的自律：往返用例用带 nanoTime 的合成键；{@code campaign:board:{id}} 真键
+ * 前后各删一次——跑前删逼出真算，跑完删不给真环境留测试快照。
  */
 @SpringBootTest
 @EnabledIfEnvironmentVariable(named = "WIIB_REAL_RUN", matches = "1")
@@ -87,13 +86,9 @@ class CampaignScoreRealRunTest {
      * 整表在真库上算得出来（七条 SQL 全发一遍），且每一行都满足榜单的三条不变量：
      * 能领取、总分不为负、按最终分降序同分按 userId 升序。
      * <p>
-     * 【榜空也不跳过】活动排期没到、或还没人挣到分时，board 合法地就是空的 ——
-     * 那三条不变量此时是空真，但"七条 SQL 在真 PG 上跑通了"这件事照样验到了，
-     * 而那正是这条用例最贵的部分。等活动跑起来，不变量自然就带上真数据了。
-     * <p>
-     * 【claimable 恒为 true 这条是承重的】listEligibleUsers 的正则
-     * {@code linux_do_id ~ '^[0-9]+$'} 与 {@code EligibleUserRow.claimable()} 是两处判据，
-     * 一旦漂移就会出现"算了分却领不到钱"的人。
+     * 榜空也不跳过：不变量此时空真，但"七条 SQL 在真 PG 上跑通"照样验到了。
+     * claimable 恒为 true 是承重断言：名单正则与 claimable() 两处判据一旦漂移，
+     * 会出现"算了分却领不到钱"的人。
      */
     @Test
     void 积分表在真库上算得出来且满足榜单不变量() {

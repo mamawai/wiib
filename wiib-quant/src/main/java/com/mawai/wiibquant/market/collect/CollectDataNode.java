@@ -1,7 +1,5 @@
 package com.mawai.wiibquant.market.collect;
 
-import org.bsc.langgraph4j.state.AgentState;
-import org.bsc.langgraph4j.action.NodeAction;
 import com.alibaba.fastjson2.JSON;
 import com.mawai.wiibcommon.entity.ForceOrder;
 import com.mawai.wiibcommon.market.BinanceRestClient;
@@ -16,11 +14,10 @@ import java.util.Map;
 import java.util.concurrent.*;
 
 /**
- * 数据采集节点：合并CollectMarketNode + CollectNewsNode。
- * 内部虚拟线程并行采集K线(7周期)、ticker、funding、orderbook、OI、LSR、新闻。
+ * 市场数据采集：虚拟线程并行采集K线(7周期)、ticker、funding、盘口、OI、多空比、强平、期权面(DVOL/盘面)、FGI。
  */
 @Slf4j
-public class CollectDataNode implements NodeAction<AgentState> {
+public class CollectDataNode {
 
     private static final long COLLECT_TIMEOUT_SECONDS = 10L;
 
@@ -37,15 +34,7 @@ public class CollectDataNode implements NodeAction<AgentState> {
         this.deribitClient = deribitClient;
     }
 
-    @Override
-    public Map<String, Object> apply(AgentState state) {
-        String symbol = (String) state.value("target_symbol").orElse("BTCUSDT");
-        if (symbol.isBlank()) symbol = "BTCUSDT";
-        String preFetchedFearGreed = (String) state.value("fear_greed_data").orElse(null);
-        return collect(symbol, preFetchedFearGreed);
-    }
-
-    /** 独立于 StateGraph 的采集入口，供测试和工具复用。 */
+    /** 采集入口；preFetchedFearGreed 非空则跳过 FGI 拉取（调度器可能已预取）。 */
     public Map<String, Object> collect(String symbol, String preFetchedFearGreed) {
         long startMs = System.currentTimeMillis();
         log.info("[Q1.0] collect_data开始 symbol={}", symbol);

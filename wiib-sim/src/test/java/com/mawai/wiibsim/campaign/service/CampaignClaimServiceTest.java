@@ -40,11 +40,9 @@ import static org.mockito.Mockito.when;
  * 不起 Spring、不连库、<b>绝不连网</b>（RestTemplate 与 LdcClient 都是 mock，
  * 真发放接口一次也不许碰到）。
  * <p>
- * 【为什么 CampaignService 用真的】同 {@link CampaignCheckinServiceTest}：
- * "领取只能用 current() 不能用 requireRunning()"这条规矩就活在 CampaignService 里。
- * mock 掉它，"结算后活动还查不查得到"这件事就测不成了 —— 而那正是领取的前提。
- * <p>
- * 【本类钉的两条顺序不变量】都是能悄悄多花钱 / 少花钱的那种：
+ * CampaignService 用真的（同 {@link CampaignCheckinServiceTest}）：
+ * "结算后活动还查不查得到"是领取的前提，mock 掉就测不成。
+ * 本类钉两条顺序不变量，都是能悄悄多花钱 / 少花钱的那种：
  * <ul>
  *   <li><b>身份不符必须在 CAS 与发放之前抛</b> —— 否则一次授权错号会把行推进 CLAIMED，
  *       甚至真把钱打到别人账上。</li>
@@ -173,16 +171,8 @@ class CampaignClaimServiceTest {
     }
 
     /**
-     * ★★ 发放整个抛异常时也必须落 FAILED，不能把行扔在 CLAIMED ★★
-     * <p>
-     * 【什么时候真会抛】distribute 只把 http.send 包在 try 里，之前那截是裸的：
-     * LDC_BASE_URL 拼不成 URI、URI 不是绝对地址、凭证里混进控制字符，都在那儿抛
-     * IllegalArgumentException。最可能撞上的时刻是 LDC_ENABLED 第一次打开的那次发版
-     * —— 那几个环境变量当时是新的，而这窗口里每个点"领取"的人都会被永久钉在 CLAIMED
-     * （casClaim 只收 PENDING/FAILED，claim() 直接拒 CLAIMED，没超时也没自愈，只能人工改库）。
-     * <p>
-     * 落 FAILED 是无条件安全的：单号一个字没动，请求就算真到了服务端，
-     * 重领时同一单号会撞唯一索引被判 SUCCESS，不会重复付款。
+     * 发放整个抛异常时也必须落 FAILED，不能把行扔在 CLAIMED（无超时无自愈，只能人工改库）。
+     * 落 FAILED 无条件安全：单号不动，重领撞唯一索引不会重复付款。
      */
     @Test
     void 发放抛异常也落FAILED而不是卡在CLAIMED() {

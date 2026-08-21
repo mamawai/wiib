@@ -24,9 +24,7 @@ export function fmtNum(n: number | string | null | undefined, decimals = 2): str
 
 /**
  * 新加坡时间 yyyy-MM-dd（不传参就是"今天"）。日历/网格切日、按日查接口走这里。
- * <p>
- * 用 en-CA 是因为它的短日期格式恰好就是 ISO 的 yyyy-MM-dd，省一轮手工补零；
- * 不能图省事用 toISOString().slice(0,10)——那是 UTC，东八区早上 8 点前整体退到前一天。
+ * en-CA 的短日期格式就是 yyyy-MM-dd；不能用 toISOString().slice(0,10)——那是 UTC，东八区早 8 点前退到前一天。
  */
 export function fmtDate(ts: number | string | Date = Date.now()): string {
   return new Date(ts).toLocaleDateString('en-CA', { timeZone: 'Asia/Singapore' });

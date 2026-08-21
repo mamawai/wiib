@@ -32,20 +32,11 @@ import static org.mockito.Mockito.when;
 /**
  * 签到写入与日常积分组装。不起 Spring、不连库。
  * <p>
- * 【为什么 CampaignService 用真的、只 mock 它底下的 CampaignMapper】签到的时间窗闸门就在
- * {@link CampaignService#requireRunning()} 里，mock 掉它等于把被测的那道闸一起 mock 掉，
- * "活动没开始也能签"这种 bug 会照绿。它只依赖一个 mapper，真造一个的成本约等于零。
- * 顺带这也把"时钟"变得可控：不动系统时间，改喂进去那场活动的窗口就行。
- * <p>
- * 【这里能测什么、不能测什么】"一天只能签一次"这条铁律真正的执行者是数据库的
- * uk_campaign_checkin 唯一索引，mock 的 mapper 证不了它 —— 那条由
- * {@link com.mawai.wiibsim.campaign.CampaignCheckinRealRunTest} 在真库上钉。
- * 本类管的是 Java 这一侧：闸门放不放行、插的行对不对、DuplicateKeyException 有没有被翻成人话、
- * 以及积分怎么从签到日算出来。
- * <p>
- * 【连续段的取值全在边界上】longestStreak 本身由 ScoreRulesTest 管，本类只钉
- * "scoreAll 传进去的是最长连续段而不是总天数" —— 这两个数在"连签不断"的样本里恰好相等，
- * 所以样本一律造成断段的，否则用例是假绿。
+ * CampaignService 用真的、只 mock 它底下的 CampaignMapper：时间窗闸门就在 requireRunning() 里，
+ * mock 掉它等于把被测的闸一起 mock 掉。
+ * "一天只能签一次"由数据库唯一索引执行，mock 证不了——那条由
+ * {@link com.mawai.wiibsim.campaign.CampaignCheckinRealRunTest} 在真库上钉；本类管 Java 侧。
+ * 连续段样本一律造成断段的：连签不断时"最长连续段"与"总天数"恰好相等，用例会假绿。
  */
 class CampaignCheckinServiceTest {
 
@@ -75,13 +66,9 @@ class CampaignCheckinServiceTest {
     // ==================== 时间窗闸门 ====================
 
     /*
-     * 【时钟这件事说清楚】requireRunning 比的是真实的 LocalDateTime.now()，用例只能挪活动窗口。
-     * 所以"开始前 / 结束后 / 窗口内"这三条是完全确定的（差着小时量级），
-     * 而"恰好等于 startAt / endAt 那一纳秒"在真实时钟下测不出来 —— 真要测得给
-     * CampaignService 注入 Clock，为这点收益给 Task 1 的类加个构造参数不划算。
-     * 下面两条边界用例把窗口边界压到"此刻"，能咬住的是"两端都不许有宽限期"
-     * （比如误把 endAt 当天整天都算上）；半开区间的日界口径则由 scoreAll 那几条日期用例
-     * 精确钉死 —— 那边不碰时钟，窗口和签到日全是写死的字面量。
+     * requireRunning 比的是真实 LocalDateTime.now()，用例只能挪活动窗口：
+     * 边界那一纳秒测不出来，下面两条边界用例咬的是"两端不许有宽限期"；
+     * 半开区间的日界口径由 scoreAll 那几条日期用例（写死字面量、不碰时钟）精确钉死。
      */
 
     /** 活动开始前：闸门必须挡住，且一行都不许插 */
@@ -131,18 +118,8 @@ class CampaignCheckinServiceTest {
     }
 
     /**
-     * ★ 已经开始发钱的活动，就算被挪回窗口内也不许再签到 ★
-     * <p>
-     * 【这个场面怎么来的】结算会把活动翻成 SETTLING，而 {@code selectActive()} 现在把 SETTLING
-     * 也算 active（结算后活动页还得显示榜单与领取入口）。正常排期下 SETTLING 必然在 endAt 之后、
-     * 被时间窗挡掉；但 campaign 表刻意做成可运行时改的，运营把 end_at 往后挪一下，
-     * 一场<b>奖池已经分完</b>的活动就重新落回窗口内了。
-     * <p>
-     * 【为什么必须挡】此时再签到、再投票挣到的分，永远兑不成 LDC —— 钱是按结算那一刻的分数
-     * 定格发出去的，不会因为你后来又签了几天而重算。让用户白挣一场比直接告诉他"结束了"糟得多。
-     * <p>
-     * 所以这里的窗口刻意造成<b>窗口内</b>（昨天开赛、13 天后收摊）：只有 status 那道判定挡得住它，
-     * 时间窗是放行的。
+     * 已经开始发钱的活动，就算被挪回窗口内也不许再签到——此时挣的分永远兑不成 LDC。
+     * 窗口刻意造成<b>窗口内</b>（昨天开赛、13 天后收摊）：只有 status 那道判定挡得住，时间窗是放行的。
      */
     @Test
     void 活动进入结算后即使还在窗口内也不许签到() {
@@ -316,13 +293,9 @@ class CampaignCheckinServiceTest {
     }
 
     /**
-     * ★ 窗口外的签到行不计分，天数和连续段<b>同时</b>把它们排除 ★
-     * <p>
-     * 【为什么窗口外还会有行】campaign 表刻意可运行时改，运营挪一下 start_at/end_at，
-     * 当初合法签下的行就落到窗口外了 —— 只在写入口卡窗口是堵不住的。
-     * <p>
-     * 【样本是怎么设计的】两个越界日（8-2 开赛前、8-17 结束那天）都紧贴着窗口内的日子，
-     * 于是"只筛天数不筛连续段"的实现会当场露馅：
+     * 窗口外的签到行不计分，天数和连续段<b>同时</b>把它们排除
+     * （运营挪窗口后窗口外会有当初合法签下的行，只卡写入口堵不住）。
+     * 样本的两个越界日（8-2、8-17）紧贴窗口内的日子，"只筛天数不筛连续段"的实现当场露馅：
      * <ul>
      *   <li>ME 窗口内是 8-3、8-4 与 8-15、8-16 两段各 2 天 → 最长 2 → 不够 3 天档 →
      *       <b>根本不该有 STREAK 这条</b>；漏筛的话 8-2/8-3/8-4 和 8-15/8-16/8-17

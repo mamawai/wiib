@@ -36,18 +36,11 @@ import static org.mockito.Mockito.when;
  * 积分总表的汇总半边：四路分怎么合、谁上榜、怎么排、预估怎么算、缓存怎么走。
  * 不起 Spring、不连库、不连 Redis。
  * <p>
- * 【为什么 CampaignService 用真的、只 mock 它底下的 CampaignMapper】同
- * {@link CampaignCheckinServiceTest}：读路径"故意不判时间窗"这条规矩就写在 CampaignService 里，
- * mock 掉它这条就测不成了。用真的还能把活动窗口整体挪到过去，直接钉住
- * "活动结束了榜还出得来"（写成 requireRunning 的话这条当场变红）。
- * <p>
- * 【三路分数全 mock 掉是有意的】各自的算法由 TradeScorerAssemblyTest /
- * CampaignCheckinServiceTest / CampaignVoteServiceTest 各管一段，这里重复一遍只会变成
- * 改一处红一片。本类只管"合"这一步：正负分怎么拆、下限 0 怎么兜、谁进榜谁不进、
- * 分母算谁、缓存的 JSON 能不能原样转回来。
- * <p>
- * 【样本里那两类"不该上榜的人"是承重的】IDLE 在名单里但一分没有；900/901 有投票分却不在名单里。
- * 前者防的是榜单挂一串 0 分噪音，后者防的是拿投票分那张图当参与名单
+ * CampaignService 用真的（同 {@link CampaignCheckinServiceTest}），钉"活动结束了榜还出得来"。
+ * 三路分数全 mock 掉是有意的：各自算法由各自的测试类管，本类只管"合"这一步
+ * （正负分拆法、下限 0、谁进榜、分母算谁、缓存 JSON 往返）。
+ * 样本里两类"不该上榜的人"承重：IDLE 在名单里但零分（防 0 分噪音），
+ * 900/901 有投票分不在名单（防拿投票分那张图当参与名单）
  * （sumScoreByUser 不筛 result，只投过票没结算的人也会出一行）—— 那会把机器人和邀请码用户放进榜里。
  */
 class CampaignScoreServiceTest {
@@ -173,12 +166,7 @@ class CampaignScoreServiceTest {
     }
 
     /**
-     * 日常侧的负分也要计进 penalty —— 明细里出现的每一个负数，总分都得认。
-     * <p>
-     * 【今天没有这种规则，为什么还要测】items 是把交易和日常两路拼在一起给前端看的。
-     * penalty 只收交易侧的话，将来日常侧一旦加一条扣分规则（比如"删评论倒扣"），
-     * 明细上会多出一条总分不认的负数，前端面板解释不了那个差额，而用户只会看到
-     * "上面写着 −3，下面的总分却没扣"。这条把"明细之和 == 总分"钉成结构性的，
+     * 日常侧的负分也要计进 penalty：把"明细之和 == 总分"钉成结构性的，
      * 不靠"碰巧日常侧全是正分"。
      */
     @Test
@@ -381,13 +369,8 @@ class CampaignScoreServiceTest {
     /**
      * ★ 缓存命中不重算，且 JSON 能原样转回来 ★
      * <p>
-     * 【为什么非要断言"反序列化后的对象等于原对象"】CampaignScore 与 ScoreItem 都是 record，
-     * fastjson2 对 record 的支持是运行期的事，编译期一个字都不会报。序列化写得出、
-     * 反序列化拿回一堆 null 或直接抛，这种错只在缓存命中的那一次请求上暴露 ——
-     * 也就是线上第二个访问活动页的人看到的东西和第一个人不一样。
-     * <p>
-     * 【equals 是逐字段比的，BigDecimal 还带 scale】所以这条同时钉住了标度：
-     * 14.50 转回来必须还是 14.50 而不是 14.5，否则前端会显示"14.5 分"。
+     * 断言"反序列化后等于原对象"：fastjson2 对 record 的支持是运行期的事，
+     * 错只在缓存命中那次请求暴露；equals 逐字段比且 BigDecimal 带 scale，顺带钉住 14.50 不变 14.5。
      */
     @Test
     void 缓存命中不重算且JSON原样转得回来() {
@@ -436,14 +419,8 @@ class CampaignScoreServiceTest {
     }
 
     /**
-     * ★ 结算走的 freshBoard 无视缓存重算，而展示走的 scoreBoard 照样吃缓存 ★
-     * <p>
-     * 【这条护的是真金白银】投票结算在 UTC 00:05 落最后一批分，缓存里可能正躺着一份 60 秒前
-     * 算的榜。结算若吃到它，就是按少算的权重把 LDC 发出去，而发放是 CAS 幂等的，发完纠不回来；
-     * 且那份陈旧的榜内部自洽，每个数看着都对，出了事都查不出来。
-     * <p>
-     * 用例把缓存喂成一份"只有 ACE、999 分"的假榜（真算出来是四个人），两条路径的返回一比就分得清
-     * 谁吃了缓存谁没吃 —— 这比 verify 调用次数更能说明问题。
+     * 结算走的 freshBoard 无视缓存重算，展示走的 scoreBoard 照样吃缓存。
+     * 缓存喂成"只有 ACE、999 分"的假榜（真算是四个人），两条路径返回一比就分得清谁吃了缓存。
      */
     @Test
     void 结算用的freshBoard无视缓存重算而展示路径照样吃缓存() {

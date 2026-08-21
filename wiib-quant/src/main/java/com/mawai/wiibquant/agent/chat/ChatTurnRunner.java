@@ -53,10 +53,8 @@ import java.util.stream.Collectors;
  *              └────────────────────────────────────────────────────────────────────────┘ 回到循环开头
  *         └─► summarizer 叶子流式作答（token 逐帧外发）→ 终态整体覆盖会话历史
  * </pre>
- * <b>为什么是普通 Java 循环而不是 StateGraph</b>：这段编排本身没有一处需要图——
- * 分支就是 if、并行就是虚拟线程、回环就是 while。而图要求把轮次和去重名单塞进 state
- * 才能跨节点传递，还附带迭代硬顶算账、hook 内联丢失、并行分支拿不到子流这些纯粹的额外成本。
- * 叶子 agent 保留 ReactAgent，因为那里的 ReAct 循环确实是框架在管。
+ * 编排用普通 Java 循环：分支就是 if、并行就是虚拟线程、回环就是 while。
+ * 叶子 agent 保留 ReactAgent，那里的 ReAct 循环确实是框架在管。
  * <p>
  * <b>让位</b>（用户消息优先于专家返回）：专家等待期收到 {@link TurnYield} 的信号即让位——
  * 存档 working、把在途批次交回（{@link TurnResult}），由 {@link ChatYieldCoordinator}

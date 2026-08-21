@@ -9,12 +9,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * {@link QuantConstants#normalizeSymbol} 的归一与校验。
- * <p>
- * 起因：截后缀那步原本在 {@code endsWith} 判定<b>之外</b>无条件先算，于是任何短于 4 字符的
- * 简写（BTC/ETH/SOL）都会走到 {@code substring(0, -1)} 当场
- * {@code StringIndexOutOfBoundsException}——而这个函数存在的意义正是接受简写。
- * 抛的还是 {@code IndexOutOfBoundsException}，调用方 {@code catch (IllegalArgumentException)}
- * 兜不住。生产上 {@code SymbolArgumentResolver:37} 拿它解析 API 入参，{@code ?symbol=BTC} 直接 500。
+ * 钉住短简写（BTC/ETH/SOL）不许越界：SymbolArgumentResolver 拿它解析 API 入参，{@code ?symbol=BTC} 必须能走通。
  */
 class QuantConstantsTest {
 

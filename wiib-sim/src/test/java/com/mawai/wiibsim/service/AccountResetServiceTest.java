@@ -28,8 +28,6 @@ import static org.mockito.Mockito.*;
  *       原样加回去（FuturesLiquidationServiceImpl 的 catch 里 zAdd 恢复），形成永久重试循环</li>
  *   <li>删表失败必须把索引重新注册回去。否则仓位还在、触发保护没了，等于静默关掉强平</li>
  * </ol>
- * （曾经还有第三件"待结算队列按 userId 前缀匹配"——现货卖出取消 5min 延迟后
- * 那条队列连同整套延迟结算一并删除，用例随之移除。）
  */
 class AccountResetServiceTest {
 

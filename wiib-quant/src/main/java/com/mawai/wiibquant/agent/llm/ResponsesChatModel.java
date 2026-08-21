@@ -42,8 +42,8 @@ import java.util.Set;
 /**
  * OpenAI Responses API（/v1/responses）协议的 ChatModel 实现。
  * <p>
- * 为什么自研：Spring AI 1.1.x 的 OpenAiChatModel 只会说 /v1/chat/completions；
- * Grok Build（经 CPA）/OpenAI 官方思考模型的原生协议是 Responses，走原生协议才能带 reasoning.effort 控思考档位。
+ * 自研为了走原生 Responses 协议带 reasoning.effort 控思考档位
+ * （Spring AI 的 OpenAiChatModel 只会说 /v1/chat/completions）。
  * <p>
  * 与框架的契约（langgraph4j + Spring AI 2.0）：
  * <ul>

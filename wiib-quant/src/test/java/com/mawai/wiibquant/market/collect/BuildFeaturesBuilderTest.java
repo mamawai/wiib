@@ -1,8 +1,11 @@
 package com.mawai.wiibquant.market.collect;
 
+import com.mawai.wiibcommon.enums.KlineInterval;
+import com.mawai.wiibquant.market.domain.FeatureSnapshot;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.offset;
@@ -12,6 +15,21 @@ import static org.assertj.core.api.Assertions.offset;
  * 上游字段变更/脏数据时靠这里第一时间红。
  */
 class BuildFeaturesBuilderTest {
+
+    // ---- buildFeatures: 空输入的输出形状 ----
+
+    @Test
+    void emptyRawDataKeepsOutputShape() {
+        BuildFeaturesBuilder builder = new BuildFeaturesBuilder(null, KlineInterval.M1);
+
+        Map<String, Object> result = builder.buildFeatures("BTCUSDT", Map.of());
+
+        assertThat(result).containsKeys("feature_snapshot", "indicator_map", "price_change_map");
+        FeatureSnapshot snapshot = (FeatureSnapshot) result.get("feature_snapshot");
+        assertThat(snapshot.symbol()).isEqualTo("BTCUSDT");
+        assertThat(snapshot.qualityFlags())
+                .contains("NO_INDICATORS", "NO_PRICE", "PARTIAL_KLINE_DATA");
+    }
 
     // ---- calcLsrExtreme: 多空比窗口百分位（各币中枢不同，不用固定阈值）----
 

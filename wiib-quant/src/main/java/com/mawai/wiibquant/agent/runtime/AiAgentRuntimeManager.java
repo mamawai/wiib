@@ -203,9 +203,7 @@ public class AiAgentRuntimeManager {
             options.reasoningEffort(config.getReasoningEffort());
         }
 
-        // 不传 toolCallingManager：该 setter 2.0 起废弃。删了不丢东西——模型层已经不跑工具循环
-        // （循环在 langgraph4j 图里），它在 OpenAiChatModel 内部只剩一件事：把 toolCallbacks
-        // 翻成发给 API 的工具声明。builder 不传就 new 一个默认的，做的事一模一样
+        // 不传 toolCallingManager：模型层不跑工具循环（循环在 langgraph4j 图里），builder 默认的够用
         return OpenAiChatModel.builder()
                 .openAiClient(openAiClient)
                 .openAiClientAsync(openAiClientAsync)

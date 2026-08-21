@@ -226,11 +226,8 @@ export function Campaign() {
   const [info, setInfo] = useState<CampaignInfo | null>(null);
   const [reward, setReward] = useState<CampaignReward | null>(null);
   const [board, setBoard] = useState<CampaignScore[]>([]);
-  // 四个"没拉到"标记，一个都不省。/current 的这个曾经被我判成"不需要"，理由是它只喂
-  // 领取卡那句永远为真的兜底话 —— 那句理由是错的：settled 同时还喂着 canAct、状态徽标
-  // 和预估卡。首屏就把 /current 拉挂、而活动其实已结算的话，徽标会写成"已结束 · 待结算"，
-  // 预估卡会退回"预估到手"。都不是关于钱的假话（领取仍走 reward 那支，照常能领），
-  // 但确实是错的状态，所以宁可挂一条"没拉全"的提示，也别假装页面是准的
+  // 四个"没拉到"标记一个都不省：settled 喂着 canAct、状态徽标和预估卡，
+  // 任何一支拉挂宁可挂"没拉全"提示，也别假装页面是准的
   const [viewFailed, setViewFailed] = useState(false);
   const [currentFailed, setCurrentFailed] = useState(false);
   const [rewardFailed, setRewardFailed] = useState(false);
@@ -361,13 +358,9 @@ export function Campaign() {
   const canAct = view != null && !notStarted && !ended && !settled;
 
   /**
-   * "有没有分到钱这件事，现在说不准"。预估卡与领取卡共用这一个判断。
-   * <p>【为什么必须共用】上一轮就是两张卡各判各的翻的车：领取卡挡住了 rewardFailed，
-   * 预估卡只看 reward 与 settled，于是 /reward 单独 500 时，一个真分到钱的人会在
-   * "奖励信息加载失败"正上方读到"实际到手 0.00 · 本次没有分到 LDC"。
-   * 两张卡的分支顺序从此都是 reward → rewardUnknown → settled → 兜底，一致性是构造出来的。
-   * <p>【为什么带 settled】结算前 /reward 本来就返回 null，它失败没有信息量，
-   * 没必要在活动进行中因为一次抖动就把预估数字换成一个"说不准"。
+   * "有没有分到钱这件事，现在说不准"。预估卡与领取卡必须共用这一个判断，
+   * 分支顺序统一为 reward → rewardUnknown → settled → 兜底，两张卡各判各的会互相打架。
+   * 带 settled：结算前 /reward 本来就返回 null，它失败没有信息量。
    */
   const rewardUnknown = rewardFailed && !reward && settled;
 
@@ -385,11 +378,8 @@ export function Campaign() {
 
   return (
     <div className="page-shell p-4 md:p-6 space-y-4">
-      {/* ① 顶部提示：无条件显示。参与名单按"linux_do_id 必须是纯数字"筛，邀请码注册的账号
-             根本不进名单 —— 不算分、不上榜、不分配，而系统没有"本地账号绑定 LinuxDo"的路径。
-             他们玩两周才发现自己压根没参与，是最容易招骂的点，所以要提前讲明白。
-             不要写成 {!view.me.claimable && ...}：名单已经筛过，claimable 恒 true，
-             而没上榜的人拿到的是全零兜底对象，那上面也是 true —— 条件永不触发 */}
+      {/* ① 顶部提示：无条件显示，提前讲明白邀请码账号不参与活动。
+             不要写成 {!view.me.claimable && ...}：名单已筛过 claimable 恒 true，条件永不触发 */}
       <div className="pt-card rounded-lg p-3 flex items-start gap-2.5 text-xs">
         <TriangleAlert className="w-4 h-4 shrink-0 text-warning mt-px" />
         <div className="leading-relaxed">

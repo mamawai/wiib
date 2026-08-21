@@ -18,21 +18,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 /**
  * 活动模块地基验收（非单测）：起完整 Spring 上下文、真连本地 PG。
  * <p>
- * 【这个类唯一要证的事】<b>包内 {@code @MapperScan} 真的生效</b>。整套活动方案押在
- * "活动结束整包 rm、业务代码一行不动"上，而这个承诺成立的前提就是
- * {@link CampaignConfig} 那句 {@code @MapperScan("com.mawai.wiibsim.campaign.mapper")}
- * 能把活动自己的 mapper 注册进来——主类 WiibSimApplication 的 {@code @MapperScan} 只覆盖
- * {@code com.mawai.wiibsim.mapper} 与 {@code wiibcommon.mapper}，<b>扫不到</b>
- * {@code wiibsim.campaign.mapper}（不是它的子包）。所以下面 {@code @Autowired CampaignMapper}
- * 能注进来这件事本身，就是结论；注不进来会直接 NoSuchBeanDefinitionException，本类红。
- * <p>
- * 其实上下文起得来就已经证完了：CampaignController 构造依赖 CampaignService、
- * CampaignService 构造依赖 CampaignMapper，链条断一环 context 就起不来。
- * 显式注入只是把这个隐式结论摆到台面上，顺带给断言一个抓手。
- * <p>
- * 【为什么不 mock】mock 掉 mapper 等于把被测的那件事（Spring 到底有没有注册这个 bean）
- * 一起 mock 掉，测试照绿而线上启动即炸。同理也不 mock DataSource：种子行是不是真在库里、
- * 下划线转驼峰有没有把 start_at→startAt 接上，只有真发给 PG 才知道。
+ * 这个类唯一要证的事：<b>包内 {@code @MapperScan} 真的生效</b>——主类的 @MapperScan 扫不到
+ * {@code wiibsim.campaign.mapper}，{@code @Autowired CampaignMapper} 注得进来本身就是结论。
+ * 不 mock：被测的正是"Spring 有没有注册这个 bean"和"种子行/驼峰映射在真库上对不对"。
  * <p>
  * 跑法（项目根）：
  * <pre>
@@ -86,10 +74,8 @@ class CampaignBootstrapRealRunTest {
     /**
      * Service 层薄封装，但它是后续所有任务拿活动窗口的入口，钉一下它和 mapper 取到的是同一行。
      * <p>
-     * 【为什么要按窗口分叉】requireRunning 现在除了 status 还判时间窗（半开 [startAt, endAt)，
-     * Task 5 补的，理由见 CampaignService）。种子活动的排期是 2026-08-03 ~ 2026-08-17，
-     * 而 status 早就是 RUNNING —— 排期外的日子跑本类，requireRunning 就该抛。
-     * 直接断言"不抛"会让这个类在开赛前后必红，而那恰恰是正确行为。
+     * 按窗口分叉断言：requireRunning 判时间窗，排期外的日子跑本类它就该抛——
+     * 直接断言"不抛"会让本类在开赛前后必红，而那恰恰是正确行为。
      */
     @Test
     void current不判窗口而requireRunning按排期放行或拦截() {

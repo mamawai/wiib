@@ -6,7 +6,7 @@ import java.math.BigDecimal;
 import java.util.List;
 
 /**
- * 多策略同框样本外报告（取代 Slice1 单策略 EvalReport 作顶层产出）：共享窗口 + buy&hold 基准算一次，每策略一条 {@link StrategyLine}。
+ * 多策略同框样本外报告：共享窗口 + buy&hold 基准算一次，每策略一条 {@link StrategyLine}。
  * 满足 spec §6 "四线同框"：buy&hold 一行 + N 条策略行（各含 vs buy&hold / naive 判定）。
  */
 public record ComparisonReport(

@@ -152,7 +152,7 @@ class ConversationSummarizerRealRunTest {
             "刚才我们都聊了什么？简单回顾一下",
             "结合前面聊过的，BTC 现在最需要注意的风险是什么？");
 
-    /** 挑 1 号不再是因为门只对管理员开（已对全体登录用户开放），纯粹因为真跑要烧的那份 BYOK 配在它名下 */
+    /** 挑 1 号：真跑要烧的那份 BYOK 配在它名下 */
     private static final long ADMIN_USER_ID = 1L;
 
     @Autowired

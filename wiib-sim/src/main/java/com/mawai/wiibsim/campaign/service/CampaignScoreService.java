@@ -24,14 +24,8 @@ import java.util.Map;
 
 /**
  * 把交易分、日常分、投票分并成一张全站积分表，「我的积分」「排行」「预估 LDC」全从这一份结果里取。
- * <p>
- * 【为什么单独一个类而不是塞进 CampaignService】{@link CampaignService} 是写路径的闸
- * （requireRunning），签到与投票两个 Service 都注入它；本类反过来要用那两个 Service 的汇总结果。
- * 塞在一起就是 CampaignService ⇄ 签到/投票 的构造器循环依赖。拆开之后依赖是单向的
- * （本类 → 那三个），CampaignService 保持只认 CampaignMapper 的样子，各司其职。
- * <p>
- * 【全站一次算完，不按人查】~100 人的量级，全站扫一次 + 缓存 60 秒，比每个人各查一遍便宜；
- * 更要紧的是三个视图同源，不会出现"我的积分 37、榜上写 36"这种对不上账的场面。
+ * 单独成类为了避开 CampaignService ⇄ 签到/投票的构造器循环依赖；
+ * 全站一次算完 + 缓存 60 秒，三个视图同源不对不上账。
  */
 @Service
 @RequiredArgsConstructor
@@ -52,12 +46,7 @@ public class CampaignScoreService {
 
     /**
      * 全站积分表，按最终分降序。缓存 60 秒。<b>展示用</b>；发钱之前请改用 {@link #freshBoard()}。
-     * <p>
-     * 【为什么不落进度表】~100 人的量级不值得维护一张会写坏、会与真实数据漂移的进度表。
-     * 唯一真相永远是业务表，每次现扫现算，缓存只挡住 60 秒内的重复请求。
-     * <p>
-     * 【读路径用 current() 不用 requireRunning()】活动开始前要能展示"还有几天开赛"、
-     * 结束后要能展示最终榜单与领取入口；判了窗口这两段时间前端就只剩报错。
+     * 不落进度表，唯一真相是业务表，现扫现算；读路径用 current() 让开赛前后都能展示。
      */
     public List<CampaignScore> scoreBoard() {
         Campaign c = campaignService.current();
@@ -72,17 +61,8 @@ public class CampaignScoreService {
 
     /**
      * 无视缓存重算一份，并把新结果写回缓存。<b>结算必须走这个，不能走 {@link #scoreBoard()}。</b>
-     * <p>
-     * 【为什么结算不能吃缓存】投票结算跑在 UTC 00:05，预测市场的 WON 也是结算时才写的 ——
-     * 最后一批分落库的那一刻，缓存里很可能躺着一份 60 秒前算的榜，它<b>不含</b>这批分。
-     * 拿它去分池子，等于按少算的权重把 LDC 发出去，而发放是 CAS 幂等的，发完就纠不回来了。
-     * 更糟的是这事完全不响：那份陈旧的榜内部是自洽的，每个数看着都对。
-     * {@link #computeBoard} 头上"活动进行中的分只是下限"那段说的就是这件事，
-     * 它撞上缓存的时刻正好是最要命的时刻。
-     * <p>
-     * 【为什么是覆写而不是先删再算】先删会留下一个"键不在"的空窗，正好落在结算这种
-     * 全站扫表的耗时操作上，期间进来的读请求会各自触发一次全表扫。直接用新结果覆盖同一个键，
-     * 失效的效果一样，还顺带让结算后用户看到的榜与真正发出去的钱是同一份。
+     * 缓存的榜可能不含结算当刻最后落库的那批分，拿它分池子发出去就纠不回来；
+     * 覆写不先删，为了不留"键不在"的空窗引发读请求各自全表扫。
      */
     public List<CampaignScore> freshBoard() {
         Campaign c = campaignService.current();
@@ -98,14 +78,8 @@ public class CampaignScoreService {
 
     /**
      * 现扫现算一份积分表。
-     * <p>
-     * 【名单只认 listEligibleUsers】三份分数图里都可能出现名单外的 userId ——
-     * 尤其投票那份（{@code sumScoreByUser} 不筛 result，只投过票还没结算的人也会出一行、total=0），
-     * 所以循环必须以名单为轴、用分数图去取值，反过来遍历分数图就会把机器人和邀请码用户放进榜里。
-     * <p>
-     * 【活动进行中的分是下限，不是终值】预测市场那条 SQL 按 created_at 卡窗口但要求 status='WON'，
-     * 而 WON 是结算时才写的 —— 临近结束下的注要等活动结束之后才结算得出。同理最后一天的投票分
-     * 也要隔天 00:05 才发。所以活动期间显示的分只会比最终分少，不会多。这是接受的，别当 bug 去"修"。
+     * 循环以 listEligibleUsers 名单为轴、分数图取值——反过来遍历分数图会把机器人放进榜里。
+     * 活动进行中的分是下限不是终值（WON/最后一天投票分要等结算才写），别当 bug 修。
      */
     private List<CampaignScore> computeBoard(Campaign c) {
         Map<Long, List<ScoreItem>> trade = tradeScorer.scoreAll(c.getId(), c.getStartAt(), c.getEndAt());
@@ -161,13 +135,9 @@ public class CampaignScoreService {
     /**
      * 参与 LDC 分配的权重：能领取且分数为正的人。分母只算这些人。
      * <p>
-     * <b>【结算别直接调这个，调 {@link #settlementBasis()}】</b>喂进来的 board 若来自
-     * 缓存的 {@link #scoreBoard()}，那份榜可能早于最后一批投票 / 预测结算，
-     * 按它分池子就是拿少算的权重把钱发出去，而发放是 CAS 幂等的，发完纠不回来。
-     * settlementBasis() 把"现算的榜"与"从它筛出的权重"绑成一个返回值，这种误用就没地方发生了。
-     * 本方法保持公开只为 {@link #myView} 那条读路径（它要的正是缓存榜的分母）。
-     * <p>
-     * 用 LinkedHashMap 保住榜单顺序 —— 结算侧要按名次逐个发放，顺序稳定才能对着日志核账。
+     * <b>结算别直接调这个，调 {@link #settlementBasis()}</b>；本方法保持公开只为
+     * {@link #myView} 那条读路径（它要的正是缓存榜的分母）。
+     * 用 LinkedHashMap 保住榜单顺序，结算按名次逐个发放才能对着日志核账。
      */
     public Map<Long, BigDecimal> eligibleWeights(List<CampaignScore> board) {
         Map<Long, BigDecimal> weights = new LinkedHashMap<>();
@@ -179,16 +149,8 @@ public class CampaignScoreService {
 
     /**
      * 结算专用：现算一份榜 + 从它筛出权重，一次给全。<b>结算只许走这个入口。</b>
-     * <p>
-     * 【为什么要有这个方法】{@link #freshBoard()} 与 {@link #eligibleWeights} 分开摆着，
-     * 结算侧就有两种静默错法：榜取成了缓存的 {@link #scoreBoard()}（少算最后一批投票分），
-     * 或者榜与权重取自两次不同的计算（明细与实发金额对不上账）。合成一个方法之后，
-     * 这两种误用在类型上就不可表达了 —— 调用方拿不到拆开的机会。
-     * <p>
-     * 【顺序：先算榜，再翻活动状态】{@link #freshBoard()} 经 {@link CampaignService#current()}
-     * 走到 {@code CampaignMapper.selectActive()}，那条 SQL 现在 {@code status IN ('RUNNING','SETTLING')}，
-     * 所以先翻 SETTLING 再算榜也查得到活动。但结算侧仍然坚持先算后翻：这条 SQL 的
-     * WHERE 是别人可以改的，而"翻了状态就再也算不出榜、于是谁也拿不到钱"这个失败是完全无声的。
+     * 合成一个方法让"吃了缓存的榜"和"榜与权重取自两次计算"这两种误用在类型上不可表达。
+     * 调用方须先算榜再翻活动状态，别反过来依赖 selectActive 的 WHERE 恰好放行 SETTLING。
      */
     public SettlementBasis settlementBasis() {
         List<CampaignScore> board = freshBoard();
@@ -197,17 +159,9 @@ public class CampaignScoreService {
 
     /**
      * 活动页一次要的全部数据。没有活动返回 null（前端据此隐藏活动入口）。
-     * <p>
-     * 【没上榜的人给全零兜底而不是抛】活动刚开、一分没挣的人打开页面是最常见的情形，
-     * 这时 rank = 0 表示"还没上榜"，预估 0。
-     * <p>
-     * 【checkedToday 的已知口径缺口】{@link CampaignCheckinService#checkedToday} 只按
-     * campaignId + 今天查行，不筛活动时间窗，而计分那侧（scoreAll / myDates）是筛的。
-     * 于是运营挪过 start_at/end_at 之后，会出现"页面显示已签到、但那天一分不算"的短暂不一致。
-     * 这里<b>照用不改</b>：一来影响只是个对勾，分数面板本身出自 scoreAll 仍然是对的；
-     * 二来真要补，该补在 checkedToday 里（把 Campaign 传进去复用同一个 inWindow），
-     * 而不是在调用侧再抄一份日界判断 —— 那个 [startAt, endAt) 跨 DATE 与 TIMESTAMP 的比法
-     * 抄第三份必然漂移，比这个对勾贵得多。
+     * 没上榜的人给全零兜底不抛：rank = 0 表示"还没上榜"。
+     * checkedToday 不筛活动时间窗（计分侧筛），挪过窗口会出现"显示已签到但不计分"——
+     * 已知口径缺口，只影响对勾，要补该补在 checkedToday 里而不是这里抄日界判断。
      */
     public MyCampaignView myView(Long userId) {
         Campaign c = campaignService.current();

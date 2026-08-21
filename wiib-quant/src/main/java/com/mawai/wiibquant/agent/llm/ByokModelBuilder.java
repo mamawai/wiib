@@ -22,8 +22,7 @@ import java.util.List;
 
 /**
  * BYOK 建模的唯一实现：一条 {@link UserLlmEndpoint} → 一个 ChatModel（openai→OpenAiChatModel / responses→ResponsesChatModel）。
- * 对话（ChatModelFactory）与交易员（TraderModelFactory）两个工厂只管各自的缓存策略，建模都走这里——
- * 以前两边各抄一份是因为配置形状不同（ai_trader 行 vs user_llm_config 行），现在同一张端点表，没理由再养两份。
+ * 对话（ChatModelFactory）与交易员（TraderModelFactory）两个工厂只管各自的缓存策略，建模都走这里。
  * <p>
  * 与平台轨（{@link com.mawai.wiibquant.agent.runtime.AiAgentRuntimeManager}）的建模路径同款，区别只是 key 来源。
  */

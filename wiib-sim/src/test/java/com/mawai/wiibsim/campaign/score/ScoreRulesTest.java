@@ -12,11 +12,7 @@ import java.util.Set;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * 计分规则纯函数。
- * <p>
- * 【为什么单独测】阶梯与分配是整套积分里唯一"错了全员都错"的部分：SQL 查漏一笔只影响一个人，
- * 阶梯边界差一位、余额法多发一分，是所有人的账都对不上。而它们又恰好完全无依赖，
- * 测起来只花几十行，没有不测的理由。
+ * 计分规则纯函数。阶梯与分配是"错了全员都错"的部分，且完全无依赖，单独钉。
  */
 class ScoreRulesTest {
 
@@ -151,11 +147,8 @@ class ScoreRulesTest {
     /**
      * 三个人平分 100：33.33 除不尽，余 1 分必须补给某一个，总额仍是 100.00。
      * <p>
-     * 【多出的那 0.01 归谁：钉的是 userId 最小的那个】喂进去的顺序刻意排成 3,1,2，
-     * 余数三家逐位相同 —— 靠 {@code .thenComparing(Share::userId)} 才轮得到 userId=1。
-     * 删了那句 tie-break 的话，List.sort 的稳定性会让 0.01 落到排在最前的 userId=3 头上，
-     * 这条当场红。用 containsExactly 而不是 InAnyOrder 也正是为此：
-     * "谁多拿了一分钱"是用户真会来问的问题，答案必须是可复现的，不能随喂入顺序漂。
+     * 多出的 0.01 归 userId 最小的：喂入顺序刻意排成 3,1,2，删掉 tie-break 这条当场红。
+     * 用 containsExactly 不用 InAnyOrder——分配结果必须可复现，不能随喂入顺序漂。
      */
     @Test
     void 除不尽时余数补给userId最小的那个() {

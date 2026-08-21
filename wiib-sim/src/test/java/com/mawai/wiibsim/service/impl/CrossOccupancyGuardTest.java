@@ -39,12 +39,8 @@ import static org.mockito.Mockito.*;
  * 维持保证金比起始保证金小一个数量级（20x 下 0.5% vs 5%），于是全仓占用形同虚设，
  * 用户看到的现象是"开了全仓后逐仓还能用所有的钱去开"。</p>
  *
- * <p>本类场景固定为：钱包 1000 + 一笔 20x 全仓（名义额 2000、占用 100、维持保证金 10）
- * <pre>
- * available       = 1000 − 100 = 900   ← 现在的口径，对齐 Binance availableBalance
- * equity − 维持保证金 = 1000 − 10  = 990   ← 曾经的口径
- * </pre>
- * 中间那 90 就是被抽走的兜底金。</p>
+ * <p>本类场景固定为：钱包 1000 + 一笔 20x 全仓（名义额 2000、占用 100、维持保证金 10），
+ * available = 1000 − 100 = 900（对齐 Binance availableBalance，不是 equity − 维持保证金的 990）。</p>
  */
 class CrossOccupancyGuardTest {
 

@@ -9,10 +9,8 @@ import java.time.LocalDateTime;
 /**
  * 活动期内平掉的一个合约仓位，已按订单侧聚合出真实口径。
  * <p>
- * 【为什么不用仓位表的 closed_pnl / margin】那两列对部分平仓过的仓位是残值
- * （见 FuturesPositionMapper:136-138 的注释），按残值算 ROI 可以被
- * "亏着分批平掉、留一小段等反弹"刷出 300%+。这里的两个字段来自订单表聚合，
- * 与用户在「仓位历史」页看到的 ROI 同一口径。
+ * 不用仓位表的 closed_pnl / margin（部分平仓后是残值，按残值算 ROI 可刷分）；
+ * 两字段来自订单表聚合，与「仓位历史」页 ROI 同口径。
  */
 @Data
 public class ClosedPositionRow {

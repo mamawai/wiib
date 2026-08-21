@@ -33,7 +33,7 @@ public final class MultiFactorForecaster implements Forecaster {
         this.name = name;
     }
 
-    /** 原 3 腿（趋势+资金费+恐惧贪婪），行为与 Slice2 完全一致——作为多因子基准。 */
+    /** 3 腿基准（趋势+资金费+恐惧贪婪），多因子对照的默认组合。 */
     public static MultiFactorForecaster defaults() {
         return new MultiFactorForecaster(EnumSet.of(Leg.TREND, Leg.FUNDING, Leg.FNG),
                 DEFAULT_FUNDING_SCALE, DEFAULT_EPSILON, "multi_factor_trend_funding_fng");

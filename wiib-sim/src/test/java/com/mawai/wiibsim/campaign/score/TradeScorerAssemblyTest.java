@@ -25,12 +25,9 @@ import java.util.Map;
 /**
  * scoreAll 的组装半边：取数、分组、并遗留、拼明细。判分本身由 TradeScorerTest 管，这里不重复测阶梯。
  * <p>
- * 【为什么这半边非测不可】scoreAll 是本模块唯一的生产入口，而它全是"看着就对"的搬运代码 ——
- * 罚分正负号写反、止损英雄误按次数发、现货流水按 symbol 而不按 (user,symbol) 归集、
- * 重置遗留并错人，这几类错都不会让任何静态函数的用例变红，却每一个都直接改变发出去的 LDC 数额。
- * <p>
- * 【count 与 score 必须成对断言】计数与分值分两步算，计数串行而分值正确的话，
- * 只看 score 的用例全绿。所以这里一律用 extracting(code, count, score) 三元组比。
+ * scoreAll 是本模块唯一的生产入口，搬运错（正负号、归集键、并遗留并错人）不会让静态函数用例红，
+ * 却直接改变发出去的 LDC 数额——所以这半边非测不可。
+ * count 与 score 成对断言（extracting 三元组），只看 score 会漏掉计数串行。
  */
 class TradeScorerAssemblyTest {
 
