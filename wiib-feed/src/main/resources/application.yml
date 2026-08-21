@@ -80,10 +80,10 @@ binance:
   fallback-poll-interval: 5000
 
 # /internal/streams(流健康+重试)由共享 InternalApiFilter 校验此 token；须与 sim/quant 同值
-# (三进程读同一 .env，默认值也一致，不填即可互通)
+# (三进程读同一 .env；无默认值，不填起不来)
 internal:
   api:
-    token: ${INTERNAL_API_TOKEN:wiib-internal-dev}
+    token: ${INTERNAL_API_TOKEN}
 
 ---
 # 哨兵模式(线上高可用，配合 redis-compose.yml)：.env 里 SPRING_PROFILES_ACTIVE=sentinel 启用，

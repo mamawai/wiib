@@ -1,5 +1,6 @@
 package com.mawai.wiibquant.controller;
 
+import com.mawai.wiibcommon.annotation.RequireAdmin;
 import com.mawai.wiibcommon.constant.QuantConstants;
 import com.mawai.wiibcommon.util.Result;
 import com.mawai.wiibcommon.market.KlineHistoryStore;
@@ -23,12 +24,14 @@ import java.util.Map;
  * 插拔式策略回测 API；数据只读本地 kline_history，不触发外部行情下载。
  * 数据装载/策略工厂委托 {@link BacktestOrchestrator}（响应结构不变；warmup 取值随
  * orchestrator 与 DbRun 对齐——含 SMA200 趋势闸预热，比旧口径更足）。
+ * 前端回测页走 /api/ai/backtest 那套带任务队列的，这条是手动调策略用的同步接口。
  */
 @Slf4j
 @Tag(name = "插拔式策略回测")
 @RestController
 @RequestMapping("/api/strategy-backtest")
 @RequiredArgsConstructor
+@RequireAdmin // 整个插拔式回测控制器仅管理员(userId=1)可访问
 public class StrategyBacktestController {
 
     private static final String FIBO_ID = "FIBO";

@@ -1,5 +1,6 @@
 package com.mawai.wiibquant.controller;
 
+import com.mawai.wiibcommon.annotation.RequireAdmin;
 import com.mawai.wiibcommon.util.Result;
 import com.mawai.wiibquant.external.etf.EtfFlowScraper;
 import com.mawai.wiibquant.market.service.StablecoinFlowService;
@@ -25,6 +26,7 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/research/eval")
 @RequiredArgsConstructor
+@RequireAdmin // 整个研究/评估控制器仅管理员(userId=1)可访问
 public class ResearchEvalController {
 
     private final KlineHistoryStore store;
