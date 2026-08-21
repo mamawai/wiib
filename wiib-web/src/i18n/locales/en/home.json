@@ -11,8 +11,8 @@
     "stocks": "Stocks",
     "crypto": "Crypto",
     "prediction": "Prediction",
-    "ai": "AI",
-    "arena": "Arena",
+    "ai": "Config",
+    "arena": "AI Arena",
     "games": "Games",
     "buff": "Rewards"
   },

@@ -20,6 +20,7 @@
     "interestAccrued": "应计利息",
     "futuresMargin": "合约保证金",
     "futuresUnrealized": "合约浮盈",
+    "ledgerEntry": "资金账单",
     "historyEntry": "合约持仓历史"
   },
   "toast": {

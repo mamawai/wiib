@@ -35,6 +35,7 @@ import {
   Landmark,
   RotateCcw,
   History,
+  Receipt,
 } from 'lucide-react';
 import type { CryptoPosition, FuturesPosition, PredictionPnl, AssetSnapshot, CategoryAverages, BStock } from '../types';
 import { formatCoinPrice, getCoin } from '../lib/coinConfig';
@@ -517,6 +518,11 @@ export function Portfolio() {
       {/* 仓位历史入口 + 刷新。入口没放进上面那张合约持仓卡——那张卡没持仓时整个 return null，
           而"手上一个仓都没有"恰恰是最想翻历史的时候。摆这行才一直在 */}
       <div className="flex items-center justify-end gap-2">
+        {/* 资金账单：全站唯一的桌面入口（顶栏那格已撤），跟仓位历史挨着——都是"翻旧账"的去处 */}
+        <Button variant="outline" size="sm" onClick={() => navigate('/ledger')}>
+          <Receipt className="w-4 h-4" />
+          {t('overview.ledgerEntry')}
+        </Button>
         <Button variant="outline" size="sm" onClick={() => navigate('/portfolio/history')}>
           <History className="w-4 h-4" />
           {t('overview.historyEntry')}

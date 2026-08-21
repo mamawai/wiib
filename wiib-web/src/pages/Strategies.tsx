@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
   Activity, ArrowDownRight, ArrowUpRight, Bot, ChevronLeft, ChevronRight, Crosshair,
@@ -370,9 +369,6 @@ export function Strategies() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <Link to="/testnet" className="border border-border hover:bg-surface-hover px-3 py-1.5 rounded-lg text-[11px] font-bold text-muted-foreground hover:text-primary">
-            {t('strategies.testnetLink')} →
-          </Link>
           <button onClick={() => { void load(); }}
             className="border border-border hover:bg-surface-hover w-9 h-9 rounded-lg flex items-center justify-center text-muted-foreground hover:text-primary" aria-label={t('common:refresh')}>
             <RefreshCcw className={cn('w-4 h-4', loading && 'animate-spin')} />

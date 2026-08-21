@@ -16,15 +16,28 @@ import { cn } from '../lib/utils';
 import {
   Home, Briefcase, LogOut, LogIn, TrendingUp, Sun, Moon,
   BarChart3, User, ChevronDown, List, DollarSign,
-  Brain, Gem, Globe,
-  Monitor, LineChart, FlaskConical, Gift, MessageSquare,
+  Settings2, Gem, Globe,
+  LineChart, FlaskConical, Gift, MessageSquare,
 } from 'lucide-react';
 
 interface Props { children: React.ReactNode }
 
 const MARKET_PATHS = ['/bstock', '/coin', '/commodity', '/tradfi'];
-/** 收进 More 下拉的低频入口：13 项平铺英文顶栏要 1524px，1280/1366/1440 三档笔记本全横向溢出 */
-const MORE_PATHS = ['/testnet', '/strategies', '/backtest', '/campaign', '/comments'];
+
+/**
+ * 低频四项。≥2xl(1536) 平铺进顶栏、More 消失；1024–1535 收进 More▾ 下拉。
+ * 两种形态共用这一份，加入口只改这里。存 key 不存文案，理由同 LED_LABEL_KEY。
+ * <p>断点卡 2xl 是量出来的：11 项平铺英文顶栏要 1321px（含两侧固定开销 534px），
+ * 1280 差 41px、1366 才够；收着 More 只要 1055px，1024 都装得下。
+ */
+const MORE_ITEMS = [
+  { to: '/strategies', icon: <LineChart className="w-4 h-4" />, labelKey: 'nav.strategies' },
+  { to: '/backtest', icon: <FlaskConical className="w-4 h-4" />, labelKey: 'nav.backtest' },
+  // 活动：桌面端入口。手机端底部 Tab 只有 5 格且已满，收在「我的」页里
+  { to: '/campaign', icon: <Gift className="w-4 h-4" />, labelKey: 'nav.campaign' },
+  { to: '/comments', icon: <MessageSquare className="w-4 h-4" />, labelKey: 'nav.comments' },
+];
+const MORE_PATHS = MORE_ITEMS.map(i => i.to);
 
 /** 当前路由是否落在这组前缀里——下拉自身要跟着亮激活态，不然进了子页顶栏就没了着落 */
 const matchPaths = (pathname: string, paths: string[]) =>
@@ -86,9 +99,10 @@ export function Layout({ children }: Props) {
           </button>
 
           {/* Desktop Nav */}
-          {/* 桌面/移动分界卡在 lg 不是 md：两侧固定开销(logo+内边距+右侧操作区)约 383px，
-              9 个入口自身的 padding/gap/chevron 又要 217px，768 视口只剩 168px 装 9 个标签，
-              中英文都填不进——这是算术不是取舍。768–1023 因此走底栏 5 格。
+          {/* 桌面/移动分界卡在 lg 不是 md：两侧固定开销(logo+内边距+右侧操作区)在 1024 段是 422px，
+              1280 起涨到 534px（GitHub 图标回来 + 用户名从 56 放宽到 128）。收着 More 的 8 项
+              自身要 522px，768 视口连它都填不进——这是算术不是取舍，768–1023 因此走底栏 5 格。
+              1536 起改摊开 11 项（要 787px），见 MORE_ITEMS。
               gap 也从 4 收到 3：1024 段要给 GitHub 让位后的用户名腾出 34px，
               每项自带 px-1，字到字仍有 21px，不挤 */}
           <nav className="hidden lg:flex items-center gap-3 h-full whitespace-nowrap">
@@ -104,25 +118,24 @@ export function Layout({ children }: Props) {
               ]}
             />
             <HeaderNavItem to="/portfolio" label={t('nav.portfolio')} />
-            {/* 账单：桌面端唯一入口（手机端在「我的」页里）。原先挂在持仓页当按钮，
-                资金流水跟持仓是两件事，藏在别的页面里找不着 */}
-            <HeaderNavItem to="/ledger" label={t('nav.ledger')} />
-            <HeaderNavItem to="/ai" label={t('nav.ai')} />
+            {/* 竞技场紧跟持仓：自己的仓位与 AI 的仓位是同一件事的两面，挨着看 */}
             <HeaderNavItem to="/arena" label={t('nav.arena')} />
+            {/* 配置＝BYOK 模型端点，竞技场里的 trader 全靠它，所以紧跟竞技场 */}
+            <HeaderNavItem to="/ai" label={t('nav.config')} />
             <HeaderNavItem to="/ranking" label={t('nav.ranking')} />
             <HeaderNavItem to="/games" label={t('nav.games')} />
-            {/* 低频五项收进 More：外露的 8 项是每天要点的，这五项进来一趟看一眼就走 */}
+            {/* 低频四项两种形态，同一份 MORE_ITEMS：宽屏摊开、窄屏收进下拉。
+                display:none 的那一份不参与 flex gap，两边间距都对 */}
+            <div className="hidden 2xl:flex items-center gap-3 h-full">
+              {MORE_ITEMS.map(({ to, labelKey }) => (
+                <HeaderNavItem key={to} to={to} label={t(labelKey)} />
+              ))}
+            </div>
             <NavDropdown
+              className="2xl:hidden"
               label={t('nav.more')}
               isActive={isMoreActive}
-              items={[
-                { to: '/testnet', icon: <Monitor className="w-4 h-4" />, label: t('nav.testnet') },
-                { to: '/strategies', icon: <LineChart className="w-4 h-4" />, label: t('nav.strategies') },
-                { to: '/backtest', icon: <FlaskConical className="w-4 h-4" />, label: t('nav.backtest') },
-                // 活动：桌面端入口。手机端底部 Tab 只有 5 格且已满，收在「我的」页里
-                { to: '/campaign', icon: <Gift className="w-4 h-4" />, label: t('nav.campaign') },
-                { to: '/comments', icon: <MessageSquare className="w-4 h-4" />, label: t('nav.comments') },
-              ]}
+              items={MORE_ITEMS.map(({ to, icon, labelKey }) => ({ to, icon, label: t(labelKey) }))}
             />
           </nav>
 
@@ -195,7 +208,7 @@ export function Layout({ children }: Props) {
         <BottomNavItem to="/bstock" icon={<BarChart3 className="w-5 h-5" />} label={t('nav.markets')} forceActive={isMarketActive} />
         <BottomNavItem to="/portfolio" icon={<Briefcase className="w-5 h-5" />} label={t('nav.portfolio')} />
         <BottomNavItem to="/me" icon={<User className="w-5 h-5" />} label={t('nav.me')} />
-        <BottomNavItem to="/ai" icon={<Brain className="w-5 h-5" />} label={t('nav.ai')} />
+        <BottomNavItem to="/ai" icon={<Settings2 className="w-5 h-5" />} label={t('nav.config')} />
       </nav>
 
       {/* 全站悬浮研判对话（BYOK）：对话要登录，游客不给气泡 */}
@@ -225,15 +238,21 @@ function HeaderNavItem({ to, label }: { to: string; label: string }) {
 
 interface NavDropdownItem { to: string; icon: React.ReactNode; label: string }
 
-/** 顶栏下拉壳子：市场与 More 共用一份，面板宽度/激活态/指示线逐字同款，别再复制一遍 */
-function NavDropdown({ label, isActive, items }: { label: string; isActive: boolean; items: NavDropdownItem[] }) {
+/**
+ * 顶栏下拉壳子：市场与 More 共用一份，面板宽度/激活态/指示线逐字同款，别再复制一遍。
+ *
+ * @param className 给调用方控 display 用（More 只在 2xl 以下出现）。合在根节点上，
+ *                  藏的时候整个下拉连同定位上下文一起消失
+ */
+function NavDropdown({ label, isActive, items, className }:
+  { label: string; isActive: boolean; items: NavDropdownItem[]; className?: string }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
   useClickOutside(ref, () => setOpen(false));
 
   return (
-    <div ref={ref} className="relative h-full">
+    <div ref={ref} className={cn("relative h-full", className)}>
       <button
         onClick={() => setOpen(v => !v)}
         className={cn(

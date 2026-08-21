@@ -22,7 +22,7 @@ import { DailyGrid } from '../components/DailyGrid';
 import { DayDetailModal } from '../components/DayDetailModal';
 import { HelpTip } from '../components/HelpTip';
 import {
-  RefreshCcw, Bell, Gamepad2, List, DollarSign, ArrowRight, Target, Brain, Gift, Swords,
+  RefreshCcw, Bell, Gamepad2, List, DollarSign, ArrowRight, Target, Settings2, Gift, Swords,
 } from 'lucide-react';
 import type { BuffStatus, AssetSnapshot } from '../types';
 import { useUserStore } from '../stores/userStore';
@@ -42,7 +42,7 @@ const QUICK_ENTRIES = [
   { icon: List, labelKey: 'quick.stocks', to: '/bstock', ic: 'text-blue-600 dark:text-blue-400' },
   { icon: DollarSign, labelKey: 'quick.crypto', to: '/coin', ic: 'text-amber-600 dark:text-amber-400' },
   { icon: Target, labelKey: 'quick.prediction', to: '/prediction', ic: 'text-primary' },
-  { icon: Brain, labelKey: 'quick.ai', to: '/ai', ic: 'text-cyan-600 dark:text-cyan-400' },
+  { icon: Settings2, labelKey: 'quick.ai', to: '/ai', ic: 'text-cyan-600 dark:text-cyan-400' },
   // 竞技场此前全站只有桌面顶栏一个入口，手机用户压根进不去，靠这颗 chip 补上
   { icon: Swords, labelKey: 'quick.arena', to: '/arena', ic: 'text-violet-600 dark:text-violet-400' },
   { icon: Gamepad2, labelKey: 'quick.games', to: '/games', ic: 'text-pink-600 dark:text-pink-400' },
