@@ -16,6 +16,7 @@ import com.mawai.wiibcommon.entity.FuturesStopLoss;
 import com.mawai.wiibcommon.entity.FuturesTakeProfit;
 import com.mawai.wiibcommon.enums.AgentLang;
 import com.mawai.wiibcommon.market.BinanceRestClient;
+import com.mawai.wiibquant.agent.i18n.LocalizedToolCallbacks;
 import com.mawai.wiibquant.agent.i18n.PromptCatalog;
 import com.mawai.wiibquant.agent.i18n.UserLangResolver;
 import com.mawai.wiibquant.agent.llm.AgentGraphs;
@@ -38,6 +39,7 @@ import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatModel;
+import org.springframework.ai.tool.ToolCallback;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
@@ -102,6 +104,7 @@ public class TraderWakeupRunner {
     private final TraderRequestService requestService;
     private final UserLangResolver userLangResolver;
     private final PromptCatalog prompts;
+    private final LocalizedToolCallbacks localizedTools;
 
     /** 墙钟注入点：预算计算要可测（测试里把"现在"钉在边界附近） */
     java.util.function.LongSupplier nowMs = System::currentTimeMillis;
@@ -270,11 +273,7 @@ public class TraderWakeupRunner {
         // 全量工具轨迹（含数据工具）：收集器在本方法手里，超时 cancel 也保得住已发生的记录
         ToolCallTraceHook trace = new ToolCallTraceHook();
         CompiledGraph<MessagesState<Message>> graph = AgentGraphs.reactAgent(model, prompt)
-                .toolsFromObject(tradeTools)
-                .toolsFromObject(indicatorToolkit)
-                .toolsFromObject(marketToolkit)
-                // 快讯按 trader 主人的语言取（英文取译文，缺译文回落中文原文）
-                .toolsFromObject(newsToolkit.boundTo(lang))
+                .tools(wakeTools(lang, tradeTools))
                 .addExecuteToolsHook(new ModelCallLimiter(MAX_MODEL_CALLS))
                 .addExecuteToolsHook(trace)
                 // 首轮强制调工具：不看数据不许决策；弱模型不支持 tool_choice 会以 ERROR 落库并最终自动暂停
@@ -319,6 +318,17 @@ public class TraderWakeupRunner {
             decision.setError(prompts.get(lang, "trader.error.callLimit", Map.of("limit", MAX_MODEL_CALLS)));
         }
         return outcome.reasoning();
+    }
+
+    /**
+     * 唤醒挂的整套工具。工具描述按语言取自词表 {@code tool.<工具名>}（词表没这条就用注解原描述）。
+     * <p>
+     * 包私有：单测直接调它，验的才是建图点真正挂上去的那批工具，而不是测试里另抄一份清单。
+     * <p>
+     * 快讯工具的语言在这里烤进实例（英文取译文，缺译文回落中文原文）——取哪门语言的新闻不是模型的选择。
+     */
+    List<ToolCallback> wakeTools(AgentLang lang, TradeTools tradeTools) {
+        return localizedTools.of(lang, tradeTools, indicatorToolkit, marketToolkit, newsToolkit.boundTo(lang));
     }
 
     /**

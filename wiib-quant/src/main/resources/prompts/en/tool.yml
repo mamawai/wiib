@@ -4,6 +4,12 @@
 # A description only says what can be looked up — never "look up more / look up less". That is an
 # open decision the system prompt hands to the model.
 tool:
+  # News tool: the language is baked into the instance at graph-build time; this entry is the
+  # description only — which language the bodies come in is not the model's choice.
+  news_search: |-
+    Get the recent important news flashes (title + full body + source + time). A flash is already
+    the complete text — there is no such thing as deep-reading a single one.
+
   peer_insights: |-
     Look at peers (read-only). Two modes:
     - Pass traderId: look closely at that one trader — their latest review in full, their learning notes, the thesis and invalidation condition of their live plans, and the "thesis → outcome" pairing of their last few closed trades.

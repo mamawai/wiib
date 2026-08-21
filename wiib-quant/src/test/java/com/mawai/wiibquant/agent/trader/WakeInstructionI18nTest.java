@@ -4,6 +4,7 @@ import com.mawai.wiibquant.agent.i18n.PromptI18nAssertions;
 import com.mawai.wiibcommon.entity.AiTrader;
 import com.mawai.wiibcommon.enums.AgentLang;
 import com.mawai.wiibcommon.market.BinanceRestClient;
+import com.mawai.wiibquant.agent.i18n.LocalizedToolCallbacks;
 import com.mawai.wiibquant.agent.i18n.PromptCatalog;
 import com.mawai.wiibquant.agent.i18n.UserLangResolver;
 import com.mawai.wiibquant.agent.toolkit.IndicatorToolkit;
@@ -49,7 +50,8 @@ class WakeInstructionI18nTest {
             new NewsToolkit(mock(NewsCache.class), mock(NewsFlashLocalizer.class)),
             traderMapper, mock(AiTraderDecisionMapper.class),
             new TraderPlanStore(mock(AiTraderPlanMapper.class)),
-            mock(TraderRequestService.class), mock(UserLangResolver.class), prompts);
+            mock(TraderRequestService.class), mock(UserLangResolver.class), prompts,
+            new LocalizedToolCallbacks(prompts));
 
     {
         runner.nowMs = () -> BOUNDARY + 1_000L;

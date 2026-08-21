@@ -64,8 +64,9 @@ public class NewsToolkit {
         private final NewsToolkit toolkit;
         private final AgentLang lang;
 
+        // 描述按语言取自词表 tool.news_search，注解这份只当词表缺失时的兜底
         @Tool(name = "news_search", description = """
-                获取最近的重要快讯列表（标题+正文+来源+时间）。快讯已是完整内容，无需再精读单篇。""")
+                Get the recent market news flashes (title + full body + source + time).""")
         public String newsSearch() {
             return toolkit.newsSearch(lang);
         }

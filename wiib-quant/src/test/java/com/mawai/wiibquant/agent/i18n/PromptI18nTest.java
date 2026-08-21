@@ -273,7 +273,7 @@ class PromptI18nTest {
         for (String key : List.of("trader.template", "trader.label.memory", "trader.mark.conclusion",
                 "reviewer.system", "reviewer.mark.memory", "reviewer.label.statsHeader",
                 "learning.system", "learning.mark.skip", "learning.label.peer.leaderboardHeader",
-                "tool.peer_insights", "tool.route", "tool.run_deep_analysis",
+                "tool.peer_insights", "tool.route", "tool.run_deep_analysis", "tool.news_search",
                 "chat.summarizer", "chat.router", "chat.expert.market", "chat.expert.news",
                 "chat.expert.trader", "chat.compress.prompt", "chat.deepAnalysis.judgePrompt",
                 "chat.hitl.reason", "chat.deferred.prefix",

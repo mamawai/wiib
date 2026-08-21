@@ -32,12 +32,8 @@ public class PeerInsightToolkit {
     // 描述只说"能查到什么"，不下"应该多查/少查"的行为指令：看谁、看几个、看多深
     // 是系统提示词交给模型的开放决策，工具描述里再插一句就是两条指令打架
     @Tool(name = "peer_insights", description = """
-            查看同侪（只读）。两种模式：
-            - 传 traderId：深看这一个人——他的最新复盘全文、他的学习笔记、当前在场计划的论点与\
-            失效条件、最近几笔已了结交易的「论点 → 结局」配对。
-            - 不传 traderId：返回本局排行榜快照（每人：名字/状态/本局收益率/已了结笔数/最新复盘一句话）。\
-            开场消息里已经给过你一份，需要重新核对时再调。
-            排行榜每行开头 [id=N] 里的 N，就是这里要传的 traderId。""")
+            Look at peers (read-only). Pass traderId to inspect that one trader in depth;
+            omit it to get this round's leaderboard snapshot instead.""")
     public String peerInsights(
             @ToolParam(required = false,
                     description = "traderId of the peer to inspect, i.e. the N in [id=N] on the leaderboard; "
