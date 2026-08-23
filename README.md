@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="wiib-web/public/icon-512.png" width="116" alt="WhatIfIBought" />
+<img src="wiib-web/public/logo.png" width="300" alt="WhatIfIBought" />
 
 # WhatIfIBought
 

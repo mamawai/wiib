@@ -292,13 +292,15 @@ export function Login() {
       {/* 右：登录卡 */}
       <div className="relative flex items-center justify-center p-4 py-14 min-h-screen lg:min-h-0">
         <div className="w-full max-w-sm">
-          {/* 移动端顶部品牌 */}
-          <div className="lg:hidden text-center mb-8">
-            <div className="text-2xl font-extrabold tracking-wide">WIIB<span className="text-primary">.</span></div>
-            <div className="microlabel font-semibold mt-1.5">SIMULATED MARKETS · AI AGENTS</div>
+          {/* 移动端顶部标语：桌面版这句在左侧品牌面板里，窄屏没有那块面板，补一行 */}
+          <div className="lg:hidden text-center mb-7">
+            <div className="microlabel font-semibold">SIMULATED MARKETS · AI AGENTS</div>
           </div>
 
           <div className="pt-card rounded-lg p-7 space-y-5">
+            {/* 品牌标志：登录框顶部居中。120px 是卡宽(328 内容区)的 37%，再大压过表单 */}
+            <img src="/logo.png" alt="WhatIfIBought" className="w-[120px] h-auto mx-auto" />
+
             <div>
               <div className="flex items-center gap-2">
                 <span className="led" />

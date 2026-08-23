@@ -14,7 +14,7 @@ import { OfflineBanner } from './OfflineBanner';
 import { ChatDock } from './workbench/ChatDock';
 import { cn } from '../lib/utils';
 import {
-  Home, Briefcase, LogOut, LogIn, TrendingUp, Sun, Moon,
+  Home, Briefcase, LogOut, LogIn, Sun, Moon,
   BarChart3, User, ChevronDown, List, DollarSign,
   Settings2, Gem, Globe,
   LineChart, FlaskConical, Gift, MessageSquare,
@@ -92,7 +92,8 @@ export function Layout({ children }: Props) {
             aria-label={t('header.logoHome')}
             title="WhatIfIBought"
           >
-            <TrendingUp className="w-4.5 h-4.5 text-primary" />
+            {/* 标志走 h-5：再小右侧浅色端糊成一团，再大要挤 1024 段导航的宽度预算 */}
+            <img src="/logo.png" alt="" className="h-5 w-auto" />
             <span className="text-sm font-extrabold tracking-wide">
               WIIB<span className="text-primary">.</span>
             </span>
