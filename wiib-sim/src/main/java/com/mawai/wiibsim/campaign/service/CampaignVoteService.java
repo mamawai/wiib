@@ -40,11 +40,13 @@ import java.util.*;
 @RequiredArgsConstructor
 public class CampaignVoteService {
 
-    /** 标的 → 展示名。顺序即前端卡片顺序 */
-    public static final Map<String, String> SYMBOLS = new LinkedHashMap<>() {{
-        put(CampaignVote.SYMBOL_BTC, "BTC");
-        put(CampaignVote.SYMBOL_GOLD, "黄金");
-    }};
+    /**
+     * 投票标的，顺序即前端卡片顺序。
+     * <p>只存 symbol 不存展示名：展示名要跟界面语言，而这里下发的是给所有人共用的一份数据。
+     * 卡片标题由前端查自己的 {@code market:coinName.*}；后端提示里要用到名字的（{@link #vote}
+     * 的重复投票拒因）现查 {@code campaign.vote.symbol.*}。
+     */
+    public static final List<String> SYMBOLS = List.of(CampaignVote.SYMBOL_BTC, CampaignVote.SYMBOL_GOLD);
 
     private final CampaignVoteMapper voteMapper;
     private final CampaignService campaignService;
@@ -89,7 +91,7 @@ public class CampaignVoteService {
      */
     void vote(Long userId, String symbol, String direction, Instant now) {
         Campaign c = campaignService.requireRunning();
-        if (!SYMBOLS.containsKey(symbol)) throw new BizException(messages.get("campaign.vote.unsupportedSymbol"));
+        if (!SYMBOLS.contains(symbol)) throw new BizException(messages.get("campaign.vote.unsupportedSymbol"));
         if (!CampaignVote.UP.equals(direction) && !CampaignVote.DOWN.equals(direction)) {
             throw new BizException(messages.get("campaign.vote.badDirection"));
         }
@@ -108,7 +110,7 @@ public class CampaignVoteService {
             // 带上日期：投的是明天，用户点下去的那一刻和那一票管的那一天不是同一天，
             // 只说"今天已经投过了"会让人以为自己投的是当天
             throw new BizException(messages.get("campaign.vote.alreadyVoted",
-                    Map.of("day", day, "symbol", SYMBOLS.get(symbol))));
+                    Map.of("day", day, "symbol", messages.get("campaign.vote.symbol." + symbol))));
         }
     }
 
@@ -138,8 +140,7 @@ public class CampaignVoteService {
         }
 
         List<VoteBoard> out = new ArrayList<>(SYMBOLS.size());
-        for (Map.Entry<String, String> e : SYMBOLS.entrySet()) {
-            String symbol = e.getKey();
+        for (String symbol : SYMBOLS) {
             // GROUP BY 某方向没票就不出行，起手 0
             long up = 0, down = 0;
             for (Map<String, Object> row : voteMapper.countByDirection(c.getId(), day, symbol)) {
@@ -148,7 +149,7 @@ public class CampaignVoteService {
                 if (CampaignVote.UP.equals(row.get("direction"))) up = cnt;
                 else if (CampaignVote.DOWN.equals(row.get("direction"))) down = cnt;
             }
-            out.add(new VoteBoard(symbol, e.getValue(), up, down, mine.get(symbol)));
+            out.add(new VoteBoard(symbol, up, down, mine.get(symbol)));
         }
         return out;
     }
@@ -183,7 +184,7 @@ public class CampaignVoteService {
 
         // 每个标的当日的涨跌：日线收盘 vs 前日收盘
         Map<String, String> outcome = new HashMap<>();
-        for (String symbol : SYMBOLS.keySet()) {
+        for (String symbol : SYMBOLS) {
             String o = resolveOutcome(symbol, utcDay);
             if (o == null) {
                 log.warn("活动投票结算：{} 取不到 {} 的日线，本日整体推迟结算", utcDay, symbol);

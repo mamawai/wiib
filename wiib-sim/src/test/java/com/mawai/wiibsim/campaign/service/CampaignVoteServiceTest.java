@@ -1,7 +1,9 @@
 package com.mawai.wiibsim.campaign.service;
 
 import com.mawai.wiibcommon.exception.BizException;
+import com.mawai.wiibcommon.enums.AgentLang;
 import com.mawai.wiibcommon.i18n.MessageCatalog;
+import com.mawai.wiibcommon.i18n.RequestLang;
 import com.mawai.wiibcommon.market.BinanceRestClient;
 import com.mawai.wiibsim.campaign.entity.Campaign;
 import com.mawai.wiibsim.campaign.entity.CampaignVote;
@@ -238,6 +240,23 @@ class CampaignVoteServiceTest {
         verify(voteMapper, times(1)).insert(any(CampaignVote.class));
     }
 
+    /** 提示里的展示名也查词表：英文界面不该冒出"黄金"（看板那侧根本不下发展示名，只下发 symbol） */
+    @Test
+    void 重复投票提示的标的名跟界面语言() {
+        when(voteMapper.insert(any(CampaignVote.class)))
+                .thenThrow(new DuplicateKeyException("uk_campaign_vote"));
+
+        RequestLang.set(AgentLang.EN);
+        try {
+            assertThatThrownBy(() -> service.vote(ME, GOLD, CampaignVote.DOWN,
+                    Instant.parse("2026-08-05T09:30:00Z")))
+                    .isInstanceOf(BizException.class)
+                    .hasMessage("You already voted on Gold for UTC 2026-08-06 - it is long or short, not both");
+        } finally {
+            RequestLang.clear();
+        }
+    }
+
     // ==================== 时间窗闸门 ====================
 
     /*
@@ -295,11 +314,10 @@ class CampaignVoteServiceTest {
                 .thenReturn(List.of(countRow(CampaignVote.UP, 2), countRow(CampaignVote.DOWN, 5)));
 
         assertThat(service.board(ME))
-                .extracting(VoteBoard::symbol, VoteBoard::label,
-                        VoteBoard::upCount, VoteBoard::downCount, VoteBoard::myDirection)
+                .extracting(VoteBoard::symbol, VoteBoard::upCount, VoteBoard::downCount, VoteBoard::myDirection)
                 .containsExactly(
-                        tuple(BTC, "BTC", 3L, 1L, CampaignVote.UP),
-                        tuple(GOLD, "黄金", 2L, 5L, null));
+                        tuple(BTC, 3L, 1L, CampaignVote.UP),
+                        tuple(GOLD, 2L, 5L, null));
     }
 
     /**

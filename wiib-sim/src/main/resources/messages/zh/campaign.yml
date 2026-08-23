@@ -11,6 +11,10 @@ campaign:
     badDirection: 方向只能是 UP 或 DOWN
     alreadyVoted: UTC {{day}} 的 {{symbol}} 已经投过了，多空二选一
     lockWindow: 结算锁盘中：UTC 23:55-00:05 日线在切换、投票结算在写结果，这 10 分钟不收票，稍后再投
+    # 标的展示名。只给后端提示用（上面的 alreadyVoted）；卡片标题走前端 market:coinName.*
+    symbol:
+      BTCUSDT: BTC
+      XAUUSDT: 黄金
 
   claim:
     disabled: 发放功能未开启

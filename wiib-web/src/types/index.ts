@@ -1273,8 +1273,8 @@ export interface CampaignScore {
 }
 
 export interface CampaignVoteBoard {
+  /** 后端只下发代码，展示名查 market:coinName.*（getCoin(symbol).name）——卡片标题跟界面语言 */
   symbol: string;
-  label: string;
   upCount: number;
   downCount: number;
   /** null = 今天还没投这个标的 */

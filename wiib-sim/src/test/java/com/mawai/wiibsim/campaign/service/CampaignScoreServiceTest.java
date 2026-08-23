@@ -103,7 +103,7 @@ class CampaignScoreServiceTest {
                 GHOST, BigDecimal.ZERO));
 
         when(voteService.board(anyLong())).thenReturn(List.of(
-                new VoteBoard("BTCUSDT", "BTC", 3, 1, "UP")));
+                new VoteBoard("BTCUSDT", 3, 1, "UP")));
     }
 
     // ==================== 四路分怎么合 ====================

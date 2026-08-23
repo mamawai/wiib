@@ -11,6 +11,7 @@ import { Skeleton } from '../components/ui/skeleton';
 import { EmptyState } from '../components/EmptyState';
 import { useToast } from '../components/ui/use-toast';
 import { cn, fmtDateTime, fmtNum } from '../lib/utils';
+import { getCoin } from '../lib/coinConfig';
 import {
   Gift, CalendarCheck, Trophy, TrendingUp, TrendingDown, Check, Loader2, TriangleAlert, RefreshCw,
 } from 'lucide-react';
@@ -653,7 +654,7 @@ export function Campaign() {
                 <CardHeader className="pb-2">
                   {/* 目标日必须摆在标题上：投的是明天，不写出来是哪天，用户只会当成今天 */}
                   <CardTitle className="flex items-baseline justify-between gap-2">
-                    <span>{t('campaign.vote.title', { label: v.label })}</span>
+                    <span>{t('campaign.vote.title', { label: getCoin(v.symbol).name })}</span>
                     <span className="num text-[10px] tracking-normal normal-case tabular-nums">
                       UTC {voteDay}
                     </span>

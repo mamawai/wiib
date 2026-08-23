@@ -11,6 +11,10 @@ campaign:
     badDirection: Direction must be UP or DOWN
     alreadyVoted: You already voted on {{symbol}} for UTC {{day}} - it is long or short, not both
     lockWindow: Settlement lock-out - between UTC 23:55 and 00:05 the daily candle rolls over and vote settlement is writing results, so no votes are taken for those 10 minutes. Try again shortly
+    # Symbol display names, for backend wording only (alreadyVoted above); card titles use the frontend's market:coinName.*
+    symbol:
+      BTCUSDT: BTC
+      XAUUSDT: Gold
 
   claim:
     disabled: Payouts are not enabled
