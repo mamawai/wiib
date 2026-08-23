@@ -1,6 +1,7 @@
 package com.mawai.wiibsim.campaign.service;
 
 import com.mawai.wiibcommon.exception.BizException;
+import com.mawai.wiibcommon.i18n.MessageCatalog;
 import com.mawai.wiibsim.campaign.entity.Campaign;
 import com.mawai.wiibsim.campaign.entity.CampaignReward;
 import com.mawai.wiibsim.campaign.mapper.CampaignMapper;
@@ -39,6 +40,8 @@ public class CampaignSettleService {
     private final CampaignVoteMapper voteMapper;
     private final CampaignService campaignService;
     private final CampaignScoreService scoreService;
+    /** 结算是管理员操作，拦阻文案同样跟界面语言 */
+    private final MessageCatalog messages;
 
     /**
      * 结算。幂等：已经结算过（有 reward 行）就直接返回条数，不重复生成。
@@ -50,7 +53,7 @@ public class CampaignSettleService {
     @Transactional(rollbackFor = Exception.class)
     public int settle() {
         Campaign c = campaignService.current();
-        if (c == null) throw new BizException("没有可结算的活动");
+        if (c == null) throw new BizException(messages.get("campaign.settle.noCampaign"));
 
         int existing = rewardMapper.countByCampaign(c.getId());
         if (existing > 0) {
@@ -63,7 +66,7 @@ public class CampaignSettleService {
 
         // 必须先算榜再翻状态，且榜必须是现算的（见 settlementBasis()）
         SettlementBasis basis = scoreService.settlementBasis();
-        if (basis.weights().isEmpty()) throw new BizException("没有符合领取条件的用户，无法结算");
+        if (basis.weights().isEmpty()) throw new BizException(messages.get("campaign.settle.noEligibleUsers"));
 
         Map<Long, BigDecimal> amounts = ScoreRules.largestRemainder(c.getPrizePool(), basis.weights());
 
@@ -101,8 +104,8 @@ public class CampaignSettleService {
         // 落表总额必须逐分等于奖池，否则整笔回滚：筛选条件或分配算法哪天改错，在这里炸而不是把错额发出去；
         // 顺带挡住奖池带分以下位数的情况
         if (sum.compareTo(c.getPrizePool()) != 0) {
-            throw new BizException("结算总额 " + sum + " 与奖池 " + c.getPrizePool()
-                    + " 不符，已回滚。奖池若带分以下的位数请先改成两位小数");
+            throw new BizException(messages.get("campaign.settle.sumMismatch",
+                    Map.of("sum", sum, "pool", c.getPrizePool())));
         }
 
         c.setStatus(Campaign.STATUS_SETTLING);
@@ -127,7 +130,7 @@ public class CampaignSettleService {
      */
     private void requireEnded(Campaign c) {
         if (LocalDateTime.now().isBefore(c.getEndAt())) {
-            throw new BizException("活动还没结束（" + c.getEndAt() + "），现在结算等于拿半场的分把奖池分完");
+            throw new BizException(messages.get("campaign.settle.notEndedYet", Map.of("endAt", c.getEndAt())));
         }
     }
 
@@ -140,8 +143,7 @@ public class CampaignSettleService {
     private void requireVotesSettled(Campaign c) {
         List<LocalDate> pending = voteMapper.listUnsettledDates(c.getId());
         if (!pending.isEmpty()) {
-            throw new BizException("还有投票没结算：" + pending
-                    + "。等 UTC 00:05 的回扫把这几天结完再结算，否则这些票的分会按 0 计入");
+            throw new BizException(messages.get("campaign.settle.votesPending", Map.of("pending", pending)));
         }
     }
 }

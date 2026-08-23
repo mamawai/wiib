@@ -1,0 +1,38 @@
+# 活动（签到 / 投票 / 领奖 / 结算）的界面文案。settle 下那几条只有管理员看得见。
+campaign:
+  notRunning: 活动未开始或已结束
+  notStarted: 活动尚未开始
+  ended: 活动已结束
+  settling: 活动已进入结算，不能再参与
+  checkedIn: 今天已经签到过了
+
+  vote:
+    unsupportedSymbol: 不支持的投票标的
+    badDirection: 方向只能是 UP 或 DOWN
+    alreadyVoted: UTC {{day}} 的 {{symbol}} 已经投过了，多空二选一
+    lockWindow: 结算锁盘中：UTC 23:55-00:05 日线在切换、投票结算在写结果，这 10 分钟不收票，稍后再投
+
+  claim:
+    disabled: 发放功能未开启
+    notSettled: 活动尚未结算，暂不可领取
+    nothingToClaim: 你没有可领取的奖励
+    alreadyClaimed: 已经领取过了
+    inProgress: 上一次领取正在处理中，请稍后再看
+    windowClosed: 领取期限已过，请联系管理员
+    accountMismatch: 授权的 LinuxDo 账号与当前登录账号不符，请用本人账号授权
+    stateChanged: 领取状态已变化，请刷新后重试
+    payoutError: 发放异常，请稍后重试
+    # {{reason}} 是发放通道原样返回的内容，不翻
+    payoutFailed: "发放失败：{{reason}}"
+    authFailed: "授权失败：{{reason}}"
+    authNoToken: "授权失败：拿不到 access_token"
+    userInfoFailed: "获取 LinuxDo 用户信息失败：{{reason}}"
+    userInfoEmpty: "获取 LinuxDo 用户信息失败：id 为空"
+
+  # 结算是管理员操作，这几条都是拦下误操作的话
+  settle:
+    noCampaign: 没有可结算的活动
+    noEligibleUsers: 没有符合领取条件的用户，无法结算
+    sumMismatch: "结算总额 {{sum}} 与奖池 {{pool}} 不符，已回滚。奖池若带分以下的位数请先改成两位小数"
+    notEndedYet: 活动还没结束（{{endAt}}），现在结算等于拿半场的分把奖池分完
+    votesPending: "还有投票没结算：{{pending}}。等 UTC 00:05 的回扫把这几天结完再结算，否则这些票的分会按 0 计入"

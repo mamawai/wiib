@@ -1,6 +1,7 @@
 package com.mawai.wiibsim.service;
 
 import com.mawai.wiibcommon.entity.CryptoOrder;
+import com.mawai.wiibcommon.i18n.MessageCatalog;
 import com.mawai.wiibcommon.entity.FuturesPosition;
 import com.mawai.wiibcommon.entity.User;
 import com.mawai.wiibcommon.exception.BizException;
@@ -61,7 +62,7 @@ class AccountResetServiceTest {
         when(cryptoOrderMapper.selectList(any())).thenReturn(List.of());
 
         service = new AccountResetService(positionMapper, cryptoOrderMapper, indexService,
-                purgeTx, redis, resetQuota, carryoverService, userMapper);
+                purgeTx, redis, resetQuota, carryoverService, userMapper, new MessageCatalog());
     }
 
     private static FuturesPosition openPosition() {

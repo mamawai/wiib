@@ -1,6 +1,7 @@
 package com.mawai.wiibsim.campaign.service;
 
 import com.mawai.wiibcommon.exception.BizException;
+import com.mawai.wiibcommon.i18n.MessageCatalog;
 import com.mawai.wiibsim.campaign.entity.Campaign;
 import com.mawai.wiibsim.campaign.mapper.CampaignMapper;
 import lombok.RequiredArgsConstructor;
@@ -15,6 +16,8 @@ import java.time.LocalDateTime;
 public class CampaignService {
 
     private final CampaignMapper campaignMapper;
+    /** 活动状态的拦阻文案跟界面语言 */
+    private final MessageCatalog messages;
 
     /**
      * 当前活动（进行中或结算中）；没有则 null（前端据此隐藏活动入口）。
@@ -37,12 +40,12 @@ public class CampaignService {
      */
     public Campaign requireRunning() {
         Campaign c = current();
-        if (c == null) throw new BizException("活动未开始或已结束");
+        if (c == null) throw new BizException(messages.get("campaign.notRunning"));
 
         LocalDateTime now = LocalDateTime.now();
-        if (now.isBefore(c.getStartAt())) throw new BizException("活动尚未开始");
-        if (!now.isBefore(c.getEndAt())) throw new BizException("活动已结束");
-        if (!Campaign.STATUS_RUNNING.equals(c.getStatus())) throw new BizException("活动已进入结算，不能再参与");
+        if (now.isBefore(c.getStartAt())) throw new BizException(messages.get("campaign.notStarted"));
+        if (!now.isBefore(c.getEndAt())) throw new BizException(messages.get("campaign.ended"));
+        if (!Campaign.STATUS_RUNNING.equals(c.getStatus())) throw new BizException(messages.get("campaign.settling"));
         return c;
     }
 }

@@ -3,6 +3,7 @@ package com.mawai.wiibsim.campaign.service;
 import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
 import com.mawai.wiibcommon.exception.BizException;
+import com.mawai.wiibcommon.i18n.MessageCatalog;
 import com.mawai.wiibsim.campaign.LdcProperties;
 import com.mawai.wiibsim.campaign.entity.Campaign;
 import com.mawai.wiibsim.campaign.entity.CampaignReward;
@@ -25,6 +26,7 @@ import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestTemplate;
 
 import java.time.LocalDateTime;
+import java.util.Map;
 
 /**
  * 领取：二次 LinuxDo 授权 → 拿最新身份 → 调分发接口。
@@ -46,6 +48,8 @@ public class CampaignClaimService {
     private final RestTemplate linuxDoRestTemplate;
     private final LdcClient ldcClient;
     private final LdcProperties ldcProperties;
+    /** 领奖各步的拦阻文案跟界面语言 */
+    private final MessageCatalog messages;
 
     public CampaignClaimService(CampaignService campaignService,
                                 CampaignRewardMapper rewardMapper,
@@ -53,7 +57,8 @@ public class CampaignClaimService {
                                 LinuxDoConfig linuxDoConfig,
                                 @Qualifier("linuxDoRestTemplate") RestTemplate linuxDoRestTemplate,
                                 LdcClient ldcClient,
-                                LdcProperties ldcProperties) {
+                                LdcProperties ldcProperties,
+                                MessageCatalog messages) {
         this.campaignService = campaignService;
         this.rewardMapper = rewardMapper;
         this.statsMapper = statsMapper;
@@ -61,6 +66,7 @@ public class CampaignClaimService {
         this.linuxDoRestTemplate = linuxDoRestTemplate;
         this.ldcClient = ldcClient;
         this.ldcProperties = ldcProperties;
+        this.messages = messages;
     }
 
     /** 我的奖励行；未结算或不在名单里返回 null */
@@ -82,21 +88,21 @@ public class CampaignClaimService {
      * 超时后重领会重发同一 out_trade_no，撞唯一索引即判上次已成功。
      */
     public CampaignReward claim(Long userId, String code) {
-        if (!ldcProperties.ready()) throw new BizException("发放功能未开启");
+        if (!ldcProperties.ready()) throw new BizException(messages.get("campaign.claim.disabled"));
 
         // 用 current() 不用 requireRunning()：领取发生在活动结束之后，requireRunning() 那时必抛
         Campaign c = campaignService.current();
         if (c == null || !Campaign.STATUS_SETTLING.equals(c.getStatus())) {
-            throw new BizException("活动尚未结算，暂不可领取");
+            throw new BizException(messages.get("campaign.claim.notSettled"));
         }
 
         CampaignReward reward = rewardMapper.selectMine(c.getId(), userId);
-        if (reward == null) throw new BizException("你没有可领取的奖励");
-        if (CampaignReward.SUCCESS.equals(reward.getStatus())) throw new BizException("已经领取过了");
+        if (reward == null) throw new BizException(messages.get("campaign.claim.nothingToClaim"));
+        if (CampaignReward.SUCCESS.equals(reward.getStatus())) throw new BizException(messages.get("campaign.claim.alreadyClaimed"));
         // CLAIMED 无超时无自愈：发放中途进程重启会永远停在这里，需人工重置 FAILED（SQL 见 CampaignReward.status 注释）
-        if (CampaignReward.CLAIMED.equals(reward.getStatus())) throw new BizException("上一次领取正在处理中，请稍后再看");
+        if (CampaignReward.CLAIMED.equals(reward.getStatus())) throw new BizException(messages.get("campaign.claim.inProgress"));
         if (reward.getCreatedAt().plusDays(ldcProperties.getClaimDays()).isBefore(LocalDateTime.now())) {
-            throw new BizException("领取期限已过，请联系管理员");
+            throw new BizException(messages.get("campaign.claim.windowClosed"));
         }
 
         // 身份核对必须在 CAS 与发放之前：授权错号在这里抛，状态不动，换号重新授权即可
@@ -105,11 +111,11 @@ public class CampaignClaimService {
 
         String bound = statsMapper.selectLinuxDoId(userId);
         if (bound == null || !bound.equals(authorizedId)) {
-            throw new BizException("授权的 LinuxDo 账号与当前登录账号不符，请用本人账号授权");
+            throw new BizException(messages.get("campaign.claim.accountMismatch"));
         }
 
         if (rewardMapper.casClaim(reward.getId(), authorizedId, info.getUsername()) == 0) {
-            throw new BizException("领取状态已变化，请刷新后重试");
+            throw new BizException(messages.get("campaign.claim.stateChanged"));
         }
 
         // 兜住 distribute 的运行时异常（如配置拼不成 URI），否则这行永远停在 CLAIMED；
@@ -121,7 +127,7 @@ public class CampaignClaimService {
         } catch (RuntimeException e) {
             rewardMapper.markFailed(reward.getId(), "发放异常：" + e);
             log.error("活动奖励发放异常 userId={} out_trade_no={}", userId, reward.getOutTradeNo(), e);
-            throw new BizException("发放异常，请稍后重试");
+            throw new BizException(messages.get("campaign.claim.payoutError"));
         }
 
         if (result.success()) {
@@ -133,7 +139,7 @@ public class CampaignClaimService {
         } else {
             rewardMapper.markFailed(reward.getId(), result.errorMsg());
             log.warn("活动奖励发放失败 userId={} : {}", userId, result.errorMsg());
-            throw new BizException("发放失败：" + result.errorMsg());
+            throw new BizException(messages.get("campaign.claim.payoutFailed", Map.of("reason", String.valueOf(result.errorMsg()))));
         }
         return rewardMapper.selectMine(c.getId(), userId);
     }
@@ -155,11 +161,11 @@ public class CampaignClaimService {
             tokenResp = linuxDoRestTemplate.postForObject(
                     linuxDoConfig.getTokenUrl(), new HttpEntity<>(form, tokenHeaders), String.class);
         } catch (RestClientException e) {
-            throw new BizException("授权失败：" + e.getMessage());
+            throw new BizException(messages.get("campaign.claim.authFailed", Map.of("reason", String.valueOf(e.getMessage()))));
         }
         JSONObject json = JSONUtil.parseObj(tokenResp == null ? "{}" : tokenResp);
         String accessToken = json.getStr("access_token");
-        if (accessToken == null) throw new BizException("授权失败：拿不到 access_token");
+        if (accessToken == null) throw new BizException(messages.get("campaign.claim.authNoToken"));
 
         HttpHeaders userHeaders = new HttpHeaders();
         userHeaders.set("Authorization", "Bearer " + accessToken);
@@ -168,9 +174,9 @@ public class CampaignClaimService {
             info = linuxDoRestTemplate.exchange(linuxDoConfig.getUserUrl(), HttpMethod.GET,
                     new HttpEntity<>(userHeaders), LinuxDoUserInfo.class).getBody();
         } catch (RestClientException e) {
-            throw new BizException("获取 LinuxDo 用户信息失败：" + e.getMessage());
+            throw new BizException(messages.get("campaign.claim.userInfoFailed", Map.of("reason", String.valueOf(e.getMessage()))));
         }
-        if (info == null || info.getId() == null) throw new BizException("获取 LinuxDo 用户信息失败：id 为空");
+        if (info == null || info.getId() == null) throw new BizException(messages.get("campaign.claim.userInfoEmpty"));
         return info;
     }
 }

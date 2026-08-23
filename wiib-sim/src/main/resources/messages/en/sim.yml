@@ -1,0 +1,20 @@
+# Remaining sim-side wording: feed-stream monitor, invite codes, account reset (all on admin pages).
+sim:
+  feed:
+    statusFailed: "Could not read the feed stream status (is feed up?): {{reason}}"
+    retryFailed: "Retry failed (is feed up?): {{reason}}"
+
+  invite:
+    usesRange: Uses must be between 1 and 10000
+    batchRange: Batch size must be between 1 and 100
+
+  reset:
+    onlyQuantSubAccount: "Only ai_trader quant sub-accounts may be deleted: {{name}}"
+
+  # LDC payout-channel diagnostics; these show up as the {{reason}} of campaign.claim.payoutFailed
+  ldc:
+    notConfigured: LDC payouts are off or the credentials are not configured
+    payeeIdNotNumeric: "The payee LinuxDo ID is not a number: {{id}}"
+    interrupted: The payout was interrupted
+    parseFailed: "Could not parse the response: {{raw}}"
+    noTradeNo: "HTTP 200 but no trade_no came back: {{raw}}"

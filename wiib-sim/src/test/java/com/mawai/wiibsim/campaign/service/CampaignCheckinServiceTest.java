@@ -1,6 +1,7 @@
 package com.mawai.wiibsim.campaign.service;
 
 import com.mawai.wiibcommon.exception.BizException;
+import com.mawai.wiibcommon.i18n.MessageCatalog;
 import com.mawai.wiibsim.campaign.entity.Campaign;
 import com.mawai.wiibsim.campaign.entity.CampaignCheckin;
 import com.mawai.wiibsim.campaign.mapper.CampaignCheckinMapper;
@@ -56,7 +57,8 @@ class CampaignCheckinServiceTest {
         checkinMapper = mock(CampaignCheckinMapper.class);
         statsMapper = mock(CampaignStatsMapper.class);
         campaignMapper = mock(CampaignMapper.class);
-        service = new CampaignCheckinService(checkinMapper, statsMapper, new CampaignService(campaignMapper));
+        service = new CampaignCheckinService(checkinMapper, statsMapper,
+                new CampaignService(campaignMapper, new MessageCatalog()), new MessageCatalog());
 
         // 默认给一场"此刻正开着"的活动，个别用例再按需换窗口
         running(LocalDateTime.now().minusDays(1), LocalDateTime.now().plusDays(13));

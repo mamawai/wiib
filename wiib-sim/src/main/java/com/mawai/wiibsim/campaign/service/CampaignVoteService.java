@@ -3,6 +3,7 @@ package com.mawai.wiibsim.campaign.service;
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONArray;
 import com.mawai.wiibcommon.exception.BizException;
+import com.mawai.wiibcommon.i18n.MessageCatalog;
 import com.mawai.wiibcommon.market.BinanceRestClient;
 import com.mawai.wiibsim.campaign.entity.Campaign;
 import com.mawai.wiibsim.campaign.entity.CampaignVote;
@@ -48,6 +49,8 @@ public class CampaignVoteService {
     private final CampaignVoteMapper voteMapper;
     private final CampaignService campaignService;
     private final BinanceRestClient binanceRestClient;
+    /** 投票拦阻文案跟界面语言 */
+    private final MessageCatalog messages;
 
     /** 结算锁盘窗口的两端（UTC 时刻），半开区间 [23:55, 00:05) */
     private static final LocalTime LOCK_FROM = LocalTime.of(23, 55);
@@ -86,9 +89,9 @@ public class CampaignVoteService {
      */
     void vote(Long userId, String symbol, String direction, Instant now) {
         Campaign c = campaignService.requireRunning();
-        if (!SYMBOLS.containsKey(symbol)) throw new BizException("不支持的投票标的");
+        if (!SYMBOLS.containsKey(symbol)) throw new BizException(messages.get("campaign.vote.unsupportedSymbol"));
         if (!CampaignVote.UP.equals(direction) && !CampaignVote.DOWN.equals(direction)) {
-            throw new BizException("方向只能是 UP 或 DOWN");
+            throw new BizException(messages.get("campaign.vote.badDirection"));
         }
         requireNotLocked(now);
 
@@ -104,7 +107,8 @@ public class CampaignVoteService {
         } catch (DuplicateKeyException e) {
             // 带上日期：投的是明天，用户点下去的那一刻和那一票管的那一天不是同一天，
             // 只说"今天已经投过了"会让人以为自己投的是当天
-            throw new BizException("UTC " + day + " 的 " + SYMBOLS.get(symbol) + " 已经投过了，多空二选一");
+            throw new BizException(messages.get("campaign.vote.alreadyVoted",
+                    Map.of("day", day, "symbol", SYMBOLS.get(symbol))));
         }
     }
 
@@ -112,10 +116,10 @@ public class CampaignVoteService {
      * 锁盘：UTC 23:55 - 00:05 这 10 分钟不收票。
      * 这段横跨"票落在哪一天"的翻页点，封上它，点按钮那几秒目标日不会被悄悄换掉。
      */
-    private static void requireNotLocked(Instant now) {
+    private void requireNotLocked(Instant now) {
         LocalTime t = now.atZone(ZoneOffset.UTC).toLocalTime();
         if (!t.isBefore(LOCK_FROM) || t.isBefore(LOCK_UNTIL)) {
-            throw new BizException("结算锁盘中：UTC 23:55-00:05 日线在切换、投票结算在写结果，这 10 分钟不收票，稍后再投");
+            throw new BizException(messages.get("campaign.vote.lockWindow"));
         }
     }
 

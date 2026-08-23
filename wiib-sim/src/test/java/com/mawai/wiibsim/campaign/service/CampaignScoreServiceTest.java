@@ -2,6 +2,7 @@ package com.mawai.wiibsim.campaign.service;
 
 import com.alibaba.fastjson2.JSON;
 import com.mawai.wiibcommon.cache.CacheService;
+import com.mawai.wiibcommon.i18n.MessageCatalog;
 import com.mawai.wiibsim.campaign.entity.Campaign;
 import com.mawai.wiibsim.campaign.mapper.CampaignMapper;
 import com.mawai.wiibsim.campaign.mapper.CampaignStatsMapper;
@@ -75,7 +76,7 @@ class CampaignScoreServiceTest {
         checkinService = mock(CampaignCheckinService.class);
         voteService = mock(CampaignVoteService.class);
         cacheService = mock(CacheService.class);
-        service = new CampaignScoreService(new CampaignService(campaignMapper), statsMapper,
+        service = new CampaignScoreService(new CampaignService(campaignMapper, new MessageCatalog()), statsMapper,
                 tradeScorer, checkinService, voteService, cacheService);
 
         running(START, END);

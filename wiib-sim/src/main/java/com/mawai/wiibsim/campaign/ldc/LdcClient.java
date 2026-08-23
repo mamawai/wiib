@@ -3,11 +3,13 @@ package com.mawai.wiibsim.campaign.ldc;
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONObject;
 import com.mawai.wiibsim.campaign.LdcProperties;
+import com.mawai.wiibcommon.i18n.MessageCatalog;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
+import java.util.Map;
 import java.math.RoundingMode;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -45,6 +47,8 @@ public class LdcClient {
     static long maxBackoffMs = 4000;
 
     private final LdcProperties props;
+    /** 发放诊断会作为领奖失败的原因上屏，跟界面语言 */
+    private final MessageCatalog messages;
 
     /**
      * 必须 NEVER：服务端会把请求误路由到前端返回 307，拒绝跟随才能把它识别成
@@ -65,7 +69,7 @@ public class LdcClient {
      * @param outTradeNo 商户单号 WIIB_{campaignCode}_{userId}，固定可重算
      */
     public LdcResult distribute(String linuxDoId, String username, BigDecimal amount, String outTradeNo) {
-        if (!props.ready()) return LdcResult.fail("LDC 发放未启用或凭证未配置");
+        if (!props.ready()) return LdcResult.fail(messages.get("sim.ldc.notConfigured"));
 
         // amount 最多两位小数，超了服务端直接拒
         String amountStr = amount.setScale(2, RoundingMode.DOWN).toPlainString();
@@ -76,7 +80,7 @@ public class LdcClient {
         try {
             numericUserId = Long.parseLong(linuxDoId);
         } catch (NumberFormatException e) {
-            return LdcResult.fail("收款人 LinuxDo ID 不是数字: " + linuxDoId);
+            return LdcResult.fail(messages.get("sim.ldc.payeeIdNotNumeric", Map.of("id", String.valueOf(linuxDoId))));
         }
 
         JSONObject payload = new JSONObject();
@@ -102,7 +106,7 @@ public class LdcClient {
                 resp = http.send(request, HttpResponse.BodyHandlers.ofString());
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
-                return LdcResult.fail("发放被中断");
+                return LdcResult.fail(messages.get("sim.ldc.interrupted"));
             } catch (Exception e) {
                 // 超时/IO：钱可能已经发出去了，但同一 outTradeNo 重发会撞唯一索引并被判成功，
                 // 所以重试是安全的，不会重复发放
@@ -150,9 +154,9 @@ public class LdcClient {
                     return LdcResult.ok(tradeNo);
                 }
             } catch (Exception e) {
-                return LdcResult.fail("响应解析失败: " + raw);
+                return LdcResult.fail(messages.get("sim.ldc.parseFailed", Map.of("raw", String.valueOf(raw))));
             }
-            return LdcResult.fail("HTTP 200 但没有 trade_no: " + raw);
+            return LdcResult.fail(messages.get("sim.ldc.noTradeNo", Map.of("raw", String.valueOf(raw))));
         }
 
         if (raw.contains("duplicate key")) {

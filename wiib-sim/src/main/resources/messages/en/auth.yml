@@ -1,0 +1,22 @@
+# Sign-in / sign-up wording. Language comes from the request's X-Lang header - most of this happens
+# before anyone is signed in, so user.lang is not available and the header is the only source.
+auth:
+  localLoginDisabled: A real sign-in method is enabled; the admin shortcut is not available
+  passwordLoginDisabled: Password sign-in is not enabled
+  usernameFormat: A username must be 2-20 letters, digits, underscores or Chinese characters
+  passwordLength: A password must be 6-64 characters
+  inviteCodeRequired: An invite code is required
+  inviteCodeInvalid: That invite code is invalid or used up
+  usernameTaken: That username is taken
+  badCredentials: Wrong username or password
+  loginFailed: "Sign-in failed: {{reason}}"
+
+  # The LinuxDo OAuth steps: get a token, then exchange it for the user info.
+  # {{reason}} is whatever upstream returned, passed through untranslated
+  oauth:
+    tokenFailed: "Could not get an access_token: {{reason}}"
+    tokenEmpty: "Could not get an access_token: empty response"
+    userInfoFailed: "Could not fetch the user info: {{reason}}"
+    userInfoParseFailed: "Could not parse the user info: {{reason}}"
+    userInfoEmpty: "Could not fetch the user info: empty response"
+    userIdEmpty: "Could not fetch the user info: the id is empty"

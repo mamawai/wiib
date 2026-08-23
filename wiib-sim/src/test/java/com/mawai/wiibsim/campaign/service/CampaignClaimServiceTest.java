@@ -1,6 +1,7 @@
 package com.mawai.wiibsim.campaign.service;
 
 import com.mawai.wiibcommon.exception.BizException;
+import com.mawai.wiibcommon.i18n.MessageCatalog;
 import com.mawai.wiibsim.campaign.LdcProperties;
 import com.mawai.wiibsim.campaign.entity.Campaign;
 import com.mawai.wiibsim.campaign.entity.CampaignReward;
@@ -93,8 +94,8 @@ class CampaignClaimServiceTest {
         ldcProperties.setClientId("cid");
         ldcProperties.setClientSecret("secret");
 
-        service = new CampaignClaimService(new CampaignService(campaignMapper), rewardMapper,
-                statsMapper, linuxDoConfig, restTemplate, ldcClient, ldcProperties);
+        service = new CampaignClaimService(new CampaignService(campaignMapper, new MessageCatalog()), rewardMapper,
+                statsMapper, linuxDoConfig, restTemplate, ldcClient, ldcProperties, new MessageCatalog());
 
         campaign(Campaign.STATUS_SETTLING);
         stubReward(CampaignReward.PENDING, LocalDateTime.now().minusDays(1));

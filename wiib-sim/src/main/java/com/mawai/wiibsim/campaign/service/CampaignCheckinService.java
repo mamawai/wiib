@@ -1,6 +1,7 @@
 package com.mawai.wiibsim.campaign.service;
 
 import com.mawai.wiibcommon.exception.BizException;
+import com.mawai.wiibcommon.i18n.MessageCatalog;
 import com.mawai.wiibsim.campaign.entity.Campaign;
 import com.mawai.wiibsim.campaign.entity.CampaignCheckin;
 import com.mawai.wiibsim.campaign.mapper.CampaignCheckinMapper;
@@ -31,6 +32,8 @@ public class CampaignCheckinService {
     private final CampaignCheckinMapper checkinMapper;
     private final CampaignStatsMapper statsMapper;
     private final CampaignService campaignService;
+    /** 签到重复的提示跟界面语言 */
+    private final MessageCatalog messages;
 
     /**
      * 签到，返回签到后的最长连续天数（前端拿它显示"已连续 X 天"）。
@@ -48,7 +51,7 @@ public class CampaignCheckinService {
         try {
             checkinMapper.insert(row);
         } catch (DuplicateKeyException e) {
-            throw new BizException("今天已经签到过了");
+            throw new BizException(messages.get("campaign.checkedIn"));
         }
 
         return ScoreRules.longestStreak(myDates(c, userId));

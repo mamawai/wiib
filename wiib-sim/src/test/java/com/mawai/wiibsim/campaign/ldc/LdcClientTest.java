@@ -3,6 +3,7 @@ package com.mawai.wiibsim.campaign.ldc;
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONObject;
 import com.mawai.wiibsim.campaign.LdcProperties;
+import com.mawai.wiibcommon.i18n.MessageCatalog;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -91,7 +92,7 @@ class LdcClientTest {
         p.setClientId("cid");
         p.setClientSecret("secret");
         p.setEnabled(true);
-        return new LdcClient(p);
+        return new LdcClient(p, new MessageCatalog());
     }
 
     private LdcResult call() {
@@ -233,7 +234,7 @@ class LdcClientTest {
         LdcProperties p = new LdcProperties();
         p.setBaseUrl("http://localhost:" + server.getAddress().getPort());
 
-        LdcResult r = new LdcClient(p).distribute("1", "x", BigDecimal.ONE, "WIIB_T_2");
+        LdcResult r = new LdcClient(p, new MessageCatalog()).distribute("1", "x", BigDecimal.ONE, "WIIB_T_2");
 
         assertThat(r.success()).isFalse();
         assertThat(hits).hasValue(0);

@@ -6,6 +6,7 @@ import com.mawai.wiibcommon.entity.FuturesPosition;
 import com.mawai.wiibcommon.entity.User;
 import com.mawai.wiibcommon.enums.ErrorCode;
 import com.mawai.wiibcommon.exception.BizException;
+import com.mawai.wiibcommon.i18n.MessageCatalog;
 import com.mawai.wiibsim.campaign.service.CampaignCarryoverService;
 import com.mawai.wiibsim.mapper.CryptoOrderMapper;
 import com.mawai.wiibsim.mapper.FuturesPositionMapper;
@@ -17,6 +18,7 @@ import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 账户重置：清空全部交易与游戏数据，账户回到初始状态；另承接量化子账户销户（清完直接删行）。
@@ -43,6 +45,8 @@ public class AccountResetService {
     private final ResetQuotaService resetQuota;
     private final CampaignCarryoverService campaignCarryoverService;
     private final UserMapper userMapper;
+    /** 管理页的拦阻提示也跟界面语言 */
+    private final MessageCatalog messages;
 
     /** 策略账户（quant-FIBO 这类）是 user 表里的真实行，永不可重置；用户名须逐字匹配，防误点 */
     public static void assertResettable(String actualUsername, String confirmUsername) {
@@ -101,7 +105,7 @@ public class AccountResetService {
         }
         if (!username.startsWith("ai_trader_")
                 || user.getLinuxDoId() == null || !user.getLinuxDoId().startsWith("internal:")) {
-            throw new BizException("仅允许删除 ai_trader 量化子账户: " + username);
+            throw new BizException(messages.get("sim.reset.onlyQuantSubAccount", Map.of("name", username)));
         }
         wipe(user.getId(), () -> purgeTx.deleteAccount(user.getId()));
         log.info("[AccountReset] 量化子账户已删除 username={} userId={}", username, user.getId());

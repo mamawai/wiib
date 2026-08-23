@@ -2,6 +2,7 @@ package com.mawai.wiibsim.campaign.service;
 
 import com.alibaba.fastjson2.JSON;
 import com.mawai.wiibcommon.cache.CacheService;
+import com.mawai.wiibcommon.i18n.MessageCatalog;
 import com.mawai.wiibcommon.exception.BizException;
 import com.mawai.wiibsim.campaign.entity.Campaign;
 import com.mawai.wiibsim.campaign.entity.CampaignReward;
@@ -89,11 +90,11 @@ class CampaignSettleServiceTest {
         startAt = LocalDateTime.now().minusDays(20);
         endAt = LocalDateTime.now().minusDays(1);
 
-        CampaignService campaignService = new CampaignService(campaignMapper);
+        CampaignService campaignService = new CampaignService(campaignMapper, new MessageCatalog());
         CampaignScoreService scoreService = new CampaignScoreService(campaignService, statsMapper,
                 tradeScorer, checkinService, voteService, cacheService);
         service = new CampaignSettleService(campaignMapper, rewardMapper, voteMapper,
-                campaignService, scoreService);
+                campaignService, scoreService, new MessageCatalog());
 
         activeCampaign(Campaign.STATUS_RUNNING);
         when(rewardMapper.countByCampaign(CAMPAIGN_ID)).thenReturn(0);

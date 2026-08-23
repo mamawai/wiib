@@ -1,0 +1,20 @@
+# sim 侧其余界面文案：feed 流监控、邀请码、账户重置（都在管理页）。
+sim:
+  feed:
+    statusFailed: "feed 流状态获取失败（feed 是否在线？）: {{reason}}"
+    retryFailed: "重试失败（feed 是否在线？）: {{reason}}"
+
+  invite:
+    usesRange: 次数需在1-10000之间
+    batchRange: 批量个数需在1-100之间
+
+  reset:
+    onlyQuantSubAccount: "仅允许删除 ai_trader 量化子账户: {{name}}"
+
+  # LDC 发放通道的诊断，作为 campaign.claim.payoutFailed 的 {{reason}} 出现
+  ldc:
+    notConfigured: LDC 发放未启用或凭证未配置
+    payeeIdNotNumeric: "收款人 LinuxDo ID 不是数字: {{id}}"
+    interrupted: 发放被中断
+    parseFailed: "响应解析失败: {{raw}}"
+    noTradeNo: "HTTP 200 但没有 trade_no: {{raw}}"

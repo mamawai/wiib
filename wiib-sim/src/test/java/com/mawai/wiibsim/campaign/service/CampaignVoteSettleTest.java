@@ -2,6 +2,7 @@ package com.mawai.wiibsim.campaign.service;
 
 import com.alibaba.fastjson2.JSONArray;
 import com.mawai.wiibcommon.market.BinanceRestClient;
+import com.mawai.wiibcommon.i18n.MessageCatalog;
 import com.mawai.wiibsim.campaign.entity.Campaign;
 import com.mawai.wiibsim.campaign.entity.CampaignVote;
 import com.mawai.wiibsim.campaign.mapper.CampaignMapper;
@@ -91,7 +92,8 @@ class CampaignVoteSettleTest {
         voteMapper = mock(CampaignVoteMapper.class);
         campaignMapper = mock(CampaignMapper.class);
         binance = mock(BinanceRestClient.class);
-        service = new CampaignVoteService(voteMapper, new CampaignService(campaignMapper), binance);
+        service = new CampaignVoteService(voteMapper, new CampaignService(campaignMapper, new MessageCatalog()),
+                binance, new MessageCatalog());
         nextVoteId = 1;
 
         Campaign c = new Campaign();
