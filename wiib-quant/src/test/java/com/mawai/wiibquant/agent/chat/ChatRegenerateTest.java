@@ -1,6 +1,7 @@
 package com.mawai.wiibquant.agent.chat;
 
 import com.mawai.wiibcommon.enums.AgentLang;
+import com.mawai.wiibcommon.i18n.MessageCatalog;
 import com.mawai.wiibcommon.enums.ErrorCode;
 import com.mawai.wiibcommon.exception.BizException;
 import com.mawai.wiibquant.agent.llm.LlmEndpointService;
@@ -51,8 +52,10 @@ class ChatRegenerateTest {
 
     private static final String SESSION = "wb-1-regen";
 
+    /** kind 按正文现认，与 ChatHistoryService.messages() 同一条路径 */
     private static ChatHistoryService.ChatMessage msg(long id, String role, String content) {
-        return new ChatHistoryService.ChatMessage(id, role, content, 1_700_000_000_000L, null);
+        return new ChatHistoryService.ChatMessage(id, role, content, 1_700_000_000_000L, null,
+                ChatRowKind.of(role, content, ChatTestEndpoints.PROMPTS));
     }
 
     /** 上下文里一条轮起始提问，形状与 run() 拼的 enriched 一致 */
@@ -95,7 +98,7 @@ class ChatRegenerateTest {
         ChatYieldCoordinator coordinator =
                 new ChatYieldCoordinator(gate, runRegistry, turnRunner, history, ChatTestEndpoints.PROMPTS);
         ChatWorkbenchController controller = new ChatWorkbenchController(agentFactory, endpointService,
-                new ApprovalRegistry(), history, contextStore, turnRunner, runRegistry, gate, coordinator, ChatTestEndpoints.PROMPTS, ChatTestEndpoints.zhLang());
+                new ApprovalRegistry(), history, contextStore, turnRunner, runRegistry, gate, new MessageCatalog(), coordinator, ChatTestEndpoints.PROMPTS, ChatTestEndpoints.zhLang());
         return new Harness(controller, history, contextStore, turnRunner, gate, coordinator);
     }
 
@@ -242,6 +245,18 @@ class ChatRegenerateTest {
                         msg(4, "assistant", ChatTestEndpoints.PROMPTS.get(AgentLang.ZH, "chat.deferred.prefix")
                                 + "BTC 怎么样」】\n\n补上的答案")),
                 List.of(turnStart("ETH 呢"), new AssistantMessage("ETH 的答案")));
+
+        assertRejected(h);
+    }
+
+    @Test
+    void 英文补答行同样不给重新生成() {
+        // 补答标头跟着用户语言走。只认中文那一份的话，英文用户的补答行会冒出重新生成按钮
+        Harness h = harness(
+                List.of(msg(1, "user", "how is BTC"), msg(2, "user", "and ETH"), msg(3, "assistant", "ETH answer"),
+                        msg(4, "assistant", ChatTestEndpoints.PROMPTS.get(AgentLang.EN, "chat.deferred.prefix")
+                                + "how is BTC\"]\n\nthe deferred answer")),
+                List.of(turnStart("and ETH"), new AssistantMessage("ETH answer")));
 
         assertRejected(h);
     }

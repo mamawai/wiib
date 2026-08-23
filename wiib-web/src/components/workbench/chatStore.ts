@@ -24,8 +24,10 @@ export type ChatItem =
   // queuedId=这条消息的身份，气泡与队列条目共用——靠下标对应的话，
   // 排队期间流式往 items 里插条目、回放整体重建、重生成砍尾巴，任一处都会让两边错位
   | { kind: 'user'; content: string; at: number; queued?: boolean; queuedId?: number }
-  // meta=这一轮的读数（端点/耗时/token），流式结束时随 done 事件到；历史回放从库里带
-  | { kind: 'assistant'; content: string; streaming: boolean; at: number; meta?: TurnMeta | null }
+  // meta=这一轮的读数（端点/耗时/token），流式结束时随 done 事件到；历史回放从库里带。
+  // deferred=这条是补答（对应提问不在会话末尾，回退会误伤中间轮次），不给重新生成；
+  // 实时流里的答案永远在末尾，只有历史回放才可能是补答行
+  | { kind: 'assistant'; content: string; streaming: boolean; at: number; meta?: TurnMeta | null; deferred?: boolean }
   // 专家过程流（不落历史）：视图层收进"工作过程"轨，折叠状态归视图管。
   // rid=轨内条目的自增号，视图拿轨首那条的 rid 当折叠状态的键——用下标做键的话，
   // 让位说明行往中间一插、重新生成把尾巴一砍，键就整体错位，收着的轨会自己弹开
@@ -63,14 +65,6 @@ const POLL_MS = 3000;
  * 存的是词表 key 不是文案：既躲开切语言僵住的坑，标记比对也不会随语言变。
  */
 const DEFERRED_NOTE = 'rail.deferredNote';
-/** 补答行的标头前缀，与后端 ChatYieldCoordinator.DEFERRED_PREFIX 同值：这类答案不给重新生成 */
-export const DEFERRED_PREFIX = '【补答「';
-/**
- * HITL 批准后自动补发的续跑指令，与后端 ChatWorkbenchController 发的 resumeMessage 同值。
- * 它是"批准"这个动作的一部分、不是用户打的字，但后端把它当普通用户消息落了库——
- * 回放时按这句话认出来还原成过程轨行，否则历史里会多出一句用户从没说过的话。
- */
-const HITL_RESUME_MESSAGE = '已确认，请继续执行深度研判';
 /** 续跑指令在过程轨里的措辞（词表 key）：与 HITL 卡自己的状态行错开，别同一句话连着显示两遍 */
 const HITL_RESUME_NOTE = 'rail.hitlResume';
 
@@ -129,13 +123,20 @@ function setSession(id: string | null) {
   set({ sessionId: id });
 }
 
-/** 后端历史 → 对话项（专家过程/进度不落库，只回放 user/assistant） */
+/**
+ * 后端历史 → 对话项（专家过程/进度不落库，只回放 user/assistant）。
+ * 特殊行按后端给的码分流：续跑指令不是用户打的字，还原成过程轨行，
+ * 否则历史里会多出一句用户从没说过的话。
+ */
 function toItems(messages: WorkbenchChatMessage[]): ChatItem[] {
   return messages.map(m => {
     if (m.role !== 'user') {
-      return { kind: 'assistant' as const, content: m.content, streaming: false, at: m.createdAt, meta: m.meta };
+      return {
+        kind: 'assistant' as const, content: m.content, streaming: false,
+        at: m.createdAt, meta: m.meta, deferred: m.kind === 'deferred',
+      };
     }
-    return m.content === HITL_RESUME_MESSAGE
+    return m.kind === 'hitlResume'
       ? { kind: 'progress' as const, rid: nextRid(), text: HITL_RESUME_NOTE, keyed: true, active: false }
       : { kind: 'user' as const, content: m.content, at: m.createdAt };
   });

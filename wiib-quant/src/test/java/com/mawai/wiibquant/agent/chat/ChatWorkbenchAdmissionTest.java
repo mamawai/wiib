@@ -1,6 +1,7 @@
 package com.mawai.wiibquant.agent.chat;
 
 import com.mawai.wiibquant.agent.llm.ChatEndpoints;
+import com.mawai.wiibcommon.i18n.MessageCatalog;
 import com.mawai.wiibquant.agent.llm.LlmEndpointService;
 import com.mawai.wiibcommon.exception.BizException;
 import jakarta.servlet.http.HttpServletResponse;
@@ -42,7 +43,7 @@ class ChatWorkbenchAdmissionTest {
         WorkbenchRunRegistry runRegistry = mock(WorkbenchRunRegistry.class);
         return new ChatWorkbenchController(factory, llmConfigService, new ApprovalRegistry(),
                 history, mock(ChatContextStore.class), turnRunner,
-                runRegistry, gate,
+                runRegistry, gate, new MessageCatalog(),
                 new ChatYieldCoordinator(gate, runRegistry, turnRunner, history, ChatTestEndpoints.PROMPTS),
                 ChatTestEndpoints.PROMPTS, ChatTestEndpoints.zhLang());
     }

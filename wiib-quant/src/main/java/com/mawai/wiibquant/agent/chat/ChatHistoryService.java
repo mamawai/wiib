@@ -2,6 +2,7 @@ package com.mawai.wiibquant.agent.chat;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.mawai.wiibcommon.entity.WorkbenchChatMessage;
+import com.mawai.wiibquant.agent.i18n.PromptCatalog;
 import com.mawai.wiibquant.agent.llm.UsageTrackingChatModel;
 import com.mawai.wiibquant.mapper.WorkbenchChatMessageMapper;
 import lombok.RequiredArgsConstructor;
@@ -25,6 +26,8 @@ public class ChatHistoryService {
     private static final int TITLE_MAX = 40;
 
     private final WorkbenchChatMessageMapper messageMapper;
+    /** 只为认出补答行与续跑指令：它们的正文是词表文案，判定见 {@link ChatRowKind} */
+    private final PromptCatalog prompts;
 
     /** 会话摘要：标题=首条用户消息截断。 */
     public record SessionSummary(String sessionId, String title, int messageCount, long lastAt) {}
@@ -48,7 +51,8 @@ public class ChatHistoryService {
         }
     }
 
-    public record ChatMessage(long id, String role, String content, long createdAt, TurnMeta meta) {}
+    /** kind=特殊行的码（见 {@link ChatRowKind}），普通行为 null。前端认码不认文案 */
+    public record ChatMessage(long id, String role, String content, long createdAt, TurnMeta meta, String kind) {}
 
     /** 追加一条消息。历史是增益不是主链，失败只记日志不打断对话。 */
     public boolean append(String sessionId, long userId, String role, String content) {
@@ -113,7 +117,8 @@ public class ChatHistoryService {
                         .orderByAsc(WorkbenchChatMessage::getId))
                 .stream()
                 .map(row -> new ChatMessage(row.getId(), row.getRole(), row.getContent(),
-                        toEpochMillis(row.getCreatedAt()), metaOf(row)))
+                        toEpochMillis(row.getCreatedAt()), metaOf(row),
+                        ChatRowKind.of(row.getRole(), row.getContent(), prompts)))
                 .toList();
     }
 

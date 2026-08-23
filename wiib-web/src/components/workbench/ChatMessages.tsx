@@ -3,7 +3,7 @@ import { Trans, useTranslation } from 'react-i18next';
 import { Check, ChevronRight, Copy, Loader2, RefreshCw, ShieldQuestion, X } from 'lucide-react';
 import { Markdown } from '../Markdown';
 import { cn, fmtTime, fmtTokens } from '../../lib/utils';
-import { DEFERRED_PREFIX, type ChatItem } from './chatStore';
+import { type ChatItem } from './chatStore';
 import { AGENT_LABEL_KEY, HUB_NAME, type RailStep } from './chatView';
 
 /** 用户提问：右侧气泡，下面挂时刻 */
@@ -66,7 +66,7 @@ export function AssistantAnswer({ item, canRegenerate, onRegenerate }: {
   }, [item.content]);
 
   // 补答行对应的提问不在会话末尾，后端回退会误伤中间轮次，所以它没有重新生成
-  const deferred = item.content.startsWith(DEFERRED_PREFIX);
+  const deferred = item.deferred === true;
   const meta = item.meta;
   // 取不到值＝上游没报用量或这一轮的账不可信，不是 0：整段不显示，不要拿 0 冒充
   const readout = [

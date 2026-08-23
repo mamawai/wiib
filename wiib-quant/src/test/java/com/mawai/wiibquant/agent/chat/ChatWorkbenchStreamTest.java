@@ -1,6 +1,7 @@
 package com.mawai.wiibquant.agent.chat;
 
 import com.mawai.wiibcommon.enums.AgentLang;
+import com.mawai.wiibcommon.i18n.MessageCatalog;
 import com.mawai.wiibquant.agent.llm.LlmEndpointService;
 import com.mawai.wiibquant.agent.llm.SseChannel;
 import com.mawai.wiibquant.agent.llm.UsageTrackingChatModel;
@@ -65,7 +66,7 @@ class ChatWorkbenchStreamTest {
         ChatWorkbenchController controller = new ChatWorkbenchController(mock(ChatAgentFactory.class),
                 mock(LlmEndpointService.class), new ApprovalRegistry(),
                 historyService, mock(ChatContextStore.class), turnRunner,
-                runRegistry, gate, coordinator, ChatTestEndpoints.PROMPTS, ChatTestEndpoints.zhLang());
+                runRegistry, gate, new MessageCatalog(), coordinator, ChatTestEndpoints.PROMPTS, ChatTestEndpoints.zhLang());
 
         RecordingEmitter emitter = new RecordingEmitter();
         SseChannel channel = new SseChannel(emitter);

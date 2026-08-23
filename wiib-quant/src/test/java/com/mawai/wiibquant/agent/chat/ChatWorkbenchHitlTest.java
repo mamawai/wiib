@@ -1,6 +1,7 @@
 package com.mawai.wiibquant.agent.chat;
 
 import com.mawai.wiibcommon.enums.AgentLang;
+import com.mawai.wiibcommon.i18n.MessageCatalog;
 import com.mawai.wiibquant.agent.llm.SseChannel;
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONObject;
@@ -172,7 +173,7 @@ class ChatWorkbenchHitlTest {
         yieldCoordinator = new ChatYieldCoordinator(gate, runRegistry, turnRunner, history, ChatTestEndpoints.PROMPTS);
         return new ChatWorkbenchController(mock(ChatAgentFactory.class), mock(LlmEndpointService.class),
                 registry, history, contextStore, turnRunner,
-                runRegistry, gate, yieldCoordinator, ChatTestEndpoints.PROMPTS, ChatTestEndpoints.zhLang());
+                runRegistry, gate, new MessageCatalog(), yieldCoordinator, ChatTestEndpoints.PROMPTS, ChatTestEndpoints.zhLang());
     }
 
     /** 跑一轮，返回这一轮发出去的全部 SSE 事件 */

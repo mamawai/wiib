@@ -1,6 +1,5 @@
 package com.mawai.wiibquant.agent.chat;
 
-import com.mawai.wiibcommon.enums.AgentLang;
 import com.mawai.wiibquant.agent.i18n.PromptCatalog;
 import com.mawai.wiibquant.agent.llm.LlmErrorMessages;
 import lombok.RequiredArgsConstructor;
@@ -282,20 +281,6 @@ public class ChatYieldCoordinator {
         return dirtyBook || work.leaves().usageUntrusted()
                 ? ChatHistoryService.TurnMeta.latencyOnly(work.leaves().modelLabel(), latencyMs)
                 : ChatHistoryService.TurnMeta.of(work.leaves().modelLabel(), work.leaves().usageSnapshot(), latencyMs);
-    }
-
-    /**
-     * 补答行的标头前缀（{@code chat.deferred.prefix}）。前端按它认出"这行是补答、不给重新生成"：
-     * 补答行对应的提问不在会话末尾，中间夹着别的问答，回退会误伤那些轮次。
-     * 认全部语言的那一份——历史行是写入时那门语言落库的。
-     */
-    static boolean isDeferredRow(String content, PromptCatalog prompts) {
-        for (AgentLang candidate : AgentLang.values()) {
-            if (content.startsWith(prompts.get(candidate, "chat.deferred.prefix"))) {
-                return true;
-            }
-        }
-        return false;
     }
 
     /** 补答的标头：时间线上它离原问题隔着别的对话，得自己说明在答哪个问题 */

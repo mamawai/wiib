@@ -162,7 +162,14 @@
     "held": "held {{d}}",
     "noPlan": "No plan on record",
     "openDecision": "Entry decision",
-    "closeDecision": "Exit decision"
+    "closeDecision": "Exit decision",
+    "closeManner": {
+      "liquidated": "liquidated",
+      "stopLoss": "taken by stop",
+      "takeProfit": "taken by target",
+      "manual": "closed by hand",
+      "UNKNOWN": "exit unclear"
+    }
   },
   "trader": {
     "tourBtn": "Setup guide",

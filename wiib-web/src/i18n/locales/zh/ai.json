@@ -159,7 +159,14 @@
     "held": "持有 {{d}}",
     "noPlan": "无计划记录",
     "openDecision": "开仓决策",
-    "closeDecision": "平仓决策"
+    "closeDecision": "平仓决策",
+    "closeManner": {
+      "liquidated": "强平",
+      "stopLoss": "止损带走",
+      "takeProfit": "止盈带走",
+      "manual": "主动平仓",
+      "UNKNOWN": "了结方式不明"
+    }
   },
   "trader": {
     "tourBtn": "配置引导",

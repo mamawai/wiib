@@ -1,6 +1,7 @@
 package com.mawai.wiibquant.agent.chat;
 
 import com.mawai.wiibcommon.enums.AgentLang;
+import com.mawai.wiibcommon.i18n.MessageCatalog;
 import com.mawai.wiibquant.agent.llm.SseChannel;
 import com.mawai.wiibquant.agent.llm.ChatEndpoints;
 import com.mawai.wiibquant.agent.llm.LlmEndpointService;
@@ -135,7 +136,7 @@ class LlmErrorSurfaceTest {
         ChatWorkbenchController controller = new ChatWorkbenchController(mock(ChatAgentFactory.class),
                 mock(LlmEndpointService.class), new ApprovalRegistry(),
                 history, mock(ChatContextStore.class), turnRunner,
-                runRegistry, gate, coordinator, ChatTestEndpoints.PROMPTS, ChatTestEndpoints.zhLang());
+                runRegistry, gate, new MessageCatalog(), coordinator, ChatTestEndpoints.PROMPTS, ChatTestEndpoints.zhLang());
 
         // run() 要拿叶子清账本，给不了 null；否则 NPE 会先于 runner 抛的那条上游异常，测的就不是这件事了
         UsageTrackingChatModel model = new UsageTrackingChatModel(mock(ChatModel.class));

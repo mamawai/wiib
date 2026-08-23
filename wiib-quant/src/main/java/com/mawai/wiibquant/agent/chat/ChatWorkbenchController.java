@@ -2,9 +2,10 @@ package com.mawai.wiibquant.agent.chat;
 
 import com.alibaba.fastjson2.JSONObject;
 import com.mawai.wiibcommon.annotation.CurrentUserId;
+import com.mawai.wiibcommon.enums.AgentLang;
 import com.mawai.wiibcommon.enums.ErrorCode;
 import com.mawai.wiibcommon.exception.BizException;
-import com.mawai.wiibcommon.enums.AgentLang;
+import com.mawai.wiibcommon.i18n.MessageCatalog;
 import com.mawai.wiibcommon.util.Result;
 import com.mawai.wiibquant.agent.i18n.PromptCatalog;
 import com.mawai.wiibquant.agent.i18n.UserLangResolver;
@@ -68,6 +69,8 @@ public class ChatWorkbenchController {
     private final ChatTurnRunner turnRunner;
     private final WorkbenchRunRegistry runRegistry;
     private final ChatConcurrencyGate concurrencyGate;
+    /** 会话归属与确认失效的提示跟界面语言 */
+    private final MessageCatalog messages;
     private final ChatYieldCoordinator yieldCoordinator;
     private final PromptCatalog prompts;
     /** chat 是实时请求：语言走 @CurrentUserId → user.lang，与 trader 同一条路 */
@@ -228,7 +231,7 @@ public class ChatWorkbenchController {
     private Rollback rollbackLastTurn(String sessionId, long userId) {
         List<ChatHistoryService.ChatMessage> history = chatHistoryService.messages(sessionId);
         if (history.isEmpty() || !"assistant".equals(history.getLast().role())
-                || ChatYieldCoordinator.isDeferredRow(history.getLast().content(), prompts)) {
+                || ChatRowKind.DEFERRED.equals(history.getLast().kind())) {
             throw new BizException(ErrorCode.CHAT_REGENERATE_UNAVAILABLE);
         }
         ChatHistoryService.ChatMessage answer = history.getLast();
@@ -353,7 +356,7 @@ public class ChatWorkbenchController {
     @Operation(summary = "会话运行状态（切页/刷新回来判断 AI 是否还在后台跑，结束后拉历史补答案）")
     public Result<Boolean> sessionStatus(@CurrentUserId long userId, @PathVariable String sessionId) {
         if (sessionId == null || !sessionId.startsWith("wb-" + userId + "-")) {
-            return Result.fail("会话不存在或无权限");
+            return Result.fail(messages.get("quant.chat.sessionNotFound"));
         }
         // 有轮在跑或欠着补答都算"还在跑"：让位收尾后前端靠这个口径继续轮询等补答落库
         return Result.ok(runRegistry.isRunning(sessionId) || yieldCoordinator.hasPending(sessionId));
@@ -364,7 +367,7 @@ public class ChatWorkbenchController {
     public Result<List<ChatHistoryService.ChatMessage>> sessionMessages(@CurrentUserId long userId,
                                                                         @PathVariable String sessionId) {
         if (sessionId == null || !sessionId.startsWith("wb-" + userId + "-")) {
-            return Result.fail("会话不存在或无权限");
+            return Result.fail(messages.get("quant.chat.sessionNotFound"));
         }
         return Result.ok(chatHistoryService.messages(sessionId));
     }
@@ -373,7 +376,7 @@ public class ChatWorkbenchController {
     @Operation(summary = "删除历史会话（展示记录 + 后端续聊上下文）")
     public Result<Void> deleteSession(@CurrentUserId long userId, @PathVariable String sessionId) {
         if (sessionId == null || !sessionId.startsWith("wb-" + userId + "-")) {
-            return Result.fail("会话不存在或无权限");
+            return Result.fail(messages.get("quant.chat.sessionNotFound"));
         }
         chatHistoryService.deleteSession(sessionId);
         // 展示记录与续聊上下文是两套存储，删会话得都清
@@ -387,7 +390,7 @@ public class ChatWorkbenchController {
     public Result<Void> approve(@CurrentUserId long userId, @RequestBody ApprovalRequest request) {
         String sessionId = request.getSessionId();
         if (sessionId == null || !sessionId.startsWith("wb-" + userId + "-")) {
-            return Result.fail("会话不存在或无权限");
+            return Result.fail(messages.get("quant.chat.sessionNotFound"));
         }
         // 标识对不上 = 用户点的是被新请求覆盖掉的旧卡片。
         // 此时若照批，用户看着"深研判 BTC"点的同意会授权给新请求里的别的标的。
@@ -395,7 +398,7 @@ public class ChatWorkbenchController {
         boolean ok = request.isApproved()
                 ? approvalRegistry.approve(sessionId, request.getRequestId())
                 : approvalRegistry.reject(sessionId, request.getRequestId());
-        return ok ? Result.ok(null) : Result.fail("该确认请求已失效，请重新发起");
+        return ok ? Result.ok(null) : Result.fail(messages.get("quant.chat.approvalExpired"));
     }
 
     /**

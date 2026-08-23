@@ -250,10 +250,13 @@ function PlanBlock({ plan }: { plan: AiTraderPlanView }) {
   );
 }
 
-/** 了结方式徽章色：止盈/止损是计划兑现，主动平仓是模型的手，强平是事故 */
+/**
+ * 了结方式徽章色：止盈/止损是计划兑现，主动平仓是模型的手，强平是事故。
+ * 键是后端下发的语言无关码（ReviewMaterialAssembler.closeMannerKey），文案另查词表。
+ */
 const CLOSE_MANNER_TONE: Record<string, string> = {
-  '止盈带走': 'bg-gain/15 text-gain', '止损带走': 'bg-loss/15 text-loss',
-  '主动平仓': 'bg-primary/15 text-primary', '强平': 'bg-loss/25 text-loss',
+  takeProfit: 'bg-gain/15 text-gain', stopLoss: 'bg-loss/15 text-loss',
+  manual: 'bg-primary/15 text-primary', liquidated: 'bg-loss/25 text-loss',
 };
 
 /** 单笔已了结交易：头行（币种·多空·了结方式·入场→出场·盈亏）→ 计划（论点/失效条件/修订史）→ 开仓/平仓决策折叠 */
@@ -269,8 +272,8 @@ function TradeCard({ r }: { r: TradeRecordView }) {
         <span className={cn('text-[10px] font-bold px-1.5 py-0.5 rounded', isLong ? 'bg-gain/15 text-gain' : 'bg-loss/15 text-loss')}>
           {isLong ? t('term.long') : t('term.short')}{r.leverage != null && ` ${r.leverage}x`}
         </span>
-        <span className={cn('text-[10px] font-bold px-1.5 py-0.5 rounded', CLOSE_MANNER_TONE[r.closeManner] ?? 'bg-muted text-muted-foreground')}>
-          {r.closeManner}
+        <span className={cn('text-[10px] font-bold px-1.5 py-0.5 rounded', CLOSE_MANNER_TONE[r.closeMannerKey] ?? 'bg-muted text-muted-foreground')}>
+          {t(`trade.closeManner.${r.closeMannerKey}`)}
         </span>
         <span className="text-muted-foreground num">{fmtNum(r.entryPrice)} → {r.closedPrice != null ? fmtNum(r.closedPrice) : '—'}</span>
         <span className={cn('ml-auto num font-black', pnl == null ? 'text-muted-foreground' : pnl >= 0 ? 'text-gain' : 'text-loss')}>

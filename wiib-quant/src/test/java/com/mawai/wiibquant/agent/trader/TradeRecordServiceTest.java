@@ -1,6 +1,5 @@
 package com.mawai.wiibquant.agent.trader;
 
-import com.mawai.wiibquant.agent.i18n.PromptCatalog;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.mawai.wiibcommon.dto.FuturesPositionDTO;
@@ -45,7 +44,7 @@ class TradeRecordServiceTest {
     private final AiTraderPlanMapper planMapper = mock(AiTraderPlanMapper.class);
     private final AiTraderDecisionMapper decisionMapper = mock(AiTraderDecisionMapper.class);
     private final TradeRecordService service =
-            new TradeRecordService(sim, planMapper, decisionMapper, new PromptCatalog());
+            new TradeRecordService(sim, planMapper, decisionMapper);
 
     private static AiTrader trader() {
         AiTrader t = new AiTrader();
@@ -116,7 +115,8 @@ class TradeRecordServiceTest {
         assertThat(out).hasSize(1);
         TradeRecordService.TradeRecord r = out.get(0);
         assertThat(r.positionId()).isEqualTo(1L);
-        assertThat(r.closeManner()).isEqualTo("止损带走");
+        // 下发的是语言无关的码，文案在前端词表里
+        assertThat(r.closeMannerKey()).isEqualTo("stopLoss");
         assertThat(r.plan().getSignalsUsed()).isEqualTo("4h 突破前高");
         assertThat(r.openDecision().id()).isEqualTo(100L);
         assertThat(r.openDecision().reasoning()).isEqualTo("突破做多");
@@ -142,7 +142,7 @@ class TradeRecordServiceTest {
 
         TradeRecordService.TradeRecord r = service.closedTrades(trader()).get(0);
 
-        assertThat(r.closeManner()).isEqualTo("主动平仓");
+        assertThat(r.closeMannerKey()).isEqualTo("manual");
         assertThat(r.closeDecision().id()).isEqualTo(103L);
         assertThat(r.closeDecision().reason()).isEqualTo("失效条件触发");
         assertThat(r.closeDecision().reasoning()).isEqualTo("走人");

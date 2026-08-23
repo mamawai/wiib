@@ -726,6 +726,12 @@ export interface WorkbenchChatMessage {
   createdAt: number;
   /** 只有 assistant 行有；user 行与加列之前的老数据是 null */
   meta?: TurnMeta | null;
+  /**
+   * 后端自己写进历史的特殊行的码（服务端 ChatRowKind），普通行为 null：
+   * deferred=补答行（不给重新生成）、hitlResume=批准后自动补发的续跑指令（还原成过程轨）。
+   * 这两种行的正文是词表文案、跟着语言变，所以判定归后端，前端只认码。
+   */
+  kind?: 'deferred' | 'hitlResume' | null;
 }
 
 /** 我的对话端点配置（BYOK）。key 只回尾 4 位，明文不出服务端 */
@@ -891,8 +897,11 @@ export interface TradeRecordView {
   closedPnl: number | null;
   openedAt: number;
   closedAt: number;
-  /** 止盈带走 / 止损带走 / 主动平仓 / 强平 / UNKNOWN（与复盘素材同一套推断） */
-  closeManner: string;
+  /**
+   * 了结方式的语言无关码：takeProfit / stopLoss / manual / liquidated / UNKNOWN
+   * （与复盘素材同一套推断）。文案查 ai:trade.closeManner.*，配色也认这个码
+   */
+  closeMannerKey: string;
   plan: AiTraderPlanView | null;
   openDecision: TradeDecisionRef | null;
   /** 只有主动平仓才有：止损/止盈带走的依据就是计划里的原始止损/目标 */
