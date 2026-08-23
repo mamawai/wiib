@@ -3,6 +3,7 @@ package com.mawai.wiibsim.service.impl;
 import com.mawai.wiibcommon.cache.CacheService;
 import com.mawai.wiibcommon.dto.FuturesAdjustLeverageRequest;
 import com.mawai.wiibcommon.entity.FuturesPosition;
+import com.mawai.wiibcommon.i18n.MessageCatalog;
 import com.mawai.wiibcommon.market.BinanceRestClient;
 import com.mawai.wiibcommon.util.SpringUtils;
 import com.mawai.wiibsim.config.FuturesLeverageBracketRegistry;
@@ -67,7 +68,8 @@ class CrossLeverageBandInvalidateTest {
                 mock(UserService.class), userMapper, positionMapper, orderMapper,
                 new TradingConfig(), redisLockUtil, cacheService,
                 mock(FuturesPositionIndexService.class), bracketRegistry, crossMargin,
-                new TradeFilterRegistry(mock(BinanceRestClient.class)));
+                new TradeFilterRegistry(mock(BinanceRestClient.class)),
+                new MessageCatalog());
 
         ApplicationContext ctx = mock(ApplicationContext.class);
         when(ctx.getBean(FuturesTradingServiceImpl.class)).thenReturn(trading);

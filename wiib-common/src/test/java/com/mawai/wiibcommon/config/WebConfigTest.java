@@ -1,6 +1,7 @@
 package com.mawai.wiibcommon.config;
 
 import com.mawai.wiibcommon.annotation.CurrentUserId;
+import com.mawai.wiibcommon.i18n.MessageCatalog;
 import com.mawai.wiibcommon.resolver.CurrentUserIdArgumentResolver;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.annotation.Configuration;
@@ -38,7 +39,7 @@ class WebConfigTest {
     void CurrentUserId解析器必须被注册() {
         List<HandlerMethodArgumentResolver> resolvers = new ArrayList<>();
 
-        new WebConfig().addArgumentResolvers(resolvers);
+        new WebConfig(new MessageCatalog()).addArgumentResolvers(resolvers);
 
         assertThat(resolvers).hasAtLeastOneElementOfType(CurrentUserIdArgumentResolver.class);
     }

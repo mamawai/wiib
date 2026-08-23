@@ -5,6 +5,7 @@ import com.mawai.wiibcommon.dto.FuturesAddMarginRequest;
 import com.mawai.wiibcommon.entity.FuturesPosition;
 import com.mawai.wiibcommon.enums.ErrorCode;
 import com.mawai.wiibcommon.exception.BizException;
+import com.mawai.wiibcommon.i18n.MessageCatalog;
 import com.mawai.wiibcommon.market.BinanceRestClient;
 import com.mawai.wiibsim.config.FuturesLeverageBracketRegistry;
 import com.mawai.wiibsim.config.TradeFilterRegistry;
@@ -143,7 +144,8 @@ class CrossOccupancyGuardTest {
                 mock(UserService.class), userMapper, positionMapper, orderMapper,
                 new TradingConfig(), mock(RedisLockUtil.class), cacheService,
                 mock(FuturesPositionIndexService.class), bracketRegistry, crossMargin,
-                new TradeFilterRegistry(mock(BinanceRestClient.class)));
+                new TradeFilterRegistry(mock(BinanceRestClient.class)),
+                new MessageCatalog());
 
         FuturesAddMarginRequest req = new FuturesAddMarginRequest();
         req.setPositionId(2L);

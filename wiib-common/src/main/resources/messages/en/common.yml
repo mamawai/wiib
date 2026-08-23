@@ -1,0 +1,3 @@
+# Odds and ends shared by all three modules.
+common:
+  symbolFormat: Bad symbol format

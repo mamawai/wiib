@@ -11,6 +11,7 @@ import com.mawai.wiibcommon.entity.FuturesTakeProfit;
 import com.mawai.wiibcommon.entity.User;
 import com.mawai.wiibcommon.enums.ErrorCode;
 import com.mawai.wiibcommon.exception.BizException;
+import com.mawai.wiibcommon.i18n.MessageCatalog;
 import com.mawai.wiibcommon.util.SpringUtils;
 import com.mawai.wiibsim.config.FuturesLeverageBracketRegistry;
 import com.mawai.wiibsim.config.TradeFilterRegistry;
@@ -60,6 +61,8 @@ public class FuturesTradingServiceImpl implements FuturesTradingService {
     private final FuturesLeverageBracketRegistry bracketRegistry;
     private final CrossMarginService crossMarginService;
     private final TradeFilterRegistry tradeFilterRegistry;
+    /** 反手的半成功要把开仓失败的原因成文带回前端，绕开了全局处理器，只能自己查词表 */
+    private final MessageCatalog messages;
 
     // ==================== 开仓 ====================
 
@@ -472,7 +475,9 @@ public class FuturesTradingServiceImpl implements FuturesTradingService {
             // 抛出去前端只看到一句失败，用户不知道自己其实已经空仓——带着已平信息返回让前端说清楚
             log.warn("反手的反向开仓失败 userId={} posId={} symbol={} qty={}",
                     userId, positionId, closed.getSymbol(), closed.getQuantity(), e);
-            return new ReverseResult(closed, null, e.getMessage());
+            // 业务异常的 getMessage() 是词表 key，直接带回前端就是一行 error.xxx
+            String why = e instanceof BizException biz ? biz.render(messages) : e.getMessage();
+            return new ReverseResult(closed, null, why);
         }
     }
 

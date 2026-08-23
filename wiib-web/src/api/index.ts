@@ -1,5 +1,5 @@
 import axios from 'axios';
-import i18n, { type Lang } from '../i18n';
+import i18n, { currentLang, type Lang } from '../i18n';
 import type { TnOverview, TnTrade, TnDailyCell, TnEquityPoint, TnFillStats, TnManualOrderReq, TnOrderResult, TnAck } from '../types/testnet';
 import type { BacktestTaskStatus, BacktestEventsPage, BacktestKlinesPage, BacktestResultPayload, ReplayCoverage, HistoryKlinesPayload, ReplayCoachRequest, ReplayCoachEvent } from '../types';
 import type { LedgerEntry, LedgerBizTypeOption, PublicTrade, UserProfile, PositionHistoryItem, RankingSort } from '../types';
@@ -25,8 +25,15 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * 界面语言头。后端的报错文案按它查词表现渲染（服务端 RequestLangFilter），
+ * 未登录的那些报错（登录失败、邀请码无效）也照样有语言可依——user.lang 那时候还没得查。
+ */
+const LANG_HEADER = 'X-Lang';
+
 // 请求拦截器：添加Token到Header
 api.interceptors.request.use((config) => {
+  config.headers[LANG_HEADER] = currentLang();
   const stored = localStorage.getItem('wiib-user');
   if (stored) {
     try {
@@ -426,6 +433,7 @@ const postSse = async <E,>(url: string, body: unknown, onEvent: (e: E) => void, 
     credentials: 'include',
     headers: {
       'Content-Type': 'application/json',
+      [LANG_HEADER]: currentLang(),
       ...(token ? { satoken: token } : {}),
     },
     body: JSON.stringify(body),

@@ -4,6 +4,7 @@ import com.mawai.wiibcommon.annotation.Symbol;
 import com.mawai.wiibcommon.constant.QuantConstants;
 import com.mawai.wiibcommon.enums.ErrorCode;
 import com.mawai.wiibcommon.exception.BizException;
+import com.mawai.wiibcommon.i18n.MessageCatalog;
 
 import org.jspecify.annotations.NonNull;
 import org.springframework.core.MethodParameter;
@@ -21,6 +22,13 @@ public class SymbolArgumentResolver implements HandlerMethodArgumentResolver {
     private static final String PARAM_NAME = "symbol";
     private static final String DEFAULT_SYMBOL = "BTCUSDT";
 
+    /** 不是 Spring bean（由 WebConfig new 出来），词表只能从构造器接进来 */
+    private final MessageCatalog messages;
+
+    public SymbolArgumentResolver(MessageCatalog messages) {
+        this.messages = messages;
+    }
+
     @Override
     public boolean supportsParameter(MethodParameter parameter) {
         return parameter.hasParameterAnnotation(Symbol.class)
@@ -36,7 +44,7 @@ public class SymbolArgumentResolver implements HandlerMethodArgumentResolver {
         try {
             return QuantConstants.normalizeSymbol(raw);
         } catch (IllegalArgumentException e) {
-            throw new BizException(ErrorCode.PARAM_ERROR.getCode(), "symbol格式错误");
+            throw new BizException(ErrorCode.PARAM_ERROR.getCode(), messages.get("common.symbolFormat"));
         }
     }
 }
