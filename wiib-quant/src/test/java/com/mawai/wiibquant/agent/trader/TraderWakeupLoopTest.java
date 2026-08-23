@@ -10,6 +10,7 @@ import com.mawai.wiibcommon.entity.FuturesPosition;
 import com.mawai.wiibquant.mapper.AiTraderPlanMapper;
 import com.mawai.wiibcommon.entity.AiTraderDecision;
 import com.mawai.wiibcommon.enums.AgentLang;
+import com.mawai.wiibcommon.i18n.MessageCatalog;
 import com.mawai.wiibcommon.market.BinanceRestClient;
 import com.mawai.wiibquant.external.sim.SimTradeClient;
 import com.mawai.wiibquant.agent.toolkit.IndicatorToolkit;
@@ -89,7 +90,7 @@ class TraderWakeupLoopTest {
             new MarketToolkit(mock(MarketDataService.class)),
             new NewsToolkit(mock(NewsCache.class), mock(NewsFlashLocalizer.class)),
             traderMapper, decisionMapper, new TraderPlanStore(planMapper), requestService, langResolver,
-            prompts, new LocalizedToolCallbacks(prompts));
+            prompts, new MessageCatalog(), new LocalizedToolCallbacks(prompts));
 
     {
         // 测试边界是固定历史时刻，墙钟钉在边界后 1s——预算充足，各用例不受真实时间影响

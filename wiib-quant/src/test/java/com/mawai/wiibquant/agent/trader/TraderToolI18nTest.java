@@ -1,6 +1,7 @@
 package com.mawai.wiibquant.agent.trader;
 
 import com.mawai.wiibcommon.enums.AgentLang;
+import com.mawai.wiibcommon.i18n.MessageCatalog;
 import com.mawai.wiibcommon.market.BinanceRestClient;
 import com.mawai.wiibquant.agent.i18n.LocalizedToolCallbacks;
 import com.mawai.wiibquant.agent.i18n.PromptCatalog;
@@ -53,6 +54,7 @@ class TraderToolI18nTest {
             mock(AiTraderMapper.class), mock(AiTraderDecisionMapper.class),
             new TraderPlanStore(mock(AiTraderPlanMapper.class)),
             mock(TraderRequestService.class), mock(UserLangResolver.class), prompts,
+            new MessageCatalog(),
             new LocalizedToolCallbacks(prompts));
 
     /** 只做反射扫描的壳：工具方法一个都不会被调起来，依赖给 null 即可 */
@@ -60,7 +62,7 @@ class TraderToolI18nTest {
             mock(SimTradeClient.class), 1L, Set.of("BTCUSDT"), BigDecimal.TEN,
             sym -> BigDecimal.ONE,
             new TraderPlanStore(mock(AiTraderPlanMapper.class)), mock(TraderRequestService.class),
-            new TradeTools.WakeCtx(1L, 1, 0L, Long.MAX_VALUE, null, AgentLang.ZH), prompts);
+            new TradeTools.WakeCtx(1L, 1, 0L, Long.MAX_VALUE, null, AgentLang.ZH), prompts, new MessageCatalog());
 
     private Map<String, String> descriptions(AgentLang lang) {
         return runner.wakeTools(lang, tradeTools).stream().collect(Collectors.toMap(

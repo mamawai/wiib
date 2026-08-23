@@ -3,6 +3,10 @@ package com.mawai.wiibcommon.enums;
 import lombok.Getter;
 import lombok.AllArgsConstructor;
 
+import java.util.Arrays;
+import java.util.Map;
+import java.util.stream.Collectors;
+
 /**
  * 业务错误码。<b>码在这里，话在 {@code messages/<语言>/error.yml}</b>——枚举名下划线转小驼峰
  * 就是词表 key（BALANCE_NOT_ENOUGH → error.balanceNotEnough）。
@@ -144,4 +148,15 @@ public enum ErrorCode {
     private final int code;
     /** 界面文案词表的 key，不是文案本身。渲染见 {@code GlobalExceptionHandler} */
     private final String msgKey;
+
+    private static final Map<Integer, ErrorCode> BY_CODE =
+            Arrays.stream(values()).collect(Collectors.toUnmodifiableMap(ErrorCode::getCode, e -> e));
+
+    /**
+     * 按码反查。跨服务调用（quant 打 sim internal API）收到的只有码，要成文得先找回枚举。
+     * 认不出返回 null——对方比自己新时不该炸，由调用方决定怎么退。
+     */
+    public static ErrorCode of(int code) {
+        return BY_CODE.get(code);
+    }
 }

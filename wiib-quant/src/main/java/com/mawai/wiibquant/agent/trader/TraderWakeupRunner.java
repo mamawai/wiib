@@ -15,6 +15,7 @@ import com.mawai.wiibcommon.entity.FuturesPosition;
 import com.mawai.wiibcommon.entity.FuturesStopLoss;
 import com.mawai.wiibcommon.entity.FuturesTakeProfit;
 import com.mawai.wiibcommon.enums.AgentLang;
+import com.mawai.wiibcommon.i18n.MessageCatalog;
 import com.mawai.wiibcommon.market.BinanceRestClient;
 import com.mawai.wiibquant.agent.i18n.LocalizedToolCallbacks;
 import com.mawai.wiibquant.agent.i18n.PromptCatalog;
@@ -104,6 +105,8 @@ public class TraderWakeupRunner {
     private final TraderRequestService requestService;
     private final UserLangResolver userLangResolver;
     private final PromptCatalog prompts;
+    /** sim 拒因按错误码成文（见 SimTradeClient.describe），同样跟 trader 主人的语言 */
+    private final MessageCatalog messages;
     private final LocalizedToolCallbacks localizedTools;
 
     /** 墙钟注入点：预算计算要可测（测试里把"现在"钉在边界附近） */
@@ -193,9 +196,11 @@ public class TraderWakeupRunner {
             decisionMapper.insert(decision);
             clearFailures(trader);
         } catch (Exception e) {
+            // 落库即公开展示（时间线的 error 行、连败暂停的 pausedReason），一律跟 lang：
+            // sim 拒因按码查词表，其余照原样（上游原文/代码异常没有码可查）
             String msg = e instanceof TimeoutException
                     ? prompts.get(lang, "trader.error.wakeTimeout", Map.of("seconds", budgetSeconds))
-                    : e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
+                    : SimTradeClient.describe(e, messages, lang);
             log.warn("[Trader] 唤醒失败 traderId={} boundary={} msg={}", trader.getId(), boundaryTime, msg);
             // 决策行已经落库了（异常出在 insert 之后的收尾，如 clearFailures/markLiquidated 的列级更新）：
             // 这一轮本身是成功的，不该改写成 ERROR 更不该计连败；而且 MP 自增主键 insert 后已把 id
@@ -238,7 +243,7 @@ public class TraderWakeupRunner {
                 // 写工具自己按这个时间点拒发，才不会在作废的一轮里继续下单
                 new TradeTools.WakeCtx(trader.getId(), trader.getRoundNo(), boundaryTime,
                         System.currentTimeMillis() + budgetSeconds * 1000, risk, lang),
-                prompts);
+                prompts, messages);
 
         // 回注窗口只认交易决策行（白名单：例行/警报/手动）——REVIEW/LEARN 的产出已经走
         // memory/learning_notes 注入，再进最近决策就是重复占字数；ALERT/MANUAL 是真实交易

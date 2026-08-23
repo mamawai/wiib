@@ -3,6 +3,7 @@ package com.mawai.wiibquant.agent.trader;
 import com.mawai.wiibquant.agent.i18n.PromptI18nAssertions;
 import com.mawai.wiibcommon.entity.AiTrader;
 import com.mawai.wiibcommon.enums.AgentLang;
+import com.mawai.wiibcommon.i18n.MessageCatalog;
 import com.mawai.wiibcommon.market.BinanceRestClient;
 import com.mawai.wiibquant.agent.i18n.LocalizedToolCallbacks;
 import com.mawai.wiibquant.agent.i18n.PromptCatalog;
@@ -51,6 +52,7 @@ class WakeInstructionI18nTest {
             traderMapper, mock(AiTraderDecisionMapper.class),
             new TraderPlanStore(mock(AiTraderPlanMapper.class)),
             mock(TraderRequestService.class), mock(UserLangResolver.class), prompts,
+            new MessageCatalog(),
             new LocalizedToolCallbacks(prompts));
 
     {

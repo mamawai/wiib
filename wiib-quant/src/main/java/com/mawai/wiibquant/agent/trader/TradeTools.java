@@ -12,6 +12,7 @@ import com.mawai.wiibcommon.dto.FuturesTakeProfitRequest;
 import com.mawai.wiibcommon.entity.AiTraderPlan;
 import com.mawai.wiibquant.agent.i18n.PromptCatalog;
 import com.mawai.wiibcommon.enums.AgentLang;
+import com.mawai.wiibcommon.i18n.MessageCatalog;
 import com.mawai.wiibcommon.entity.AiTraderRequest;
 import com.mawai.wiibcommon.entity.FuturesPosition;
 import com.mawai.wiibcommon.entity.FuturesStopLoss;
@@ -63,13 +64,15 @@ public class TradeTools {
     private final WakeCtx ctx;
     /** 拒因文案：回给模型、也进公开时间线，跟 {@code ctx.lang()} 走 */
     private final PromptCatalog prompts;
+    /** sim 那侧的拒因按错误码在这儿成文（余额不足/止损价非法等），同样跟 {@code ctx.lang()} */
+    private final MessageCatalog messages;
     /** 本次唤醒的动作轨迹，唤醒回路收走序列化进 ai_trader_decision.actions_json */
     private final List<JSONObject> actions = new ArrayList<>();
 
     public TradeTools(SimTradeClient simTradeClient, long simUserId, Set<String> symbolWhitelist,
                       BigDecimal equity, Function<String, BigDecimal> markPrice,
                       TraderPlanStore planStore, TraderRequestService requestService, WakeCtx ctx,
-                      PromptCatalog prompts) {
+                      PromptCatalog prompts, MessageCatalog messages) {
         this.simTradeClient = simTradeClient;
         this.simUserId = simUserId;
         this.symbolWhitelist = symbolWhitelist;
@@ -79,6 +82,7 @@ public class TradeTools {
         this.requestService = requestService;
         this.ctx = ctx;
         this.prompts = prompts;
+        this.messages = messages;
     }
 
     public List<JSONObject> actions() {
@@ -628,7 +632,9 @@ public class TradeTools {
     }
 
     private String fail(String tool, JSONObject args, Exception e) {
-        String msg = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
+        // sim 拒因按码查词表跟 ctx.lang()：这句既进模型上下文又进公开时间线，
+        // 跟不上语言的话英文 trader 会读到一句中文（模型立刻跟着混）
+        String msg = SimTradeClient.describe(e, messages, ctx.lang());
         // 上游异常可能拖着整段响应体（曾见全市场premiumIndex数组进拒因），截断防烧token防撑爆轨迹
         if (msg.length() > 300) {
             msg = msg.substring(0, 300) + "…";
