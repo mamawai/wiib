@@ -170,41 +170,30 @@
           ctx.globalAlpha = 1;
         }
 
-        // ---- 把折线画到 p（0~1）处，返回笔尖坐标 ----
+        // ---- 把折线画到 p（0~1）处 ----
         function stroke(g, pts, p, w) {
-          if (p <= 0) return null;
-          var n = pts.length - 1, f = Math.min(p, 1) * n, i = Math.floor(f), r = f - i, k, tip;
+          if (p <= 0) return;
+          var n = pts.length - 1, f = Math.min(p, 1) * n, i = Math.floor(f), r = f - i, k;
           g.lineWidth = w; g.lineCap = 'round'; g.lineJoin = 'round'; g.strokeStyle = '#000';
           g.beginPath();
           g.moveTo(pts[0][0], pts[0][1]);
           for (k = 1; k <= Math.min(i, n); k++) g.lineTo(pts[k][0], pts[k][1]);
-          if (i < n) {
-            tip = [pts[i][0] + (pts[i + 1][0] - pts[i][0]) * r, pts[i][1] + (pts[i + 1][1] - pts[i][1]) * r];
-            g.lineTo(tip[0], tip[1]);
-          } else tip = pts[n];
+          // 末点落在两个采样点中间，补一段到插值位置——否则笔迹是逐点跳不是连续推进
+          if (i < n) g.lineTo(pts[i][0] + (pts[i + 1][0] - pts[i][0]) * r, pts[i][1] + (pts[i + 1][1] - pts[i][1]) * r);
           g.stroke();
-          return tip;
-        }
-
-        function glow(tip, PRI) {
-          var x = LX + tip[0] * SC, y = LY + tip[1] * SC, r = PEN * SC * 0.46;
-          var g = ctx.createRadialGradient(x, y, 0, x, y, r * 1.7);
-          g.addColorStop(0, PRI); g.addColorStop(0.4, PRI + 'b0'); g.addColorStop(1, PRI + '00');
-          ctx.fillStyle = g;
-          ctx.beginPath(); ctx.arc(x, y, r * 1.7, 0, 6.2832); ctx.fill();
         }
 
         function seg(p, f) { return f <= 0 ? 1 : Math.min(p / f, 1); }
 
-        function drawMark(prog, PRI) {
+        function drawMark(prog) {
           if (!logo.naturalWidth) return;
           mx.setTransform(1, 0, 0, 1, 0, 0);
           mx.clearRect(0, 0, mc.width, mc.height);
           mx.setTransform(SC * dpr, 0, 0, SC * dpr, 0, 0);   // 换算到标志像素空间
-          var tips = [], t, i, pb, s2;
+          var i, pb, s2;
           // ① 两支笔的前半截：都在禁区之外
-          t = stroke(mx, L1, seg(prog, DATA.lsp), PEN); if (t && prog < DATA.lsp) tips.push(t);
-          t = stroke(mx, R1, seg(prog, DATA.rsp), PEN); if (t && prog < DATA.rsp) tips.push(t);
+          stroke(mx, L1, seg(prog, DATA.lsp), PEN);
+          stroke(mx, R1, seg(prog, DATA.rsp), PEN);
           // ② 抠掉两块禁区：交叉附近那段斜杠带（平头收口，不顺中线两端多啃）+ 竖杆的全部像素
           mx.globalCompositeOperation = 'destination-out';
           mx.lineWidth = DATA.ew; mx.lineCap = 'butt'; mx.lineJoin = 'round'; mx.strokeStyle = '#000';
@@ -225,24 +214,22 @@
             bx.setTransform(1, 0, 0, 1, 0, 0);
             bx.clearRect(0, 0, bc.width, bc.height);
             bx.setTransform(s2, 0, 0, s2, -DATA.bx * s2, -DATA.by * s2);
-            t = stroke(bx, BLADE, pb, PEN * 1.2);
+            stroke(bx, BLADE, pb, PEN * 1.2);
             bx.setTransform(1, 0, 0, 1, 0, 0);
             bx.globalCompositeOperation = 'destination-in';
             bx.drawImage(bmask, 0, 0, bc.width, bc.height);
             bx.globalCompositeOperation = 'source-over';
             mx.drawImage(bc, DATA.bx, DATA.by, DATA.bw, DATA.bh);
-            if (t && pb < 1) tips.push(t);
           }
           // ④ 后半截：笔已走在斜杠上，放开画进禁区，两笔在这里会合
-          if (prog > DATA.lsp) { t = stroke(mx, L2, seg(prog - DATA.lsp, 1 - DATA.lsp), PEN); if (t && prog < 1) tips.push(t); }
-          if (prog > DATA.rsp) { t = stroke(mx, R2, seg(prog - DATA.rsp, 1 - DATA.rsp), PEN); if (t && prog < 1) tips.push(t); }
+          if (prog > DATA.lsp) stroke(mx, L2, seg(prog - DATA.lsp, 1 - DATA.lsp), PEN);
+          if (prog > DATA.rsp) stroke(mx, R2, seg(prog - DATA.rsp, 1 - DATA.rsp), PEN);
           // 遮罩里只留笔迹扫过的标志像素
           mx.globalCompositeOperation = 'source-in';
           mx.drawImage(logo, 0, 0, DATA.w, DATA.h);
           mx.globalCompositeOperation = 'source-over';
           mx.setTransform(1, 0, 0, 1, 0, 0);
           ctx.drawImage(mc, LX, LY, LW, LH);
-          for (i = 0; i < tips.length; i++) glow(tips[i], PRI);   // 笔尖：一点橙色辉光
         }
 
         function ease(t) { return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2; }
@@ -255,7 +242,7 @@
           noise(REDUCED ? 0 : (now - t0) / 1000, PRI, st.getPropertyValue('--c-cell').trim());
           if (failed) return;                                  // 没有标志可画，留噪点就行
           var prog = REDUCED ? 1 : (ready ? Math.min(Math.max((now - drawT0) / DRAW_LEN, 0), 1) : 0);
-          drawMark(ease(prog), PRI);
+          drawMark(ease(prog));
           lbl.style.opacity = prog >= 1 ? Math.min((now - drawT0 - DRAW_LEN) / 400, 1) : 0;
         }
 
