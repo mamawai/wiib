@@ -53,6 +53,18 @@
         var dark = localStorage.getItem('theme') === 'dark';
         if (dark) document.documentElement.classList.add('dark');
 
+        // 语言也得在这儿定：开屏跑在 bundle 之前，i18n 还不存在，但开屏上有话要说。
+        // 判定复刻 src/i18n/index.ts 那套（localStorage 的 wiib-lang 优先，没选过就看
+        // 浏览器语言、zh-* 算中文其余算英文），两处必须同规则，否则开屏与应用会说两种语言
+        var lang = localStorage.getItem('wiib-lang');
+        if (lang !== 'zh' && lang !== 'en') {
+          var nav = (navigator.languages && navigator.languages[0]) || navigator.language || '';
+          lang = nav.toLowerCase().indexOf('zh') === 0 ? 'zh' : 'en';
+        }
+        window.__wiibLang = lang;
+        // 标签页语言从第一帧就对：浏览器断词与读屏软件都认它（bundle 起来后 i18n 会接着维护）
+        document.documentElement.lang = lang === 'zh' ? 'zh-CN' : 'en';
+
         // 是否从桌面图标启动：安卓认 display-mode，iOS 只认 navigator.standalone。
         // 打成 html.pwa 供 CSS 用（不走 @media display-mode，iOS 支持度没把握）
         var pwa = matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
@@ -71,7 +83,8 @@
     <!-- 开屏放在 #root 前：解析到就上屏，不等 bundle。画面交给紧随其后的内联脚本绘制 -->
     <div id="splash" aria-hidden="true">
       <canvas id="sp-cv"></canvas>
-      <div class="sp-lbl">GRID ONLINE <b>·</b> 数据接入中</div>
+      <!-- 后半句由下面的脚本按语言填（标签 opacity:0 起手、画完才淡入，填之前看不见） -->
+      <div class="sp-lbl">GRID ONLINE <b>·</b> <span id="sp-tail"></span></div>
     </div>
     <script>
       (function () {
@@ -79,6 +92,8 @@
         var cv = document.getElementById('sp-cv');
         var ctx = cv && cv.getContext ? cv.getContext('2d') : null;
         var lbl = el.querySelector('.sp-lbl');
+        el.querySelector('#sp-tail').textContent =
+          window.__wiibLang === 'zh' ? '数据接入中' : 'LINKING FEEDS';
         if (!ctx) {
           // canvas 拿不到就别演了：定个短时限撤掉遮罩，绝不能挡住应用
           window.__wiibSplashDone = function () {};

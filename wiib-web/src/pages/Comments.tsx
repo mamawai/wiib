@@ -25,12 +25,6 @@ const MUTE_OPTIONS = [1, 7, -1];
 /** 正在回复谁：rootId 恒指向根评论（回复子评论也是），toUserId 决定"回复 @xxx"挂在谁身上 */
 type ReplyTarget = { rootId: number; toUserId: number; toUsername: string };
 
-/**
- * 自删后顶替原文的占位文案，须与后端 CommentService.DELETED_PLACEHOLDER 一致。
- * 这里只用于删除后的乐观更新，刷新页面拿到的仍以后端为准
- */
-const DELETED_PLACEHOLDER = '该留言已删除，无法查看';
-
 /** 就地改一条评论（根或子），赞踩后不必整页重拉。结构固定两层，不做递归 */
 function patchComment(roots: CommentItem[], id: number, fn: (c: CommentItem) => CommentItem): CommentItem[] {
   return roots.map(r => {
@@ -211,7 +205,9 @@ function CommentRow({ c, isChild, focused, currentUserId, isAdmin, busy, onVote,
             'text-[13px] leading-relaxed whitespace-pre-wrap break-words',
             c.selfDeleted && 'italic text-muted-foreground',
           )}>
-            {c.content}
+            {/* 自删的正文在后端被中文占位覆盖掉了，这里认 selfDeleted 标出自己的词条，
+                存量行照样跟着界面语言走 */}
+            {c.selfDeleted ? t('comments.deletedPlaceholder') : c.content}
           </p>
         )}
 
@@ -459,8 +455,9 @@ export function Comments() {
     const isMine = c.userId === currentUserId;
     try {
       await commentApi.remove(c.id);
+      // 只翻 selfDeleted：正文由渲染处按这个标出词条，不必在这儿造一份占位文案
       setRoots(prev => isMine
-        ? patchComment(prev, c.id, x => ({ ...x, content: DELETED_PLACEHOLDER, selfDeleted: true }))
+        ? patchComment(prev, c.id, x => ({ ...x, selfDeleted: true }))
         : dropComment(prev, c.id));
       toast(t('comments.toast.deleted'), 'success');
     } catch (e) {

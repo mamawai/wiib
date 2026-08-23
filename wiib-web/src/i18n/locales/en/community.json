@@ -46,7 +46,8 @@
       "mutedDays_one": "{{name}} muted for {{count}} day",
       "mutedDays_other": "{{name}} muted for {{count}} days",
       "muteFailed": "Failed to mute"
-    }
+    },
+    "deletedPlaceholder": "This comment was deleted"
   },
   "ranking": {
     "title": "Asset leaderboard",

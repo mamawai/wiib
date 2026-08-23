@@ -42,7 +42,8 @@
       "mutedPermanent": "已永久禁言 {{name}}",
       "mutedDays_other": "已禁言 {{name}} {{count}} 天",
       "muteFailed": "禁言失败"
-    }
+    },
+    "deletedPlaceholder": "该留言已删除，无法查看"
   },
   "ranking": {
     "title": "资产排行榜",
