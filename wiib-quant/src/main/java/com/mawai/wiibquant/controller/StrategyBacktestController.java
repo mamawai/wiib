@@ -80,7 +80,7 @@ public class StrategyBacktestController {
             return Result.ok(toResponse(normalized, days, leverage, fromMs, tradingStartMs, toMs,
                     p.bars().size(), p.warmupBars(), result));
         } catch (BacktestOrchestrator.BacktestSetupException e) {
-            return Result.fail(e.getMessage());
+            return Result.fail(messages.get(e.msgKey(), e.vars()));
         } catch (Exception e) {
             log.error("[StrategyBacktest] fibo 回测失败", e);
             return Result.fail(messages.get("quant.backtest.fiboFailed", Map.of("reason", String.valueOf(e.getMessage()))));

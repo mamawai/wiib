@@ -88,7 +88,7 @@ public class AiBacktestController {
                     req.fromMs(), req.toMs(), balance, leverage);
             return Result.ok(Map.of("taskId", taskId));
         } catch (BacktestTaskService.TaskRejectedException e) {
-            return Result.fail(e.getMessage());
+            return Result.fail(messages.get(e.msgKey(), e.vars()));
         }
     }
 
@@ -99,7 +99,7 @@ public class AiBacktestController {
         try {
             return Result.ok(taskService.status(id));
         } catch (BacktestTaskService.TaskRejectedException e) {
-            return Result.fail(e.getMessage());
+            return Result.fail(messages.get(e.msgKey(), e.vars()));
         }
     }
 
@@ -112,7 +112,7 @@ public class AiBacktestController {
         try {
             return Result.ok(taskService.events(id, after, limit));
         } catch (BacktestTaskService.TaskRejectedException e) {
-            return Result.fail(e.getMessage());
+            return Result.fail(messages.get(e.msgKey(), e.vars()));
         }
     }
 
@@ -125,7 +125,7 @@ public class AiBacktestController {
         try {
             return Result.ok(taskService.klines(id, offset, limit));
         } catch (BacktestTaskService.TaskRejectedException e) {
-            return Result.fail(e.getMessage());
+            return Result.fail(messages.get(e.msgKey(), e.vars()));
         }
     }
 
@@ -136,7 +136,7 @@ public class AiBacktestController {
         try {
             return Result.ok(taskService.result(id));
         } catch (BacktestTaskService.TaskRejectedException e) {
-            return Result.fail(e.getMessage());
+            return Result.fail(messages.get(e.msgKey(), e.vars()));
         }
     }
 

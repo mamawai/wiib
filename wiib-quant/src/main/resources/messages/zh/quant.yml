@@ -13,9 +13,18 @@ quant:
     daysLeverageInvalid: days/leverage 必须为正数
     noRecentKline: "本地 kline_history 没有最新 5m K线: {{symbol}}"
     fiboFailed: "fibo 回测失败: {{reason}}"
+    userTaskActive: 你已有一个回测在排队/进行中，等它完成再提交
+    queueFull: 回测排队已满，稍后再试
+    taskNotFound: 回测任务不存在（可能因服务重启丢失），请重新提交
+    notFinished: 回测尚未完成
+    runFailed: "回测执行异常: {{reason}}"
+    noKlineInRange: "本地 kline_history 没有该区间的 5m K线: {{symbol}}"
+    klineGap: "本地 5m K线不连续，需先回填: {{symbol}} {{gap}}"
+    liqCoverageLow: "该窗口 liq side data 覆盖率仅 {{pct}}%（需≥60%），跑 LiqDataBackfillRun 回填后再试"
 
   strategy:
     positionIdRequired: positionId 不能为空
+    positionNotFound: 仓位不存在或已平仓
     closeFailed: "平仓失败：{{reason}}"
 
   chat:

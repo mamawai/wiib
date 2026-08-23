@@ -2,6 +2,7 @@ package com.mawai.wiibquant.controller;
 
 import cn.dev33.satoken.stp.StpUtil;
 import com.mawai.wiibcommon.annotation.RequireAdmin;
+import com.mawai.wiibcommon.exception.BizException;
 import com.mawai.wiibcommon.util.Result;
 import com.mawai.wiibcommon.i18n.MessageCatalog;
 import com.mawai.wiibquant.strategy.core.StrategyRuntime;
@@ -70,8 +71,8 @@ public class StrategyAccountController {
         try {
             strategyAccountService.closePosition(strategyId, request.getPositionId());
             return Result.ok(null);
-        } catch (IllegalArgumentException e) {
-            return Result.fail(e.getMessage());
+        } catch (BizException e) {
+            throw e;   // 已成文的业务拒因（仓位不存在），交全局处理器原样下发，别再包一层"平仓失败"
         } catch (Exception e) {
             log.error("[StrategyAccount] 平仓失败 strategyId={} posId={}", strategyId, request.getPositionId(), e);
             return Result.fail(messages.get("quant.strategy.closeFailed", Map.of("reason", String.valueOf(e.getMessage()))));

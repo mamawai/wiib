@@ -62,7 +62,7 @@ class BacktestOrchestratorTest {
 
         assertThatThrownBy(() -> orch.prepare("FIBO", "BTCUSDT", 10 * M5, 50 * M5))
                 .isInstanceOf(BacktestOrchestrator.BacktestSetupException.class)
-                .hasMessageContaining("不连续");
+                .hasMessageContaining("quant.backtest.klineGap");
     }
 
     @Test
@@ -80,7 +80,7 @@ class BacktestOrchestratorTest {
 
         assertThatThrownBy(() -> orch.prepare("LIQFADE", "BTCUSDT", 10 * M5, 50 * M5))
                 .isInstanceOf(BacktestOrchestrator.BacktestSetupException.class)
-                .hasMessageContaining("覆盖率");
+                .hasMessageContaining("quant.backtest.liqCoverageLow");
     }
 
     // ==================== 桩 ====================

@@ -1,5 +1,6 @@
 package com.mawai.wiibquant.strategy.backtest.task;
 
+import com.mawai.wiibcommon.i18n.MessageCatalog;
 import com.mawai.wiibcommon.market.KlineBar;
 import com.mawai.wiibquant.strategy.backtest.BacktestListener;
 import com.mawai.wiibquant.strategy.backtest.BacktestResult;
@@ -42,11 +43,31 @@ public class BacktestTaskService {
     static final int MAX_QUEUED = 4;
     private static final int EVENTS_PAGE_MAX = 2000;
     private static final int KLINES_PAGE_MAX = 20_000;
+    /** 唯一一个读时要回填文案的事件类型（失败原因存在 task 上） */
+    private static final String EV_TASK_FAILED = "TASK_FAILED";
 
-    /** 给用户看的拒绝/失败（排队满、任务不存在等），控制器转 Result.fail。 */
+    /**
+     * 给用户看的拒绝/失败（排队满、任务不存在等），控制器查词表成文后转 Result.fail。
+     * 带的是词表 key 不是文案，{@code getMessage()} 拿到的就是 key（给日志与堆栈用）。
+     */
     public static class TaskRejectedException extends RuntimeException {
-        public TaskRejectedException(String message) {
-            super(message);
+        private final Map<String, Object> vars;
+
+        public TaskRejectedException(String msgKey) {
+            this(msgKey, Map.of());
+        }
+
+        public TaskRejectedException(String msgKey, Map<String, Object> vars) {
+            super(msgKey);
+            this.vars = vars;
+        }
+
+        public String msgKey() {
+            return getMessage();
+        }
+
+        public Map<String, Object> vars() {
+            return vars;
         }
     }
 
@@ -69,7 +90,10 @@ public class BacktestTaskService {
         volatile int warmupBars;
         volatile List<KlineBar> bars;          // 引擎用的同一份，K线接口直接切片
         volatile BacktestResult result;
-        volatile String error;
+        // 失败原因存词表 key + 占位符，不存成文：任务按参数指纹去重共享，
+        // 同一个 FAILED 会被不同界面语言的人读到，写时成文只能对一个人是对的
+        volatile String errorKey;
+        volatile Map<String, Object> errorVars = Map.of();
         volatile long lastTouchMs = System.currentTimeMillis();   // LRU 逐出依据
         final List<BacktestEvent> events = new ArrayList<>();     // 只增不删；读写都 synchronized(events)
 
@@ -114,6 +138,8 @@ public class BacktestTaskService {
     }
 
     private final BacktestOrchestrator orchestrator;
+    /** 失败原因在读路径（status/events，都在请求线程上）才成文，跟读的人的界面语言 */
+    private final MessageCatalog messages;
     private final Map<String, Task> tasks = new ConcurrentHashMap<>();
     private final AtomicLong submitSeq = new AtomicLong();
     private final ExecutorService pool = Executors.newFixedThreadPool(2, r -> {
@@ -143,10 +169,10 @@ public class BacktestTaskService {
         // 先查用户自己的额度再查全局队列：文案对提交者更可操作
         if (tasks.values().stream().anyMatch(t -> t.userId == userId
                 && (t.state == State.QUEUED || t.state == State.RUNNING))) {
-            throw new TaskRejectedException("你已有一个回测在排队/进行中，等它完成再提交");
+            throw new TaskRejectedException("quant.backtest.userTaskActive");
         }
         if (tasks.values().stream().filter(t -> t.state == State.QUEUED).count() >= MAX_QUEUED) {
-            throw new TaskRejectedException("回测排队已满，稍后再试");
+            throw new TaskRejectedException("quant.backtest.queueFull");
         }
         evictIfNeeded();
         Task t = new Task(submitSeq.incrementAndGet(), fp, userId, strategyId, symbol,
@@ -203,15 +229,18 @@ public class BacktestTaskService {
             log.info("[BacktestTask] 完成 {} {} {} bars={} trades={}",
                     t.strategyId, t.symbol, t.id, t.totalBars, r.totalTrades());
         } catch (Exception e) {
-            boolean setup = e instanceof BacktestOrchestrator.BacktestSetupException;
-            String msg = setup ? e.getMessage() : "回测执行异常: " + rootMessage(e);
-            if (setup) {
-                log.warn("[BacktestTask] 失败 {} {}: {}", t.strategyId, t.symbol, msg);
+            if (e instanceof BacktestOrchestrator.BacktestSetupException setup) {
+                t.errorKey = setup.msgKey();
+                t.errorVars = setup.vars();
+                log.warn("[BacktestTask] 失败 {} {}: {} {}", t.strategyId, t.symbol, t.errorKey, t.errorVars);
             } else {
+                // 代码 bug / 环境异常：原文没法进词表，当占位符塞进那句成文的壳里
+                t.errorKey = "quant.backtest.runFailed";
+                t.errorVars = Map.of("reason", rootMessage(e));
                 log.error("[BacktestTask] 异常 {} {}", t.strategyId, t.symbol, e);
             }
-            t.error = msg;
-            addEvent(t, "TASK_FAILED", 0, Map.of("message", msg));
+            // 事件本身不带文案：原因只存在 task 上一份，读时统一成文（见 renderError）
+            addEvent(t, EV_TASK_FAILED, 0, Map.of());
             t.state = State.FAILED;
         }
     }
@@ -236,7 +265,7 @@ public class BacktestTaskService {
     private Task get(String taskId) {
         Task t = tasks.get(taskId);
         if (t == null) {
-            throw new TaskRejectedException("回测任务不存在（可能因服务重启丢失），请重新提交");
+            throw new TaskRejectedException("quant.backtest.taskNotFound");
         }
         t.touch();
         return t;
@@ -251,7 +280,12 @@ public class BacktestTaskService {
                     .count() + 1;
         }
         return new StatusView(t.id, t.state.name(), t.strategyId, t.symbol,
-                t.barsDone.get(), t.totalBars, t.warmupBars, t.error, queuePos);
+                t.barsDone.get(), t.totalBars, t.warmupBars, renderError(t), queuePos);
+    }
+
+    /** 失败原因成文，跟当次请求的界面语言；没失败就没这句话。 */
+    private String renderError(Task t) {
+        return t.errorKey == null ? null : messages.get(t.errorKey, t.errorVars);
     }
 
     public EventsPage events(String taskId, long after, int limit) {
@@ -263,7 +297,14 @@ public class BacktestTaskService {
                 return new EventsPage(List.of(), after, t.state.name());
             }
             int to = Math.min(from + lim, t.events.size());
-            return new EventsPage(List.copyOf(t.events.subList(from, to)), to - 1L, t.state.name());
+            List<BacktestEvent> page = new ArrayList<>(to - from);
+            for (BacktestEvent e : t.events.subList(from, to)) {
+                // 工作记录里那条失败，原因在这儿才补上（存的是 key，见 Task.errorKey）
+                page.add(EV_TASK_FAILED.equals(e.type())
+                        ? new BacktestEvent(e.seq(), e.barTimeMs(), e.type(), Map.of("message", renderError(t)))
+                        : e);
+            }
+            return new EventsPage(page, to - 1L, t.state.name());
         }
     }
 
@@ -287,7 +328,7 @@ public class BacktestTaskService {
     public ResultPayload result(String taskId) {
         Task t = get(taskId);
         if (t.state != State.DONE) {
-            throw new TaskRejectedException("回测尚未完成");
+            throw new TaskRejectedException("quant.backtest.notFinished");
         }
         BacktestResult r = t.result;
         Map<String, Object> summary = new LinkedHashMap<>();
