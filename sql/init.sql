@@ -27,6 +27,8 @@ CREATE TABLE IF NOT EXISTS "user" (
     bankrupt_at TIMESTAMP,
     bankrupt_reset_date DATE,
     lang VARCHAR(8),
+    muted_until TIMESTAMP,
+    profile_public BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -48,6 +50,9 @@ COMMENT ON COLUMN "user".is_bankrupt IS '是否破产（爆仓后禁用交易）
 COMMENT ON COLUMN "user".bankrupt_count IS '破产次数';
 COMMENT ON COLUMN "user".bankrupt_at IS '爆仓时间';
 COMMENT ON COLUMN "user".bankrupt_reset_date IS '恢复日期（交易日09:00恢复）';
+COMMENT ON COLUMN "user".lang IS 'AI产出语言 zh/en（AgentLang.code），NULL=跟随中文。只管后端AI的提示词与回答；界面语言在前端localStorage(wiib-lang)，不从这里读';
+COMMENT ON COLUMN "user".muted_until IS '禁言到期时间，NULL或已过期=未禁言；永久禁言存2099年。到期自动解禁，无需定时任务。重置账户不清此列，否则被禁言者可靠重置逃避处罚';
+COMMENT ON COLUMN "user".profile_public IS '是否允许别人查看自己的持仓与交易历史。关掉只挡详情页，仍照常上排行榜（榜上只有总资产/收益率）';
 COMMENT ON COLUMN "user".created_at IS '创建时间';
 COMMENT ON COLUMN "user".updated_at IS '更新时间';
 
@@ -72,9 +77,7 @@ COMMENT ON COLUMN invite_code.max_uses IS '最大可用次数';
 COMMENT ON COLUMN invite_code.used_count IS '已用次数（注册时原子+1，防并发超用）';
 COMMENT ON COLUMN invite_code.enabled IS '是否可用（作废置 FALSE）';
 
--- 1c. 钱包划转流水表 wallet_transfer 已删：职责被 user_ledger 完全覆盖
---     （划转记 WALLET_TRANSFER_OUT/IN 两条，差额即销毁的手续费）。旧库执行：
---     DROP TABLE IF EXISTS wallet_transfer;
+-- 1c. 无钱包划转流水表：划转记 user_ledger 的 WALLET_TRANSFER_OUT/IN 两条，差额即销毁的手续费
 
 -- ============================================
 -- 13. 每日Buff表
@@ -503,6 +506,8 @@ COMMENT ON COLUMN force_order.avg_price IS '成交均价';
 COMMENT ON COLUMN force_order.amount IS '爆仓金额(avg_price * quantity)';
 
 CREATE INDEX IF NOT EXISTS idx_fo_symbol_time ON force_order(symbol, trade_time DESC);
+-- 首页"最新一条强平"卡片直取首行，代价与表大小无关
+CREATE INDEX IF NOT EXISTS idx_fo_time ON force_order(trade_time DESC);
 
 -- 策略运行时信号记录（实盘信号复盘）
 CREATE TABLE IF NOT EXISTS strategy_signal (
@@ -566,7 +571,7 @@ CREATE TABLE IF NOT EXISTS ai_model_assignment (
 );
 
 COMMENT ON TABLE ai_model_assignment IS '功能位→LLM配置指针（模型名归属ai_runtime_config）';
-COMMENT ON COLUMN ai_model_assignment.function_name IS '功能名称：news-tagging（quant后台批量打标）/sim（wiib-sim行情新闻生成，自读DB）；面向用户的功能位已全量BYOK，behavior等残行是孤儿不影响使用';
+COMMENT ON COLUMN ai_model_assignment.function_name IS '功能名称，白名单见AiFunctions，现只有news-tagging（quant后台批量打标）；面向用户的功能位已全量BYOK，behavior等残行是孤儿不影响使用';
 COMMENT ON COLUMN ai_model_assignment.config_id IS '关联ai_runtime_config.id';
 
 -- ============ kline_history：回测/评估用 5m 基础 K 线落库（research，可复现） ============
@@ -651,13 +656,7 @@ CREATE TABLE IF NOT EXISTS workbench_chat_message (
     latency_ms  INT,
     created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
--- 存量库补列（新库上面建表已含）
-ALTER TABLE workbench_chat_message ADD COLUMN IF NOT EXISTS model_label VARCHAR(200);
-ALTER TABLE workbench_chat_message ADD COLUMN IF NOT EXISTS model_calls INT;
-ALTER TABLE workbench_chat_message ADD COLUMN IF NOT EXISTS prompt_tokens BIGINT;
-ALTER TABLE workbench_chat_message ADD COLUMN IF NOT EXISTS completion_tokens BIGINT;
-ALTER TABLE workbench_chat_message ADD COLUMN IF NOT EXISTS total_tokens BIGINT;
-ALTER TABLE workbench_chat_message ADD COLUMN IF NOT EXISTS latency_ms INT;
+
 CREATE INDEX IF NOT EXISTS idx_wb_chat_session ON workbench_chat_message (session_id, id);
 CREATE INDEX IF NOT EXISTS idx_wb_chat_user ON workbench_chat_message (user_id, id DESC);
 COMMENT ON TABLE workbench_chat_message IS '工作台对话历史(展示用):user/assistant按会话落库,session_id与workbench_chat_context同值';
@@ -702,15 +701,8 @@ COMMENT ON COLUMN news_event.source_id IS 'BlockBeats快讯id,增量去重键';
 COMMENT ON COLUMN news_event.published_at IS '发稿时刻epoch毫秒(BlockBeats create_time按北京时间解析),对齐K线open_time用';
 COMMENT ON COLUMN news_event.tags IS '逗号串,封闭词表(OIL/GOLD/BTC/美股白名单,见news.collect.vocabulary);空串=轻模型判定与词表标的无关';
 COMMENT ON COLUMN news_event.tagged_model IS '打标用的模型名,坏标追责用';
-
--- 英文译文：打标同一次调用顺带产出，中英用户读同一份新闻(不拉第二个数据源,竞技场才有可比性)
-ALTER TABLE news_event ADD COLUMN IF NOT EXISTS title_en   TEXT;
-ALTER TABLE news_event ADD COLUMN IF NOT EXISTS content_en TEXT;
-COMMENT ON COLUMN news_event.title_en IS '标题英文译文;NULL=没译成(模型没给/正文超长/存量老行),取用侧回落中文原文——不许拿原文冒充译文';
+COMMENT ON COLUMN news_event.title_en IS '标题英文译文,打标同一次调用顺带产出;NULL=没译成(模型没给/正文超长/老行),取用侧回落中文原文——不许拿原文冒充译文';
 COMMENT ON COLUMN news_event.content_en IS '正文英文译文;NULL 同 title_en。正文超过打标输入上限的那条不留译文:半截译文比原文更糟';
--- 存量行 title_en/content_en 为 NULL，英文界面按"缺译文回落原文"照常出中文，不做全量回填。
--- 真想让最近这批重走一遍采集轨(只对还在 BlockBeats 当前拉取窗口里的那 20 条有效,更早的删了是净损失)：
---     DELETE FROM news_event WHERE title_en IS NULL AND published_at > (EXTRACT(EPOCH FROM NOW()) - 86400) * 1000;
 
 -- ============================================
 -- 27. 留言板评论（全站唯一，无附着实体）
@@ -724,7 +716,9 @@ CREATE TABLE IF NOT EXISTS comment (
     like_count INT NOT NULL DEFAULT 0,
     dislike_count INT NOT NULL DEFAULT 0,
     status SMALLINT NOT NULL DEFAULT 1,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    self_deleted BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP
 );
 
 COMMENT ON TABLE comment IS '留言板评论（全站唯一，无附着实体）';
@@ -732,10 +726,7 @@ COMMENT ON COLUMN comment.root_id IS 'NULL=根评论；非NULL=所属根评论ID
 COMMENT ON COLUMN comment.reply_to_user_id IS '子评论回复的目标用户，用于展示"回复 @xxx"';
 COMMENT ON COLUMN comment.like_count IS '赞数。只存计数，投票去重靠Redis Set，不落记录表';
 COMMENT ON COLUMN comment.status IS '1=正常 0=已删（软删；根评论被删时级联软删其子评论）';
-
--- 编辑与自删。两列都不参与任何过滤，下面两个部分索引和所有读查询的 status=1 无需改动
-ALTER TABLE comment ADD COLUMN IF NOT EXISTS updated_at   TIMESTAMP;
-ALTER TABLE comment ADD COLUMN IF NOT EXISTS self_deleted BOOLEAN NOT NULL DEFAULT FALSE;
+-- updated_at/self_deleted 都不参与过滤，下面两个部分索引与所有读查询的 status=1 与它们无关
 COMMENT ON COLUMN comment.updated_at IS 'NULL=从未编辑过；非空=最后一次编辑时刻，前端据此显示"已编辑"。自删刻意不写此列';
 COMMENT ON COLUMN comment.self_deleted IS '用户自删：内容已被占位文案覆盖（原文不可恢复）。仍算正常评论，照常可赞可回复，只是不能再编辑';
 
@@ -762,15 +753,6 @@ CREATE TABLE IF NOT EXISTS notification (
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
--- 老库补齐：原表这两列是 NOT NULL，交易通知填不上
-ALTER TABLE notification ALTER COLUMN actor_id DROP NOT NULL;
-ALTER TABLE notification ALTER COLUMN comment_id DROP NOT NULL;
-ALTER TABLE notification ADD COLUMN IF NOT EXISTS symbol VARCHAR(20);
-ALTER TABLE notification ADD COLUMN IF NOT EXISTS side VARCHAR(8);
-ALTER TABLE notification ADD COLUMN IF NOT EXISTS quantity NUMERIC(28,10);
-ALTER TABLE notification ADD COLUMN IF NOT EXISTS price NUMERIC(28,10);
-ALTER TABLE notification ADD COLUMN IF NOT EXISTS pnl NUMERIC(28,10);
-
 COMMENT ON TABLE notification IS '通知：评论赞/回复 + 交易事件（强平/止损/止盈/全仓爆仓）';
 COMMENT ON COLUMN notification.user_id IS '接收者';
 COMMENT ON COLUMN notification.type IS '1=赞 2=回复 3=逐仓强平 4=止损触发 5=止盈触发 6=全仓爆仓';
@@ -783,22 +765,6 @@ COMMENT ON COLUMN notification.price IS '触发价；全仓爆仓为空';
 COMMENT ON COLUMN notification.pnl IS '已实现盈亏；type=6 时是全部仓位的净结算额';
 
 CREATE INDEX IF NOT EXISTS idx_notif_unread ON notification(user_id, is_read, created_at DESC);
-
--- 禁言（评论区管理用）。重置账户刻意不清此列，否则被禁言者可靠重置逃避处罚
-ALTER TABLE "user" ADD COLUMN IF NOT EXISTS muted_until TIMESTAMP;
-COMMENT ON COLUMN "user".muted_until IS '禁言到期时间，NULL或已过期=未禁言；永久禁言存2099年。到期自动解禁，无需定时任务';
-
--- 排行榜用户详情页的公开开关。DEFAULT TRUE 让存量用户和新用户都是开着的（需求：默认开启）
-ALTER TABLE "user" ADD COLUMN IF NOT EXISTS profile_public BOOLEAN NOT NULL DEFAULT TRUE;
-COMMENT ON COLUMN "user".profile_public IS '是否允许别人查看自己的持仓与交易历史。关掉只挡详情页，仍照常上排行榜（榜上只有总资产/收益率）';
-
--- AI 产出语言。可空：存量用户全是 NULL，读出来回落中文，等于零影响
-ALTER TABLE "user" ADD COLUMN IF NOT EXISTS lang VARCHAR(8);
-COMMENT ON COLUMN "user".lang IS 'AI产出语言 zh/en（AgentLang.code），NULL=跟随中文。只管后端AI的提示词与回答；界面语言在前端localStorage(wiib-lang)，不从这里读';
-
---新版本删掉这两列(待执行不进入commit)
-ALTER TABLE crypto_order  DROP COLUMN IF EXISTS expire_at;
-ALTER TABLE futures_order DROP COLUMN IF EXISTS expire_at;
 
 -- ============================================
 -- 30. 用户资金流水账本
@@ -865,14 +831,7 @@ CREATE TABLE IF NOT EXISTS ai_trader (
     created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
--- 存量库补列（新库上面建表已含）：CREATE TABLE IF NOT EXISTS 对已存在的表不加列，重跑必须靠这里
-ALTER TABLE ai_trader ADD COLUMN IF NOT EXISTS owner_note TEXT;
-ALTER TABLE ai_trader ADD COLUMN IF NOT EXISTS learning_notes TEXT;
-ALTER TABLE ai_trader ADD COLUMN IF NOT EXISTS learning_enabled BOOLEAN NOT NULL DEFAULT TRUE;
-ALTER TABLE ai_trader ADD COLUMN IF NOT EXISTS owner_note_rounds INT NOT NULL DEFAULT 0;
-ALTER TABLE ai_trader ADD COLUMN IF NOT EXISTS wake_window VARCHAR(11);
--- 存量未读留言按原语义补成 1 轮（读后即焚=多轮的特例）。幂等：补过的行 rounds 已非 0，整文件重跑不会重复加轮
-UPDATE ai_trader SET owner_note_rounds = 1 WHERE owner_note IS NOT NULL AND owner_note_rounds = 0;
+
 COMMENT ON TABLE ai_trader IS 'AI Trader：用户BYOK自主交易代理（每用户1个，独立sim子账户，公开竞技场）';
 COMMENT ON COLUMN ai_trader.status IS 'PAUSED/RUNNING/LIQUIDATED';
 COMMENT ON COLUMN ai_trader.symbols IS '交易币种白名单子集，逗号分隔（须在binance.symbols范围内）';
@@ -919,8 +878,7 @@ CREATE TABLE IF NOT EXISTS ai_trader_decision (
     memory_after    TEXT,
     created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
--- 存量库补列（新库上面建表已含）
-ALTER TABLE ai_trader_decision ADD COLUMN IF NOT EXISTS memory_after TEXT;
+
 CREATE INDEX IF NOT EXISTS idx_atd_trader_time ON ai_trader_decision(trader_id, wake_time DESC);
 COMMENT ON TABLE ai_trader_decision IS 'AI Trader每次唤醒一行：推理全文+动作(含play_type论点标签)+权益快照——竞技场决策时间线与净值曲线数据源';
 COMMENT ON COLUMN ai_trader_decision.status IS 'OK/ERROR/SKIPPED（上一唤醒未完被跳过）';
@@ -1026,16 +984,3 @@ CREATE TABLE IF NOT EXISTS user_llm_binding (
     UNIQUE (user_id, purpose)
 );
 COMMENT ON TABLE  user_llm_binding IS '用途→端点绑定：CHAT_MAIN 对话主模型 / CHAT_LIGHT 对话轻模型 / TRADER 交易员；无行=跟随默认端点。端点删除时其绑定连带删';
-
--- ============ 三个游戏"进行中的那一局"落库所需的两列（2026-08） ============
--- 事实源只有库表——mines_game 的 PLAYING 行、video_poker_game 的 DEALING 行、
--- blackjack_account.session_json。Redis 那边只留每日积分池计数器 bj:pool:*。
-ALTER TABLE blackjack_account ADD COLUMN IF NOT EXISTS session_json TEXT;
-COMMENT ON COLUMN blackjack_account.session_json IS '进行中那一局的完整快照(牌靴/各手牌/庄家牌/保险)，NULL=无牌局；与筹码同行同一笔update，钱和牌不会分叉';
-
-ALTER TABLE video_poker_game ADD COLUMN IF NOT EXISTS deck TEXT;
-COMMENT ON COLUMN video_poker_game.deck IS '本局洗好的整副52张(逗号分隔)，前5张即initial_cards，draw从第6张起补牌';
-
--- 切库前留下的 DEALING 行没有牌堆，补不了牌，恢复不了；它们的 Redis session 也早随 TTL 没了。
--- 不判死这些行会永久占着"有局在进行"，那个用户从此开不了新局。切库后的行 deck 必非空，重复执行无害
-UPDATE video_poker_game SET status = 'SETTLED' WHERE status = 'DEALING' AND deck IS NULL;
