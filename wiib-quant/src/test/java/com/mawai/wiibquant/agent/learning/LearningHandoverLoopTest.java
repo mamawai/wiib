@@ -4,6 +4,7 @@ import com.mawai.wiibquant.agent.i18n.LocalizedToolCallbacks;
 import com.mawai.wiibquant.agent.i18n.UserLangResolver;
 import com.mawai.wiibquant.agent.i18n.PromptCatalog;
 import com.mawai.wiibcommon.enums.AgentLang;
+import com.mawai.wiibcommon.i18n.MessageCatalog;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.mawai.wiibcommon.entity.AiTrader;
@@ -136,7 +137,7 @@ class LearningHandoverLoopTest {
                 traderMapper, decisionMapper, planMapper, simTradeClient, assembler, prompts);
         LearningRunner learningRunner = new LearningRunner(peers, modelFactory, traderMapper,
                 decisionMapper, prompts, new LocalizedToolCallbacks(prompts), langResolver);
-        TraderScheduler scheduler = new TraderScheduler(traderMapper, wakeupRunner, reviewRunner, learningRunner);
+        TraderScheduler scheduler = new TraderScheduler(traderMapper, wakeupRunner, reviewRunner, learningRunner, new MessageCatalog());
 
         scheduler.onKlineClosed(new KlineClosedEvent(this, "BTCUSDT", "5m", DAY_BOUNDARY - 1));
 

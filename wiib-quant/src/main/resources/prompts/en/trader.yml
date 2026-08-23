@@ -231,3 +231,79 @@ trader:
     liquidatedReason: "Liquidated: equity below 1% of the initial balance"
     keyInvalid: The API key is invalid or has expired - update the endpoint config and start it again
     consecutiveFailures: "{{n}} consecutive wake-up failures: {{error}}"
+
+  # The one pause reason that is not a fault - the owner pressed the button. Fault-driven ones live under error
+  pause:
+    manual: Paused by hand
+
+  # Guard and write-tool rejection reasons. Two audiences: the model, so it can correct itself, and
+  # the public arena timeline (they land in actions_json). Both follow the owner's language - an
+  # English trader's public timeline should never show a Chinese rejection.
+  guard:
+    symbolNotWhitelisted: "symbol is not on your whitelist; tradable: {{whitelist}}"
+    sideInvalid: side must be LONG or SHORT
+    orderTypeInvalid: orderType must be MARKET or LIMIT
+    quantityPositive: quantity must be positive
+    leverageRange: leverage must land within {{min}}~{{max}}x (set by your owner, not negotiable); you gave {{given}}
+    playTypeInvalid: "playType must be one of: {{types}}"
+    invalidationRequired: invalidationCondition is required - one line on what market condition would prove this thesis wrong (a market condition, not a P&L number)
+    limitPriceRequired: a LIMIT order needs limitPrice
+    limitTooFar: the limit price is {{pct}}% away from the mark, over the 5% cap (mark {{mark}})
+    symbolLeverageMismatch: "{{symbol}} already has a position/order at {{lev}}x; leverage must match across one symbol (exchange rule), so use {{lev}}x here too"
+    singlePositionOnly: "your owner allows only one position at a time and the slot is taken: {{occupied}}. Close it before switching symbols"
+    hedgeNotAllowed: "{{symbol}} already has an opposite position and your owner has not enabled hedging - one symbol cannot be long and short at once"
+    marginOutOfRange: margin {{margin}} is {{pct}}% of equity, outside your owner's {{min}}~{{max}}% range. At {{lev}}x the quantity should be between {{qtyLo}} and {{qtyHi}}
+    stopLossRequired: a stop-loss price is required (decide where you are wrong before you enter)
+    stopLossPositive: "the stop-loss price must be positive; you gave {{given}} (most likely stopLossPrice was dropped on a retry). Entry reference {{entry}}, {{hint}}"
+    stopLossHintLong: a LONG stop must sit between 0 and the entry price, e.g. {{example}}
+    stopLossHintShort: a SHORT stop must sit above the entry price, e.g. {{example}}
+    stopLossDirection: "the stop-loss is on the wrong side: {{rule}} (entry reference {{entry}})"
+    stopLossRuleLong: a LONG stop must be below the entry price
+    stopLossRuleShort: a SHORT stop must be above the entry price
+    takeProfitDirection: "the take-profit is on the wrong side: {{rule}}"
+    takeProfitRuleLong: a LONG target must be above the entry price
+    takeProfitRuleShort: a SHORT target must be below the entry price
+
+  # Rejections the write tools raise themselves (everything the guard does not cover)
+  reject:
+    symbolNotWhitelisted: "symbol is not on your whitelist; tradable: {{whitelist}}, you gave {{given}}. On a retry you must pass every parameter again, not only the ones you changed"
+    positionGone: that position no longer exists - call get_account to see what you hold
+    positionIdNotFound: no such positionId - call get_account for your current positions
+    stopReasonRequired: "reason is required: say why you are moving the stop now (it goes into the public revision history)"
+    targetReasonRequired: "reason is required: say why you are moving the target now (it goes into the public revision history)"
+    stopWrongSide: "the stop is on the wrong side: mark is {{mark}}, {{rule}}, and the {{given}} you gave would trigger instantly - a market exit in disguise. If you really want out, check your invalidation condition and use close_position with a reason"
+    stopRuleLong: a LONG stop must be below the mark
+    stopRuleShort: a SHORT stop must be above the mark
+    stopOnlyTighter: stops may only tighten (LONG up, SHORT down; current stop {{current}}) - wanting more room means your thesis is shaken, so check your invalidation condition instead
+    targetWrongSide: "the target is on the wrong side: mark is {{mark}}, {{rule}}, and the {{given}} you gave would trigger instantly - a market exit in disguise. To leave early, check your invalidation condition and use close_position with a reason"
+    targetRuleLong: a LONG target must be above the mark
+    targetRuleShort: a SHORT target must be below the mark
+    targetOnlyFarther: targets may only move away from entry (LONG up, SHORT down; current target {{current}}) - to leave early, check your invalidation condition and use close_position with a reason
+    planAlreadyExists: this position already has a plan and plans cannot be rewritten - adding to the position or closing and reopening are the legitimate ways to change a thesis
+    expired: this round is out of time (budget exhausted); no further trading action runs and this call was not sent
+    unknown: "UNKNOWN: the order outcome is unknown - sim did not confirm within the retries, so it may well have filled. Call get_account to reconcile your positions and open orders before doing anything; do NOT simply place it again. Cause: {{cause}}"
+    pending: "PENDING (this call did not fill; it became a request awaiting your owner's approval, so do not proceed as if it had filled): {{receipt}}"
+
+  # Action names in the public plan revision history, plus the "there was none" placeholder
+  revise:
+    addOn: added to position
+    reduce: reduced position
+    ownerApproved: "approved by owner: {{reason}}"
+    fileNew: plan filed
+    fileNewNote: filed a plan for a position that had none
+    moveStop: stop moved
+    moveTarget: target moved
+    none: none
+
+  # Tool receipts and execution results for add/reduce requests. Both the receipt and executed_result
+  # are injected verbatim into the next round's prompt as fact, so they follow the owner's language
+  # (the front end does not display these fields).
+  receipt:
+    duplicate: this position already has a request of the same type waiting for your owner - do not submit it again; the outcome shows up in the account state next round
+    submittedAdd: the add request went to your owner for approval and will not fill this round. Carry on with the rest of your read; you will learn the outcome next round
+    submittedReduce: the reduce request went to your owner for approval and will not fill this round. Your stop-loss order is still live, so the risk stays covered
+    positionGone: the position no longer exists (most likely taken by a stop or target), so nothing was executed
+    filled: "filled {{qty}} @order {{orderId}}"
+    unknown: "outcome unknown: sim did not confirm within the retries, so this may well have filled - reconcile against your positions"
+    failed: "execution failed: {{reason}}"
+    voidedByReset: voided by a reset to a new round

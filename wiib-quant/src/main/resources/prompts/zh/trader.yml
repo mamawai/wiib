@@ -188,3 +188,77 @@ trader:
     liquidatedReason: 爆仓终局：权益低于初始资金1%
     keyInvalid: API key 无效或已失效，请更新端点配置后重新启动
     consecutiveFailures: "连续{{n}}次唤醒失败: {{error}}"
+
+  # 暂停原因里不是故障的那一种（用户自己按的）。故障导致的暂停原因在 error 下
+  pause:
+    manual: 手动暂停
+
+  # 风险护栏与写工具的拒因。两处用途：回给模型让它改正，以及落进 actions_json 在竞技场时间线上公开。
+  # 所以跟 trader 主人的语言走——英文 trader 的公开时间线上不该出现中文拒因。
+  guard:
+    symbolNotWhitelisted: "symbol不在白名单内，可交易: {{whitelist}}"
+    sideInvalid: side必须是LONG或SHORT
+    orderTypeInvalid: orderType必须是MARKET或LIMIT
+    quantityPositive: 数量必须为正数
+    leverageRange: 杠杆必须在{{min}}~{{max}}倍之间（主人设定，不可协商），你给了{{given}}
+    playTypeInvalid: "playType必须是: {{types}}"
+    invalidationRequired: 必须给invalidationCondition失效条件：一句话说明什么市场状况会证明这个论点错了（市场条件，不是盈亏数字）
+    limitPriceRequired: 限价单必须给limitPrice
+    limitTooFar: 限价偏离现价{{pct}}%，超过5%上限（现价{{mark}}）
+    symbolLeverageMismatch: "{{symbol}}已有{{lev}}倍仓位/挂单，同币杠杆必须一致（交易所规则），本次也得用{{lev}}倍"
+    singlePositionOnly: "主人设定只允许同时持有一个仓位，当前已占用：{{occupied}}。要换标的先平掉现有仓位"
+    hedgeNotAllowed: "{{symbol}}已有反向仓位，主人未开启多空双开——同一个币不能同时做多做空"
+    marginOutOfRange: 开仓保证金{{margin}}占权益{{pct}}%，超出主人设定的{{min}}~{{max}}%区间。{{lev}}倍杠杆下数量应在 {{qtyLo}} ~ {{qtyHi}} 之间
+    stopLossRequired: 必须设置止损价（每笔交易先想好在哪认错）
+    stopLossPositive: "止损价必须为正数，你给了{{given}}（多半是重试时漏传了stopLossPrice）：入场参考{{entry}}，{{hint}}"
+    stopLossHintLong: LONG止损须落在0与入场价之间，例如 {{example}}
+    stopLossHintShort: SHORT止损须高于入场价，例如 {{example}}
+    stopLossDirection: "止损价方向错误：{{rule}}（入场参考{{entry}}）"
+    stopLossRuleLong: LONG止损须低于入场价
+    stopLossRuleShort: SHORT止损须高于入场价
+    takeProfitDirection: "止盈价方向错误：{{rule}}"
+    takeProfitRuleLong: LONG止盈须高于入场价
+    takeProfitRuleShort: SHORT止盈须低于入场价
+
+  # 写工具自己的拒因（护栏之外的那些）
+  reject:
+    symbolNotWhitelisted: "symbol不在白名单内，可交易: {{whitelist}}，你给了{{given}}。重试时必须完整给出全部参数，不能只给改动项"
+    positionGone: 仓位不存在，先 get_account 看当前持仓
+    positionIdNotFound: positionId不存在，请先 get_account 查当前持仓
+    stopReasonRequired: 必须给reason：说明为什么现在移动止损（会进公开修订历史）
+    targetReasonRequired: 必须给reason：说明为什么现在移动目标位（会进公开修订历史）
+    stopWrongSide: "止损价站错边：当前现价{{mark}}，{{rule}}，你给的{{given}}会立刻触发＝变相市价平仓。真想离场就检查失效条件后用 close_position 说明理由"
+    stopRuleLong: LONG止损必须低于现价
+    stopRuleShort: SHORT止损必须高于现价
+    stopOnlyTighter: 止损只许收紧（多单上移/空单下移，当前止损{{current}}）——想给仓位更多空间说明论点已动摇，去检查失效条件
+    targetWrongSide: "止盈价站错边：当前现价{{mark}}，{{rule}}，你给的{{given}}会立刻触发＝变相市价平仓。想提前离场请检查失效条件并用 close_position 说明理由"
+    targetRuleLong: LONG止盈必须高于现价
+    targetRuleShort: SHORT止盈必须低于现价
+    targetOnlyFarther: 止盈只许向远离入场的方向移动（多单上移/空单下移，当前目标{{current}}）——想提前离场请检查失效条件并用 close_position 说明理由
+    planAlreadyExists: 该持仓已有计划，计划不可改写——加仓覆盖或平仓重开才是改论点的合法途径
+    expired: 本轮已超时（预算耗尽），不再执行任何交易动作，本次调用未发出
+    unknown: "UNKNOWN: 下单结果未知，sim 未在重试内确认，这笔单可能已经成交。请先调用 get_account 核对持仓/挂单，切勿直接重复下单。原因: {{cause}}"
+    pending: "PENDING（本次调用未成交，已转为待主人确认的请求，不要按已成交继续推进）: {{receipt}}"
+
+  # 计划修订历史里的动作名与"原本没有"的占位，同样公开展示
+  revise:
+    addOn: 加仓
+    reduce: 减仓
+    ownerApproved: "主人确认：{{reason}}"
+    fileNew: 补立
+    fileNewNote: 为无计划持仓补立计划
+    moveStop: 移动止损
+    moveTarget: 移动止盈
+    none: 无
+
+  # 加/减仓请求的工具回执与执行结果。回执与 executed_result 都会原样注入下一轮提示词当事实，
+  # 所以跟 trader 主人的语言走（前端不展示这些字段）。
+  receipt:
+    duplicate: 该仓位已有一条同类型请求在等主人确认，不要重复提交——等下一轮看账户状态里的结果
+    submittedAdd: 加仓请求已提交给主人确认，本轮不会成交。继续做你该做的其余判断，结果下一轮揭晓
+    submittedReduce: 减仓请求已提交给主人确认，本轮不会成交。你的止损单仍在生效，风险有保护
+    positionGone: 仓位已不存在（多半被止损/止盈带走），未执行
+    filled: "已成交 {{qty}} @订单{{orderId}}"
+    unknown: 结果未知：sim 未在重试内确认，这笔可能已经成交，请在持仓里核对
+    failed: "执行失败：{{reason}}"
+    voidedByReset: 重置开新局，请求作废

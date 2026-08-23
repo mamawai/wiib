@@ -60,7 +60,7 @@ class TraderToolI18nTest {
             mock(SimTradeClient.class), 1L, Set.of("BTCUSDT"), BigDecimal.TEN,
             sym -> BigDecimal.ONE,
             new TraderPlanStore(mock(AiTraderPlanMapper.class)), mock(TraderRequestService.class),
-            new TradeTools.WakeCtx(1L, 1, 0L, Long.MAX_VALUE, null));
+            new TradeTools.WakeCtx(1L, 1, 0L, Long.MAX_VALUE, null, AgentLang.ZH), prompts);
 
     private Map<String, String> descriptions(AgentLang lang) {
         return runner.wakeTools(lang, tradeTools).stream().collect(Collectors.toMap(

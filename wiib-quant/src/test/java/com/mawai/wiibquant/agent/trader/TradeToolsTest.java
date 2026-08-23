@@ -3,6 +3,8 @@ package com.mawai.wiibquant.agent.trader;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.mawai.wiibcommon.dto.FuturesOpenRequest;
+import com.mawai.wiibcommon.enums.AgentLang;
+import com.mawai.wiibquant.agent.i18n.PromptCatalog;
 import com.mawai.wiibcommon.dto.FuturesOrderResponse;
 import com.mawai.wiibcommon.dto.FuturesPositionDTO;
 import com.mawai.wiibcommon.dto.FuturesStopLossRequest;
@@ -43,6 +45,8 @@ import static org.mockito.Mockito.when;
  */
 class TradeToolsTest {
 
+    private static final PromptCatalog PROMPTS = new PromptCatalog();
+
     @BeforeAll
     static void initTableInfoCache() {
         TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""), AiTraderPlan.class);
@@ -60,7 +64,7 @@ class TradeToolsTest {
             new TraderPlanStore(planMapper), requestService,
             new TradeTools.WakeCtx(7L, 1, 1785171600000L, DEADLINE,
                     new TraderRiskConfig(1, 20, new BigDecimal("1"), new BigDecimal("50"),
-                            true, true, true, true)));
+                            true, true, true, true), AgentLang.ZH), PROMPTS);
 
     /** 多单：入场10万，当前止损9.5万、止盈11万 */
     private FuturesPositionDTO longPosition() {
@@ -386,7 +390,7 @@ class TradeToolsTest {
                 new TraderPlanStore(planMapper), requestService,
                 new TradeTools.WakeCtx(7L, 1, 1785171600000L, System.currentTimeMillis() - 1,
                         new TraderRiskConfig(1, 20, new BigDecimal("1"), new BigDecimal("50"),
-                                true, true, true, true)));
+                                true, true, true, true), AgentLang.ZH), PROMPTS);
 
         assertThat(openOnce(late)).startsWith("REJECTED").contains("本轮已超时");
         assertThat(late.closePosition(5L, 0.01, "失效条件触发")).contains("本轮已超时");
@@ -409,7 +413,7 @@ class TradeToolsTest {
                 new TraderPlanStore(planMapper), requestService,
                 new TradeTools.WakeCtx(7L, 1, 1785171600000L, DEADLINE,
                         new TraderRiskConfig(1, 20, new BigDecimal("1"), new BigDecimal("50"),
-                                true, true, true, true)));
+                                true, true, true, true), AgentLang.ZH), PROMPTS);
 
         String r = strict.openPosition(null, "SHORT", "MARKET", 0.64, 20,
                 null, 64980.0, 64640.0, "BREAKOUT", "突破", "收回箱体");
@@ -439,14 +443,14 @@ class TradeToolsTest {
     @Test
     void reduceTurnedIntoRequestIsMarkedPendingNotOk() {
         when(simTradeClient.getAllPositions(99L)).thenReturn(List.of(longPosition()));
-        when(requestService.submit(any()))
+        when(requestService.submit(any(), any()))
                 .thenReturn("减仓请求已提交给主人确认，本轮不会成交。你的止损单仍在生效，风险有保护");
         TradeTools noSelfReduce = new TradeTools(simTradeClient, 99L, Set.of("BTCUSDT"),
                 new BigDecimal("10000"), sym -> new BigDecimal("100000"),
                 new TraderPlanStore(planMapper), requestService,
                 new TradeTools.WakeCtx(7L, 1, 1785171600000L, DEADLINE,
                         new TraderRiskConfig(1, 20, new BigDecimal("1"), new BigDecimal("50"),
-                                true, true, true, false)));
+                                true, true, true, false), AgentLang.ZH), PROMPTS);
 
         String r = noSelfReduce.closePosition(5L, 0.01, "失效条件触发");
 
@@ -460,14 +464,14 @@ class TradeToolsTest {
     @Test
     void addTurnedIntoRequestIsMarkedPendingNotOk() {
         when(simTradeClient.getAllPositions(99L)).thenReturn(List.of(longPosition()));
-        when(requestService.submit(any()))
+        when(requestService.submit(any(), any()))
                 .thenReturn("加仓请求已提交给主人确认，本轮不会成交。继续做你该做的其余判断，结果下一轮揭晓");
         TradeTools noSelfAdd = new TradeTools(simTradeClient, 99L, Set.of("BTCUSDT"),
                 new BigDecimal("10000"), sym -> new BigDecimal("100000"),
                 new TraderPlanStore(planMapper), requestService,
                 new TradeTools.WakeCtx(7L, 1, 1785171600000L, DEADLINE,
                         new TraderRiskConfig(1, 20, new BigDecimal("1"), new BigDecimal("50"),
-                                true, true, false, true)));
+                                true, true, false, true), AgentLang.ZH), PROMPTS);
 
         String r = noSelfAdd.openPosition("BTCUSDT", "LONG", "MARKET", 0.01, 10,
                 null, 95000.0, null, "PULLBACK", "回踩确认支撑", "1h收盘跌破97000");

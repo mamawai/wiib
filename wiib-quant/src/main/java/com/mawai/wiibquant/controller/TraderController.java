@@ -9,6 +9,8 @@ import com.mawai.wiibcommon.entity.AiTraderDecision;
 import com.mawai.wiibcommon.entity.AiTraderPlan;
 import com.mawai.wiibcommon.entity.UserLlmBinding;
 import com.mawai.wiibcommon.entity.UserLlmEndpoint;
+import com.mawai.wiibcommon.enums.ErrorCode;
+import com.mawai.wiibcommon.i18n.MessageCatalog;
 import com.mawai.wiibcommon.util.Result;
 import com.mawai.wiibquant.agent.i18n.UserLangResolver;
 import com.mawai.wiibquant.agent.llm.LlmEndpointService;
@@ -50,6 +52,7 @@ public class TraderController {
     private final TraderActionService actionService;
     private final TradeRecordService tradeRecordService;
     private final UserLangResolver userLangResolver;
+    private final MessageCatalog messages;
 
     // ========== 我的 trader ==========
 
@@ -282,7 +285,7 @@ public class TraderController {
         long viewer = StpUtil.getLoginIdAsLong();
         AiTrader t = traderService.byId(id);
         if (t == null) {
-            return Result.fail("trader不存在");
+            return Result.fail(ErrorCode.SYSTEM_ERROR.getCode(), messages.get("trader.notFound"));
         }
         List<FuturesPositionDTO> positions = List.of();
         List<FuturesOrderResponse> pending = List.of();
@@ -312,7 +315,7 @@ public class TraderController {
         StpUtil.checkLogin();
         AiTrader t = traderService.byId(id);
         if (t == null) {
-            return Result.fail("trader不存在");
+            return Result.fail(ErrorCode.SYSTEM_ERROR.getCode(), messages.get("trader.notFound"));
         }
         try {
             return Result.ok(tradeRecordService.closedTrades(t));
@@ -333,7 +336,7 @@ public class TraderController {
         StpUtil.checkLogin();
         AiTrader t = traderService.byId(id);
         if (t == null) {
-            return Result.fail("trader不存在");
+            return Result.fail(ErrorCode.SYSTEM_ERROR.getCode(), messages.get("trader.notFound"));
         }
         return Result.ok(traderService.equityCurve(t, round).stream()
                 .map(d -> new EquityPoint(d.getWakeTime(), d.getEquity()))

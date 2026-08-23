@@ -9,6 +9,9 @@ import com.mawai.wiibcommon.entity.AiTraderPlan;
 import com.mawai.wiibcommon.entity.AiTraderRequest;
 import com.mawai.wiibcommon.entity.UserLlmBinding;
 import com.mawai.wiibcommon.entity.UserLlmEndpoint;
+import com.mawai.wiibcommon.i18n.MessageCatalog;
+import com.mawai.wiibquant.agent.i18n.PromptCatalog;
+import com.mawai.wiibquant.agent.i18n.UserLangResolver;
 import com.mawai.wiibquant.agent.llm.LlmEndpointService;
 import com.mawai.wiibquant.external.sim.SimTradeClient;
 import com.mawai.wiibquant.mapper.AiTraderDecisionMapper;
@@ -23,6 +26,7 @@ import java.time.LocalDateTime;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -51,6 +55,11 @@ public class TraderService {
     private final BinanceProperties binanceProperties;
     private final TraderPlanStore planStore;
     private final AiTraderRequestMapper requestMapper;
+    /** 暂停原因落库即公开展示，跟 trader 主人的语言写入——与 TraderWakeupRunner 那几种同一口径 */
+    private final PromptCatalog prompts;
+    private final UserLangResolver langResolver;
+    /** 校验回执是当场给用户看的话，跟当次请求的界面语言，与上面那份落库文案不是一个来源 */
+    private final MessageCatalog messages;
 
     /** llmEndpointId：端点库里的一条；空=跟随用户默认端点。wakeWindow：唤醒时段"HH:mm-HH:mm"（北京时间），null=全天 */
     public record UpsertReq(String name, String symbols, String intervalCode, String customPrompt,
@@ -80,7 +89,7 @@ public class TraderService {
     /** 创建：校验→选端点→连通性测试→开子账户→PAUSED 入库→绑定用途。返回错误信息或 null。 */
     public String create(long userId, UpsertReq req) {
         if (mine(userId) != null) {
-            return "每个用户只能创建一个 AI Trader";
+            return messages.get("trader.alreadyExists");
         }
         String err = validate(req);
         if (err != null) {
@@ -88,11 +97,11 @@ public class TraderService {
         }
         UserLlmEndpoint endpoint = pickEndpoint(userId, req.llmEndpointId());
         if (endpoint == null) {
-            return NO_ENDPOINT;
+            return messages.get("trader.noEndpoint");
         }
         String connErr = modelFactory.testConnection(endpoint);
         if (connErr != null) {
-            return "模型连通性测试失败：" + connErr;
+            return messages.get("trader.connectFailed", Map.of("reason", connErr));
         }
         AiTrader t = new AiTrader();
         t.setUserId(userId);
@@ -111,7 +120,7 @@ public class TraderService {
     public String updateConfig(long userId, UpsertReq req) {
         AiTrader t = mine(userId);
         if (t == null) {
-            return "尚未创建 AI Trader";
+            return messages.get("trader.notCreated");
         }
         String err = validate(req);
         if (err != null) {
@@ -119,14 +128,14 @@ public class TraderService {
         }
         UserLlmEndpoint endpoint = pickEndpoint(userId, req.llmEndpointId());
         if (endpoint == null) {
-            return NO_ENDPOINT;
+            return messages.get("trader.noEndpoint");
         }
         UserLlmEndpoint current = modelFactory.endpointFor(t);
         boolean modelChanged = current == null || !current.getId().equals(endpoint.getId());
         if (modelChanged) {
             String connErr = modelFactory.testConnection(endpoint);
             if (connErr != null) {
-                return "模型连通性测试失败：" + connErr;
+                return messages.get("trader.connectFailed", Map.of("reason", connErr));
             }
         }
         AiTrader probe = new AiTrader();
@@ -161,7 +170,6 @@ public class TraderService {
         return null;
     }
 
-    private static final String NO_ENDPOINT = "还没有可用的模型端点，请先到 AI 页「模型配置」里添加";
 
     /** 显式选的端点必须是自己的；不选（null）= 跟随默认。两头都拿不到端点 → null */
     private UserLlmEndpoint pickEndpoint(long userId, Long endpointId) {
@@ -174,10 +182,10 @@ public class TraderService {
     public String start(long userId) {
         AiTrader t = mine(userId);
         if (t == null) {
-            return "尚未创建 AI Trader";
+            return messages.get("trader.notCreated");
         }
         if (AiTrader.STATUS_LIQUIDATED.equals(t.getStatus())) {
-            return "本局已爆仓终局，请先重置开新一局";
+            return messages.get("trader.liquidatedRound");
         }
         traderMapper.update(null, new LambdaUpdateWrapper<AiTrader>()
                 .eq(AiTrader::getId, t.getId())
@@ -191,12 +199,12 @@ public class TraderService {
     public String pause(long userId) {
         AiTrader t = mine(userId);
         if (t == null) {
-            return "尚未创建 AI Trader";
+            return messages.get("trader.notCreated");
         }
         traderMapper.update(null, new LambdaUpdateWrapper<AiTrader>()
                 .eq(AiTrader::getId, t.getId())
                 .set(AiTrader::getStatus, AiTrader.STATUS_PAUSED)
-                .set(AiTrader::getPausedReason, "手动暂停")
+                .set(AiTrader::getPausedReason, prompts.get(langResolver.of(userId), "trader.pause.manual"))
                 .set(AiTrader::getUpdatedAt, LocalDateTime.now()));
         return null;
     }
@@ -205,7 +213,7 @@ public class TraderService {
     public String reset(long userId) {
         AiTrader t = mine(userId);
         if (t == null) {
-            return "尚未创建 AI Trader";
+            return messages.get("trader.notCreated");
         }
         int newRound = t.getRoundNo() + 1;
         Long simUserId = simTradeClient.ensureAccount(accountName(userId, newRound), INITIAL_BALANCE);
@@ -216,7 +224,8 @@ public class TraderService {
                 .eq(AiTraderRequest::getTraderId, t.getId())
                 .eq(AiTraderRequest::getStatus, AiTraderRequest.STATUS_PENDING)
                 .set(AiTraderRequest::getStatus, AiTraderRequest.STATUS_REJECTED)
-                .set(AiTraderRequest::getExecutedResult, "重置开新局，请求作废")
+                .set(AiTraderRequest::getExecutedResult,
+                        prompts.get(langResolver.of(userId), "trader.receipt.voidedByReset"))
                 .set(AiTraderRequest::getDecidedAt, LocalDateTime.now()));
         traderMapper.update(null, new LambdaUpdateWrapper<AiTrader>()
                 .eq(AiTrader::getId, t.getId())
@@ -310,23 +319,24 @@ public class TraderService {
 
     private String validate(UpsertReq req) {
         if (req.name() == null || req.name().isBlank() || req.name().length() > 32) {
-            return "名字必填且不超过32字符";
+            return messages.get("trader.config.nameRequired");
         }
         if (req.intervalCode() == null || !INTERVALS.contains(req.intervalCode())) {
-            return "K线级别仅支持 5m/15m/1h/4h";
+            return messages.get("trader.config.badInterval");
         }
         WakeWindow window;
         try {
             window = WakeWindow.parse(req.wakeWindow());
         } catch (IllegalArgumentException e) {
-            return e.getMessage();
+            // parse 抛的是词表 key（见 WakeWindow.parse），成文在这一处
+            return messages.get(e.getMessage());
         }
         // 4h 档选 21:00-23:00 这种时段里一根本档K线都不收盘 = 永远不醒，拦在入口
         if (window != null) {
             long intervalMs = TraderScheduler.INTERVAL_MS.get(req.intervalCode());
             long now = System.currentTimeMillis();
             if (window.nextBoundaryFrom(now - Math.floorMod(now, intervalMs), intervalMs) < 0) {
-                return "唤醒时段内没有任何一根 " + req.intervalCode() + " K线收盘，等于永远不会醒；请放宽时段或换档位";
+                return messages.get("trader.config.windowNeverWakes", Map.of("interval", req.intervalCode()));
             }
         }
         String spec = validateSpec(req);
@@ -336,18 +346,18 @@ public class TraderService {
         List<String> whitelist = binanceProperties.getSymbols();
         Set<String> symbols = parseSymbols(req.symbols());
         if (symbols.isEmpty()) {
-            return "至少选择一个交易币种";
+            return messages.get("trader.config.symbolRequired");
         }
         if (whitelist == null || !whitelist.containsAll(symbols)) {
-            return "币种超出可交易范围: " + whitelist;
+            return messages.get("trader.config.symbolNotAllowed", Map.of("whitelist", whitelist));
         }
         if (req.customPrompt() != null && req.customPrompt().length() > 4000) {
-            return "自定义提示词不超过4000字符";
+            return messages.get("trader.config.promptTooLong");
         }
         // 退出平台模板后自定义就是唯一指令来源，空着=模型裸奔
         if (Boolean.FALSE.equals(req.useDefaultPrompt())
                 && (req.customPrompt() == null || req.customPrompt().isBlank())) {
-            return "已取消平台系统提示词，自定义提示词不能为空";
+            return messages.get("trader.config.customPromptRequired");
         }
         return null;
     }
@@ -357,31 +367,31 @@ public class TraderService {
      * 杠杆上界只卡到 125——实际可用还受 sim 按名义价值分档限制，超档由 sim 拒并把原因回传给模型，
      * 这里不重复实现一套分档表（quant 进程读不到 sim 的 bracket registry）。
      */
-    private static String validateSpec(UpsertReq req) {
+    private String validateSpec(UpsertReq req) {
         int lmin = req.leverageMin() == null ? TraderRiskConfig.DEF_LEV_MIN : req.leverageMin();
         int lmax = req.leverageMax() == null ? TraderRiskConfig.DEF_LEV_MAX : req.leverageMax();
         if (lmin < 1 || lmax > TraderRiskConfig.LEVERAGE_HARD_MAX) {
-            return "杠杆区间须在 1~" + TraderRiskConfig.LEVERAGE_HARD_MAX + " 倍之内";
+            return messages.get("trader.config.leverageRange", Map.of("max", TraderRiskConfig.LEVERAGE_HARD_MAX));
         }
         if (lmin > lmax) {
-            return "杠杆区间下界不能大于上界";
+            return messages.get("trader.config.leverageInverted");
         }
         BigDecimal mmin = req.marginPctMin() == null ? TraderRiskConfig.DEF_MARGIN_MIN : req.marginPctMin();
         BigDecimal mmax = req.marginPctMax() == null ? TraderRiskConfig.DEF_MARGIN_MAX : req.marginPctMax();
         if (mmin.compareTo(TraderRiskConfig.MARGIN_PCT_HARD_MIN) < 0
                 || mmax.compareTo(TraderRiskConfig.MARGIN_PCT_HARD_MAX) > 0) {
-            return "单笔保证金占比须在 0.1~100% 之内";
+            return messages.get("trader.config.marginRange");
         }
         if (mmin.compareTo(mmax) > 0) {
-            return "保证金占比下界不能大于上界";
+            return messages.get("trader.config.marginInverted");
         }
         // 双开天然要占两个仓位，单仓模式下勾它是自相矛盾的配置，直接拦在入口
         if (Boolean.FALSE.equals(req.allowMultiPosition()) && Boolean.TRUE.equals(req.allowHedge())) {
-            return "只允许一个仓位时无法开启多空双开（双开本身需要两个仓位）";
+            return messages.get("trader.config.hedgeNeedsTwoSlots");
         }
         // 警报阈值只能调高：系数<1 等于把每币基准（平台下限）调低
         if (req.alertThresholdMult() != null && req.alertThresholdMult().compareTo(BigDecimal.ONE) < 0) {
-            return "警报灵敏度系数不能低于 1.0（阈值只能调高不能调低）";
+            return messages.get("trader.config.alertMultTooLow");
         }
         return null;
     }

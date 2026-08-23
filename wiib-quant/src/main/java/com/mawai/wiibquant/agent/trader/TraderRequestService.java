@@ -7,6 +7,10 @@ import com.mawai.wiibcommon.dto.FuturesOpenRequest;
 import com.mawai.wiibcommon.dto.FuturesOrderResponse;
 import com.mawai.wiibcommon.dto.FuturesPositionDTO;
 import com.mawai.wiibcommon.entity.AiTrader;
+import com.mawai.wiibcommon.i18n.MessageCatalog;
+import com.mawai.wiibquant.agent.i18n.UserLangResolver;
+import com.mawai.wiibquant.agent.i18n.PromptCatalog;
+import com.mawai.wiibcommon.enums.AgentLang;
 import com.mawai.wiibcommon.entity.AiTraderRequest;
 import com.mawai.wiibcommon.entity.FuturesPosition;
 import com.mawai.wiibcommon.entity.FuturesStopLoss;
@@ -23,6 +27,7 @@ import org.springframework.stereotype.Service;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 加仓/减仓待确认请求：allowSelfAdd/allowSelfReduce 关掉时，模型的工具调用转成这里一行。
@@ -38,21 +43,25 @@ public class TraderRequestService {
     private final AiTraderMapper traderMapper;
     private final SimTradeClient simTradeClient;
     private final TraderPlanStore planStore;
+    /** 只给 approve/reject 用：那两条是点按钮当场看的话 */
+    private final MessageCatalog messages;
+    /** 工具回执与 executed_result：都会原样注入下一轮提示词当事实，跟 trader 主人的语言 */
+    private final PromptCatalog prompts;
+    private final UserLangResolver langResolver;
 
     /**
      * 模型侧提交请求，返回给模型看的中文回执。
      * 同仓位同类型至多一条待确认（DB 部分唯一索引兜底）：模型每轮看仓位没动会反复提，不去重就堆满卡片。
      */
-    public String submit(AiTraderRequest req) {
+    public String submit(AiTraderRequest req, AgentLang lang) {
         req.setStatus(AiTraderRequest.STATUS_PENDING);
         try {
             requestMapper.insert(req);
         } catch (DuplicateKeyException e) {
-            return "该仓位已有一条同类型请求在等主人确认，不要重复提交——等下一轮看账户状态里的结果";
+            return prompts.get(lang, "trader.receipt.duplicate");
         }
-        return AiTraderRequest.TYPE_ADD.equals(req.getType())
-                ? "加仓请求已提交给主人确认，本轮不会成交。继续做你该做的其余判断，结果下一轮揭晓"
-                : "减仓请求已提交给主人确认，本轮不会成交。你的止损单仍在生效，风险有保护";
+        return prompts.get(lang, AiTraderRequest.TYPE_ADD.equals(req.getType())
+                ? "trader.receipt.submittedAdd" : "trader.receipt.submittedReduce");
     }
 
     /** 回注提示词用：本局待确认的请求，模型看到就别重复提。 */
@@ -97,9 +106,9 @@ public class TraderRequestService {
     /** 主人拒绝：不执行，留档。同样走抢状态——否则"先同意已下单、再点拒绝"会把状态改花。 */
     public String reject(long userId, long requestId) {
         if (ownedPending(userId, requestId) == null) {
-            return "请求不存在或已处理";
+            return messages.get("trader.request.notFoundOrHandled");
         }
-        return claim(requestId, AiTraderRequest.STATUS_REJECTED) ? null : "请求不存在或已处理";
+        return claim(requestId, AiTraderRequest.STATUS_REJECTED) ? null : messages.get("trader.request.notFoundOrHandled");
     }
 
     /**
@@ -109,24 +118,25 @@ public class TraderRequestService {
      * 执行前重查仓位——从模型提交到主人点同意之间，仓位可能已被止损带走，这时不能静默吞掉。
      */
     public String approve(long userId, long requestId) {
+        AgentLang lang = langResolver.of(userId);
         AiTraderRequest r = ownedPending(userId, requestId);
         if (r == null) {
-            return "请求不存在或已处理";
+            return messages.get("trader.request.notFoundOrHandled");
         }
         AiTrader t = traderMapper.selectById(r.getTraderId());
         if (t == null || t.getSimUserId() == null) {
-            return "trader 账户不可用";
+            return messages.get("trader.request.accountUnavailable");
         }
         // 抢不到就是别人已经处理过了：直接走人，一笔单都不许下
         if (!claim(requestId, AiTraderRequest.STATUS_APPROVED)) {
-            return "请求不存在或已处理";
+            return messages.get("trader.request.notFoundOrHandled");
         }
         try {
             FuturesPositionDTO pos = simTradeClient.getAllPositions(t.getSimUserId()).stream()
                     .filter(p -> p.getId() != null && p.getId().equals(r.getPositionId()))
                     .findFirst().orElse(null);
             if (pos == null) {
-                writeResult(r, "仓位已不存在（多半被止损/止盈带走），未执行");
+                writeResult(r, prompts.get(lang, "trader.receipt.positionGone"));
                 return null;
             }
             boolean isAdd = AiTraderRequest.TYPE_ADD.equals(r.getType());
@@ -135,17 +145,18 @@ public class TraderRequestService {
             BigDecimal executedQty = isAdd ? r.getQuantity() : r.getQuantity().min(pos.getQuantity());
             FuturesOrderResponse resp = SimOrderRetry.send(
                     () -> isAdd ? doAdd(t, r, pos) : doReduce(r, t, executedQty));
-            writeResult(r, "已成交 " + executedQty.stripTrailingZeros().toPlainString()
-                    + " @订单" + resp.getOrderId());
+            writeResult(r, prompts.get(lang, "trader.receipt.filled", Map.of(
+                    "qty", executedQty.stripTrailingZeros().toPlainString(),
+                    "orderId", resp.getOrderId())));
             revisePlan(t, r, pos);
         } catch (SimOrderRetry.UnknownOutcome e) {
             // 读超时后重发也问不到结果：这笔很可能已经在 sim 成交了。写"执行失败"会被原样注入
             // 下一轮提示词当事实，模型照着一个不存在的仓位往下算；不修订计划同理，宁可留空
-            writeResult(r, "结果未知：sim 未在重试内确认，这笔可能已经成交，请在持仓里核对");
+            writeResult(r, prompts.get(lang, "trader.receipt.unknown"));
             log.warn("[TraderRequest] 批准执行结果未知 requestId={} msg={}", requestId, e.getCause().getMessage());
         } catch (Exception e) {
             // 余额不足/步长不合规等：写进结果给主人看，不吞
-            writeResult(r, "执行失败：" + e.getMessage());
+            writeResult(r, prompts.get(lang, "trader.receipt.failed", Map.of("reason", String.valueOf(e.getMessage()))));
             log.warn("[TraderRequest] 批准执行失败 requestId={} msg={}", requestId, e.getMessage());
         }
         return null;
@@ -229,10 +240,13 @@ public class TraderRequestService {
         try {
             var plan = planStore.find(t.getId(), r.getRoundNo(), pos.getSymbol(), pos.getSide());
             if (plan != null) {
+                AgentLang lang = langResolver.of(t.getUserId());
                 planStore.revise(plan, r.getWakeTime(),
-                        AiTraderRequest.TYPE_ADD.equals(r.getType()) ? "加仓" : "减仓",
+                        prompts.get(lang, AiTraderRequest.TYPE_ADD.equals(r.getType())
+                                ? "trader.revise.addOn" : "trader.revise.reduce"),
                         r.getQuantity().stripTrailingZeros().toPlainString(),
-                        "主人确认：" + r.getReason());
+                        prompts.get(lang, "trader.revise.ownerApproved",
+                                Map.of("reason", String.valueOf(r.getReason()))));
             }
         } catch (Exception e) {
             log.warn("[TraderRequest] 计划修订失败 requestId={} msg={}", r.getId(), e.getMessage());

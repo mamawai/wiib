@@ -2,6 +2,7 @@ package com.mawai.wiibquant.agent.trader;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.mawai.wiibcommon.entity.AiTrader;
+import com.mawai.wiibcommon.i18n.MessageCatalog;
 import com.mawai.wiibquant.agent.learning.LearningRunner;
 import com.mawai.wiibquant.agent.learning.ReviewRunner;
 import com.mawai.wiibquant.market.domain.KlineClosedEvent;
@@ -56,12 +57,13 @@ public class TraderScheduler {
     private final TraderWakeupRunner runner;
     private final ReviewRunner reviewRunner;
     private final LearningRunner learningRunner;
+    /** 手动唤醒的拦因当场回给用户，跟界面语言 */
+    private final MessageCatalog messages;
 
     /** 警报冷静期：距该 trader 上一次任何唤醒（例行/警报）不足 5 分钟不再警报 */
     static final long ALERT_COOLDOWN_MS = 5 * 60_000L;
 
     /** 同一 trader 不并行的拒因；预检与真占位两处共用一份措辞 */
-    private static final String WAKE_BUSY_REASON = "上一轮唤醒还在跑，本次手动唤醒跳过（同一 trader 不并行）";
 
     private final Semaphore slots = new Semaphore(MAX_CONCURRENT_WAKEUPS);
     private final Set<Long> inFlight = ConcurrentHashMap.newKeySet();
@@ -324,21 +326,22 @@ public class TraderScheduler {
      */
     public String manualWakeBlockedReason(AiTrader trader) {
         if (handoverActive) {
-            return "全体复盘与学习进行中（日线交接的停工窗口），几分钟后窗口关闭再试";
+            return messages.get("trader.wake.handover");
         }
         Long intervalMs = INTERVAL_MS.get(trader.getIntervalCode());
         if (intervalMs == null) {
-            return "该 trader 的唤醒档位已下线，无法唤醒";
+            return messages.get("trader.wake.intervalRetired");
         }
         long now = nowMs.getAsLong();
         long boundary = now - Math.floorMod(now, intervalMs);
         // 距下一根K线太近就别烧这一次：例行唤醒马上到，内容几乎一样
         if (TraderWakeupRunner.wakeBudgetSeconds(boundary, intervalMs, now) < TraderWakeupRunner.MIN_WAKE_SECONDS) {
             // 措辞不提"例行马上来"：休眠时段里没有"稍等就来"的例行唤醒，手动是那时唯一的通道；拦本身保留（预算不够会落 SKIPPED）
-            return "距下一根K线收盘不足" + TraderWakeupRunner.MIN_WAKE_SECONDS + "秒，这一轮时间预算不够，等这根K线收了再点";
+            return messages.get("trader.wake.budgetTooTight",
+                    Map.of("seconds", TraderWakeupRunner.MIN_WAKE_SECONDS));
         }
         if (inFlight.contains(trader.getId())) {
-            return WAKE_BUSY_REASON;
+            return messages.get("trader.wake.busy");
         }
         return null;
     }
@@ -402,7 +405,7 @@ public class TraderScheduler {
         long boundary = now - Math.floorMod(now, intervalMs);
         // 预检只是"看一眼"不占位；真占位要在这里再抢一次——预检到现在之间可能有别人先进来了
         if (!inFlight.add(trader.getId())) {
-            return WAKE_BUSY_REASON;
+            return messages.get("trader.wake.busy");
         }
         // 一并记进冷静期基准：刚手动醒过，紧接着的波动警报就没有增量价值了
         lastWakeAt.put(trader.getId(), now);

@@ -282,6 +282,12 @@ class PromptI18nTest {
                 "chat.hitl.reason", "chat.deferred.prefix",
                 "coach.hint.system", "coach.review.system", "coach.label.barsHeader",
                 "trader.wake.routineQuestion", "trader.wake.sleepNotice", "trader.error.wakeTimeout",
+                // 落库即公开展示的暂停原因：四种来源必须都有英文，漏一种就是面板上一行中文
+                "trader.pause.manual", "trader.error.keyInvalid", "trader.error.liquidatedReason",
+                // 护栏拒因既回给模型也公开在时间线上；回执与修订标签同理
+                "trader.guard.leverageRange", "trader.guard.stopLossRequired", "trader.guard.marginOutOfRange",
+                "trader.reject.stopOnlyTighter", "trader.reject.expired", "trader.reject.planAlreadyExists",
+                "trader.receipt.duplicate", "trader.receipt.filled", "trader.revise.moveStop",
                 "news.tagging", "news.flashLine",
                 // 任务 5 的两条缓解：回落成中文＝英文用户被一行中文指令要求"输出中文"，正好反了
                 "trader.label.ownerWritten", "trader.label.outputLanguage",

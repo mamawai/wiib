@@ -287,7 +287,7 @@ class TraderWakeupLoopTest {
     void reduceTurnsIntoRequestWithoutBlockingTheRound() {
         stubHealthyAccount();
         when(simTradeClient.getAllPositions(99L)).thenReturn(List.of(crossPosition("2000", "0")));
-        when(requestService.submit(any())).thenReturn("减仓请求已提交给主人确认，本轮不会成交");
+        when(requestService.submit(any(), any())).thenReturn("减仓请求已提交给主人确认，本轮不会成交");
         // 先建好再 stub：嵌套在 when() 里建 mock 会触发 UnfinishedStubbingException
         ChatModel model = modelCallingThenSummary("close_position",
                 "{\"positionId\":349,\"quantity\":0.1,\"reason\":\"失效条件触发\"}");
@@ -299,7 +299,7 @@ class TraderWakeupLoopTest {
 
         verify(simTradeClient, never()).closePosition(anyLong(), any());
         ArgumentCaptor<AiTraderRequest> ask = ArgumentCaptor.forClass(AiTraderRequest.class);
-        verify(requestService).submit(ask.capture());
+        verify(requestService).submit(ask.capture(), any());
         assertThat(ask.getValue().getType()).isEqualTo(AiTraderRequest.TYPE_REDUCE);
         assertThat(ask.getValue().getPositionId()).isEqualTo(349L);
         assertThat(ask.getValue().getRequestPrice()).isEqualByComparingTo("100000");
@@ -325,7 +325,7 @@ class TraderWakeupLoopTest {
         runner.wake(t, 1785171600000L);
 
         verify(simTradeClient).closePosition(eq(99L), any());
-        verify(requestService, never()).submit(any());
+        verify(requestService, never()).submit(any(), any());
     }
 
     @Test

@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.mawai.wiibcommon.entity.AiTrader;
+import com.mawai.wiibcommon.i18n.MessageCatalog;
 import com.mawai.wiibcommon.entity.AiTraderDecision;
 import com.mawai.wiibquant.agent.learning.ReviewRunner;
 import com.mawai.wiibquant.agent.trader.TraderActionService.ActionPanel;
@@ -72,7 +73,7 @@ class TraderActionServiceTest {
     private final AiTraderDecisionMapper decisionMapper = mock(AiTraderDecisionMapper.class);
 
     private final TraderActionService service = new TraderActionService(
-            traderService, scheduler, reviewRunner, traderMapper, decisionMapper);
+            traderService, scheduler, reviewRunner, traderMapper, decisionMapper, new MessageCatalog());
 
     /**
      * 调度器的 inFlight 是点播复盘与例行唤醒共用的互斥位，拿真集合当替身——

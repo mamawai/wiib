@@ -4,11 +4,15 @@ import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.mawai.wiibcommon.config.BinanceProperties;
+import com.mawai.wiibcommon.i18n.MessageCatalog;
 import com.mawai.wiibcommon.entity.AiTrader;
 import com.mawai.wiibcommon.entity.AiTraderDecision;
 import com.mawai.wiibcommon.entity.AiTraderRequest;
 import com.mawai.wiibcommon.entity.UserLlmBinding;
 import com.mawai.wiibcommon.entity.UserLlmEndpoint;
+import com.mawai.wiibcommon.enums.AgentLang;
+import com.mawai.wiibquant.agent.i18n.PromptCatalog;
+import com.mawai.wiibquant.agent.i18n.UserLangResolver;
 import com.mawai.wiibquant.agent.llm.LlmEndpointService;
 import com.mawai.wiibquant.external.sim.SimTradeClient;
 import com.mawai.wiibquant.mapper.AiTraderDecisionMapper;
@@ -50,9 +54,12 @@ class TraderServiceTest {
     private final AiTraderRequestMapper requestMapper = mock(AiTraderRequestMapper.class);
     private final AiTraderDecisionMapper decisionMapper = mock(AiTraderDecisionMapper.class);
 
+    private final UserLangResolver langResolver = mock(UserLangResolver.class);
+
     private final TraderService service = new TraderService(
             traderMapper, decisionMapper, modelFactory, endpointService,
-            simTradeClient, binanceProperties, planStore, requestMapper);
+            simTradeClient, binanceProperties, planStore, requestMapper,
+            new PromptCatalog(), langResolver, new MessageCatalog());
 
     /** 端点库里的一条 */
     private static UserLlmEndpoint endpoint(long id, String model) {
@@ -336,5 +343,25 @@ class TraderServiceTest {
         verify(modelFactory).testConnection(next);
         verify(endpointService).bind(1L, UserLlmBinding.TRADER, 6L);
         verify(modelFactory).evict(7L);
+    }
+
+    /**
+     * 暂停原因落库即上屏（trader 面板 + 竞技场），跟 trader 主人的语言写入——
+     * 与自动暂停那三种（keyInvalid/连败/爆仓）同一口径，英文用户不该在面板上看见一行中文
+     */
+    @Test
+    void pauseWritesReasonInOwnerLanguage() {
+        AiTrader t = new AiTrader();
+        t.setId(7L);
+        t.setUserId(1L);
+        when(traderMapper.selectOne(any())).thenReturn(t);
+        when(langResolver.of(1L)).thenReturn(AgentLang.EN);
+
+        assertThat(service.pause(1L)).isNull();
+
+        ArgumentCaptor<LambdaUpdateWrapper<AiTrader>> captor = ArgumentCaptor.forClass(LambdaUpdateWrapper.class);
+        verify(traderMapper).update(isNull(), captor.capture());
+        assertThat(captor.getValue().getParamNameValuePairs().values())
+                .contains(new PromptCatalog().get(AgentLang.EN, "trader.pause.manual"));
     }
 }

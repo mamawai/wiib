@@ -1,6 +1,9 @@
 package com.mawai.wiibquant.agent.trader;
 
 import com.mawai.wiibcommon.dto.FuturesCloseRequest;
+import com.mawai.wiibcommon.i18n.MessageCatalog;
+import com.mawai.wiibquant.agent.i18n.UserLangResolver;
+import com.mawai.wiibquant.agent.i18n.PromptCatalog;
 import com.mawai.wiibcommon.dto.FuturesOpenRequest;
 import com.mawai.wiibcommon.dto.FuturesOrderResponse;
 import com.mawai.wiibcommon.dto.FuturesPositionDTO;
@@ -48,8 +51,11 @@ class TraderRequestServiceTest {
     private final SimTradeClient simTradeClient = mock(SimTradeClient.class);
     private final TraderPlanStore planStore = mock(TraderPlanStore.class);
 
+    private final UserLangResolver langResolver = mock(UserLangResolver.class);
+
     private final TraderRequestService service =
-            new TraderRequestService(requestMapper, traderMapper, simTradeClient, planStore);
+            new TraderRequestService(requestMapper, traderMapper, simTradeClient, planStore,
+                    new MessageCatalog(), new PromptCatalog(), langResolver);
 
     private AiTrader trader() {
         AiTrader t = new AiTrader();

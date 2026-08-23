@@ -237,7 +237,8 @@ public class TraderWakeupRunner {
                 // 截止时刻交给工具层：超时后 cancel(true) 未必立刻打断图里正在跑的工具调用，
                 // 写工具自己按这个时间点拒发，才不会在作废的一轮里继续下单
                 new TradeTools.WakeCtx(trader.getId(), trader.getRoundNo(), boundaryTime,
-                        System.currentTimeMillis() + budgetSeconds * 1000, risk));
+                        System.currentTimeMillis() + budgetSeconds * 1000, risk, lang),
+                prompts);
 
         // 回注窗口只认交易决策行（白名单：例行/警报/手动）——REVIEW/LEARN 的产出已经走
         // memory/learning_notes 注入，再进最近决策就是重复占字数；ALERT/MANUAL 是真实交易
