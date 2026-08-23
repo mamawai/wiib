@@ -1,6 +1,7 @@
 package com.mawai.wiibquant.controller;
 
 import com.mawai.wiibcommon.util.Result;
+import com.mawai.wiibcommon.i18n.MessageCatalog;
 import com.mawai.wiibcommon.market.KlineBar;
 import com.mawai.wiibcommon.market.KlineHistoryStore;
 import org.junit.jupiter.api.Test;
@@ -24,7 +25,8 @@ class StrategyBacktestControllerTest {
         store.bars = flatBars(80, latestClose - 80 * M5 + 1);
 
         StrategyBacktestController controller = new StrategyBacktestController(
-                store, new com.mawai.wiibquant.strategy.backtest.task.BacktestOrchestrator(store, null));
+                store, new com.mawai.wiibquant.strategy.backtest.task.BacktestOrchestrator(store, null),
+                new MessageCatalog());
         Result<Map<String, Object>> result = controller.runFibo(
                 "BTCUSDT", 1, new BigDecimal("100000"), 5);
 
@@ -38,7 +40,8 @@ class StrategyBacktestControllerTest {
     void failsWhenLocalKlineHasNoLatestCloseTime() {
         FakeKlineHistoryStore emptyStore = new FakeKlineHistoryStore();
         StrategyBacktestController controller = new StrategyBacktestController(
-                emptyStore, new com.mawai.wiibquant.strategy.backtest.task.BacktestOrchestrator(emptyStore, null));
+                emptyStore, new com.mawai.wiibquant.strategy.backtest.task.BacktestOrchestrator(emptyStore, null),
+                new MessageCatalog());
 
         Result<Map<String, Object>> result = controller.runFibo(
                 "BTCUSDT", 1, new BigDecimal("100000"), 5);
@@ -55,7 +58,8 @@ class StrategyBacktestControllerTest {
         store.bars.remove(5);
 
         StrategyBacktestController controller = new StrategyBacktestController(
-                store, new com.mawai.wiibquant.strategy.backtest.task.BacktestOrchestrator(store, null));
+                store, new com.mawai.wiibquant.strategy.backtest.task.BacktestOrchestrator(store, null),
+                new MessageCatalog());
         Result<Map<String, Object>> result = controller.runFibo(
                 "BTCUSDT", 1, new BigDecimal("100000"), 5);
 

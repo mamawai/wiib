@@ -2,6 +2,7 @@ package com.mawai.wiibquant.controller;
 
 import cn.dev33.satoken.stp.StpUtil;
 import com.mawai.wiibcommon.constant.QuantConstants;
+import com.mawai.wiibcommon.i18n.MessageCatalog;
 import com.mawai.wiibcommon.market.KlineBar;
 import com.mawai.wiibcommon.market.KlineHistoryStore;
 import com.mawai.wiibcommon.util.Result;
@@ -42,6 +43,8 @@ public class AiBacktestController {
 
     private final BacktestTaskService taskService;
     private final KlineHistoryStore klineHistoryStore;
+    /** 入口校验的提示跟界面语言 */
+    private final MessageCatalog messages;
 
     public record RunReq(String strategyId, String symbol, Long fromMs, Long toMs,
                          BigDecimal initialBalance, Integer leverage) {
@@ -61,25 +64,25 @@ public class AiBacktestController {
         try {
             String symbol = QuantConstants.normalizeSymbol(req.symbol());
             if (!QuantConstants.WATCH_SYMBOLS.contains(symbol)) {
-                return Result.fail("仅支持 BTCUSDT/ETHUSDT");
+                return Result.fail(messages.get("quant.backtest.symbolUnsupported"));
             }
             if (req.fromMs() == null || req.toMs() == null || req.fromMs() >= req.toMs()) {
-                return Result.fail("时间范围无效");
+                return Result.fail(messages.get("quant.backtest.rangeInvalid"));
             }
             if (req.toMs() - req.fromMs() > MAX_SPAN_MS) {
-                return Result.fail("时间范围过长，最多 3 年");
+                return Result.fail(messages.get("quant.backtest.rangeTooLong"));
             }
             BigDecimal balance = req.initialBalance() == null ? new BigDecimal("100000") : req.initialBalance();
             if (balance.signum() <= 0 || balance.compareTo(new BigDecimal("1000000000")) > 0) {
-                return Result.fail("初始资金无效");
+                return Result.fail(messages.get("quant.backtest.balanceInvalid"));
             }
             int leverage = req.leverage() == null ? 5 : req.leverage();
             if (leverage < 1 || leverage > 100) {
-                return Result.fail("杠杆需在 1~100");
+                return Result.fail(messages.get("quant.backtest.leverageRange"));
             }
             String strategyId = req.strategyId();
             if (strategyId == null || !taskService.knownStrategy(strategyId)) {
-                return Result.fail("未知策略: " + strategyId);
+                return Result.fail(messages.get("quant.backtest.unknownStrategy", Map.of("id", String.valueOf(strategyId))));
             }
             String taskId = taskService.submit(userId, strategyId, symbol,
                     req.fromMs(), req.toMs(), balance, leverage);
@@ -162,10 +165,10 @@ public class AiBacktestController {
         StpUtil.checkLogin();
         String normalized = QuantConstants.normalizeSymbol(symbol);
         if (!QuantConstants.WATCH_SYMBOLS.contains(normalized)) {
-            return Result.fail("仅支持 BTCUSDT/ETHUSDT");
+            return Result.fail(messages.get("quant.backtest.symbolUnsupported"));
         }
         if (fromMs >= toMs || toMs - fromMs > HISTORY_ROWS_MAX * KlineHistoryStore.DEFAULT_BAR_MILLIS) {
-            return Result.fail("时间范围无效（上限 2 万根 5m）");
+            return Result.fail(messages.get("quant.backtest.rangeTooManyBars"));
         }
         List<KlineBar> bars = klineHistoryStore.load(normalized, KlineHistoryStore.DEFAULT_INTERVAL, fromMs, toMs);
         List<List<Number>> rows = new ArrayList<>(bars.size());

@@ -2,6 +2,7 @@ package com.mawai.wiibquant.controller;
 
 import cn.dev33.satoken.stp.StpUtil;
 import com.mawai.wiibcommon.util.Result;
+import com.mawai.wiibcommon.i18n.MessageCatalog;
 import com.mawai.wiibquant.external.binance.BinanceFuturesTestnetClient;
 import com.mawai.wiibquant.external.binance.model.OrderResponse;
 import com.mawai.wiibquant.external.binance.model.PlaceOrderRequest;
@@ -18,6 +19,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 /**
@@ -34,6 +36,8 @@ import java.util.Objects;
 public class TestnetTradeController {
 
     private final BinanceFuturesTestnetClient client;
+    /** 管理页的校验提示跟界面语言 */
+    private final MessageCatalog messages;
 
     /** 仅 1 号用户放行；未登录/token 无效/非 1 号都判非管理员(不抛异常，避免 500 与误触发前端登录跳转)。 */
     private boolean notAdmin() {
@@ -47,17 +51,17 @@ public class TestnetTradeController {
     /** 手动下单：MARKET 立即成交 / LIMIT 挂单。传 leverage 则先调杠杆再下单。 */
     @PostMapping("/order")
     public Result<OrderResponse> order(@RequestBody ManualOrderRequest req) {
-        if (notAdmin()) return Result.fail("仅管理员可操作");
+        if (notAdmin()) return Result.fail(messages.get("quant.admin.adminOnly"));
         try {
             if (req.getSymbol() == null || req.getSide() == null || req.getType() == null) {
-                return Result.fail("symbol/side/type 必填");
+                return Result.fail(messages.get("quant.testnet.fieldsRequired"));
             }
             if (req.getQuantity() == null || req.getQuantity().signum() <= 0) {
-                return Result.fail("quantity 必须 > 0");
+                return Result.fail(messages.get("quant.testnet.quantityPositive"));
             }
             boolean isLimit = "LIMIT".equalsIgnoreCase(req.getType());
             if (isLimit && (req.getPrice() == null || req.getPrice().signum() <= 0)) {
-                return Result.fail("LIMIT 必须传 price");
+                return Result.fail(messages.get("quant.testnet.limitNeedsPrice"));
             }
             if (req.getLeverage() != null) {
                 client.setLeverage(req.getSymbol(), req.getLeverage());  // 白名单/范围校验在 client 内
@@ -89,7 +93,7 @@ public class TestnetTradeController {
     /** 一键市价平仓：查持仓→反向 MARKET reduceOnly 全平。无持仓则提示。 */
     @PostMapping("/close")
     public Result<OrderResponse> close(@RequestParam String symbol) {
-        if (notAdmin()) return Result.fail("仅管理员可操作");
+        if (notAdmin()) return Result.fail(messages.get("quant.admin.adminOnly"));
         try {
             List<PositionRisk> risks = client.getPositionRisk(symbol);
             BigDecimal amt = risks == null ? BigDecimal.ZERO : risks.stream()
@@ -97,7 +101,7 @@ public class TestnetTradeController {
                     .map(PositionRisk::getPositionAmt)
                     .filter(Objects::nonNull)
                     .findFirst().orElse(BigDecimal.ZERO);
-            if (amt.signum() == 0) return Result.fail("当前无持仓: " + symbol);
+            if (amt.signum() == 0) return Result.fail(messages.get("quant.testnet.noPosition", Map.of("symbol", symbol)));
 
             String side = amt.signum() > 0 ? "SELL" : "BUY";  // 多头平仓=SELL，空头=BUY
             PlaceOrderRequest req = PlaceOrderRequest.builder()
@@ -121,7 +125,7 @@ public class TestnetTradeController {
     /** 撤销该 symbol 全部挂单(清场，方便重测)。 */
     @PostMapping("/cancel-all")
     public Result<SimpleAck> cancelAll(@RequestParam String symbol) {
-        if (notAdmin()) return Result.fail("仅管理员可操作");
+        if (notAdmin()) return Result.fail(messages.get("quant.admin.adminOnly"));
         try {
             SimpleAck ack = client.cancelAllOpenOrders(symbol);
             log.info("[TestnetManual] 撤全部挂单 symbol={}", symbol);

@@ -5,6 +5,7 @@ import com.mawai.wiibcommon.constant.AiProtocols;
 import com.mawai.wiibcommon.entity.AiModelAssignment;
 import com.mawai.wiibcommon.entity.AiRuntimeConfig;
 import com.mawai.wiibcommon.util.Result;
+import com.mawai.wiibcommon.i18n.MessageCatalog;
 import com.mawai.wiibcommon.mapper.AiModelAssignmentMapper;
 import com.mawai.wiibcommon.mapper.AiRuntimeConfigMapper;
 import com.mawai.wiibquant.agent.runtime.AiAgentRuntimeManager;
@@ -17,6 +18,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 
 @Slf4j
 @Tag(name = "AI Agent管理")
@@ -32,6 +34,8 @@ public class AiAgentAdminController {
     private final AiAgentRuntimeManager aiAgentRuntimeManager;
     private final AiRuntimeConfigMapper configMapper;
     private final AiModelAssignmentMapper assignmentMapper;
+    /** 管理页的校验与回执跟界面语言 */
+    private final MessageCatalog messages;
 
     // ========== API Key 管理 ==========
 
@@ -45,16 +49,16 @@ public class AiAgentAdminController {
     @Operation(summary = "新增/修改API Key配置")
     public Result<AiRuntimeConfig> saveKey(@RequestBody KeyRequest req) {
         if (req.getApiKey() == null || req.getApiKey().isBlank()) {
-            return Result.fail("apiKey不能为空");
+            return Result.fail(messages.get("quant.admin.apiKeyRequired"));
         }
         if (req.getBaseUrl() == null || req.getBaseUrl().isBlank()) {
-            return Result.fail("baseUrl不能为空");
+            return Result.fail(messages.get("quant.admin.baseUrlRequired"));
         }
         if (req.getConfigName() == null || req.getConfigName().isBlank()) {
-            return Result.fail("名称不能为空");
+            return Result.fail(messages.get("quant.admin.nameRequired"));
         }
         if (req.getModel() == null || req.getModel().isBlank()) {
-            return Result.fail("model不能为空");
+            return Result.fail(messages.get("quant.admin.modelRequired"));
         }
         // 档位留空=不传（走模型默认）。不限白名单：各家档位名字自己定（xhigh/minimal…），
         // 认不认只有上游知道；只挡列宽 VARCHAR(16) 免得存的时候炸 SQL
@@ -63,13 +67,13 @@ public class AiAgentAdminController {
             effort = null;
         }
         if (effort != null && effort.length() > MAX_EFFORT_LEN) {
-            return Result.fail("思考档位最长 " + MAX_EFFORT_LEN + " 字符，留空=不传");
+            return Result.fail(messages.get("quant.admin.effortTooLong", Map.of("max", MAX_EFFORT_LEN)));
         }
         // 协议留空=openai（存量兼容）；responses 需上游支持 /v1/responses（CPA/OpenAI官方/xAI）
         String protocol = req.getApiProtocol() == null || req.getApiProtocol().isBlank()
                 ? AiProtocols.OPENAI : req.getApiProtocol().trim().toLowerCase();
         if (!AiProtocols.isValid(protocol)) {
-            return Result.fail("协议仅支持 openai / responses");
+            return Result.fail(messages.get("quant.admin.protocolUnsupported"));
         }
 
         String baseUrl = req.getBaseUrl().trim();
@@ -81,7 +85,7 @@ public class AiAgentAdminController {
         if (req.getId() != null) {
             config = configMapper.selectById(req.getId());
             if (config == null) {
-                return Result.fail("配置不存在");
+                return Result.fail(messages.get("quant.admin.configNotFound"));
             }
         } else {
             config = new AiRuntimeConfig();
@@ -105,7 +109,7 @@ public class AiAgentAdminController {
 
         // 管理端配置修改频率很低，直接全量刷新最稳，确保主图和fallback图缓存都失效
         if (!aiAgentRuntimeManager.refresh()) {
-            return Result.fail("配置已保存，但AI运行时刷新失败（详见服务日志），当前沿用变更前模型运行");
+            return Result.fail(messages.get("quant.admin.savedButRefreshFailed"));
         }
         return Result.ok(config);
     }
@@ -114,11 +118,11 @@ public class AiAgentAdminController {
     @Operation(summary = "删除LLM配置")
     public Result<Void> deleteKey(@PathVariable Long id) {
         if (aiAgentRuntimeManager.isConfigReferenced(id)) {
-            return Result.fail("该LLM配置正被功能位引用，无法删除");
+            return Result.fail(messages.get("quant.admin.configInUse"));
         }
         configMapper.deleteById(id);
         if (!aiAgentRuntimeManager.refresh()) {
-            return Result.fail("已删除，但AI运行时刷新失败（详见服务日志），当前沿用变更前模型运行");
+            return Result.fail(messages.get("quant.admin.deletedButRefreshFailed"));
         }
         return Result.ok(null);
     }
@@ -138,21 +142,21 @@ public class AiAgentAdminController {
     public Result<Void> saveAssignments(@RequestBody List<AssignmentRequest> assignments) {
         for (AssignmentRequest req : assignments) {
             if (req.getFunctionName() == null) {
-                return Result.fail("参数不完整: " + null);
+                return Result.fail(messages.get("quant.admin.paramsIncomplete", Map.of("what", "functionName")));
             }
             if (!AiAgentRuntimeManager.isManagedFunction(req.getFunctionName())) {
                 continue;
             }
             if (req.getConfigId() == null) {
-                return Result.fail("参数不完整: " + req.getFunctionName());
+                return Result.fail(messages.get("quant.admin.paramsIncomplete", Map.of("what", req.getFunctionName())));
             }
             AiRuntimeConfig target = configMapper.selectById(req.getConfigId());
             if (target == null) {
-                return Result.fail("LLM配置不存在(id=" + req.getConfigId() + ")");
+                return Result.fail(messages.get("quant.admin.llmConfigNotFound", Map.of("id", req.getConfigId())));
             }
             // 空model的配置建不出模型，提前拦截别等refresh才炸
             if (target.getModel() == null || target.getModel().isBlank()) {
-                return Result.fail("LLM配置'" + target.getConfigName() + "'缺模型名，请先在「配置LLM」里补全");
+                return Result.fail(messages.get("quant.admin.llmConfigNoModel", Map.of("name", String.valueOf(target.getConfigName()))));
             }
 
             AiModelAssignment existing = assignmentMapper.selectByFunction(req.getFunctionName());
@@ -169,7 +173,7 @@ public class AiAgentAdminController {
             }
         }
         if (!aiAgentRuntimeManager.refresh()) {
-            return Result.fail("分配已保存，但AI运行时刷新失败（详见服务日志），当前沿用变更前模型运行");
+            return Result.fail(messages.get("quant.admin.assignedButRefreshFailed"));
         }
         return Result.ok(null);
     }

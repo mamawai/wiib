@@ -1,0 +1,48 @@
+# Remaining quant-side wording: backtest entry validation, workbench session ownership, admin panels.
+# The admin section is admin-only, but still follows the interface language - admins switch to English too.
+quant:
+  backtest:
+    symbolUnsupported: Only BTCUSDT and ETHUSDT are supported
+    rangeInvalid: Invalid time range
+    rangeTooLong: The time range is too long - 3 years at most
+    rangeTooManyBars: Invalid time range (at most 20000 5m candles)
+    balanceInvalid: Invalid starting balance
+    leverageRange: Leverage must be between 1 and 100
+    unknownStrategy: "Unknown strategy: {{id}}"
+    fiboSymbolUnsupported: fibo v1 supports only BTCUSDT and ETHUSDT
+    daysLeverageInvalid: days and leverage must be positive
+    noRecentKline: "Local kline_history has no recent 5m candle: {{symbol}}"
+    fiboFailed: "The fibo backtest failed: {{reason}}"
+
+  strategy:
+    positionIdRequired: positionId is required
+    closeFailed: "Closing the position failed: {{reason}}"
+
+  chat:
+    sessionNotFound: That session does not exist or is not yours
+    approvalExpired: That approval request has expired - start it again
+
+  # Admin: LLM configs and feature-slot assignment
+  admin:
+    adminOnly: Administrators only
+    apiKeyRequired: apiKey is required
+    baseUrlRequired: baseUrl is required
+    nameRequired: A name is required
+    modelRequired: model is required
+    effortTooLong: The reasoning level is at most {{max}} characters; leave it blank to omit it
+    protocolUnsupported: The protocol must be openai or responses
+    configNotFound: No such config
+    configInUse: This LLM config is referenced by a feature slot and cannot be deleted
+    savedButRefreshFailed: Saved, but the AI runtime failed to reload (see the server log) - it is still running the previous model
+    deletedButRefreshFailed: Deleted, but the AI runtime failed to reload (see the server log) - it is still running the previous model
+    assignedButRefreshFailed: Assignment saved, but the AI runtime failed to reload (see the server log) - it is still running the previous model
+    paramsIncomplete: "Incomplete parameters: {{what}}"
+    llmConfigNotFound: "No such LLM config (id={{id}})"
+    llmConfigNoModel: "The LLM config '{{name}}' has no model name - fill it in under Configure LLM first"
+
+  # Admin: manual orders on the Binance testnet (interface self-check)
+  testnet:
+    fieldsRequired: symbol, side and type are required
+    quantityPositive: quantity must be > 0
+    limitNeedsPrice: A LIMIT order needs a price
+    noPosition: "No open position: {{symbol}}"
