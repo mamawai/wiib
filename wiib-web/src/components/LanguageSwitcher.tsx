@@ -4,8 +4,7 @@ import { Button } from './ui/button';
 import { Card, CardContent } from './ui/card';
 import { cn } from '../lib/utils';
 import { currentLang, type Lang } from '../i18n';
-import { userApi } from '../api';
-import { useUserStore } from '../stores/userStore';
+import { applyLanguage } from '../lib/language';
 
 /**
  * 语言名一律用本族语写死，不跟着界面语言翻译——中文在英文界面里也该是"中文"，
@@ -15,20 +14,9 @@ const LANG_LABEL: Record<Lang, string> = { zh: '中文', en: 'English' };
 
 /** 当前语言与"点一下切到哪"。只有两门语言，点按直切，不做下拉 */
 function useLangToggle() {
-  const { i18n } = useTranslation();
   const current = currentLang();
   const next: Lang = current === 'zh' ? 'en' : 'zh';
-
-  const toggle = () => {
-    void i18n.changeLanguage(next);
-    // 服务端那份只管 AI 产出语言：游客没账号可写就不调；失败也不打扰用户——
-    // 界面语言本地已经切好了，最坏结果只是 AI 还说上一门语言，下次切换/登录会再推一次
-    if (useUserStore.getState().token) {
-      void userApi.setLang(next).catch(() => {});
-    }
-  };
-
-  return { current, next, toggle };
+  return { current, next, toggle: () => applyLanguage(next) };
 }
 
 /**
