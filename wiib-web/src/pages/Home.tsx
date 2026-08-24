@@ -164,7 +164,7 @@ export function Home() {
           <div className="grid lg:grid-cols-[1.7fr_1fr] gap-4 items-stretch">
             <SpotlightCard className="p-5 flex flex-col">
               <div className="flex items-center gap-2">
-                <span className="microlabel font-semibold text-xs">{t('dashboard.totalAssets')}</span>
+                <span className="microlabel font-semibold">{t('dashboard.totalAssets')}</span>
                 <span className={cn(
                   'ml-auto num text-xs font-bold px-2.5 py-1 rounded-full',
                   isProfit ? 'bg-gain/10 text-gain' : 'bg-loss/10 text-loss',

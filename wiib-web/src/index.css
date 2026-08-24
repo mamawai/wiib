@@ -210,8 +210,11 @@ html.dark .pt-card { box-shadow: none; }
           mask-image: linear-gradient(to right, transparent 0, #000 var(--fade-l, 0px), #000 calc(100% - var(--fade-r, 0px)), transparent 100%);
 }
 
-/* 微标签：小号宽字距灰字，卡片标题/表头用 */
-.microlabel { font-size: 0.625rem; letter-spacing: 0.1em; color: var(--color-muted-foreground); }
+/* 微标签：小号宽字距灰字，卡片标题/表头用。
+   落在 components 层：调用方叠 text-primary / text-foreground 这类工具类能盖掉这里的 color 和 font-size */
+@layer components {
+  .microlabel { font-size: 0.625rem; letter-spacing: 0.1em; color: var(--color-muted-foreground); }
+}
 
 /* LED 状态灯（仪器细节）：绿=正常 黄=降级 灭=断连/未知 */
 .led { width: 6px; height: 6px; border-radius: 9999px; background: var(--color-gain); box-shadow: 0 0 5px var(--color-gain); }

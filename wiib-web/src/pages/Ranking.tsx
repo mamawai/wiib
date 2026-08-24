@@ -6,8 +6,9 @@ import { Card, CardContent } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Skeleton } from '../components/ui/skeleton';
 import { EmptyState } from '../components/EmptyState';
+import { useUserStore } from '../stores/userStore';
 import { cn, fmtNum } from '../lib/utils';
-import { ChevronLeft, ChevronRight, Clock, Trophy } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Clock, Info, Trophy } from 'lucide-react';
 import type { RankingItem, RankingSort } from '../types';
 
 const PAGE_SIZE = 20;
@@ -187,7 +188,19 @@ function TopCard({ item, place, sort, onOpen }: {
   );
 }
 
-function RankRow({ item, sort, onOpen }: { item: RankingItem; sort: RankingSort; onOpen: () => void }) {
+/** 「我」徽标。名次列宽只够放两位数字，塞不进去，所以跟在用户名后面 */
+function MeBadge() {
+  const { t } = useTranslation('community');
+  return (
+    <span className="microlabel text-primary shrink-0 px-1 py-px rounded border border-primary/40 leading-none">
+      {t('ranking.me.badge')}
+    </span>
+  );
+}
+
+function RankRow({ item, sort, me, onOpen }: {
+  item: RankingItem; sort: RankingSort; me?: boolean; onOpen: () => void;
+}) {
   const { t } = useTranslation('community');
   return (
     <button
@@ -195,14 +208,17 @@ function RankRow({ item, sort, onOpen }: { item: RankingItem; sort: RankingSort;
       onClick={onOpen}
       title={t('ranking.rowTitle', { name: item.username })}
       className={cn(GRID, 'w-full text-left px-3 sm:px-4 py-2.5 border-b border-border/25 last:border-b-0',
-        'hover:bg-accent/25 transition-colors group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset')}
+        'hover:bg-accent/25 transition-colors group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset',
+        // 自己那条：左侧主色竖条 + 极淡主色底，跟表格行同构但一眼能挑出来
+        me && 'relative bg-primary/5 hover:bg-primary/10 before:absolute before:inset-y-0 before:left-0 before:w-0.5 before:bg-primary')}
     >
       {/* 名次 + 用户：窄屏并成一行占满，箭头也跟着挪到这行尾（宽屏那个在表格最后一列） */}
       <div className="col-span-2 md:col-span-1 flex items-center gap-2 md:gap-0">
-        <RankNum rank={item.rank} className="text-[13px] font-bold" />
+        <RankNum rank={item.rank} className={cn('text-[13px] font-bold', me && 'text-primary')} />
         <div className="flex items-center gap-2 md:hidden min-w-0 flex-1">
           <Avatar username={item.username} avatar={item.avatar} className="w-7 h-7 text-[11px]" />
           <span className="text-[13px] font-semibold truncate">{item.username}</span>
+          {me && <MeBadge />}
           <ChevronRight className="w-3.5 h-3.5 text-muted-foreground/35 ml-auto shrink-0" />
         </div>
       </div>
@@ -211,6 +227,7 @@ function RankRow({ item, sort, onOpen }: { item: RankingItem; sort: RankingSort;
         <span className="text-[13px] font-semibold truncate group-hover:text-primary transition-colors">
           {item.username}
         </span>
+        {me && <MeBadge />}
       </div>
 
       <Cell label={t('ranking.metric.assets')} className={cn('md:text-right', sort === 'ASSETS' && 'text-primary')}>
@@ -244,7 +261,10 @@ function RankRow({ item, sort, onOpen }: { item: RankingItem; sort: RankingSort;
 export function Ranking() {
   const { t } = useTranslation('community');
   const navigate = useNavigate();
+  const myUserId = useUserStore(s => s.user?.id);
   const [ranking, setRanking] = useState<RankingItem[]>([]);
+  // 三态：undefined=这块整条不显示（未登录/请求失败），null=已登录但没上榜（显示提示条），有值=显示横条
+  const [myRow, setMyRow] = useState<RankingItem | null | undefined>(undefined);
   const [sort, setSort] = useState<RankingSort>('ASSETS');
   const [page, setPage] = useState(1);
   const [pages, setPages] = useState(0);
@@ -255,19 +275,26 @@ export function Ranking() {
   const [loadedKey, setLoadedKey] = useState<string | null>(null);
   const loading = loadedKey !== requestKey;
 
+  // 自己那条只在第 1 页出现（前三卡也只在第 1 页），未登录不要——那条接口未登录是 401
+  const showMine = page === 1 && myUserId != null;
+
   useEffect(() => {
     let cancelled = false;
-    rankingApi.list(sort, page, PAGE_SIZE)
-      .then(res => {
+    const mine = showMine
+      ? rankingApi.me(sort).catch(() => undefined)   // 拉不到就整条不显示，别拿"未上榜"糊弄
+      : Promise.resolve(undefined);
+    Promise.all([rankingApi.list(sort, page, PAGE_SIZE), mine])
+      .then(([res, row]) => {
         if (cancelled) return;
         setRanking(res.records);
         setPages(res.pages);
         setTotal(res.total);
+        setMyRow(row);
       })
-      .catch(() => { if (!cancelled) setRanking([]); })
+      .catch(() => { if (!cancelled) { setRanking([]); setMyRow(undefined); } })
       .finally(() => { if (!cancelled) setLoadedKey(requestKey); });
     return () => { cancelled = true; };
-  }, [requestKey, sort, page]);
+  }, [requestKey, sort, page, showMine]);
 
   const openUser = (userId: number) => navigate(`/user/${userId}`);
 
@@ -338,6 +365,7 @@ export function Ranking() {
 
       {loading ? (
         <>
+          {showMine && <Skeleton className="h-14 w-full rounded-lg" />}
           <div className="grid grid-cols-3 gap-2 sm:gap-3">
             {[...Array(3)].map((_, i) => <Skeleton key={i} className="h-40 sm:h-52 w-full rounded-lg" />)}
           </div>
@@ -349,6 +377,22 @@ export function Ranking() {
         <Card><CardContent className="p-0"><EmptyState icon={<Trophy />} text={t('ranking.empty')} /></CardContent></Card>
       ) : (
         <>
+          {/* 自己那条提到最上面。下面的名次表照旧也有这个人，这里是提出来的一份，不是搬走 */}
+          {showMine && myRow !== undefined && (
+            <Card className="overflow-hidden border-primary/40">
+              <CardContent className="p-0">
+                {myRow ? (
+                  <RankRow item={myRow} sort={sort} me onOpen={() => openUser(myRow.userId)} />
+                ) : (
+                  <div className="flex items-center gap-2 px-3 sm:px-4 py-3 text-[12px] text-muted-foreground">
+                    <Info className="w-3.5 h-3.5 shrink-0" />
+                    {t('ranking.me.notRanked')}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
           {/* 前三名：并排等高，不做台阶。名次靠序号和高光条区分 */}
           {top.length > 0 && (
             <div className="grid grid-cols-3 gap-2 sm:gap-3">

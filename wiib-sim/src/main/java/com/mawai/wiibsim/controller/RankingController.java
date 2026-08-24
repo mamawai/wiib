@@ -43,6 +43,19 @@ public class RankingController {
     }
 
     /**
+     * 当前用户在榜上的那一行，名次跟着 sort 维度走，与分页同口径。
+     * <p>
+     * 榜单页只拿得到当页 20 条，自己排在第几页无从得知，所以单开这条按 userId 直取。
+     * 没上榜（从没成交过 / 排在入榜上限之外）返回 data=null，不是错误。
+     */
+    @GetMapping("/me")
+    @Operation(summary = "当前用户的榜单行（未上榜返回 null）")
+    public Result<RankingDTO> myRanking(@RequestParam(defaultValue = "ASSETS") String sort,
+                                        @CurrentUserId Long userId) {
+        return Result.ok(rankingService.findRanking(userId, sort));
+    }
+
+    /**
      * 用户详情：榜单行 + 当前持仓。
      * <p>
      * 目标用户关了公开开关就 403（本人除外）。这里的 userId 是<b>要看谁</b>，

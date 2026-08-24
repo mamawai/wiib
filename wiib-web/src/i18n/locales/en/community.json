@@ -62,6 +62,10 @@
       "second": "Runner-up",
       "third": "Third"
     },
+    "me": {
+      "badge": "YOU",
+      "notRanked": "You're not ranked yet — one fill puts you on the board"
+    },
     "metric": {
       "user": "User",
       "assets": "Total assets",

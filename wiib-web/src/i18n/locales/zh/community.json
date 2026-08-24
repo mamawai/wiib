@@ -58,6 +58,10 @@
       "second": "亚军",
       "third": "季军"
     },
+    "me": {
+      "badge": "我",
+      "notRanked": "你还没上榜，完成一笔成交就进榜"
+    },
     "metric": {
       "user": "用户",
       "assets": "总资产",

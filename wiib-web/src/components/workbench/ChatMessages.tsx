@@ -38,7 +38,7 @@ export function UserBubble({ item, onCancelQueued }: {
           )}
         </span>
       ) : (
-        <span className="microlabel num">{fmtTime(item.at)}</span>
+        <span className="microlabel font-mono tabular-nums">{fmtTime(item.at)}</span>
       )}
     </div>
   );
@@ -79,10 +79,9 @@ export function AssistantAnswer({ item, canRegenerate, onRegenerate }: {
     <div className="min-w-0">
       <div className="flex items-center gap-2 mb-1.5">
         <span className="w-[2px] h-3 rounded-full bg-primary shrink-0" />
-        {/* 署名要压得住，不走 .microlabel：那条规则在 index.css 里是无层普通 CSS，
-            Tailwind v4 的 utility 都在 layer 里，颜色改不动它 */}
-        <span className="text-[10px] tracking-[0.1em] font-bold uppercase shrink-0">{HUB_NAME}</span>
-        {meta?.modelLabel && <span className="microlabel num truncate min-w-0">{meta.modelLabel}</span>}
+        {/* 署名要压得住，不用微标签那档灰 */}
+        <span className="microlabel text-foreground font-bold uppercase shrink-0">{HUB_NAME}</span>
+        {meta?.modelLabel && <span className="microlabel font-mono tabular-nums truncate min-w-0">{meta.modelLabel}</span>}
         {item.streaming && (
           <span className="ml-auto flex items-center gap-1.5 shrink-0">
             <span className="led" />

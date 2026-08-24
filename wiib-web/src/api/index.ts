@@ -127,6 +127,13 @@ export const rankingApi = {
    */
   list: (sort: RankingSort = 'ASSETS', pageNum = 1, pageSize = 20) =>
     api.get<unknown, PageResult<RankingItem>>('/ranking', { params: { sort, pageNum, pageSize } }),
+  /**
+   * 当前用户的榜单行，名次跟着 sort 维度走（与 list 同口径）。
+   * 分页一次只给 20 条，自己在第几页无从得知，所以按 userId 单独直取。
+   * 没上榜返回 null（不是错误）；未登录别调，会 401 弹回登录页。
+   */
+  me: (sort: RankingSort = 'ASSETS') =>
+    api.get<unknown, RankingItem | null>('/ranking/me', { params: { sort } }),
   /** 用户详情：榜单行 + 当前持仓。对方关了公开开关时 403（本人除外） */
   userProfile: (userId: number) => api.get<unknown, UserProfile>(`/ranking/users/${userId}`),
   /** 该用户的成交历史分页，同样过隐私门控 */
