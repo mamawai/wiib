@@ -337,6 +337,7 @@
     "stopping": "收尾中",
     "toBottom": "回到底部",
     "hitlFailed": "确认失败，请重试",
+    "tooLong": "消息太长（上限 {{max}} 字），请精简后再发",
     "queued": "排队中 · 本轮结束后发出",
     "cancelQueued": "不发了",
     "cancelQueuedAria": "取消这条排队消息",

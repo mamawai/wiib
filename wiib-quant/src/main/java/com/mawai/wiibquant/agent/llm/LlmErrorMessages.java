@@ -32,13 +32,23 @@ public final class LlmErrorMessages {
     private LlmErrorMessages() {
     }
 
+    /**
+     * 401/403 形态：{@link #classify} 的第一分支单独暴露，唤醒回路据它"key 失效立即暂停"——
+     * 按异常本身判，不按成文后的话判（两协议的 401 原文各不同：openai 路
+     * {@code UnauthorizedException: 401: Invalid API key}，responses 路 {@code Responses API HTTP 401}）。
+     */
+    public static boolean unauthorized(Throwable t) {
+        String lower = chain(t).toLowerCase(Locale.ROOT);
+        return lower.contains("401") || lower.contains("403")
+                || lower.contains("unauthorized") || lower.contains("invalid api key");
+    }
+
     public static String classify(Throwable t, PromptCatalog prompts, AgentLang lang) {
         if (t == null) {
             return prompts.get(lang, "llm.error.fallback");
         }
         String lower = chain(t).toLowerCase(Locale.ROOT);
-        if (lower.contains("401") || lower.contains("403")
-                || lower.contains("unauthorized") || lower.contains("invalid api key")) {
+        if (unauthorized(t)) {
             return prompts.get(lang, "llm.error.unauthorized");
         }
         if (lower.contains("429") || lower.contains("quota") || lower.contains("rate limit")) {

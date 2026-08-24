@@ -29,6 +29,7 @@ quant:
 
   chat:
     sessionNotFound: 会话不存在或无权限
+    sessionRunning: 这个会话还在运行或有补答未落地，等它结束再删
     approvalExpired: 该确认请求已失效，请重新发起
 
   # 管理员：LLM 配置与功能位分配

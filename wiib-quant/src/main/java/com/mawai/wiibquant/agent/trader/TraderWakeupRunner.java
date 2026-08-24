@@ -21,6 +21,7 @@ import com.mawai.wiibquant.agent.i18n.LocalizedToolCallbacks;
 import com.mawai.wiibquant.agent.i18n.PromptCatalog;
 import com.mawai.wiibquant.agent.i18n.UserLangResolver;
 import com.mawai.wiibquant.agent.llm.AgentGraphs;
+import com.mawai.wiibquant.agent.llm.LlmErrorMessages;
 import com.mawai.wiibquant.agent.llm.ModelCallLimiter;
 import com.mawai.wiibquant.agent.llm.ResilientChatService;
 import com.mawai.wiibquant.agent.llm.ToolCallTraceHook;
@@ -197,11 +198,19 @@ public class TraderWakeupRunner {
             clearFailures(trader);
         } catch (Exception e) {
             // 落库即公开展示（时间线的 error 行、连败暂停的 pausedReason），一律跟 lang：
-            // sim 拒因按码查词表，其余照原样（上游原文/代码异常没有码可查）
-            String msg = e instanceof TimeoutException
-                    ? prompts.get(lang, "trader.error.wakeTimeout", Map.of("seconds", budgetSeconds))
-                    : SimTradeClient.describe(e, messages, lang);
-            log.warn("[Trader] 唤醒失败 traderId={} boundary={} msg={}", trader.getId(), boundaryTime, msg);
+            // sim 拒因按码查词表，其余归类成文（上游原文可能带网关 URL/key），原文进日志。
+            // key 失效按异常本身判，不按成文后的话判
+            boolean keyInvalid = false;
+            String msg;
+            if (e instanceof TimeoutException) {
+                msg = prompts.get(lang, "trader.error.wakeTimeout", Map.of("seconds", budgetSeconds));
+            } else if (e instanceof SimTradeClient.SimBizException) {
+                msg = SimTradeClient.describe(e, messages, lang);
+            } else {
+                keyInvalid = LlmErrorMessages.unauthorized(e);
+                msg = LlmErrorMessages.classify(e, prompts, lang);
+            }
+            log.warn("[Trader] 唤醒失败 traderId={} boundary={} msg={}", trader.getId(), boundaryTime, msg, e);
             // 决策行已经落库了（异常出在 insert 之后的收尾，如 clearFailures/markLiquidated 的列级更新）：
             // 这一轮本身是成功的，不该改写成 ERROR 更不该计连败；而且 MP 自增主键 insert 后已把 id
             // 回填进这个对象，同一个对象再 insert 必撞主键，异常会直接逃出唤醒回路——调度器的
@@ -210,10 +219,11 @@ public class TraderWakeupRunner {
                 return;
             }
             decision.setStatus(AiTraderDecision.STATUS_ERROR);
+            // error 列 VARCHAR(500)：sim 原话的长度不受本侧控制
             decision.setError(msg.length() > 500 ? msg.substring(0, 500) : msg);
             decision.setLatencyMs((int) (System.currentTimeMillis() - start));
             decisionMapper.insert(decision);
-            recordFailure(trader, msg, lang);
+            recordFailure(trader, msg, lang, keyInvalid);
         }
     }
 
@@ -645,7 +655,7 @@ public class TraderWakeupRunner {
         log.info("[Trader] 爆仓终局 traderId={} round={}", trader.getId(), trader.getRoundNo());
     }
 
-    private void recordFailure(AiTrader trader, String lastError, AgentLang lang) {
+    private void recordFailure(AiTrader trader, String lastError, AgentLang lang, boolean keyInvalid) {
         int failures = (trader.getConsecutiveFailures() == null ? 0 : trader.getConsecutiveFailures()) + 1;
         LambdaUpdateWrapper<AiTrader> update = new LambdaUpdateWrapper<AiTrader>()
                 .eq(AiTrader::getId, trader.getId())
@@ -653,7 +663,7 @@ public class TraderWakeupRunner {
                 .set(AiTrader::getUpdatedAt, LocalDateTime.now());
         // key 无效是永久错误：再攒够连败也只是原样重炸几轮，白烧调度还让用户多等几个周期。
         // 能修的人只有用户自己，所以立刻停、把原因写成他看得懂的话
-        if (keyInvalid(lastError)) {
+        if (keyInvalid) {
             update.set(AiTrader::getStatus, AiTrader.STATUS_PAUSED)
                     .set(AiTrader::getPausedReason, prompts.get(lang, "trader.error.keyInvalid"));
             log.warn("[Trader] key 失效自动暂停 traderId={}", trader.getId());
@@ -665,13 +675,6 @@ public class TraderWakeupRunner {
             log.warn("[Trader] 连败自动暂停 traderId={} failures={}", trader.getId(), failures);
         }
         traderMapper.update(null, update);
-    }
-
-    /** 两协议的 401 文案各不同：openai 路 {@code UnauthorizedException: 401: Invalid API key}，responses 路 {@code Responses API HTTP 401} */
-    private static boolean keyInvalid(String lastError) {
-        return lastError.contains("UnauthorizedException")
-                || lastError.contains("HTTP 401")
-                || lastError.contains("Invalid API key");
     }
 
     private void clearFailures(AiTrader trader) {

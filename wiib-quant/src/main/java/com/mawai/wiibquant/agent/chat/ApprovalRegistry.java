@@ -146,6 +146,13 @@ public class ApprovalRegistry {
         approvedUntil.keySet().removeIf(k -> k.sessionId().equals(sessionId));
     }
 
+    /** 删会话：挂着的确认卡、拒绝标记、未消费授权一并清掉。 */
+    public void purgeSession(String sessionId) {
+        pending.remove(sessionId);
+        rejected.remove(sessionId);
+        discardApprovals(sessionId);
+    }
+
     /** 闸门侧：取走拒绝标记（一次性——用户改主意重新问时不该还被上一次的拒绝挡着）。 */
     public Optional<PendingRequest> consumeRejected(String sessionId) {
         return Optional.ofNullable(rejected.remove(sessionId));

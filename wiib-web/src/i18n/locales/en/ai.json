@@ -340,6 +340,7 @@
     "stopping": "Wrapping up",
     "toBottom": "Back to bottom",
     "hitlFailed": "Confirmation failed, please retry",
+    "tooLong": "Message too long (limit {{max}} characters) - trim it and resend",
     "queued": "Queued · sends after this round",
     "cancelQueued": "Never mind",
     "cancelQueuedAria": "Cancel this queued message",

@@ -971,6 +971,10 @@ CREATE TABLE IF NOT EXISTS user_llm_endpoint (
     updated_at       TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_user_llm_endpoint_user ON user_llm_endpoint(user_id);
+-- 一人恰一条默认。旧库若同一用户有多条默认只留最早一条，再建部分唯一索引：并发新增/设默认时另一方直接失败
+UPDATE user_llm_endpoint e SET is_default = FALSE
+ WHERE e.is_default AND e.id <> (SELECT min(d.id) FROM user_llm_endpoint d WHERE d.user_id = e.user_id AND d.is_default);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_user_llm_endpoint_default ON user_llm_endpoint(user_id) WHERE is_default;
 COMMENT ON TABLE  user_llm_endpoint IS '用户 BYOK 端点库：一条=协议+URL+key+模型(+思考档位)，一人多条；对话/交易员/复盘教练从中选';
 COMMENT ON COLUMN user_llm_endpoint.reasoning_effort IS '思考档位，任意上游认的值（none/low/medium/high/xhigh…），NULL=不传走模型默认；模型支不支持查不到，由用户自选';
 COMMENT ON COLUMN user_llm_endpoint.api_key_enc IS 'AES-256-GCM 密文，密钥来自 WIIB_TRADER_KEY_SECRET';

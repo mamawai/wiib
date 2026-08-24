@@ -6,6 +6,7 @@ import com.mawai.wiibcommon.entity.AiTraderDecision;
 import com.mawai.wiibcommon.enums.AgentLang;
 import com.mawai.wiibquant.agent.i18n.PromptCatalog;
 import com.mawai.wiibquant.agent.i18n.UserLangResolver;
+import com.mawai.wiibquant.agent.llm.LlmErrorMessages;
 import com.mawai.wiibquant.agent.llm.UsageTrackingChatModel;
 import com.mawai.wiibquant.agent.trader.TraderModelFactory;
 import com.mawai.wiibquant.mapper.AiTraderDecisionMapper;
@@ -111,7 +112,13 @@ public class ReviewRunner {
             String output = callWithTimeout(model,
                     userPrompt(trader, material, fromMs, boundaryMs, last, lang), lang, d);
             if (output == null || output.isBlank()) {
-                throw new IllegalStateException(prompts.get(lang, "reviewer.error.emptyOutput"));
+                // 空输出直接落 ERROR 行：这句本来就是给用户看的，不走下面的异常归类
+                d.setStatus(AiTraderDecision.STATUS_ERROR);
+                d.setError(prompts.get(lang, "reviewer.error.emptyOutput"));
+                d.setLatencyMs((int) (System.currentTimeMillis() - start));
+                decisionMapper.insert(d);
+                log.warn("[Review] 模型输出为空 traderId={} boundary={}", trader.getId(), boundaryMs);
+                return;
             }
             Parsed parsed = parse(output, memoryMark, NoteBudget.maxChars(lang));
             d.setStatus(AiTraderDecision.STATUS_OK);
@@ -135,15 +142,16 @@ public class ReviewRunner {
             }
         } catch (Exception e) {
             Throwable t = e instanceof ExecutionException && e.getCause() != null ? e.getCause() : e;
+            // ERROR 行公开上时间线：只存归类文案（上游原文可能带网关 URL/key），原文进日志
             String msg = t instanceof TimeoutException
                     ? prompts.get(lang, "reviewer.error.timeout", Map.of("seconds", timeoutSeconds))
-                    : t.getMessage() == null ? t.getClass().getSimpleName() : t.getMessage();
+                    : LlmErrorMessages.classify(t, prompts, lang);
             d.setStatus(AiTraderDecision.STATUS_ERROR);
-            d.setError(msg.length() > 500 ? msg.substring(0, 500) : msg);
+            d.setError(msg);
             d.setLatencyMs((int) (System.currentTimeMillis() - start));
             decisionMapper.insert(d);
             // 不计连败不暂停：复盘失败没有资金风险，明天素材还在
-            log.warn("[Review] 复盘失败 traderId={} boundary={} msg={}", trader.getId(), boundaryMs, msg);
+            log.warn("[Review] 复盘失败 traderId={} boundary={} msg={}", trader.getId(), boundaryMs, msg, t);
         }
     }
 

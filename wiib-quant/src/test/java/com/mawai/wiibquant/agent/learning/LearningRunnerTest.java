@@ -272,7 +272,8 @@ class LearningRunnerTest {
         verify(decisionMapper).insert(dec.capture());
         assertThat(dec.getValue().getKind()).isEqualTo(AiTraderDecision.KIND_LEARN);
         assertThat(dec.getValue().getStatus()).isEqualTo(AiTraderDecision.STATUS_ERROR);
-        assertThat(dec.getValue().getError()).contains("401");
+        // 公开行只存归类文案，上游原文不落库
+        assertThat(dec.getValue().getError()).contains("API key").doesNotContain("上游401");
         verify(traderMapper, never()).update(any(), any());
     }
 

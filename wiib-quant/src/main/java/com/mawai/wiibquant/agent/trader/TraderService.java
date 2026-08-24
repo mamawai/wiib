@@ -311,17 +311,22 @@ public class TraderService {
     }
 
     /**
-     * 最近一条成功的 REVIEW / LEARN 行的 wakeTime，没有=null。
+     * 最近一条写了笔记的 REVIEW / LEARN 行的 wakeTime，没有=null。
+     * REVIEW 以 memoryAfter 非空为准（缺分隔符的复盘 OK 行照存但笔记没动）；LEARN 的 OK 行本身就是笔记全文。
      * 不按局过滤：memory / learningNotes 是跨局累积的，"最近一次复盘/学习"也就跨局看。
      */
     public Long latestNoteTime(long traderId, String kind) {
-        AiTraderDecision d = decisionMapper.selectOne(new LambdaQueryWrapper<AiTraderDecision>()
+        LambdaQueryWrapper<AiTraderDecision> q = new LambdaQueryWrapper<AiTraderDecision>()
                 .select(AiTraderDecision::getWakeTime)
                 .eq(AiTraderDecision::getTraderId, traderId)
                 .eq(AiTraderDecision::getKind, kind)
                 .eq(AiTraderDecision::getStatus, AiTraderDecision.STATUS_OK)
                 .orderByDesc(AiTraderDecision::getWakeTime)
-                .last("LIMIT 1"));
+                .last("LIMIT 1");
+        if (AiTraderDecision.KIND_REVIEW.equals(kind)) {
+            q.isNotNull(AiTraderDecision::getMemoryAfter);
+        }
+        AiTraderDecision d = decisionMapper.selectOne(q);
         return d == null ? null : d.getWakeTime();
     }
 

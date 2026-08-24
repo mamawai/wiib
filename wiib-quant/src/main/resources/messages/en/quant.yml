@@ -29,6 +29,7 @@ quant:
 
   chat:
     sessionNotFound: That session does not exist or is not yours
+    sessionRunning: This session is still running or has a follow-up pending - delete it once it finishes
     approvalExpired: That approval request has expired - start it again
 
   # Admin: LLM configs and feature-slot assignment

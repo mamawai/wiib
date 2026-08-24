@@ -348,6 +348,22 @@ class TraderWakeupLoopTest {
         assertThat(dec.getValue().getActionsJson()).contains("rejected").contains("杠杆");
     }
 
+    /** key 失效（401）第一败就暂停，不等攒满 5 败：判的是异常本身，不是成文后的话 */
+    @Test
+    void keyInvalidPausesOnFirstFailure() {
+        stubHealthyAccount();
+        when(modelFactory.modelFor(any())).thenThrow(new IllegalStateException("Responses API HTTP 401: invalid key"));
+
+        runner.wake(trader(), 1785171600000L);
+
+        @SuppressWarnings({"unchecked", "rawtypes"})
+        ArgumentCaptor<com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<AiTrader>> u =
+                ArgumentCaptor.forClass((Class) com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper.class);
+        verify(traderMapper).update(any(), u.capture());
+        assertThat(u.getValue().getParamNameValuePairs().values())
+                .contains(AiTrader.STATUS_PAUSED, prompts.get(AgentLang.ZH, "trader.error.keyInvalid"));
+    }
+
     @Test
     void modelFailureRecordsErrorAndPausesAfterFifthConsecutive() {
         stubHealthyAccount();
@@ -360,7 +376,8 @@ class TraderWakeupLoopTest {
         ArgumentCaptor<AiTraderDecision> dec = ArgumentCaptor.forClass(AiTraderDecision.class);
         verify(decisionMapper).insert(dec.capture());
         assertThat(dec.getValue().getStatus()).isEqualTo(AiTraderDecision.STATUS_ERROR);
-        assertThat(dec.getValue().getError()).contains("401");
+        // 公开行只存归类文案，上游原文不落库
+        assertThat(dec.getValue().getError()).contains("API key").doesNotContain("上游401");
         verify(traderMapper).update(any(), any()); // 连败暂停走列级更新
     }
 

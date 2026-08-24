@@ -28,6 +28,8 @@ const DRAG_THRESHOLD = 8;
 const CLICK_SWALLOW_MS = 300;
 /** 横滚两端的渐隐宽度，配 index.css 的 .hscroll-fade */
 const FADE_W = '1.25rem';
+/** 单条消息字符上限，与后端 ChatWorkbenchController.MAX_MESSAGE_CHARS 同值 */
+const MAX_MESSAGE_CHARS = 10_000;
 
 /** 用户自己配过的那份；null=没配过，交给出厂四条（它们要随语言走，不能在这儿定死） */
 function loadSuggests(): string[] | null {
@@ -90,10 +92,15 @@ export function ChatComposer({ loading, onSend, fullscreen }: {
   const submit = useCallback((text?: string) => {
     const msg = (text ?? input).trim();
     if (!msg) return;
+    // 超限在发出前拦：发出去再被后端拒，输入框已经清空，用户手里就没那段文本了
+    if (msg.length > MAX_MESSAGE_CHARS) {
+      chatStore.pushError(t('chat.tooLong', { max: MAX_MESSAGE_CHARS }));
+      return;
+    }
     edit('');
     if (inputRef.current) inputRef.current.style.height = 'auto';
     onSend(msg);
-  }, [input, edit, onSend]);
+  }, [input, edit, onSend, t]);
 
   const saveSuggests = useCallback((next: string[]) => {
     setStored(next);

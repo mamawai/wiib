@@ -10,6 +10,7 @@ import com.mawai.wiibquant.agent.i18n.LocalizedToolCallbacks;
 import com.mawai.wiibquant.agent.i18n.PromptCatalog;
 import com.mawai.wiibquant.agent.i18n.UserLangResolver;
 import com.mawai.wiibquant.agent.llm.AgentGraphs;
+import com.mawai.wiibquant.agent.llm.LlmErrorMessages;
 import com.mawai.wiibquant.agent.llm.ModelCallLimiter;
 import com.mawai.wiibquant.agent.llm.ResilientChatService;
 import com.mawai.wiibquant.agent.llm.ToolCallTraceHook;
@@ -145,22 +146,23 @@ public class LearningRunner {
                     trader.getId(), d.getToolCalls(), notes.length());
         } catch (Exception e) {
             Throwable t = e instanceof ExecutionException && e.getCause() != null ? e.getCause() : e;
+            // ERROR 行公开上时间线：只存归类文案（上游原文可能带网关 URL/key），原文进日志
             String msg = t instanceof TimeoutException
                     ? prompts.get(lang, "learning.error.timeout", Map.of("seconds", timeoutSeconds))
-                    : t.getMessage() == null ? t.getClass().getSimpleName() : t.getMessage();
+                    : LlmErrorMessages.classify(t, prompts, lang);
             // LEARN 行已落库（异常出在之后写笔记那步）：这一轮学习本身是成功的，不该改写成 ERROR；
             // 而且 MP insert 已把自增 id 回填进 d，再 insert 必撞主键、异常直接逃出学习回路——
             // 与 TraderWakeupRunner 同款坑同款防护。只留日志。
             if (d.getId() != null) {
-                log.warn("[Learn] LEARN行已存但写笔记失败 traderId={} msg={}", trader.getId(), msg);
+                log.warn("[Learn] LEARN行已存但写笔记失败 traderId={} msg={}", trader.getId(), msg, t);
                 return;
             }
             d.setStatus(AiTraderDecision.STATUS_ERROR);
-            d.setError(msg.length() > 500 ? msg.substring(0, 500) : msg);
+            d.setError(msg);
             d.setLatencyMs((int) (System.currentTimeMillis() - start));
             decisionMapper.insert(d);
             // 不计连败不暂停：学习失败没有资金风险，明天同侪还在
-            log.warn("[Learn] 学习失败 traderId={} boundary={} msg={}", trader.getId(), boundaryMs, msg);
+            log.warn("[Learn] 学习失败 traderId={} boundary={} msg={}", trader.getId(), boundaryMs, msg, t);
         }
     }
 

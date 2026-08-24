@@ -112,6 +112,7 @@ error:
   chatCapacityFull: The chat is at capacity - try again shortly
   replayAiBusy: The previous AI analysis is still running
   chatRegenerateUnavailable: This answer cannot be regenerated
+  chatMessageTooLong: Message too long (limit 10000 characters) - trim it and resend
 
   # Login-state failures: the various sa-token NotLoginException types, all returned as 401
   token:

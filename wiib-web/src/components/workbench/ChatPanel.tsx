@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { ArrowDown, Bot, ChevronsDownUp, ChevronsUpDown, History, KeyRound, Loader2, Maximize2, Minimize2, PanelLeftClose, PanelLeftOpen, RotateCcw, Square, X } from 'lucide-react';
 import { workbenchApi } from '../../api';
 import { cn } from '../../lib/utils';
+import { useToast } from '../ui/use-toast';
 import { chatStore } from './chatStore';
 import { AssistantAnswer, HitlCard, ProcessRail, UserBubble } from './ChatMessages';
 import { groupBlocks, HUB_NAME } from './chatView';
@@ -37,6 +38,7 @@ interface ChatPanelProps {
  */
 export function ChatPanel({ onClose, onGoConfig, fullscreen, onToggleFullscreen }: ChatPanelProps) {
   const { t } = useTranslation(['ai', 'common']);
+  const { toast } = useToast();
   const { items, loading, background, sessionId, needsConfig } = useSyncExternalStore(chatStore.subscribe, chatStore.getSnapshot);
   // 在途的那张确认卡（按 requestId 认）。面板里可能同时挂着几张，用一个布尔会把别的卡一起禁掉
   const [hitlBusy, setHitlBusy] = useState<{ requestId: string; approved: boolean } | null>(null);
@@ -176,8 +178,11 @@ export function ChatPanel({ onClose, onGoConfig, fullscreen, onToggleFullscreen 
       await workbenchApi.deleteSession(s.sessionId);
       setSessions(prev => prev.filter(x => x.sessionId !== s.sessionId));
       chatStore.clearIfCurrent(s.sessionId);
-    } catch { /* 删除失败保持原样 */ }
-  }, [t]);
+    } catch (err) {
+      // 后端拒删（会话还在跑/欠补答）带的是成句的拒因，直接给用户看；列表保持原样
+      toast((err as Error).message || t('common:loadFailed'), 'error');
+    }
+  }, [t, toast]);
 
   const handleNewSession = useCallback(() => {
     chatStore.newSession();

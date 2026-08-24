@@ -250,8 +250,25 @@ class ReviewRunnerTest {
         verify(decisionMapper).insert(dec.capture());
         assertThat(dec.getValue().getKind()).isEqualTo(AiTraderDecision.KIND_REVIEW);
         assertThat(dec.getValue().getStatus()).isEqualTo(AiTraderDecision.STATUS_ERROR);
-        assertThat(dec.getValue().getError()).contains("401");
+        // 公开行只存归类文案，上游原文不落库
+        assertThat(dec.getValue().getError()).contains("API key").doesNotContain("上游401");
         // 不动 memory、不计连败（复盘失败没有资金风险，trader 行一个字段都不碰）
+        verify(traderMapper, never()).update(any(), any());
+    }
+
+    /** 模型空输出：ERROR 行写"输出为空"这句给用户看的话，不走异常归类 */
+    @Test
+    void emptyOutputWritesErrorRow() {
+        stubMaterial();
+        ChatModel model = modelReturning("");
+        when(modelFactory.modelFor(any())).thenReturn(model);
+
+        runner.review(trader(), BOUNDARY);
+
+        ArgumentCaptor<AiTraderDecision> dec = ArgumentCaptor.forClass(AiTraderDecision.class);
+        verify(decisionMapper).insert(dec.capture());
+        assertThat(dec.getValue().getStatus()).isEqualTo(AiTraderDecision.STATUS_ERROR);
+        assertThat(dec.getValue().getError()).contains("输出为空");
         verify(traderMapper, never()).update(any(), any());
     }
 

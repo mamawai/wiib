@@ -88,6 +88,9 @@ public class ChatWorkbenchController {
     /** 深研判期间 SSE 通道会静默数分钟，nginx 默认 proxy_read_timeout 60s 会掐断——20s 一帧留 3 倍余量 */
     private static final long HEARTBEAT_SECONDS = 20;
 
+    /** 单条用户消息字符上限；文案见 error.chatMessageTooLong，改这里要一起改 */
+    static final int MAX_MESSAGE_CHARS = 10_000;
+
     /**
      * 上下文里每轮用户消息的起始标记。重新生成靠它从尾部找到"本轮提问"那条——
      * 一轮的尾巴不止"一问一答"，中间还夹着专家结论、交接指令和 tool_call 配对，
@@ -135,6 +138,10 @@ public class ChatWorkbenchController {
         response.setHeader("X-Accel-Buffering", "no");
         if (request.getMessage() == null || request.getMessage().isBlank()) {
             throw new IllegalArgumentException("消息不能为空");
+        }
+        // 上限挡的是误粘贴整份文件：首问会被压缩器原样保留、每次模型调用都重发
+        if (request.getMessage().length() > MAX_MESSAGE_CHARS) {
+            throw new BizException(ErrorCode.CHAT_MESSAGE_TOO_LONG);
         }
         // 三道准入都在把 emitter 交出去之前：一旦 return 给 MVC，响应就成了 event-stream，
         // 之后再出错只能推 error 事件，前端拿不到结构化错误码、没法自动引导用户去配置页
@@ -299,6 +306,12 @@ public class ChatWorkbenchController {
                 } catch (Throwable e) {
                     // submit 返回的 Future 没人 get()，不自己记一笔的话异常被完全吞掉
                     log.error("[Workbench] 对话任务异常退出 sessionId={}", sessionId, e);
+                    // run() 只兜 Exception，Error 穿到这里时通道还开着：不收口前端要挂到 10 分钟超时
+                    if (!channel.isClosed()) {
+                        channel.send("error", new JSONObject()
+                                .fluentPut("message", prompts.get(leaves.lang(), "llm.error.fallback")));
+                        channel.complete();
+                    }
                 } finally {
                     concurrencyGate.release(userId);
                     // 必须在还名额之后：turnDone 是让位等待者抢名额的发令枪
@@ -373,14 +386,19 @@ public class ChatWorkbenchController {
     }
 
     @DeleteMapping("/sessions/{sessionId}")
-    @Operation(summary = "删除历史会话（展示记录 + 后端续聊上下文）")
+    @Operation(summary = "删除历史会话（展示记录 + 后端续聊上下文）；在跑或欠补答的会话拒删")
     public Result<Void> deleteSession(@CurrentUserId long userId, @PathVariable String sessionId) {
         if (sessionId == null || !sessionId.startsWith("wb-" + userId + "-")) {
             return Result.fail(messages.get("quant.chat.sessionNotFound"));
         }
+        // 与 /status 同一口径：这轮收尾/补答落库还会往会话里写 assistant 行，先删掉它会以无标题空壳重新冒出来
+        if (runRegistry.isRunning(sessionId) || yieldCoordinator.hasPending(sessionId)) {
+            return Result.fail(messages.get("quant.chat.sessionRunning"));
+        }
         chatHistoryService.deleteSession(sessionId);
-        // 展示记录与续聊上下文是两套存储，删会话得都清
+        // 展示记录与续聊上下文是两套存储，删会话得都清；挂着的确认卡/授权一并清
         contextStore.purge(sessionId);
+        approvalRegistry.purgeSession(sessionId);
         return Result.ok(null);
     }
 

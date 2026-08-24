@@ -53,7 +53,7 @@ function NotesCard({ icon: Icon, tone, title, time, content, empty }: {
     <div className="rounded-lg pt-card p-4 space-y-2">
       <div className="flex items-center gap-2 flex-wrap">
         <span className="microlabel inline-flex items-center gap-1"><Icon className={cn('w-3 h-3', tone)} />{title}</span>
-        {time != null && (
+        {time != null && text && (
           <span className="ml-auto text-[10px] num text-muted-foreground/70">{t('detail.lastAt', { time: fmtDateTime(time) })}</span>
         )}
       </div>
@@ -93,10 +93,15 @@ export function ArenaDetail() {
 
   const load = useCallback(() => {
     if (!Number.isFinite(traderId)) return;
-    const bounds = day ? dayBounds(day) : null;
     void traderApi.detail(traderId).then(setDetail).catch(() => setDetail(null));
     void traderApi.equityCurve(traderId, round ?? undefined).then(setCurve).catch(() => setCurve([]));
     void traderApi.trades(traderId).then(setTrades).catch(() => setTrades([]));
+  }, [traderId, round]);
+
+  // 时间线单独拉：按天翻看只动它，持仓/曲线/已了结不跟着重拉
+  const loadDecisions = useCallback(() => {
+    if (!Number.isFinite(traderId)) return;
+    const bounds = day ? dayBounds(day) : null;
     void traderApi.decisions(traderId, PAGE, undefined, round ?? undefined, bounds?.from, bounds?.to).then(list => {
       setDecisions(list);
       setHasMore(list.length >= PAGE);
@@ -108,6 +113,11 @@ export function ArenaDetail() {
     const timer = setInterval(load, REFRESH_MS);
     return () => clearInterval(timer);
   }, [load]);
+  useEffect(() => {
+    loadDecisions();
+    const timer = setInterval(loadDecisions, REFRESH_MS);
+    return () => clearInterval(timer);
+  }, [loadDecisions]);
 
   const loadMore = useCallback(() => {
     const oldest = decisions[decisions.length - 1];
@@ -129,11 +139,14 @@ export function ArenaDetail() {
   const shiftDay = (delta: number) => setDay(d => fmtDate(dayBounds(d ?? today).from + delta * DAY_MS));
 
   // 区间锚在曲线最后一个点而不是"现在"：看历史局时 3 天＝那局的最后 3 天
-  const visible = useMemo(() => {
+  const windowed = useMemo(() => {
     if (range === 0 || curve.length === 0) return curve;
     const from = curve[curve.length - 1].wakeTime - range * DAY_MS;
     return curve.filter(p => p.wakeTime >= from);
   }, [curve, range]);
+  // 区间内点不够画线（末点之前是长停工）就退到整局，按钮高亮跟着退
+  const effectiveRange: Range = windowed.length > 1 ? range : 0;
+  const visible = effectiveRange === 0 ? curve : windowed;
   // 净值曲线复用 EquityChart（累计盈亏口径）：equity-10000 起点归零；区间只裁 x 轴，y 轴仍是整局口径
   const chartPoints = useMemo<TnEquityPoint[]>(
     () => visible.map(p => ({ time: p.wakeTime, cumPnl: p.equity - 10000 })),
@@ -171,7 +184,7 @@ export function ArenaDetail() {
           </>
         )}
         <button
-          onClick={load}
+          onClick={() => { load(); loadDecisions(); }}
           className="ml-auto border border-border hover:bg-surface-hover w-8 h-8 rounded-lg flex items-center justify-center text-muted-foreground hover:text-primary"
           aria-label={t('common:refresh')}
         >
@@ -216,7 +229,7 @@ export function ArenaDetail() {
             )}
             <div className="ml-auto flex gap-1">
               {RANGES.map(r => (
-                <SegButton key={r} active={r === range} onClick={() => setRange(r)}>
+                <SegButton key={r} active={r === effectiveRange} onClick={() => setRange(r)}>
                   {r === 0 ? t('detail.rangeAll') : t('detail.rangeDays', { n: r })}
                 </SegButton>
               ))}
