@@ -236,9 +236,9 @@ class LearningRunnerTest {
         verify(traderMapper, never()).update(any(), any());
     }
 
-    /** 笔记总量是硬约束：模型不肯收敛就截到 2000 字内兜底，且按句读收笔（决策行仍存全文） */
+    /** 篇幅只由提示词那句"≤N"约束：模型写超了照样整段落库，代码不替它裁 */
     @Test
-    void notesTruncatedAtLimit() {
+    void notesStoredInFullEvenOverBudget() {
         stubLeaderboard();
         String longOutput = QUALIFIED_OUTPUT + "\n" + "这句凑长度的话以句号收尾。".repeat(200);
         ChatModel model = modelReturning(longOutput);
@@ -253,9 +253,9 @@ class LearningRunnerTest {
         String written = up.getValue().getParamNameValuePairs().values().stream()
                 .filter(v -> v instanceof String s && s.startsWith("【本期学习】"))
                 .map(String.class::cast).findFirst().orElseThrow();
-        assertThat(written.length()).isLessThanOrEqualTo(NoteBudget.maxChars(AgentLang.ZH));
-        assertThat(written).endsWith("。");   // 句读收笔，不吐半句话
-        // 决策行留全文：公开时间线不该被这条兜底规则裁掉
+        assertThat(written.length()).isGreaterThan(NoteBudget.maxChars(AgentLang.ZH));   // 确实超了预算
+        assertThat(written).isEqualTo(longOutput);
+        // 决策行同样是全文（笔记与公开时间线本就是同一份产出）
         ArgumentCaptor<AiTraderDecision> dec = ArgumentCaptor.forClass(AiTraderDecision.class);
         verify(decisionMapper).insert(dec.capture());
         assertThat(dec.getValue().getReasoning()).hasSize(longOutput.length());

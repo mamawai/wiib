@@ -134,15 +134,15 @@ public class LearningRunner {
             d.setStatus(AiTraderDecision.STATUS_OK);
             d.setReasoning(output);
             decisionMapper.insert(d);
-            // 笔记就是这份产出的全文（不像复盘要切两段）；超限按句读收笔截断兜底，见 NoteBudget.clip
-            String notes = NoteBudget.clip(output, NoteBudget.maxChars(lang));
+            // 笔记就是这份产出的全文（不像复盘要切两段），原样落库。
+            // 篇幅靠提示词里那句"≤N"约束，不在这裁：裁刀落在哪都是把模型认为最该留的那句切了
             // 覆盖写 + 列级更新：并发唤醒回路正在改同一行的其它列，整行 updateById 会把它们打回旧值
             traderMapper.update(null, new LambdaUpdateWrapper<AiTrader>()
                     .eq(AiTrader::getId, trader.getId())
-                    .set(AiTrader::getLearningNotes, notes)
+                    .set(AiTrader::getLearningNotes, output)
                     .set(AiTrader::getUpdatedAt, LocalDateTime.now()));
             log.info("[Learn] 学习完成 traderId={} 工具调用{}次 笔记{}字",
-                    trader.getId(), d.getToolCalls(), notes.length());
+                    trader.getId(), d.getToolCalls(), output.length());
         } catch (Exception e) {
             Throwable t = e instanceof ExecutionException && e.getCause() != null ? e.getCause() : e;
             // ERROR 行公开上时间线：只存归类文案（上游原文可能带网关 URL/key），原文进日志
@@ -191,7 +191,7 @@ public class LearningRunner {
         UsageTrackingChatModel model = new UsageTrackingChatModel(modelFactory.modelFor(trader));
         // "它看了谁"是 LEARN 行在公开时间线上的观赏点，全靠这个 hook 记
         ToolCallTraceHook trace = new ToolCallTraceHook();
-        // 提示词里那句"≤N"与写库时的截断值同源，都取 NoteBudget
+        // 提示词里那句"≤N"是笔记篇幅的唯一约束（落库不裁），取值见 NoteBudget
         CompiledGraph<MessagesState<Message>> graph = AgentGraphs
                 .reactAgent(model, prompts.get(lang, "learning.system",
                         Map.of("maxChars", NoteBudget.maxChars(lang))))

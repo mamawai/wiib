@@ -219,7 +219,8 @@ public class TraderWakeupRunner {
                 return;
             }
             decision.setStatus(AiTraderDecision.STATUS_ERROR);
-            // error 列 VARCHAR(500)：sim 原话的长度不受本侧控制
+            // 上游原话的长度不受本侧控制（曾见整段响应体当异常消息回来），截一刀：
+            // 这句要原样铺进竞技场的错误行，几十 KB 会把时间线撑烂
             decision.setError(msg.length() > 500 ? msg.substring(0, 500) : msg);
             decision.setLatencyMs((int) (System.currentTimeMillis() - start));
             decisionMapper.insert(decision);
@@ -668,6 +669,7 @@ public class TraderWakeupRunner {
                     .set(AiTrader::getPausedReason, prompts.get(lang, "trader.error.keyInvalid"));
             log.warn("[Trader] key 失效自动暂停 traderId={}", trader.getId());
         } else if (failures >= MAX_CONSECUTIVE_FAILURES) {
+            // 原因嵌在暂停提示那一句里显示在 trader 卡片上，留 150 字够说清是什么错
             update.set(AiTrader::getStatus, AiTrader.STATUS_PAUSED)
                     .set(AiTrader::getPausedReason, prompts.get(lang, "trader.error.consecutiveFailures",
                             Map.of("n", failures, "error",

@@ -520,8 +520,8 @@ CREATE TABLE IF NOT EXISTS strategy_signal (
     stop_loss         DECIMAL(20,8)   NOT NULL,
     take_profit       DECIMAL(20,8),
     score             DECIMAL(10,4),
-    reason            VARCHAR(512),
-    leg_tags          VARCHAR(512),
+    reason            TEXT,
+    leg_tags          TEXT,
     bar_close_time    BIGINT          NOT NULL,
     created_at        TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT uk_strategy_signal UNIQUE (strategy_id, symbol, bar_close_time)
@@ -533,6 +533,11 @@ COMMENT ON COLUMN strategy_signal.leg_tags IS 'live确认腿判定，如liq_casc
 COMMENT ON COLUMN strategy_signal.take_profit IS '固定止盈价；TURTLE类通道出场策略无固定TP，为NULL';
 
 CREATE INDEX IF NOT EXISTS idx_strategy_signal_symbol_time ON strategy_signal(symbol, bar_close_time DESC);
+
+-- 旧库放开列宽（新库的 CREATE 里已是 TEXT）：PG 的 varchar(n) 与 text 存储实现相同，
+-- 封顶换不来好处，只会让超长的那行整条写不进去
+ALTER TABLE strategy_signal ALTER COLUMN reason   TYPE TEXT;
+ALTER TABLE strategy_signal ALTER COLUMN leg_tags TYPE TEXT;
 
 -- ============================================
 -- AI 运行时配置表（API Key 管理，支持多条）
@@ -803,7 +808,7 @@ CREATE TABLE IF NOT EXISTS ai_trader (
     user_id         BIGINT NOT NULL UNIQUE,
     name            VARCHAR(32) NOT NULL,
     status          VARCHAR(16) NOT NULL DEFAULT 'PAUSED',
-    paused_reason   VARCHAR(255),
+    paused_reason   TEXT,
     symbols         VARCHAR(255) NOT NULL,
     interval_code   VARCHAR(8) NOT NULL DEFAULT '1h',
     custom_prompt   TEXT,
@@ -874,7 +879,7 @@ CREATE TABLE IF NOT EXISTS ai_trader_decision (
     completion_tokens BIGINT,
     total_tokens    BIGINT,
     latency_ms      INT,
-    error           VARCHAR(500),
+    error           TEXT,
     memory_after    TEXT,
     created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -895,8 +900,8 @@ CREATE TABLE IF NOT EXISTS ai_trader_plan (
     symbol          VARCHAR(20) NOT NULL,
     side            VARCHAR(8) NOT NULL,
     play_type       VARCHAR(20),
-    signals_used    VARCHAR(500),
-    invalidation_condition VARCHAR(500) NOT NULL,
+    signals_used    TEXT,
+    invalidation_condition TEXT NOT NULL,
     entry_price     NUMERIC(20,8),
     stop_loss_price NUMERIC(20,8),
     take_profit_price NUMERIC(20,8),
@@ -932,9 +937,9 @@ CREATE TABLE IF NOT EXISTS ai_trader_request (
     quantity        NUMERIC(20,8) NOT NULL,
     leverage        INT,
     request_price   NUMERIC(20,8) NOT NULL,
-    reason          VARCHAR(500) NOT NULL,
+    reason          TEXT NOT NULL,
     status          VARCHAR(10) NOT NULL DEFAULT 'PENDING',
-    executed_result VARCHAR(500),
+    executed_result TEXT,
     notified        BOOLEAN NOT NULL DEFAULT FALSE,
     wake_time       BIGINT NOT NULL,
     decided_at      TIMESTAMP,
@@ -952,6 +957,16 @@ COMMENT ON COLUMN ai_trader_request.status IS 'PENDING待确认 / APPROVED已同
 COMMENT ON COLUMN ai_trader_request.executed_result IS '批准后的执行结果或失败原因（余额不足/仓位已不存在等），不吞';
 COMMENT ON COLUMN ai_trader_request.notified IS '处理结果是否已回注给模型：主人批/拒之后的下一次唤醒注入一次并置true——反馈闭环的最后一环，不注模型只能从仓位变化倒猜';
 COMMENT ON COLUMN ai_trader_request.wake_time IS '发起时所在唤醒边界(ms)，用于回注提示词时说明"这是第几轮提的"';
+
+-- 旧库放开这几列的列宽（新库的 CREATE 里已是 TEXT）。装的是模型自由文本与上游异常串，
+-- 长度封顶换不来任何好处：PG 的 varchar(n) 与 text 存储实现相同，超长不截断而是整行拒收——
+-- 模型多写一句，一整份交易计划就没了。varchar→text 二进制兼容，只改 catalog 不重写表，可反复执行
+ALTER TABLE ai_trader          ALTER COLUMN paused_reason          TYPE TEXT;
+ALTER TABLE ai_trader_decision ALTER COLUMN error                  TYPE TEXT;
+ALTER TABLE ai_trader_plan     ALTER COLUMN signals_used           TYPE TEXT;
+ALTER TABLE ai_trader_plan     ALTER COLUMN invalidation_condition TYPE TEXT;
+ALTER TABLE ai_trader_request  ALTER COLUMN reason                 TYPE TEXT;
+ALTER TABLE ai_trader_request  ALTER COLUMN executed_result        TYPE TEXT;
 
 -- ============ user_llm_endpoint / user_llm_binding：用户 BYOK 端点库（2026-08 重构） ============
 -- 全站 BYOK 总配置：一人多条端点（协议+URL+key+模型+思考档位），对话/交易员/复盘教练只做选择；

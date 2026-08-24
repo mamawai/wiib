@@ -36,7 +36,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * ReviewRunner 回路测试：两段解析/降级安全（缺分隔符不动 memory）/2000字截断/
+ * ReviewRunner 回路测试：两段解析/降级安全（缺分隔符不动 memory）/超预算照存全文/
  * 无素材跳过/失败只留 ERROR 行不计连败。提示词按习惯配套断言。
  */
 class ReviewRunnerTest {
@@ -209,8 +209,9 @@ class ReviewRunnerTest {
         verify(traderMapper, never()).update(any(), any());
     }
 
+    /** 篇幅只由提示词那句"≤N"约束：模型写超了照样整段落库，代码不替它裁 */
     @Test
-    void memoryTruncatedAtLimit() {
+    void memoryStoredInFullEvenOverBudget() {
         stubMaterial();
         String longMemory = "记忆里每一句都以句号收尾。".repeat(160);
         ChatModel model = modelReturning("【本期复盘】\n战绩：……\n【记忆更新】\n" + longMemory);
@@ -225,8 +226,8 @@ class ReviewRunnerTest {
         String written = up.getValue().getParamNameValuePairs().values().stream()
                 .filter(v -> v instanceof String s && s.startsWith("记"))
                 .map(String.class::cast).findFirst().orElseThrow();
-        assertThat(written.length()).isLessThanOrEqualTo(NoteBudget.maxChars(AgentLang.ZH));
-        assertThat(written).endsWith("。");
+        assertThat(written.length()).isGreaterThan(NoteBudget.maxChars(AgentLang.ZH));   // 确实超了预算
+        assertThat(written).isEqualTo(longMemory);
     }
 
     @Test

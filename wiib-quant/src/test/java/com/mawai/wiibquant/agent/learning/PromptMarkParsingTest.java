@@ -42,7 +42,7 @@ class PromptMarkParsingTest {
 
     @Test
     void 中文复盘_认中文标记切两段() {
-        ReviewRunner.Parsed p = ReviewRunner.parse(ZH_REVIEW, prompts.get(AgentLang.ZH, "reviewer.mark.memory"), 2000);
+        ReviewRunner.Parsed p = ReviewRunner.parse(ZH_REVIEW, prompts.get(AgentLang.ZH, "reviewer.mark.memory"));
 
         assertThat(p.review()).isEqualTo("【本期复盘】战绩：起始 10000 → 期末 9800");
         assertThat(p.memory()).isEqualTo("已验证纪律：等回踩");
@@ -50,7 +50,7 @@ class PromptMarkParsingTest {
 
     @Test
     void 英文复盘_认英文标记切两段() {
-        ReviewRunner.Parsed p = ReviewRunner.parse(EN_REVIEW, prompts.get(AgentLang.EN, "reviewer.mark.memory"), 2000);
+        ReviewRunner.Parsed p = ReviewRunner.parse(EN_REVIEW, prompts.get(AgentLang.EN, "reviewer.mark.memory"));
 
         assertThat(p.review()).isEqualTo("[REVIEW] Scorecard: 10000 -> 9800");
         assertThat(p.memory()).isEqualTo("verified: wait for the retest");
@@ -59,9 +59,9 @@ class PromptMarkParsingTest {
     /** 反例：语言与标记交叉 → 判格式失守，memory 返回 null（REVIEW 行照存、记忆不动） */
     @Test
     void 复盘标记与语言对不上_判格式失守不污染记忆() {
-        assertThat(ReviewRunner.parse(EN_REVIEW, prompts.get(AgentLang.ZH, "reviewer.mark.memory"), 2000).memory())
+        assertThat(ReviewRunner.parse(EN_REVIEW, prompts.get(AgentLang.ZH, "reviewer.mark.memory")).memory())
                 .as("中文用户交回英文标记").isNull();
-        assertThat(ReviewRunner.parse(ZH_REVIEW, prompts.get(AgentLang.EN, "reviewer.mark.memory"), 2000).memory())
+        assertThat(ReviewRunner.parse(ZH_REVIEW, prompts.get(AgentLang.EN, "reviewer.mark.memory")).memory())
                 .as("英文用户交回中文标记——最容易被漏掉的那一种").isNull();
     }
 

@@ -120,7 +120,7 @@ public class ReviewRunner {
                 log.warn("[Review] 模型输出为空 traderId={} boundary={}", trader.getId(), boundaryMs);
                 return;
             }
-            Parsed parsed = parse(output, memoryMark, NoteBudget.maxChars(lang));
+            Parsed parsed = parse(output, memoryMark);
             d.setStatus(AiTraderDecision.STATUS_OK);
             d.setReasoning(parsed.review());
             // 学习快照随 REVIEW 行存档：memory 是滚动覆盖的，历史版本只活在这一列（学习演进史）
@@ -158,7 +158,7 @@ public class ReviewRunner {
     /** 虚拟线程承载超时；用量落 finally——超时作废的调用 token 也真烧了，不能不记。 */
     private String callWithTimeout(UsageTrackingChatModel model, String user, AgentLang lang,
                                    AiTraderDecision d) throws Exception {
-        // 提示词里那句"≤N"与 parse 的截断值同源，都取 NoteBudget
+        // 提示词里那句"≤N"是笔记篇幅的唯一约束（落库不裁），取值见 NoteBudget
         Prompt prompt = new Prompt(List.of(
                 new SystemMessage(prompts.get(lang, "reviewer.system",
                         Map.of("maxChars", NoteBudget.maxChars(lang)))), new UserMessage(user)));
@@ -191,12 +191,13 @@ public class ReviewRunner {
 
     /**
      * 两段解析：按最后一个记忆更新标记切分。缺分隔符 → REVIEW 照存、memory 返回 null 不动
-     * （降级安全）；记忆段超 {@code memoryMaxChars}（{@link NoteBudget}，按语言给）按句读收笔截断。复盘段意外为空时整篇当复盘存——公开留痕优先。
+     * （降级安全）；复盘段意外为空时整篇当复盘存——公开留痕优先。两段都原样返回，
+     * 记忆段的篇幅靠提示词里那句"≤N"（{@link NoteBudget}）约束，不在这裁。
      * <p>
      * 标记<b>只认本轮提示词那一门语言</b>的那条：提示词刚让它用英文标记，它交回中文标记就是没照格式
      * 走，按格式失守降级才对。这里若两门都认，"英文提示词却输出中文"这种真失守会被悄悄放过。
      */
-    static Parsed parse(String output, String memoryMark, int memoryMaxChars) {
+    static Parsed parse(String output, String memoryMark) {
         int idx = output.lastIndexOf(memoryMark);
         if (idx < 0) {
             return new Parsed(output.strip(), null);
@@ -206,7 +207,6 @@ public class ReviewRunner {
         if (memory.isEmpty()) {
             return new Parsed(review.isEmpty() ? output.strip() : review, null);
         }
-        memory = NoteBudget.clip(memory, memoryMaxChars);
         return new Parsed(review.isEmpty() ? output.strip() : review, memory);
     }
 
