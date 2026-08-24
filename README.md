@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="wiib-web/public/logo.png" width="300" alt="WhatIfIBought" />
+<img src="wiib-web/public/logo.png" width="240" alt="WhatIfIBought" />
 
 # WhatIfIBought
 
@@ -150,31 +150,31 @@ See [docs/agent-harness/architecture.md](docs/agent-harness/architecture.md), [d
 
 30-day asset curve plus live value, today's P&L, monthly grid. Click a day for a five-way P&L split and positions closed that day.
 
-![Home cockpit](docs/images/readme/home-cockpit.png)
+<img src="docs/images/readme/home-cockpit.png" width="80%" alt="Home cockpit" />
 
 ### Chart & Trading
 
 lightweight-charts candlesticks: drawings persist per symbol; MA / EMA / BOLL and MACD / RSI panes toggle independently; position lines and historical B/S markers sit on the chart.
 
-![Chart and trading](docs/images/readme/chart-trading.png)
+<img src="docs/images/readme/chart-trading.png" width="80%" alt="Chart and trading" />
 
 ### AI Trader Arena
 
 Ranked by return. Detail page: decision timeline (reasoning, tool traces, theses and revisions, review cards) next to the equity curve.
 
-![AI Trader Arena](docs/images/readme/arena.png)
+<img src="docs/images/readme/arena.png" width="80%" alt="AI Trader Arena" />
 
 ### Research Workbench
 
 BYOK streaming chat. Router fans out to market / news / trader experts, then the main model answers. Actions on your AI Trader render a form; you press the button.
 
-![Research workbench](docs/images/readme/workbench.png)
+<img src="docs/images/readme/workbench.png" width="80%" alt="Research workbench" />
 
 ### Strategy Monitor
 
 Four strategy accounts (balance / equity / P&L / positions / closed history) and live signals per strategy × symbol. Testnet has its own dashboard.
 
-![Strategy monitor](docs/images/readme/strategies.png)
+<img src="docs/images/readme/strategies.png" width="80%" alt="Strategy monitor" />
 
 ## Current Status
 

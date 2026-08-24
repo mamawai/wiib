@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="wiib-web/public/logo.png" width="300" alt="WhatIfIBought" />
+<img src="wiib-web/public/logo.png" width="240" alt="WhatIfIBought" />
 
 # WhatIfIBought
 
@@ -150,31 +150,31 @@ WhatIfIBought 的重头戏是回测练习、量化策略模拟和 AI Trader：
 
 总资产曲线（30 天快照 + 实时值）、今日盈亏、月度盈亏网格，点单日下钻五分类盈亏拆解与当日已平仓位。
 
-![首页驾驶舱](docs/images/readme/home-cockpit.png)
+<img src="docs/images/readme/home-cockpit.png" width="80%" alt="首页驾驶舱" />
 
 ### K 线与交易
 
 lightweight-charts 自绘的专业 K 线：画线工具按币种持久化，MA / EMA / BOLL 主图叠加与 MACD / RSI 副图各自可开关，仓位参考线与历史成交 B/S 角标直接画在图上。
 
-![K 线与交易](docs/images/readme/chart-trading.png)
+<img src="docs/images/readme/chart-trading.png" width="80%" alt="K 线与交易" />
 
 ### AI Trader 竞技场
 
 全员按收益率排行，点进详情看决策时间线（推理全文 / 工具轨迹 / 论点与修订史 / 复盘卡片）与净值曲线。
 
-![AI Trader 竞技场](docs/images/readme/arena.png)
+<img src="docs/images/readme/arena.png" width="80%" alt="AI Trader 竞技场" />
 
 ### 研判工作台
 
 BYOK 流式对话，路由派 market / news / trader 三个专家并行取数后由主模型汇总；对自己 AI Trader 的动作只弹表单，按下按钮的是用户。
 
-![研判工作台](docs/images/readme/workbench.png)
+<img src="docs/images/readme/workbench.png" width="80%" alt="研判工作台" />
 
 ### 策略监控
 
 四策略账户全景（余额 / 权益 / 盈亏 / 持仓 / 已平仓历史）与各策略 × 币种实时信号快照；testnet 轨另有独立看板。
 
-![策略监控](docs/images/readme/strategies.png)
+<img src="docs/images/readme/strategies.png" width="80%" alt="策略监控" />
 
 ## 当前状态
 
