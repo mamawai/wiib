@@ -18,4 +18,26 @@ final class NoteBudget {
     static int maxChars(AgentLang lang) {
         return lang == AgentLang.EN ? 4000 : 2000;
     }
+
+    /**
+     * 预算内截断：超限时退到预算内最后一个完整句读收笔（中文句读直接算；半角 .!? 须后跟空白，
+     * 免得切在 2463.39 这类小数点上）。段标题行不含句读，回退时天然连「只剩标题没正文」的尾段一起收掉。
+     * 句读太靠前（不足预算一半）或全程无句读时硬截断兜底；硬截断不劈代理对。
+     */
+    static String clip(String text, int maxChars) {
+        if (text.length() <= maxChars) {
+            return text;
+        }
+        for (int i = maxChars - 1; i >= maxChars / 2; i--) {
+            char c = text.charAt(i);
+            boolean fullWidth = c == '。' || c == '！' || c == '？' || c == '；';
+            boolean halfWidth = (c == '.' || c == '!' || c == '?' || c == ';')
+                    && Character.isWhitespace(text.charAt(i + 1));
+            if (fullWidth || halfWidth) {
+                return text.substring(0, i + 1);
+            }
+        }
+        int cut = Character.isHighSurrogate(text.charAt(maxChars - 1)) ? maxChars - 1 : maxChars;
+        return text.substring(0, cut);
+    }
 }

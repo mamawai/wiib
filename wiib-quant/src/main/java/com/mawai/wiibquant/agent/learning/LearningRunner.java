@@ -134,9 +134,8 @@ public class LearningRunner {
             d.setStatus(AiTraderDecision.STATUS_OK);
             d.setReasoning(output);
             decisionMapper.insert(d);
-            // 笔记就是这份产出的全文（不像复盘要切两段）；超限截断兜底，上限见 NoteBudget
-            int maxChars = NoteBudget.maxChars(lang);
-            String notes = output.length() > maxChars ? output.substring(0, maxChars) : output;
+            // 笔记就是这份产出的全文（不像复盘要切两段）；超限按句读收笔截断兜底，见 NoteBudget.clip
+            String notes = NoteBudget.clip(output, NoteBudget.maxChars(lang));
             // 覆盖写 + 列级更新：并发唤醒回路正在改同一行的其它列，整行 updateById 会把它们打回旧值
             traderMapper.update(null, new LambdaUpdateWrapper<AiTrader>()
                     .eq(AiTrader::getId, trader.getId())

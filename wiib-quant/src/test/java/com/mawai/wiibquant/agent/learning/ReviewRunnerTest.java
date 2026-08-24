@@ -212,7 +212,7 @@ class ReviewRunnerTest {
     @Test
     void memoryTruncatedAtLimit() {
         stubMaterial();
-        String longMemory = "长".repeat(NoteBudget.maxChars(AgentLang.ZH) + 500);
+        String longMemory = "记忆里每一句都以句号收尾。".repeat(160);
         ChatModel model = modelReturning("【本期复盘】\n战绩：……\n【记忆更新】\n" + longMemory);
         when(modelFactory.modelFor(any())).thenReturn(model);
 
@@ -223,9 +223,10 @@ class ReviewRunnerTest {
                 ArgumentCaptor.forClass((Class) LambdaUpdateWrapper.class);
         verify(traderMapper).update(any(), up.capture());
         String written = up.getValue().getParamNameValuePairs().values().stream()
-                .filter(v -> v instanceof String s && s.startsWith("长"))
+                .filter(v -> v instanceof String s && s.startsWith("记"))
                 .map(String.class::cast).findFirst().orElseThrow();
-        assertThat(written).hasSize(NoteBudget.maxChars(AgentLang.ZH));
+        assertThat(written.length()).isLessThanOrEqualTo(NoteBudget.maxChars(AgentLang.ZH));
+        assertThat(written).endsWith("。");
     }
 
     @Test

@@ -236,11 +236,11 @@ class LearningRunnerTest {
         verify(traderMapper, never()).update(any(), any());
     }
 
-    /** 笔记总量是硬约束：模型不肯收敛就按 2000 字截断兜底（决策行仍存全文） */
+    /** 笔记总量是硬约束：模型不肯收敛就截到 2000 字内兜底，且按句读收笔（决策行仍存全文） */
     @Test
     void notesTruncatedAtLimit() {
         stubLeaderboard();
-        String longOutput = QUALIFIED_OUTPUT + "\n" + "补".repeat(NoteBudget.maxChars(AgentLang.ZH));
+        String longOutput = QUALIFIED_OUTPUT + "\n" + "这句凑长度的话以句号收尾。".repeat(200);
         ChatModel model = modelReturning(longOutput);
         when(modelFactory.modelFor(any())).thenReturn(model);
 
@@ -253,7 +253,8 @@ class LearningRunnerTest {
         String written = up.getValue().getParamNameValuePairs().values().stream()
                 .filter(v -> v instanceof String s && s.startsWith("【本期学习】"))
                 .map(String.class::cast).findFirst().orElseThrow();
-        assertThat(written).hasSize(NoteBudget.maxChars(AgentLang.ZH));
+        assertThat(written.length()).isLessThanOrEqualTo(NoteBudget.maxChars(AgentLang.ZH));
+        assertThat(written).endsWith("。");   // 句读收笔，不吐半句话
         // 决策行留全文：公开时间线不该被这条兜底规则裁掉
         ArgumentCaptor<AiTraderDecision> dec = ArgumentCaptor.forClass(AiTraderDecision.class);
         verify(decisionMapper).insert(dec.capture());

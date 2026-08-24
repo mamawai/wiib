@@ -191,7 +191,7 @@ public class ReviewRunner {
 
     /**
      * 两段解析：按最后一个记忆更新标记切分。缺分隔符 → REVIEW 照存、memory 返回 null 不动
-     * （降级安全）；记忆段超 {@code memoryMaxChars}（{@link NoteBudget}，按语言给）截断。复盘段意外为空时整篇当复盘存——公开留痕优先。
+     * （降级安全）；记忆段超 {@code memoryMaxChars}（{@link NoteBudget}，按语言给）按句读收笔截断。复盘段意外为空时整篇当复盘存——公开留痕优先。
      * <p>
      * 标记<b>只认本轮提示词那一门语言</b>的那条：提示词刚让它用英文标记，它交回中文标记就是没照格式
      * 走，按格式失守降级才对。这里若两门都认，"英文提示词却输出中文"这种真失守会被悄悄放过。
@@ -206,9 +206,7 @@ public class ReviewRunner {
         if (memory.isEmpty()) {
             return new Parsed(review.isEmpty() ? output.strip() : review, null);
         }
-        if (memory.length() > memoryMaxChars) {
-            memory = memory.substring(0, memoryMaxChars);
-        }
+        memory = NoteBudget.clip(memory, memoryMaxChars);
         return new Parsed(review.isEmpty() ? output.strip() : review, memory);
     }
 
