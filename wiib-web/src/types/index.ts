@@ -630,7 +630,8 @@ export type WorkbenchEvent =
   // 真答案由后端补答轮落历史，前端靠 status 轮询等它落库后整体回放补显
   // meta 是本轮读数，让位收尾那条 done 不带（答案还没出，无账可报）。
   // cancelled=用户中断，answer 是"半截 + （已中断）"的定稿，前端要整段用它覆盖屏上那半截
-  | { type: 'done'; sessionId: string; answer: string; deferred?: boolean; cancelled?: boolean; meta?: TurnMeta }
+  // deferred=让位收尾（answer 只是过渡话术，question=被让位的原问题）；pending=此刻会话还欠着补答，前端空闲时发起补答轮
+  | { type: 'done'; sessionId: string; answer: string; deferred?: boolean; question?: string; cancelled?: boolean; pending?: boolean; meta?: TurnMeta }
   | { type: 'error'; message: string };
 
 /**
@@ -691,6 +692,12 @@ export interface StrategyAccountView {
   winRate: number;
   positions: FuturesPosition[];
   closedPositions: StrategyClosedPosition[];
+}
+
+/** 会话运行状态（/ai/workbench/sessions/{id}/status）：running=有轮在跑；pending=欠着补答 */
+export interface WorkbenchSessionStatus {
+  running: boolean;
+  pending: boolean;
 }
 
 /** 工作台历史会话摘要（/ai/workbench/sessions） */

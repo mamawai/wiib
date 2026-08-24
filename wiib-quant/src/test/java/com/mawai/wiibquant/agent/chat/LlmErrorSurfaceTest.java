@@ -95,7 +95,7 @@ class LlmErrorSurfaceTest {
         List<ChatTurnRunner.ExpertProgress> progress = new CopyOnWriteArrayList<>();
         new ChatTurnRunner(contextStore, new ApprovalRegistry(), ChatTestEndpoints.PROMPTS, ChatTestEndpoints.TOOLS)
                 .run(leaves, 1L, "wb-1-expert-fail", "看看行情", null, chunk -> { }, progress::add,
-                        ChatTurnRunner.TurnYield.NONE);
+                        ChatTurnRunner.TurnYield.NONE, null);
 
         String pushedToUser = progress.stream()
                 .filter(e -> ChatTurnRunner.ExpertProgress.ERROR.equals(e.phase()))
@@ -127,12 +127,12 @@ class LlmErrorSurfaceTest {
         };
         ChatTurnRunner turnRunner = mock(ChatTurnRunner.class);
         doThrow(new RuntimeException(RAW)).when(turnRunner)
-                .run(any(), anyLong(), any(), any(), any(), any(), any(), any());
+                .run(any(), anyLong(), any(), any(), any(), any(), any(), any(), any());
         ChatConcurrencyGate gate = new ChatConcurrencyGate(10);
         WorkbenchRunRegistry runRegistry = mock(WorkbenchRunRegistry.class);
         ChatHistoryService history = mock(ChatHistoryService.class);
         ChatYieldCoordinator coordinator =
-                new ChatYieldCoordinator(gate, runRegistry, turnRunner, history, ChatTestEndpoints.PROMPTS);
+                new ChatYieldCoordinator();
         ChatWorkbenchController controller = new ChatWorkbenchController(mock(ChatAgentFactory.class),
                 mock(LlmEndpointService.class), new ApprovalRegistry(),
                 history, mock(ChatContextStore.class), turnRunner,
@@ -144,7 +144,7 @@ class LlmErrorSurfaceTest {
                 new ChatAgentFactory.Leaves("test", model, model, Map.of(), null, AgentLang.ZH);
 
         controller.run(new SseChannel(emitter), 1L, "wb-1-boom", "看看行情", leaves,
-                coordinator.openTurn(1L), null, null);
+                coordinator.openTurn(1L), null, null, null);
 
         String errorEvent = sent.stream().filter(text -> text.startsWith("{") && text.contains("message"))
                 .reduce((first, second) -> second).orElseThrow();

@@ -22,6 +22,7 @@ import reactor.core.publisher.Flux;
 
 import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
@@ -130,7 +131,7 @@ class ChatTurnRunnerTest {
     private void turn(String message, ChatIntent intent) {
         new ChatTurnRunner(contextStore, registry, ChatTestEndpoints.PROMPTS, ChatTestEndpoints.TOOLS)
                 .run(leaves(), 1L, SESSION, message, intent, answer::append, progress::add,
-                        ChatTurnRunner.TurnYield.NONE);
+                        ChatTurnRunner.TurnYield.NONE, null);
     }
 
     /** 某个专家被真跑起来的次数（START 事件即"开始执行"） */
@@ -533,7 +534,7 @@ class ChatTurnRunnerTest {
 
         new ChatTurnRunner(contextStore, registry, ChatTestEndpoints.PROMPTS, ChatTestEndpoints.TOOLS)
                 .run(leaves, 1L, SESSION, "BTC 怎么样", null, answer::append, progress::add,
-                        ChatTurnRunner.TurnYield.NONE);
+                        ChatTurnRunner.TurnYield.NONE, null);
 
         ArgumentCaptor<Prompt> prompt = ArgumentCaptor.forClass(Prompt.class);
         verify(light).call(prompt.capture());
@@ -583,16 +584,119 @@ class ChatTurnRunnerTest {
         assertThat(saved.getValue()).filteredOn(m -> "同一句话".equals(m.getText())).hasSize(2);
     }
 
-    /** 补答兜底是直接给用户看的：summarizer 零产出退专家原文时，内部出处标注必须剥掉 */
+    // ===== 补答轮：让位那轮交出去的批次，由前端在会话空闲时发起的下一轮接回 =====
+
+    private static Message expertReply(String agent, String body) {
+        return ChatTurnRunner.expertMessage(ChatTestEndpoints.PROMPTS, AgentLang.ZH, agent,
+                "chat.expertStatus.data", body);
+    }
+
+    private ChatTurnRunner.TurnResult deferredTurn(ChatTurnRunner.ExpertBatch batch, ChatTurnRunner.TurnYield yield) {
+        return new ChatTurnRunner(contextStore, registry, ChatTestEndpoints.PROMPTS, ChatTestEndpoints.TOOLS)
+                .run(leaves(), 1L, SESSION, "补答指令：看看行情", null, answer::append, progress::add, yield, batch);
+    }
+
+    /** 某个专家的进度阶段序列 */
+    private List<String> phases(String agent) {
+        return progress.stream().filter(e -> agent.equals(e.agent()))
+                .map(ChatTurnRunner.ExpertProgress::phase).toList();
+    }
+
+    /**
+     * 补答轮接回的批次不问路由直接接、名字预填进去重集合；之后照常问路由，缺的专家能补派。
+     * 这是补答轮与旧"summarizer 单次收尾"的分界：拿到 market 结论后发现还该问 news，得问得了。
+     */
     @Test
-    void 补答零产出时兜底剥掉出处标注() {
-        summarizerAnswers("");
+    void 补答轮接回批次后仍问路由可补派() {
+        lightAnswers(() -> route("news_agent"), () -> responseOf(new AssistantMessage("不该再跑的市场结论")),
+                () -> responseOf(new AssistantMessage("新闻结论")));
+        summarizerAnswers("这是答案");
+        ChatTurnRunner.ExpertBatch batch = new ChatTurnRunner.ExpertBatch(List.of("market_agent"),
+                List.of(CompletableFuture.completedFuture(expertReply("market_agent", "市场结论"))));
 
-        String deferred = new ChatTurnRunner(contextStore, registry, ChatTestEndpoints.PROMPTS, ChatTestEndpoints.TOOLS).runDeferredSummary(
-                leaves(), 1L, SESSION, "看看行情",
-                List.of(ChatTurnRunner.expertMessage(ChatTestEndpoints.PROMPTS, AgentLang.ZH, "market_agent", "chat.expertStatus.data", "资金费 0.01%")));
+        ChatTurnRunner.TurnResult result = deferredTurn(batch, ChatTurnRunner.TurnYield.NONE);
 
-        assertThat(deferred).isEqualTo("资金费 0.01%");
+        assertThat(result.yielded()).isFalse();
+        // market 没有被重派：专家侧只收到 news 的 Prompt
+        assertThat(expertPrompts).hasSize(1);
+        assertThat(expertPrompts.getFirst().getInstructions().getFirst().getText()).doesNotContain(MARKET_MARK);
+        assertThat(starts("news_agent")).isEqualTo(1);
+        // 接回的结论、补派的结论、补答指令都进了 summarizer，接回的在补派的前面
+        assertThat(summarizerInput())
+                .containsSubsequence("补答指令：看看行情", "市场结论", "新闻结论")
+                .doesNotContain("不该再跑的市场结论");
+        assertThat(answer.toString()).isEqualTo("这是答案");
+    }
+
+    /**
+     * 让位那轮的通道早关了，专家跑完推的进度没人看见。补答轮要把接回的专家进度重推到自己的通道：
+     * 已完成的立刻 START+DONE，还在跑的先 START、跑完再 DONE——前端看到的与普通轮无异。
+     */
+    @Test
+    void 补答轮对接回的专家重推进度() throws Exception {
+        lightAnswers(() -> route("FINISH"), () -> responseOf(new AssistantMessage("市场结论")),
+                () -> responseOf(new AssistantMessage("新闻结论")));
+        summarizerAnswers("这是答案");
+        CompletableFuture<Message> newsPending = new CompletableFuture<>();
+        ChatTurnRunner.ExpertBatch batch = new ChatTurnRunner.ExpertBatch(List.of("market_agent", "news_agent"),
+                List.of(CompletableFuture.completedFuture(expertReply("market_agent", "市场结论")), newsPending));
+
+        Thread thread = new Thread(() -> deferredTurn(batch, ChatTurnRunner.TurnYield.NONE));
+        thread.start();
+        long deadline = System.currentTimeMillis() + 5_000;
+        while (starts("news_agent") == 0 && System.currentTimeMillis() < deadline) {
+            Thread.sleep(10);
+        }
+        // news 还在跑：它只有 START；market 早完成了，START 后立刻 DONE
+        assertThat(phases("market_agent")).containsExactly(
+                ChatTurnRunner.ExpertProgress.START, ChatTurnRunner.ExpertProgress.DONE);
+        assertThat(phases("news_agent")).containsExactly(ChatTurnRunner.ExpertProgress.START);
+
+        newsPending.complete(expertReply("news_agent", "新闻结论"));
+        thread.join(10_000);
+        assertThat(thread.isAlive()).isFalse();
+        assertThat(phases("news_agent")).containsExactly(
+                ChatTurnRunner.ExpertProgress.START, ChatTurnRunner.ExpertProgress.DONE);
+        // DONE 带的是剥掉出处标注的结论原文（前端折叠成"工作过程"块）
+        assertThat(progress).filteredOn(e -> ChatTurnRunner.ExpertProgress.DONE.equals(e.phase()))
+                .extracting(ChatTurnRunner.ExpertProgress::text).containsExactly("市场结论", "新闻结论");
+        assertThat(summarizerInput()).containsSubsequence("市场结论", "新闻结论");
+    }
+
+    /** 补答轮就是普通轮：专家等待期照样可让位，在途批次原样再交出去、再排队 */
+    @Test
+    void 补答轮专家等待期同样可让位() {
+        lightAnswers(() -> route("FINISH"), () -> responseOf(new AssistantMessage("市场结论")),
+                () -> responseOf(new AssistantMessage("新闻结论")));
+        summarizerAnswers("这是答案");
+        ChatTurnRunner.ExpertBatch batch = new ChatTurnRunner.ExpertBatch(List.of("market_agent"),
+                List.of(new CompletableFuture<>()));
+        ChatTurnRunner.TurnYield yieldNow = new ChatTurnRunner.TurnYield() {
+            @Override
+            public CompletableFuture<Void> enterExpertWait() {
+                return CompletableFuture.completedFuture(null);
+            }
+
+            @Override
+            public void exitExpertWait() {
+            }
+
+            @Override
+            public boolean yieldRequested() {
+                return true;
+            }
+        };
+
+        ChatTurnRunner.TurnResult result = deferredTurn(batch, yieldNow);
+
+        assertThat(result.yielded()).isTrue();
+        assertThat(result.deferredExperts()).isSameAs(batch);
+        verify(deep, never()).stream(any(Prompt.class));
+        // 让位存档：补答指令 + 占位答复都在，下一轮的 summarizer 不会替它代答
+        ArgumentCaptor<List<Message>> saved = ArgumentCaptor.captor();
+        verify(contextStore).save(eq(SESSION), eq(1L), saved.capture());
+        assertThat(savedText(saved)).contains("补答指令：看看行情")
+                .contains(ChatTestEndpoints.PROMPTS.get(AgentLang.ZH, "chat.yieldPlaceholder"));
     }
 
     /** 一轮跑完必须落库，否则下一轮从零起跑（用户表现为 AI 失忆） */

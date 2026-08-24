@@ -137,7 +137,7 @@ class PromptI18nTest {
                 "chat.router", "chat.expertHandoff", "chat.yieldPlaceholder", "chat.cancelledNote",
                 "chat.cancelledEmpty", "chat.yieldDoneAnswer", "chat.preloadHeader",
                 "chat.expertStatus.data", "chat.expertStatus.failed", "chat.expertStatus.noContent",
-                "chat.expertNoContentBody", "chat.expertNoContentReason", "chat.deferred.empty",
+                "chat.expertNoContentBody", "chat.expertNoContentReason",
                 "chat.deferred.prefix", "chat.hitl.label", "chat.hitl.reason", "chat.hitl.notExecuted",
                 "chat.hitl.resumeMessage", "chat.form.wake", "chat.form.review", "chat.form.note",
                 "chat.compress.summaryPrefix", "chat.compress.role.user", "chat.compress.role.assistant",
@@ -160,7 +160,6 @@ class PromptI18nTest {
                 prompts.get(AgentLang.EN, "chat.deferred.header", Map.of("question", "btc?")));
         assertNoCjk("英文补答指令",
                 prompts.get(AgentLang.EN, "chat.deferred.instruction", Map.of("question", "btc?")));
-        assertNoCjk("英文补答失败", prompts.get(AgentLang.EN, "chat.deferred.failed", Map.of("reason", "timeout")));
         assertNoCjk("英文专家失败进度", prompts.get(AgentLang.EN, "chat.progress.expertFailed",
                 Map.of("agent", "market_agent", "reason", "timeout")));
         assertNoCjk("英文 HITL 待确认", prompts.get(AgentLang.EN, "chat.hitl.pendingMessage",

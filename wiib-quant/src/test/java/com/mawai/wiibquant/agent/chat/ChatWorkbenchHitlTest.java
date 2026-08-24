@@ -170,7 +170,7 @@ class ChatWorkbenchHitlTest {
         ChatConcurrencyGate gate = new ChatConcurrencyGate(10);
         WorkbenchRunRegistry runRegistry = mock(WorkbenchRunRegistry.class);
         ChatHistoryService history = mock(ChatHistoryService.class);
-        yieldCoordinator = new ChatYieldCoordinator(gate, runRegistry, turnRunner, history, ChatTestEndpoints.PROMPTS);
+        yieldCoordinator = new ChatYieldCoordinator();
         return new ChatWorkbenchController(mock(ChatAgentFactory.class), mock(LlmEndpointService.class),
                 registry, history, contextStore, turnRunner,
                 runRegistry, gate, new MessageCatalog(), yieldCoordinator, ChatTestEndpoints.PROMPTS, ChatTestEndpoints.zhLang());
@@ -182,7 +182,7 @@ class ChatWorkbenchHitlTest {
         deepCallsThisTurn.set(0);
         RecordingEmitter emitter = new RecordingEmitter();
         controller.run(new SseChannel(emitter), 1L, SESSION, message, leaves,
-                yieldCoordinator.openTurn(1L), null, null);
+                yieldCoordinator.openTurn(1L), null, null, null);
         return emitter;
     }
 

@@ -82,7 +82,7 @@ class ChatRegenerateTest {
             Consumer<String> sink = inv.getArgument(5);   // leaves/userId/session/message/intent 之后才是答案 sink
             sink.accept("新答案");
             return ChatTurnRunner.TurnResult.COMPLETED;
-        }).when(turnRunner).run(any(), anyLong(), any(), any(), any(), any(), any(), any());
+        }).when(turnRunner).run(any(), anyLong(), any(), any(), any(), any(), any(), any(), any());
 
         LlmEndpointService endpointService = mock(LlmEndpointService.class);
         when(endpointService.chatEndpoints(1L)).thenReturn(ChatTestEndpoints.eps(1L, "gpt-5"));
@@ -96,7 +96,7 @@ class ChatRegenerateTest {
         ChatConcurrencyGate gate = new ChatConcurrencyGate(10);
         WorkbenchRunRegistry runRegistry = mock(WorkbenchRunRegistry.class);
         ChatYieldCoordinator coordinator =
-                new ChatYieldCoordinator(gate, runRegistry, turnRunner, history, ChatTestEndpoints.PROMPTS);
+                new ChatYieldCoordinator();
         ChatWorkbenchController controller = new ChatWorkbenchController(agentFactory, endpointService,
                 new ApprovalRegistry(), history, contextStore, turnRunner, runRegistry, gate, new MessageCatalog(), coordinator, ChatTestEndpoints.PROMPTS, ChatTestEndpoints.zhLang());
         return new Harness(controller, history, contextStore, turnRunner, gate, coordinator);
@@ -139,7 +139,7 @@ class ChatRegenerateTest {
         // 重跑喂给 runner 的是库里那条原提问
         ArgumentCaptor<String> enriched = ArgumentCaptor.captor();
         verify(h.turnRunner(), timeout(5_000))
-                .run(any(), anyLong(), eq(SESSION), enriched.capture(), any(), any(), any(), any());
+                .run(any(), anyLong(), eq(SESSION), enriched.capture(), any(), any(), any(), any(), any());
         assertThat(enriched.getValue()).endsWith(ChatWorkbenchController.QUESTION_MARKER + "BTC 怎么样");
         // 提问行已经在库里，再落一遍历史里就成了连问两遍
         verify(h.history(), never()).append(any(), anyLong(), eq("user"), any());
@@ -176,7 +176,7 @@ class ChatRegenerateTest {
                 List.of(msg(1, "user", "BTC 怎么样"), msg(2, "assistant", "旧答案")),
                 List.of(turnStart("BTC 怎么样"), new AssistantMessage("旧答案")));
         doReturn(ChatTurnRunner.TurnResult.CANCELLED)
-                .when(h.turnRunner()).run(any(), anyLong(), any(), any(), any(), any(), any(), any());
+                .when(h.turnRunner()).run(any(), anyLong(), any(), any(), any(), any(), any(), any(), any());
 
         regenerate(h);
 
@@ -190,7 +190,7 @@ class ChatRegenerateTest {
                 List.of(msg(1, "user", "BTC 怎么样"), msg(2, "assistant", "旧答案")),
                 List.of(turnStart("BTC 怎么样"), new AssistantMessage("旧答案")));
         doThrow(new RuntimeException("上游挂了"))
-                .when(h.turnRunner()).run(any(), anyLong(), any(), any(), any(), any(), any(), any());
+                .when(h.turnRunner()).run(any(), anyLong(), any(), any(), any(), any(), any(), any(), any());
 
         regenerate(h);
 

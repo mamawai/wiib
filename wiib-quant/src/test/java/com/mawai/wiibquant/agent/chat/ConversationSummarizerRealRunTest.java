@@ -272,7 +272,7 @@ class ConversationSummarizerRealRunTest {
         StringBuilder answer = new StringBuilder();
         chatTurnRunner.run(leaves, ADMIN_USER_ID, sessionId, question, null, answer::append,
                 event -> log.info("[SummarizeRealRun] 专家 {} {}", event.agent(), event.phase()),
-                ChatTurnRunner.TurnYield.NONE);
+                ChatTurnRunner.TurnYield.NONE, null);
         return answer.toString();
     }
 

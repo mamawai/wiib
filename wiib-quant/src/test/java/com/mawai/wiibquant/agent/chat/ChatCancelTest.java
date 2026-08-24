@@ -123,7 +123,7 @@ class ChatCancelTest {
         AtomicBoolean cancelled = new AtomicBoolean(true);   // 一进循环就已经点了停
 
         ChatTurnRunner.TurnResult result = new ChatTurnRunner(contextStore, registry, ChatTestEndpoints.PROMPTS, ChatTestEndpoints.TOOLS)
-                .run(leaves(), 1L, SESSION, "看看行情", null, answer::append, e -> { }, yieldWith(cancelled));
+                .run(leaves(), 1L, SESSION, "看看行情", null, answer::append, e -> { }, yieldWith(cancelled), null);
 
         assertThat(result.cancelled()).isTrue();
         // 中断不是让位：不欠补答，没有在途批次要交给协调器
@@ -148,7 +148,7 @@ class ChatCancelTest {
                 .run(leaves(), 1L, SESSION, "看看行情", null, chunk -> {
                     answer.append(chunk);
                     cancelled.set(true);
-                }, e -> { }, yieldWith(cancelled));
+                }, e -> { }, yieldWith(cancelled), null);
 
         assertThat(result.cancelled()).isTrue();
         assertThat(answer.toString()).isEqualTo("前半截");
@@ -177,7 +177,7 @@ class ChatCancelTest {
 
         ChatTurnRunner.TurnResult result = new ChatTurnRunner(contextStore, registry, ChatTestEndpoints.PROMPTS, ChatTestEndpoints.TOOLS)
                 .run(leaves(), 1L, SESSION, "看看行情", null, answer::append, e -> { },
-                        yieldWith(cancelled, yielded));
+                        yieldWith(cancelled, yielded), null);
 
         assertThat(result.cancelled()).isTrue();
         assertThat(result.yielded()).isFalse();          // 没有在途批次要交给协调器排补答
@@ -204,9 +204,7 @@ class ChatCancelTest {
     @Test
     void 没有轮在跑时中断请求如实回false() {
         ChatConcurrencyGate gate = new ChatConcurrencyGate(10);
-        ChatYieldCoordinator coordinator = new ChatYieldCoordinator(
-                gate, mock(WorkbenchRunRegistry.class), mock(ChatTurnRunner.class), mock(ChatHistoryService.class),
-                ChatTestEndpoints.PROMPTS);
+        ChatYieldCoordinator coordinator = new ChatYieldCoordinator();
 
         // 没登记过任何轮：按钮点晚了，前端要据此如实告诉用户，而不是假装停住了
         assertThat(coordinator.requestCancel(1L)).isFalse();

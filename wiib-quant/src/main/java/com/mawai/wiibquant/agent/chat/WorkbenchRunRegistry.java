@@ -25,10 +25,7 @@ public class WorkbenchRunRegistry {
     public interface Emitter extends BiPredicate<String, JSONObject> {
     }
 
-    /** 无通道占位：补答轮只要"运行中"这个标记，它没有 SSE 可推，一律推不出去。 */
-    public static final Emitter NO_EMITTER = (event, data) -> false;
-
-    /** value=SSE 事件出口（没有通道可推时放 {@link #NO_EMITTER} 占位，key 存在即"运行中"） */
+    /** value=SSE 事件出口（key 存在即"运行中"） */
     private final Map<String, Emitter> runs = new ConcurrentHashMap<>();
 
     /** 一轮对话开跑：登记运行中 + 挂事件出口。 */
@@ -53,7 +50,7 @@ public class WorkbenchRunRegistry {
     /**
      * 工具侧：请前端弹一张表单卡（模型只出预填，执行权归用户点击）。
      * <p>
-     * 返回值不能省：断连、会话已结束、补答轮这几种情况下卡根本推不出去，
+     * 返回值不能省：断连、会话已结束这几种情况下卡根本推不出去，
      * 调用方必须据此如实告诉模型"没弹出来"，否则模型会宣称已弹卡，用户却永远等不到。
      *
      * @param formType note / wake / review
@@ -80,7 +77,7 @@ public class WorkbenchRunRegistry {
         return publish(sessionId, "behavior_report", new JSONObject().fluentPut("report", report));
     }
 
-    /** 统一出口：会话已结束、补答轮无通道、通道已断连，三种都返回 false。 */
+    /** 统一出口：会话已结束、通道已断连，两种都返回 false。 */
     private boolean publish(String sessionId, String event, JSONObject data) {
         Emitter emitter = runs.get(sessionId);
         return emitter != null && emitter.test(event, data);

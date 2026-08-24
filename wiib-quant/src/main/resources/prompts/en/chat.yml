@@ -153,13 +153,12 @@ chat:
     expertFailed: "{{agent}} failed: {{reason}}"
 
   # ---- Deferred answer turn ----
+  # user-side message of the deferred turn: it picks up the expert batch handed over at yield time; their conclusions follow this message as tagged messages
   deferred:
-    instruction: "[SYSTEM] The experts dispatched for the earlier question \"{{question}}\" have returned their data (see the expert conclusions above). Answer that question now, using the whole context."
-    empty: (the deferred answer produced nothing; feel free to ask again)
+    instruction: "[SYSTEM] The experts dispatched for the earlier question \"{{question}}\" have returned; their conclusions follow below as tagged messages. Answer that question now using the whole context. Answer directly - do not add a heading or restate the question."
     # header and prefix must stay in sync: the front end recognises a deferred row by the prefix (those rows cannot be regenerated). Change one, change the other
     prefix: '[Deferred answer to "'
     header: '[Deferred answer to "{{question}}"]'
-    failed: (deferred answer failed - {{reason}} - feel free to ask again)
 
   # ---- HITL approval (deep analysis only) ----
   hitl:

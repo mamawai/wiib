@@ -37,14 +37,14 @@ class ChatWorkbenchAdmissionTest {
 
     private ChatWorkbenchController controller(ChatConcurrencyGate gate) {
         // mock runner 默认返回 null，controller 会在 result.yielded() 上 NPE——真跑到 run 的用例要正常收尾
-        when(turnRunner.run(any(), anyLong(), any(), any(), any(), any(), any(), any()))
+        when(turnRunner.run(any(), anyLong(), any(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(ChatTurnRunner.TurnResult.COMPLETED);
         ChatHistoryService history = mock(ChatHistoryService.class);
         WorkbenchRunRegistry runRegistry = mock(WorkbenchRunRegistry.class);
         return new ChatWorkbenchController(factory, llmConfigService, new ApprovalRegistry(),
                 history, mock(ChatContextStore.class), turnRunner,
                 runRegistry, gate, new MessageCatalog(),
-                new ChatYieldCoordinator(gate, runRegistry, turnRunner, history, ChatTestEndpoints.PROMPTS),
+                new ChatYieldCoordinator(),
                 ChatTestEndpoints.PROMPTS, ChatTestEndpoints.zhLang());
     }
 

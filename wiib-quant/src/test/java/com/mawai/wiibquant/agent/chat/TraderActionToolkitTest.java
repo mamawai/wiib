@@ -96,18 +96,6 @@ class TraderActionToolkitTest {
         assertThat(pushed).isEmpty();
     }
 
-    /** 补答轮更阴：会话还挂着"运行中"，但出口是 NO_EMITTER 占位，一样推不出去 */
-    @Test
-    void 补答轮同样如实说没打开() {
-        runRegistry.start(SESSION, WorkbenchRunRegistry.NO_EMITTER);
-
-        JSONObject out = parse(toolkit.reviewTraderNow());
-
-        assertThat(out.getBooleanValue("ok")).isFalse();
-        assertThat(out.getString("message")).contains("没能打开");
-        assertThat(pushed).isEmpty();
-    }
-
     /** 没有会话号（不在工具执行栈里）时连推都不该推，更不能回一句"已打开" */
     @Test
     void 没有会话号时不推表单() {

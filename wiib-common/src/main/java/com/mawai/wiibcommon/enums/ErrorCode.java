@@ -144,7 +144,8 @@ public enum ErrorCode {
     CHAT_CAPACITY_FULL(2204, "error.chatCapacityFull"),
     REPLAY_AI_BUSY(2205, "error.replayAiBusy"),
     CHAT_REGENERATE_UNAVAILABLE(2206, "error.chatRegenerateUnavailable"),
-    CHAT_MESSAGE_TOO_LONG(2207, "error.chatMessageTooLong");
+    CHAT_MESSAGE_TOO_LONG(2207, "error.chatMessageTooLong"),
+    CHAT_NOTHING_DEFERRED(2208, "error.chatNothingDeferred");
 
     private final int code;
     /** 界面文案词表的 key，不是文案本身。渲染见 {@code GlobalExceptionHandler} */

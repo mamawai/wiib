@@ -58,11 +58,11 @@ class ChatWorkbenchStreamTest {
             sink.accept("前半段");
             sink.accept("后半段");
             return ChatTurnRunner.TurnResult.COMPLETED;
-        }).when(turnRunner).run(any(), anyLong(), any(), any(), any(), any(), any(), any());
+        }).when(turnRunner).run(any(), anyLong(), any(), any(), any(), any(), any(), any(), any());
         ChatConcurrencyGate gate = new ChatConcurrencyGate(10);
         WorkbenchRunRegistry runRegistry = mock(WorkbenchRunRegistry.class);
         ChatYieldCoordinator coordinator =
-                new ChatYieldCoordinator(gate, runRegistry, turnRunner, historyService, ChatTestEndpoints.PROMPTS);
+                new ChatYieldCoordinator();
         ChatWorkbenchController controller = new ChatWorkbenchController(mock(ChatAgentFactory.class),
                 mock(LlmEndpointService.class), new ApprovalRegistry(),
                 historyService, mock(ChatContextStore.class), turnRunner,
@@ -77,7 +77,7 @@ class ChatWorkbenchStreamTest {
         ChatAgentFactory.Leaves leaves =
                 new ChatAgentFactory.Leaves("test", model, model, Map.of(), null, AgentLang.ZH);
 
-        controller.run(channel, 1L, SESSION, "看看行情", leaves, coordinator.openTurn(1L), null, null);
+        controller.run(channel, 1L, SESSION, "看看行情", leaves, coordinator.openTurn(1L), null, null, null);
 
         // 答案完整进历史——这是断连用户唯一还拿得到东西的途径
         verify(historyService).append(eq(SESSION), eq(1L), eq("assistant"), eq("前半段后半段"), any());
