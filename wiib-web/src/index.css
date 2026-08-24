@@ -188,6 +188,9 @@ html.pwa nav a {
   margin-inline: auto;
 }
 
+/* 宽版壳：卡片密集的看板页（竞技场详情）用，大屏比标准壳多给 240px */
+.page-shell-wide { max-width: 105rem; } /* 1680px */
+
 /* ===== 精密终端工具类 ===== */
 /* 卡片基线：1px 边框分层，亮色极轻投影，暗色纯靠边框 */
 .pt-card {

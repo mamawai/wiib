@@ -43,25 +43,25 @@ function SegButton({ active, onClick, children }: { active: boolean; onClick: ()
 
 const ICON_BTN = 'w-6 h-6 rounded border border-border flex items-center justify-center text-muted-foreground hover:text-primary disabled:opacity-40 disabled:hover:text-muted-foreground';
 
-/** 笔记卡（学习/记忆）：桌面全文内滚；手机折叠成预览+展开——三块笔记堆在单列里全文铺开会把页面拉得没法翻 */
+/** 笔记卡（学习/记忆）：桌面限高 48vh 卡内滚，跟同行的卡等高；手机折叠成预览+展开——三块笔记堆在单列里全文铺开会把页面拉得没法翻 */
 function NotesCard({ icon: Icon, tone, title, time, content, empty }: {
   icon: LucideIcon; tone: string; title: string; time: number | null | undefined; content: string | null | undefined; empty: string;
 }) {
   const { t } = useTranslation('ai');
   const text = content?.trim() || '';
   return (
-    <div className="rounded-lg pt-card p-4 space-y-2">
-      <div className="flex items-center gap-2 flex-wrap">
+    <div className="rounded-lg pt-card p-4 flex flex-col gap-2 lg:max-h-[48vh]">
+      <div className="flex items-center gap-2 flex-wrap shrink-0">
         <span className="microlabel inline-flex items-center gap-1"><Icon className={cn('w-3 h-3', tone)} />{title}</span>
         {time != null && text && (
           <span className="ml-auto text-[10px] num text-muted-foreground/70">{t('detail.lastAt', { time: fmtDateTime(time) })}</span>
         )}
       </div>
       {!text ? (
-        <div className="py-6 text-center text-xs text-muted-foreground">{empty}</div>
+        <div className="flex-1 flex items-center justify-center py-6 text-xs text-muted-foreground">{empty}</div>
       ) : (
         <>
-          <div className="hidden lg:block text-xs leading-relaxed text-foreground/90 lg:max-h-[48vh] overflow-y-auto pr-1">
+          <div className="hidden lg:block flex-1 min-h-0 overflow-y-auto pr-1 text-xs leading-relaxed text-foreground/90">
             <Markdown content={text} />
           </div>
           <div className="lg:hidden"><ReasoningFold reasoning={text} /></div>
@@ -167,7 +167,7 @@ export function ArenaDetail() {
     : [];
 
   return (
-    <div className="page-shell p-4 md:p-6 space-y-4">
+    <div className="page-shell page-shell-wide p-4 md:p-6 space-y-4">
       <div className="flex items-center gap-2.5 flex-wrap">
         <Link to="/arena" className="border border-border hover:bg-surface-hover w-8 h-8 rounded-lg flex items-center justify-center text-muted-foreground hover:text-primary" aria-label={t('term.backToArena')}>
           <ChevronLeft className="w-4 h-4" />
@@ -213,9 +213,9 @@ export function ArenaDetail() {
         </div>
       )}
 
-      <div className="grid lg:grid-cols-5 gap-4 items-start">
-        <div className="lg:col-span-3 rounded-lg pt-card p-4 space-y-2">
-          <div className="flex items-center gap-2 flex-wrap">
+      <div className="grid lg:grid-cols-5 gap-4">
+        <div className="lg:col-span-3 rounded-lg pt-card p-4 flex flex-col gap-2">
+          <div className="flex items-center gap-2 flex-wrap shrink-0">
             <span className="microlabel">
               {t('detail.equityCurve', { round: viewingHistory ? `R${viewingRound}` : t('detail.thisRound') })}
             </span>
@@ -235,109 +235,114 @@ export function ArenaDetail() {
               ))}
             </div>
           </div>
+          {/* 曲线撑满卡片剩余高度：右侧持仓卡更高时曲线跟着长，两张卡底边始终齐 */}
           {chartPoints.length > 1
-            ? <EquityChart points={chartPoints} height={260} />
-            : <div className="py-10 text-center text-xs text-muted-foreground">{t('detail.notEnoughPoints')}</div>}
+            ? <EquityChart points={chartPoints} className="flex-1 min-h-[260px]" />
+            : <div className="flex-1 min-h-[260px] flex items-center justify-center text-xs text-muted-foreground">{t('detail.notEnoughPoints')}</div>}
         </div>
 
-        <div className="lg:col-span-2 rounded-lg pt-card p-4 space-y-2">
-          <span className="microlabel">{t('detail.positionsTitle')}</span>
-          {detail && detail.positions.length === 0 && detail.pendingOrders.length === 0 && (
-            <div className="py-6 text-center text-xs text-muted-foreground">{t('detail.flat')}</div>
-          )}
-          {detail?.positions.map(p => {
-            const isLong = p.side === 'LONG';
-            return (
-              <div key={p.id} className="rounded-md border border-border bg-card p-2.5 text-[11px]">
-                <div className="flex items-center gap-2 flex-wrap">
-                  {isLong ? <ArrowUpRight className="w-3.5 h-3.5 text-gain" /> : <ArrowDownRight className="w-3.5 h-3.5 text-loss" />}
-                  <span className="font-black text-xs">{p.symbol}</span>
-                  <span className={cn('text-[10px] font-bold px-1.5 py-0.5 rounded', isLong ? 'bg-gain/15 text-gain' : 'bg-loss/15 text-loss')}>
-                    {isLong ? t('term.long') : t('term.short')} {p.leverage}x
-                  </span>
-                  <span className="text-muted-foreground">{t('detail.qty')} <span className="num font-bold text-foreground">{p.quantity}</span></span>
-                  <span className="text-muted-foreground">{t('detail.entry')} <span className="num font-bold text-foreground">{fmtNum(p.entryPrice)}</span></span>
-                  <span className="ml-auto">
-                    <span className={cn('num font-black', p.unrealizedPnl >= 0 ? 'text-gain' : 'text-loss')}>
-                      {p.unrealizedPnl >= 0 ? '+' : ''}{fmtNum(p.unrealizedPnl)}
-                    </span>
-                  </span>
-                </div>
-                {/* 两个数组都空时 length 求值为 0，裸 && 会把 0 渲染到页面上，得先转 boolean */}
-                {Boolean(p.stopLosses?.length || p.takeProfits?.length) && (
-                  <div className="mt-1 text-muted-foreground num flex flex-wrap gap-x-3 gap-y-0.5">
-                    {p.stopLosses?.length ? <span>{t('detail.curSl')} {p.stopLosses.map(s => fmtNum(s.price)).join(' / ')}</span> : null}
-                    {p.takeProfits?.length ? <span>{t('detail.curTp')} {p.takeProfits.map(tp => fmtNum(tp.price)).join(' / ')}</span> : null}
+        <div className="lg:col-span-2 rounded-lg pt-card p-4 flex flex-col gap-2">
+          <span className="microlabel shrink-0">{t('detail.positionsTitle')}</span>
+          {detail && (detail.positions.length === 0 && detail.pendingOrders.length === 0 ? (
+            <div className="flex-1 flex items-center justify-center py-6 text-xs text-muted-foreground">{t('detail.flat')}</div>
+          ) : (
+            <div className="space-y-2">
+              {detail.positions.map(p => {
+                const isLong = p.side === 'LONG';
+                return (
+                  <div key={p.id} className="rounded-md border border-border bg-card p-2.5 text-[11px] space-y-1">
+                    {/* 头行只放币种·方向·浮盈，数量/价格另起一行：窄卡上浮盈不会被挤到第二行 */}
+                    <div className="flex items-center gap-2">
+                      {isLong ? <ArrowUpRight className="w-3.5 h-3.5 text-gain" /> : <ArrowDownRight className="w-3.5 h-3.5 text-loss" />}
+                      <span className="font-black text-xs">{p.symbol}</span>
+                      <span className={cn('text-[10px] font-bold px-1.5 py-0.5 rounded', isLong ? 'bg-gain/15 text-gain' : 'bg-loss/15 text-loss')}>
+                        {isLong ? t('term.long') : t('term.short')} {p.leverage}x
+                      </span>
+                      <span className={cn('ml-auto num font-black', p.unrealizedPnl >= 0 ? 'text-gain' : 'text-loss')}>
+                        {p.unrealizedPnl >= 0 ? '+' : ''}{fmtNum(p.unrealizedPnl)}
+                      </span>
+                    </div>
+                    <div className="text-muted-foreground num flex flex-wrap gap-x-3 gap-y-0.5">
+                      <span>{t('detail.qty')} <span className="font-bold text-foreground">{p.quantity}</span></span>
+                      <span>{t('detail.entry')} <span className="font-bold text-foreground">{fmtNum(p.entryPrice)}</span></span>
+                      {p.stopLosses?.length ? <span>{t('detail.curSl')} {p.stopLosses.map(s => fmtNum(s.price)).join(' / ')}</span> : null}
+                      {p.takeProfits?.length ? <span>{t('detail.curTp')} {p.takeProfits.map(tp => fmtNum(tp.price)).join(' / ')}</span> : null}
+                    </div>
                   </div>
-                )}
-              </div>
-            );
-          })}
-          {detail?.pendingOrders.map(o => {
-            // 开/平 与 多/空 拼成一个词：中文能直接接起来，英文中间要空格，所以四种组合各一条词条
-            const isLong = o.orderSide.includes('LONG');
-            const sideKey = o.orderSide.startsWith('OPEN')
-              ? (isLong ? 'detail.openLong' : 'detail.openShort')
-              : (isLong ? 'detail.closeLong' : 'detail.closeShort');
-            return (
-              <div key={o.orderId} className="rounded-md border border-dashed border-border bg-card-2 p-2.5 text-[11px] text-muted-foreground flex items-center gap-2 flex-wrap">
-                <span className="font-bold text-foreground/80">{t('detail.limitOrder')}</span>
-                <span className="font-black text-foreground">{o.symbol}</span>
-                <span className={cn('text-[10px] font-bold px-1.5 py-0.5 rounded',
-                  isLong ? 'bg-gain/15 text-gain' : 'bg-loss/15 text-loss')}>
-                  {t(sideKey)} {o.leverage}x
-                </span>
-                <span>{t('detail.qty')} <span className="num font-bold text-foreground">{o.quantity}</span></span>
-                {o.limitPrice != null && <span>{t('detail.limitPrice')} <span className="num font-bold text-foreground">{fmtNum(o.limitPrice)}</span></span>}
-              </div>
-            );
-          })}
+                );
+              })}
+              {detail.pendingOrders.map(o => {
+                // 开/平 与 多/空 拼成一个词：中文能直接接起来，英文中间要空格，所以四种组合各一条词条
+                const isLong = o.orderSide.includes('LONG');
+                const sideKey = o.orderSide.startsWith('OPEN')
+                  ? (isLong ? 'detail.openLong' : 'detail.openShort')
+                  : (isLong ? 'detail.closeLong' : 'detail.closeShort');
+                return (
+                  <div key={o.orderId} className="rounded-md border border-dashed border-border bg-card-2 p-2.5 text-[11px] text-muted-foreground flex items-center gap-2 flex-wrap">
+                    <span className="font-bold text-foreground/80">{t('detail.limitOrder')}</span>
+                    <span className="font-black text-foreground">{o.symbol}</span>
+                    <span className={cn('text-[10px] font-bold px-1.5 py-0.5 rounded',
+                      isLong ? 'bg-gain/15 text-gain' : 'bg-loss/15 text-loss')}>
+                      {t(sideKey)} {o.leverage}x
+                    </span>
+                    <span>{t('detail.qty')} <span className="num font-bold text-foreground">{o.quantity}</span></span>
+                    {o.limitPrice != null && <span>{t('detail.limitPrice')} <span className="num font-bold text-foreground">{fmtNum(o.limitPrice)}</span></span>}
+                  </div>
+                );
+              })}
+            </div>
+          ))}
         </div>
       </div>
 
-      {/* 两份笔记是 trader 每次唤醒真正读到的东西，跨局累积不随局次切换；计划是本局存活的，归档的配在已了结卡里 */}
-      <div className="grid lg:grid-cols-3 gap-4 items-start">
+      {/* 两份笔记是 trader 每次唤醒真正读到的东西，跨局累积不随局次切换；计划是本局存活的，归档的配在已了结卡里。
+          三张都限高 48vh 卡内滚，行高取最高那张、底边齐；1024–1279 三列太挤，计划卡退到第二行独占整行 */}
+      <div className="grid lg:grid-cols-2 xl:grid-cols-3 gap-4">
         <NotesCard icon={GraduationCap} tone="text-sky-500" title={t('detail.learnNotesTitle')}
                    time={detail?.lastLearnAt} content={detail?.learningNotes} empty={t('detail.noLearnNotes')} />
         <NotesCard icon={NotebookPen} tone="text-violet-500" title={t('detail.memoryTitle')}
                    time={detail?.lastReviewAt} content={detail?.memory} empty={t('detail.noMemory')} />
-        <div className="rounded-lg pt-card p-4 space-y-2">
-          <span className="microlabel inline-flex items-center gap-1"><ClipboardList className="w-3 h-3 text-primary" />{t('detail.plansTitle')}</span>
-          {detail && detail.plans.length === 0 && (
-            <div className="py-6 text-center text-xs text-muted-foreground">{t('detail.noPlans')}</div>
-          )}
-          {detail?.plans.map(pl => {
-            const isLong = pl.side === 'LONG';
-            return (
-              <div key={pl.id} className="text-[11px]">
-                <div className="flex items-center gap-2">
-                  {isLong ? <ArrowUpRight className="w-3.5 h-3.5 text-gain" /> : <ArrowDownRight className="w-3.5 h-3.5 text-loss" />}
-                  <span className="font-black text-xs">{pl.symbol}</span>
-                  <span className={cn('text-[10px] font-bold px-1.5 py-0.5 rounded', isLong ? 'bg-gain/15 text-gain' : 'bg-loss/15 text-loss')}>
-                    {isLong ? t('term.long') : t('term.short')}
-                  </span>
-                </div>
-                <PlanBlock plan={pl} />
-              </div>
-            );
-          })}
+        <div className="lg:col-span-2 xl:col-span-1 rounded-lg pt-card p-4 flex flex-col gap-2 lg:max-h-[48vh]">
+          <span className="microlabel inline-flex items-center gap-1 shrink-0"><ClipboardList className="w-3 h-3 text-primary" />{t('detail.plansTitle')}</span>
+          {detail && (detail.plans.length === 0 ? (
+            <div className="flex-1 flex items-center justify-center py-6 text-xs text-muted-foreground">{t('detail.noPlans')}</div>
+          ) : (
+            <div className="flex-1 min-h-0 lg:overflow-y-auto lg:pr-1 space-y-2">
+              {detail.plans.map(pl => {
+                const isLong = pl.side === 'LONG';
+                return (
+                  <div key={pl.id} className="text-[11px]">
+                    <div className="flex items-center gap-2">
+                      {isLong ? <ArrowUpRight className="w-3.5 h-3.5 text-gain" /> : <ArrowDownRight className="w-3.5 h-3.5 text-loss" />}
+                      <span className="font-black text-xs">{pl.symbol}</span>
+                      <span className={cn('text-[10px] font-bold px-1.5 py-0.5 rounded', isLong ? 'bg-gain/15 text-gain' : 'bg-loss/15 text-loss')}>
+                        {isLong ? t('term.long') : t('term.short')}
+                      </span>
+                    </div>
+                    <PlanBlock plan={pl} />
+                  </div>
+                );
+              })}
+            </div>
+          ))}
         </div>
       </div>
 
-      <div className="grid lg:grid-cols-2 gap-4 items-start">
-        <div className="rounded-lg pt-card p-4 space-y-2">
-          <span className="microlabel">{t('detail.tradesTitle')}</span>
-          {trades.length === 0 && (
-            <div className="py-6 text-center text-xs text-muted-foreground">{t('detail.noTrades')}</div>
+      {/* 两栏都限高卡内滚、底边齐；手机不限高跟页面滚——单栏堆叠再套双层滚动是灾难 */}
+      <div className="grid lg:grid-cols-2 gap-4">
+        <div className="rounded-lg pt-card p-4 flex flex-col gap-2 lg:max-h-[75vh]">
+          <span className="microlabel shrink-0">{t('detail.tradesTitle')}</span>
+          {trades.length === 0 ? (
+            <div className="flex-1 flex items-center justify-center py-6 text-xs text-muted-foreground">{t('detail.noTrades')}</div>
+          ) : (
+            <div className="flex-1 min-h-0 lg:overflow-y-auto lg:pr-1 space-y-2">
+              {trades.map(r => <TradeCard key={r.positionId} r={r} />)}
+            </div>
           )}
-          {/* 内层滚动只给桌面双栏用；手机上单栏堆叠，双层滚动是灾难，跟页面自然滚 */}
-          <div className="space-y-2 lg:max-h-[70vh] lg:overflow-y-auto lg:pr-1">
-            {trades.map(r => <TradeCard key={r.positionId} r={r} />)}
-          </div>
         </div>
 
-        <div className="rounded-lg pt-card p-4 space-y-2.5">
-          <div className="flex items-center gap-2 flex-wrap">
+        <div className="rounded-lg pt-card p-4 flex flex-col gap-2.5 lg:max-h-[75vh]">
+          <div className="flex items-center gap-2 flex-wrap shrink-0">
             <span className="microlabel">
               {t('detail.timeline')}{viewingHistory && ` · R${viewingRound}`}
             </span>
@@ -360,21 +365,22 @@ export function ArenaDetail() {
               )}
             </div>
           </div>
-          {decisions.length === 0 && (
-            <div className="py-10 text-center text-xs text-muted-foreground">{day ? t('detail.noDecisionsDay') : t('detail.noDecisions')}</div>
+          {decisions.length === 0 ? (
+            <div className="flex-1 flex items-center justify-center py-10 text-xs text-muted-foreground">{day ? t('detail.noDecisionsDay') : t('detail.noDecisions')}</div>
+          ) : (
+            <div className="flex-1 min-h-0 lg:overflow-y-auto lg:pr-1 space-y-2.5">
+              {decisions.map(d => <DecisionCard key={d.id} d={d} />)}
+              {hasMore && (
+                <button
+                  onClick={loadMore}
+                  disabled={loadingMore}
+                  className="w-full border border-border hover:bg-surface-hover rounded-lg py-2 text-xs font-bold text-muted-foreground hover:text-primary flex items-center justify-center gap-1.5"
+                >
+                  {loadingMore && <Loader2 className="w-3.5 h-3.5 animate-spin" />} {t('detail.loadMore')}
+                </button>
+              )}
+            </div>
           )}
-          <div className="space-y-2.5 lg:max-h-[70vh] lg:overflow-y-auto lg:pr-1">
-            {decisions.map(d => <DecisionCard key={d.id} d={d} />)}
-            {hasMore && decisions.length > 0 && (
-              <button
-                onClick={loadMore}
-                disabled={loadingMore}
-                className="w-full border border-border hover:bg-surface-hover rounded-lg py-2 text-xs font-bold text-muted-foreground hover:text-primary flex items-center justify-center gap-1.5"
-              >
-                {loadingMore && <Loader2 className="w-3.5 h-3.5 animate-spin" />} {t('detail.loadMore')}
-              </button>
-            )}
-          </div>
         </div>
       </div>
     </div>
