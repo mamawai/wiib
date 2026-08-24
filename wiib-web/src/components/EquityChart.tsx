@@ -8,13 +8,15 @@ import type { TnEquityPoint } from '../types/testnet';
 
 interface Props {
   points: TnEquityPoint[];
+  /** 画布高度 px */
+  height?: number;
 }
 
 /**
  * 累计已实现盈亏曲线。带 0 轴参考线；终值为正用 gain 色、为负用 loss 色，
  * 末点实心标记收口。轴/网格/tooltip 走 chartTheme，亮暗模式自动匹配拟物底色。
  */
-export function EquityChart({ points }: Props) {
+export function EquityChart({ points, height = 220 }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const isDark = useIsDark();
   const { t, i18n } = useTranslation('portfolio');
@@ -100,5 +102,5 @@ export function EquityChart({ points }: Props) {
     // 依赖里必须带 i18n.language：少了它切语言后 option 不重算，tooltip 还是旧文案
   }, [points, isDark, t, i18n.language]);
 
-  return <div ref={ref} style={{ width: '100%', height: 220 }} />;
+  return <div ref={ref} style={{ width: '100%', height }} />;
 }

@@ -273,14 +273,22 @@ public class TraderController {
                 .toList());
     }
 
+    /**
+     * 详情视图：公开视图 + 实时持仓/挂单 + 本局存活计划 + 两份笔记。
+     * memory=reviewer 复盘沉淀的记忆笔记，learningNotes=learning agent 向同侪学的笔记，
+     * 都是 trader 每次唤醒真正读到的东西；lastReviewAt / lastLearnAt 是最近一次成功写笔记的时刻（ms），没有=null。
+     * 两份笔记公开与时间线口径一致：REVIEW 行本就带 memoryAfter 快照，LEARN 行的 reasoning 就是学习笔记全文。
+     */
     public record TraderDetailView(TraderPublicView trader,
                                    List<FuturesPositionDTO> positions,
                                    List<FuturesOrderResponse> pendingOrders,
-                                   List<AiTraderPlan> plans) {
+                                   List<AiTraderPlan> plans,
+                                   String memory, String learningNotes,
+                                   Long lastReviewAt, Long lastLearnAt) {
     }
 
     @GetMapping("/{id}")
-    @Operation(summary = "trader详情（当前持仓/挂单实时现查 + 各持仓的交易计划）")
+    @Operation(summary = "trader详情（当前持仓/挂单实时现查 + 各持仓的交易计划 + 复盘/学习笔记）")
     public Result<TraderDetailView> detail(@PathVariable long id) {
         long viewer = StpUtil.getLoginIdAsLong();
         AiTrader t = traderService.byId(id);
@@ -296,17 +304,21 @@ public class TraderController {
             log.warn("[Trader] 详情持仓查询失败 traderId={} msg={}", id, e.getMessage());
         }
         return Result.ok(new TraderDetailView(publicView(t, viewer, modelName(t)), positions, pending,
-                traderService.plans(t)));
+                traderService.plans(t), t.getMemory(), t.getLearningNotes(),
+                traderService.latestNoteTime(id, AiTraderDecision.KIND_REVIEW),
+                traderService.latestNoteTime(id, AiTraderDecision.KIND_LEARN)));
     }
 
     @GetMapping("/{id}/decisions")
-    @Operation(summary = "决策时间线（倒序分页，before传上一页最旧wakeTime）")
+    @Operation(summary = "决策时间线（倒序分页，before传上一页最旧wakeTime；from/to 为 wakeTime 区间 [from,to)）")
     public Result<List<AiTraderDecision>> decisions(@PathVariable long id,
                                                     @RequestParam(defaultValue = "50") int limit,
                                                     @RequestParam(required = false) Long before,
-                                                    @RequestParam(required = false) Integer round) {
+                                                    @RequestParam(required = false) Integer round,
+                                                    @RequestParam(required = false) Long from,
+                                                    @RequestParam(required = false) Long to) {
         StpUtil.checkLogin();
-        return Result.ok(traderService.decisions(id, limit, before, round));
+        return Result.ok(traderService.decisions(id, limit, before, round, from, to));
     }
 
     @GetMapping("/{id}/trades")

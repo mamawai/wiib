@@ -541,9 +541,12 @@ export const traderApi = {
   reset: () => api.post<unknown, void>('/ai/trader/reset'),
   arena: () => api.get<unknown, TraderPublicView[]>('/ai/trader/arena'),
   detail: (id: number) => api.get<unknown, TraderDetailView>(`/ai/trader/${id}`),
-  /** 决策时间线；round 传空=当前局。必须按局看——局与局是两个独立子账户，混排对不上净值曲线 */
-  decisions: (id: number, limit = 50, before?: number, round?: number) =>
-    api.get<unknown, AiTraderDecisionView[]>(`/ai/trader/${id}/decisions`, { params: { limit, before, round } }),
+  /**
+   * 决策时间线；round 传空=当前局。必须按局看——局与局是两个独立子账户，混排对不上净值曲线。
+   * from/to 是 wakeTime 区间 [from, to)，按天翻看用；与 before 分页可叠加
+   */
+  decisions: (id: number, limit = 50, before?: number, round?: number, from?: number, to?: number) =>
+    api.get<unknown, AiTraderDecisionView[]>(`/ai/trader/${id}/decisions`, { params: { limit, before, round, from, to } }),
   equityCurve: (id: number, round?: number) =>
     api.get<unknown, TraderEquityPoint[]>(`/ai/trader/${id}/equity-curve`, { params: { round } }),
   /** 已了结交易（只有当前局：每局独立子账户，历史局的子账户查不回来） */

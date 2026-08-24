@@ -285,8 +285,10 @@ public class TraderService {
     /**
      * 决策时间线。必须按局过滤：局与局之间是两个互不相干的 sim 子账户（各自注资 10000），
      * 混排会出现"曲线上没有的决策"，权益数字也在两条基线之间跳。round 传空=当前局。
+     * from/to 是 wakeTime 区间 [from, to)，竞技场按天翻看用；与 before 分页可叠加。
      */
-    public List<AiTraderDecision> decisions(long traderId, int limit, Long before, Integer round) {
+    public List<AiTraderDecision> decisions(long traderId, int limit, Long before, Integer round,
+                                            Long from, Long to) {
         AiTrader t = traderMapper.selectById(traderId);
         if (t == null) {
             return List.of();
@@ -299,7 +301,28 @@ public class TraderService {
         if (before != null) {
             q.lt(AiTraderDecision::getWakeTime, before);
         }
+        if (from != null) {
+            q.ge(AiTraderDecision::getWakeTime, from);
+        }
+        if (to != null) {
+            q.lt(AiTraderDecision::getWakeTime, to);
+        }
         return decisionMapper.selectList(q);
+    }
+
+    /**
+     * 最近一条成功的 REVIEW / LEARN 行的 wakeTime，没有=null。
+     * 不按局过滤：memory / learningNotes 是跨局累积的，"最近一次复盘/学习"也就跨局看。
+     */
+    public Long latestNoteTime(long traderId, String kind) {
+        AiTraderDecision d = decisionMapper.selectOne(new LambdaQueryWrapper<AiTraderDecision>()
+                .select(AiTraderDecision::getWakeTime)
+                .eq(AiTraderDecision::getTraderId, traderId)
+                .eq(AiTraderDecision::getKind, kind)
+                .eq(AiTraderDecision::getStatus, AiTraderDecision.STATUS_OK)
+                .orderByDesc(AiTraderDecision::getWakeTime)
+                .last("LIMIT 1"));
+        return d == null ? null : d.getWakeTime();
     }
 
     /** 当前局的持仓交易计划（竞技场详情随持仓一并展示）。 */

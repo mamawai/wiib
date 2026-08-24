@@ -908,12 +908,19 @@ export interface TradeRecordView {
   closeDecision: TradeDecisionRef | null;
 }
 
-/** trader 详情：公开视图 + 实时持仓/挂单 + 各持仓交易计划 */
+/** trader 详情：公开视图 + 实时持仓/挂单 + 本局生效中的交易计划 + 两份笔记 */
 export interface TraderDetailView {
   trader: TraderPublicView;
   positions: FuturesPosition[];
   pendingOrders: FuturesOrder[];
   plans: AiTraderPlanView[];
+  /** 记忆笔记：reviewer 每日复盘沉淀的，跨局累积；trader 每次唤醒都读 */
+  memory: string | null;
+  /** 学习笔记：learning agent 向同侪学的，跨局累积；trader 每次唤醒都读 */
+  learningNotes: string | null;
+  /** 最近一次成功复盘 / 学习的 wakeTime(ms)，没有=null */
+  lastReviewAt: number | null;
+  lastLearnAt: number | null;
 }
 
 /** 每次唤醒一条决策（竞技场时间线） */
