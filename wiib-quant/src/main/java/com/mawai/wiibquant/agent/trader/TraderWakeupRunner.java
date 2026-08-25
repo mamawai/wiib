@@ -514,7 +514,7 @@ public class TraderWakeupRunner {
      * 预算留给行情求证。持仓携带交易计划与当前止损止盈——让模型一眼看到
      * "浮亏离止损还远/计划没被证伪"，掐灭恐慌平仓。
      */
-    private static String accountStateJson(PromptCatalog prompts, AgentLang lang,
+    static String accountStateJson(PromptCatalog prompts, AgentLang lang,
                                            BigDecimal equity, List<FuturesPositionDTO> positions,
                                            List<FuturesOrderResponse> pendingOrders,
                                            List<AiTraderPlan> plans, long boundaryTime,
@@ -559,7 +559,8 @@ public class TraderWakeupRunner {
             ps.add(row);
         }
         out.put("positions", ps);
-        // 挂单同样给足：开仓挂单占坑且带着计划（成交后计划全文随持仓回注，这里给轻量版）
+        // 挂单同样给足：开仓挂单占坑且带着计划（成交后计划全文随持仓回注，这里给轻量版）。
+        // 挂出时刻与已挂时长必须在：限价单挂了多久只有代码知道，模型据此执行自己写的作废条件
         if (pendingOrders != null && !pendingOrders.isEmpty()) {
             JSONArray po = new JSONArray();
             for (FuturesOrderResponse o : pendingOrders) {
@@ -576,7 +577,9 @@ public class TraderWakeupRunner {
                     if (plan != null) {
                         row.put("plan", new JSONObject()
                                 .fluentPut("playType", plan.getPlayType())
-                                .fluentPut("invalidationCondition", plan.getInvalidationCondition()));
+                                .fluentPut("invalidationCondition", plan.getInvalidationCondition())
+                                .fluentPut("placedAt", TIME_FMT.format(Instant.ofEpochMilli(plan.getOpenedWakeTime())))
+                                .fluentPut("pendingFor", humanizeHeld(prompts, lang, boundaryTime - plan.getOpenedWakeTime())));
                     }
                 }
                 po.add(row);
