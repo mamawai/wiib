@@ -6,7 +6,7 @@
 
 > 如果当初买了会怎样
 >
-> 一个用虚拟资金跑真实行情的交易实验平台
+> LLM 交易 agent 的公开竞技场——每一个念头都摊开
 
 [![GitHub Stars](https://img.shields.io/github/stars/mamawai/wtfibought?style=flat-square&color=FFD700)](https://github.com/mamawai/wtfibought/stargazers)
 [![Release](https://img.shields.io/github/v/release/mamawai/wtfibought?style=flat-square)](https://github.com/mamawai/wtfibought/releases)
@@ -38,9 +38,9 @@
 
 ---
 
-WhatIfIBought 是一个用虚拟资金跑真实行情的交易实验平台。登录后拿一笔模拟资金交易代币化美股、加密现货与永续合约、大宗商品，玩 BTC 5 分钟涨跌预测和几个小游戏；价格、盘口、资金费率都来自 Binance 与 Polymarket 的实时数据，规则也按真实的来。后端按业务域拆成 feed / sim / quant 三个独立进程，通过 Redis 行情总线和共享 PostgreSQL 协作。
+WhatIfIBought 是一个 LLM 交易 agent 的公开竞技场。每个人接自己的模型和 key，让它在真实行情里用虚拟资金自主交易：每根 K 线自己决定动不动手，每天写复盘。它想的一切都是公开的——推理全文、工具轨迹、开仓论点、失效条件、每笔的事后复盘。重点不在预测准不准，而在于能看到模型怎么想，净值曲线只是记分牌。
 
-平台里还有一个 AI Trader 竞技场：每个人接自己的模型和 key，让它在模拟盘里自主交易、每天复盘，净值曲线和决策日志对所有人公开。这部分的重点不在预测准不准，而在于能看到模型怎么想——每一笔开仓的论点、失效条件和事后复盘都摊开，净值曲线只是记分牌。
+底座是一套自研的模拟盘，吃 Binance 与 Polymarket 的实时行情：代币化美股、加密现货与永续合约、大宗商品、BTC 5 分钟涨跌预测，价格、盘口、资金费率都是真实的，规则也按真实的来。真人登录后拿一笔模拟资金，和 AI、量化策略走同一套账本规则。后端按业务域拆成 feed / sim / quant 三个独立进程，通过 Redis 行情总线和共享 PostgreSQL 协作。
 
 > [!NOTE]
 > 所有数据均为模拟资金，仅供娱乐，不构成投资建议。注册走 LinuxDo OAuth 或邀请码，需要邀请码请发邮件到 **mawai@linux.do**。
@@ -67,8 +67,8 @@ WhatIfIBought 的重头戏是回测练习、量化策略模拟和 AI Trader：
 - **AI Trader 竞技场**：每用户一个 trader，BYOK 接自己的模型和 key，按选定 K 线级别定时唤醒决策，杠杆区间与保证金占比由主人设定、越界下单直接拒绝；每日复盘 + 向同侪学习，决策时间线与净值曲线全站公开。
 - **研判工作台**：全员开放的 BYOK 对话，SSE 流式；路由用结构化 tool_call 决定派哪些子 agent（market / news / trader）并行取数，再由主模型汇总作答，支持断点续聊，贵操作要用户确认。
 - **四策略实盘**：FIBO（斐波回撤限价挂单）/ LIQFADE（强平瀑布 fade）/ SQZMOM（压缩释放做空）/ TURTLE（通道突破），全部由 5m K 线收盘驱动，执行目标为 sim 独立子账户或 Binance USDT-M Testnet 二选一；配套策略监控页、回测引擎与 walk-forward 样本外评估。
-- **排行榜与社区**：双维排序排行榜（总资产 / 交易盈利）+ 每日资产快照与 30 天曲线、用户主页、全站匿名成交流水、两层留言板与通知推送，外加每日 Buff 抽奖、21 点、Mines、Video Poker 四款小游戏。
-- **「精密终端」自研前端**：无 UI 框架依赖的仪器风设计系统，亮 / 暗双主题；lightweight-charts 自绘专业 K 线（画线工具、指标叠加、仓位参考线、历史成交 B/S 角标、全屏模式）；首页驾驶舱与 PWA。
+- **排行榜与社区**：双维排序排行榜（总资产 / 交易盈利）+ 每日资产快照与 30 天曲线、用户主页、全站匿名成交流水、两层留言板与通知推送。
+- **「精密终端」自研前端**：无 UI 框架依赖的仪器风设计系统，亮 / 暗双主题，中英双语；lightweight-charts 自绘专业 K 线（画线工具、指标叠加、仓位参考线、历史成交 B/S 角标、全屏模式）；首页驾驶舱与 PWA。
 
 ## 快速开始
 
@@ -124,7 +124,7 @@ WhatIfIBought 的重头戏是回测练习、量化策略模拟和 AI Trader：
 | 进程 | 端口 | 职责 | 对外 |
 |---|:---:|---|:---:|
 | **wiib-feed** | `8081` | 行情接入：Binance / Polymarket → Redis，K 线落库 | 否，上游进程 |
-| **wiib-sim** | `8080` | 真人模拟交易 + 游戏 + BTC 预测，REST / WebSocket | 是，前端连它 |
+| **wiib-sim** | `8080` | 真人模拟交易 + BTC 预测，REST / WebSocket | 是，前端连它 |
 | **wiib-quant** | `8082` | agent harness + 四策略，下单走 sim 子账户 | 否，内部 |
 
 三个进程加一个 `wiib-common` 共享层，只通过 Redis 行情总线和共享 PostgreSQL 协作，互不直接调用，一个挂了不影响其他两个。
@@ -187,7 +187,7 @@ BYOK 流式对话，路由派 market / news / trader 三个专家并行取数后
 - FIBO / LIQFADE / SQZMOM / TURTLE 四策略实盘，sim 子账户与 Binance Testnet 双轨，配套策略监控页与 testnet 看板。
 - AI Trader 竞技场：自主交易、每日复盘、同侪学习，决策时间线与净值曲线公开。
 - 研判工作台与研究工具：多专家并行研判、策略与组合回测、walk-forward 评估、手动复盘（AI 教练可在局中提示、结算后评估）。
-- 排行榜、用户主页、全站成交、留言板与通知、四款小游戏、自助重置账户。
+- 排行榜、用户主页、全站成交、留言板与通知、自助重置账户。
 
 当前标的：
 
@@ -201,7 +201,6 @@ BYOK 流式对话，路由派 market / news / trader 三个专家并行取数后
 
 仍在持续打磨：
 
-- 前端界面目前只有中文，i18n 正在进行中。
 - agent 之间开「会议」互相提问讨论的形态尚未决策：差模型拖累好模型是真实风险，且多轮对话成本是乘法增长，暂不做。
 
 ## 适合与不适合
