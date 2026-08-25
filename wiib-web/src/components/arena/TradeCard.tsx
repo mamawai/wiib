@@ -1,9 +1,8 @@
 import { useTranslation } from 'react-i18next';
-import { ArrowDownRight, ArrowUpRight, MousePointerClick, Zap } from 'lucide-react';
+import { ArrowDownRight, ArrowRight, ArrowUpRight } from 'lucide-react';
 import { cn, fmtDateTime, fmtDuration, fmtNum } from '../../lib/utils';
 import type { TradeDecisionRef, TradeRecordView } from '../../types';
 import { PlanBlock } from './PlanBlock';
-import { ReasoningFold } from './ReasoningFold';
 
 /**
  * 了结方式徽章色：止盈/止损是计划兑现，主动平仓是模型的手，强平是事故。
@@ -14,8 +13,11 @@ const CLOSE_MANNER_TONE: Record<string, string> = {
   manual: 'bg-primary/15 text-primary', liquidated: 'bg-loss/25 text-loss',
 };
 
-/** 单笔已了结交易：头行（币种·多空·了结方式·入场→出场·盈亏）→ 计划（论点/失效条件/修订史）→ 开仓/平仓决策折叠 */
-export function TradeCard({ r }: { r: TradeRecordView }) {
+/**
+ * 单笔已了结交易：头行（币种·多空·了结方式·入场→出场·盈亏）→ 开/平时刻 → 计划（论点/失效条件/修订史）
+ * → 开仓/平仓决策的跳转链接。决策全文不在这里重复——时间线才是它的家，onJump 把人带过去。
+ */
+export function TradeCard({ r, onJump }: { r: TradeRecordView; onJump: (d: TradeDecisionRef) => void }) {
   const { t } = useTranslation('ai');
   const isLong = r.side === 'LONG';
   const pnl = r.closedPnl;
@@ -41,33 +43,23 @@ export function TradeCard({ r }: { r: TradeRecordView }) {
         <span>{t('trade.held', { d: fmtDuration(r.openedAt, r.closedAt) })}</span>
       </div>
       {r.plan ? <PlanBlock plan={r.plan} /> : <p className="text-muted-foreground/70">{t('trade.noPlan')}</p>}
-      {r.openDecision && <DecisionRefBlock label={t('trade.openDecision')} d={r.openDecision} />}
-      {r.closeDecision && <DecisionRefBlock label={t('trade.closeDecision')} d={r.closeDecision} />}
+      {(r.openDecision || r.closeDecision) && (
+        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 leading-relaxed">
+          {r.openDecision && <DecisionLink label={t('trade.openDecision')} d={r.openDecision} onJump={onJump} />}
+          {r.closeDecision && <DecisionLink label={t('trade.closeDecision')} d={r.closeDecision} onJump={onJump} />}
+          {/* 平仓那一轮的一句话理由：止损/止盈带走没有这一轮，头行的了结方式徽章已经说明 */}
+          {r.closeDecision?.reason && <span className="text-muted-foreground">—— {r.closeDecision.reason}</span>}
+        </div>
+      )}
     </div>
   );
 }
 
-/** 交易记录挂的那一轮决策：标签 + 时刻 + 一句话理由（平仓才有）+ 全文折叠 */
-function DecisionRefBlock({ label, d }: { label: string; d: TradeDecisionRef }) {
-  const { t } = useTranslation('ai');
+function DecisionLink({ label, d, onJump }: { label: string; d: TradeDecisionRef; onJump: (d: TradeDecisionRef) => void }) {
   return (
-    <div className="rounded border border-border/60 bg-card-2/40 px-2.5 py-2 space-y-1 leading-relaxed">
-      <div className="flex items-center gap-1.5 flex-wrap">
-        <span className="font-black">{label}</span>
-        <span className="text-muted-foreground/80 num">{fmtDateTime(d.wakeTime)}</span>
-        {d.kind === 'ALERT' && (
-          <span className="inline-flex items-center gap-0.5 text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-600">
-            <Zap className="w-3 h-3" />{t('decision.alertRound')}
-          </span>
-        )}
-        {d.kind === 'MANUAL' && (
-          <span className="inline-flex items-center gap-0.5 text-[10px] font-bold px-1.5 py-0.5 rounded bg-teal-500/15 text-teal-600">
-            <MousePointerClick className="w-3 h-3" />{t('decision.manualRound')}
-          </span>
-        )}
-        {d.reason && <span className="text-muted-foreground">—— {d.reason}</span>}
-      </div>
-      <ReasoningFold reasoning={d.reasoning} />
-    </div>
+    <button type="button" onClick={() => onJump(d)}
+            className="inline-flex items-center gap-0.5 font-bold text-primary hover:underline">
+      {label} · <span className="num">{fmtDateTime(d.wakeTime)}</span><ArrowRight className="w-3 h-3" />
+    </button>
   );
 }

@@ -5,29 +5,17 @@ import i18n from '../../i18n';
 import { cn, fmtDateTime, fmtNum, fmtTokens } from '../../lib/utils';
 import type { AiTraderDecisionView } from '../../types';
 import { ReasoningFold } from './ReasoningFold';
+import { TRADE_TOOL_SET, toolName } from './traderTools';
 
-/** 徽章存的是词表 key：模块级常量只算一次，存翻好的字面量切了语言也不会变（下面几张表同理） */
+/** 徽章存的是词表 key：模块级常量只算一次，存翻好的字面量切了语言也不会变 */
 const DECISION_STATUS: Record<string, { labelKey: string; tone: string }> = {
   OK: { labelKey: 'decision.ok', tone: 'bg-primary/15 text-primary' },
   ERROR: { labelKey: 'decision.error', tone: 'bg-loss/15 text-loss' },
   SKIPPED: { labelKey: 'decision.skipped', tone: 'bg-muted text-muted-foreground' },
 };
 
-/** 工具名人话化：交易动作独立成行展示参数，数据查询弱化成 chip——一眼分清"看了什么"和"做了什么" */
-const TOOL_KEY: Record<string, string> = {
-  open_position: 'tool.openPosition', close_position: 'tool.closePosition', set_stop_loss: 'tool.setStopLoss',
-  set_take_profit: 'tool.setTakeProfit', cancel_order: 'tool.cancelOrder', write_plan: 'tool.writePlan',
-  get_account: 'tool.getAccount', klines: 'tool.klines', indicators: 'tool.indicators',
-  market_snapshot: 'tool.marketSnapshot', funding_history: 'tool.fundingHistory',
-  orderbook_depth: 'tool.orderbookDepth', option_iv: 'tool.optionIv', news_search: 'tool.newsSearch',
-};
-
-/** 工具的展示名；表里没有的（后端加了新工具）原样显示 id */
-function toolName(tool: string): string {
-  const key = TOOL_KEY[tool];
-  return key ? i18n.t(`ai:${key}`) : tool;
-}
-const TRADE_TOOLS = new Set(['open_position', 'close_position', 'set_stop_loss', 'set_take_profit', 'cancel_order', 'write_plan']);
+/** "看了什么"一行最多点名几个工具，其余折成 +N */
+const LOOKED_MAX = 4;
 
 interface ActionRow {
   tool: string;
@@ -67,8 +55,11 @@ function tradeArgsSummary(a: ActionRow): string {
   }
 }
 
-/** 单条决策卡：时间/权益 + 数据工具chip + 交易动作行（参数/拒因） + 推理 markdown 折叠——竞技场的观赏核心。 */
-export function DecisionCard({ d }: { d: AiTraderDecisionView }) {
+/**
+ * 单条决策卡：徽章/时间/权益 + token（耗时·工具次·模型次收进 hover）→ "看了什么"一句 → 交易动作行（参数/拒因）→ 推理折叠。
+ * highlight=从已了结交易跳过来的那一条，描个边让人找得到。
+ */
+export function DecisionCard({ d, highlight }: { d: AiTraderDecisionView; highlight?: boolean }) {
   const { t } = useTranslation('ai');
   // 复盘行不是交易决策，徽章与配色单独一套：reviewer 的每日日志，时间线上要一眼认出
   // 学习行同样不交易，但来源不同（复盘看自己、学习看同侪），再分一套色——两种日志行混在时间线上要能一眼分清
@@ -88,13 +79,28 @@ export function DecisionCard({ d }: { d: AiTraderDecisionView }) {
       return [];
     }
   }, [d.actionsJson]);
-  const dataCalls = actions.filter(a => !TRADE_TOOLS.has(a.tool));
-  const trades = actions.filter(a => TRADE_TOOLS.has(a.tool));
+  const dataCalls = actions.filter(a => !TRADE_TOOL_SET.has(a.tool));
+  const trades = actions.filter(a => TRADE_TOOL_SET.has(a.tool));
+  // 同一工具多周期连查几次只点名一次；出错的排前面露出来
+  const seen = new Map<string, boolean>();
+  for (const a of dataCalls) seen.set(a.tool, (seen.get(a.tool) ?? false) || a.status === 'error');
+  const looked = [...seen.entries()].sort((a, b) => Number(b[1]) - Number(a[1]));
+  const extra = looked.length - LOOKED_MAX;
+
+  // 遥测明细只进 hover：观众看的是它怎么想，不是工程指标
+  const metaTitle = [
+    d.latencyMs != null && `${(d.latencyMs / 1000).toFixed(1)}s`,
+    // 复盘无工具（单次调用）不显示"0次工具"占位；学习是 ReactAgent 有 peer_insights 工具，照常显示
+    d.kind !== 'REVIEW' && t('detail.toolCalls', { count: d.toolCalls }),
+    d.modelCalls != null && t('detail.modelCalls', { count: d.modelCalls }),
+  ].filter(Boolean).join(' · ');
 
   return (
-    <div className={cn('rounded-md border bg-card p-3 space-y-2',
-      d.kind === 'REVIEW' ? 'border-violet-500/35 bg-violet-500/[0.04]'
-        : d.kind === 'LEARN' ? 'border-sky-500/35 bg-sky-500/[0.04]' : 'border-border')}>
+    <div id={`decision-${d.id}`}
+         className={cn('rounded-md border bg-card p-3 space-y-2',
+           d.kind === 'REVIEW' ? 'border-violet-500/35 bg-violet-500/[0.04]'
+             : d.kind === 'LEARN' ? 'border-sky-500/35 bg-sky-500/[0.04]' : 'border-border',
+           highlight && 'ring-2 ring-primary/60')}>
       <div className="flex items-center gap-2 flex-wrap">
         <span className={cn('inline-flex items-center gap-0.5 text-[10px] font-bold px-1.5 py-0.5 rounded', meta.tone)}>
           {d.kind === 'REVIEW' && <NotebookPen className="w-3 h-3" />}
@@ -116,27 +122,28 @@ export function DecisionCard({ d }: { d: AiTraderDecisionView }) {
         {d.equity != null && (
           <span className="text-[11px] text-muted-foreground">{t('term.equity')} <span className="num font-bold text-foreground">{fmtNum(d.equity)}</span></span>
         )}
-        <span className="ml-auto text-[10px] text-muted-foreground/70 num">
-          {[
-            d.latencyMs != null && `${(d.latencyMs / 1000).toFixed(1)}s`,
-            // 复盘无工具（单次调用）不显示"0次工具"占位；学习是 ReactAgent 有 peer_insights 工具，照常显示
-            d.kind !== 'REVIEW' && t('detail.toolCalls', { count: d.toolCalls }),
-            d.modelCalls != null && t('detail.modelCalls', { count: d.modelCalls }),
-            // token 为 null＝上游端点没报 usage，显示「—」而不是 0：0 会被读成"这轮没花钱"
-            d.modelCalls != null && `${d.totalTokens == null ? '—' : fmtTokens(d.totalTokens)} tokens`,
-          ].filter(Boolean).join(' · ')}
-        </span>
+        {/* token 为 null＝上游端点没报 usage，显示「—」而不是 0：0 会被读成"这轮没花钱" */}
+        {d.modelCalls != null && (
+          <span className="ml-auto text-[10px] num text-muted-foreground/70 cursor-help" title={metaTitle}>
+            {d.totalTokens == null ? '—' : fmtTokens(d.totalTokens)} tok
+          </span>
+        )}
       </div>
 
-      {/* 数据查询：弱化 chip，交代"它看了什么"再决策 */}
-      {dataCalls.length > 0 && (
-        <div className="flex flex-wrap gap-1">
-          {dataCalls.map((a, i) => (
-            <span key={i} className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground/80"
-                  title={a.error || undefined}>
-              {toolName(a.tool)}{a.status === 'error' && ' ✕'}
+      {/* 数据查询收成一句：交代"它看了什么"再决策；出错的工具标红 */}
+      {looked.length > 0 && (
+        <div className="text-[11px] text-muted-foreground">
+          {t('detail.lookedAt')}{' '}
+          {looked.slice(0, LOOKED_MAX).map(([tool, failed], i) => (
+            <span key={tool}>
+              {i > 0 && <span className="mx-1">·</span>}
+              <span className={cn('font-semibold', failed ? 'text-loss' : 'text-foreground/75')}
+                    title={failed ? dataCalls.find(a => a.tool === tool && a.status === 'error')?.error : undefined}>
+                {toolName(tool)}
+              </span>
             </span>
           ))}
+          {extra > 0 && <span className="ml-1">+{extra}</span>}
         </div>
       )}
 

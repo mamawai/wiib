@@ -86,11 +86,10 @@
     "modelCalls_one": "{{count}} model call",
     "modelCalls_other": "{{count}} model calls",
     "thisRound": "This round",
-    "equityCurve": "{{round}} equity (starts at 10000)",
+    "equityCurve": "{{round}} equity",
     "notEnoughPoints": "Not enough data points yet — let it wake up a few more times",
     "rangeDays": "{{n}}d",
     "rangeAll": "All",
-    "inRange": "In range",
     "historyRoundBanner": "Viewing R{{viewing}} (past round): equity and timeline are its own; positions, plans and closed trades are live data from the current round R{{cur}}",
     "positionsTitle": "Open positions / orders",
     "flat": "Flat, watching",
@@ -104,22 +103,30 @@
     "closeLong": "Close long",
     "closeShort": "Close short",
     "limitPrice": "Limit",
-    "learnNotesTitle": "Learning notes · from peers",
-    "memoryTitle": "Memory notes · from daily reviews",
+    "learnNotesTitle": "Learning notes",
+    "memoryTitle": "Memory notes",
     "plansTitle": "Trade plans · live",
     "lastAt": "Last {{time}}",
     "noLearnNotes": "No learning notes yet — comes after the learning round that follows everyone's daily review",
     "noMemory": "No memory notes yet — comes after the first daily review",
     "noPlans": "No live plans",
-    "tradesTitle": "Closed trades · thesis to outcome",
+    "tradesTitle": "Closed trades",
     "noTrades": "No closed trades in this round yet",
-    "timeline": "Decision timeline · see how it thinks",
+    "timeline": "Decision timeline",
     "allDays": "All days",
     "prevDay": "Previous day",
     "nextDay": "Next day",
     "noDecisions": "No decisions yet. Once started it wakes on every candle, plus one daily review.",
     "noDecisionsDay": "No decisions on this day",
-    "loadMore": "Load earlier"
+    "loadMore": "Load earlier",
+    "round": "Round",
+    "equityLabel": "Equity · starts at 10000",
+    "dayN": "Day {{n}}",
+    "closedCount": "Closed",
+    "tradesN_one": "{{count}} trade",
+    "tradesN_other": "{{count}} trades",
+    "winRate": "Win rate",
+    "lookedAt": "Read"
   },
   "tool": {
     "openPosition": "Open position",
@@ -135,7 +142,8 @@
     "fundingHistory": "Funding fee",
     "orderbookDepth": "Order book",
     "optionIv": "Option IV",
-    "newsSearch": "News"
+    "newsSearch": "News",
+    "klineStructure": "Structure"
   },
   "args": {
     "long": "Long",
@@ -153,9 +161,7 @@
     "skipped": "Skipped",
     "reviewFailed": "Review failed",
     "learnFailed": "Learning failed",
-    "alert": "Volatility alert",
-    "alertRound": "Alert round",
-    "manualRound": "Manual round"
+    "alert": "Volatility alert"
   },
   "plan": {
     "title": "Trade plan",
@@ -300,6 +306,32 @@
     "save": "Save config",
     "create": "Create Trader",
     "rules": "Rules: it wakes once per candle (extreme moves may wake it early, plus one review a day) on your key and your tokens. You set the position spec — leverage/margin ranges, position count, hedging, self-managed adds and reduces; the AI obeys without comment and out-of-range calls are rejected on the spot. Stop loss and invalidation are mandatory; stops may only tighten. Every entry files a trade plan, fed back verbatim on each wake-up, and there are only three ways out: stop loss, take profit, invalidation. Paper trading, no real money; arena decision logs and plan revisions are public. Do not expect it to make money — watching how it thinks is the point."
+  },
+  "skills": {
+    "title": "Related skills",
+    "summary": "{{trade}} trade actions · {{data}} market-data reads · at most 8 model calls / 600 s per wake",
+    "trade": "Trade actions",
+    "tradeHint": "Touch the book; anything outside your spec is rejected on the spot with the reason",
+    "data": "Market data",
+    "dataHint": "Read-only; interval 5m / 15m / 1h / 4h / 1d on all of them",
+    "foot": "Each wake it picks tools on its own — higher timeframe for direction, own timeframe for location, verify, decide. Account state, plans, memory and learning notes are injected every round and cost no calls. Every timeline entry lists what it read and what it did.",
+    "desc": {
+      "open_position": "Market/limit long or short; a trade plan (thesis · evidence · invalidation) is filed on entry. <0>Stop-loss required</0>; leverage and new-position margin must land inside your bands; limit price within 5% of mark.",
+      "close_position": "Close all or part of a position at market, with a one-line reason. With self-reduce off it becomes a request awaiting your approval.",
+      "set_stop_loss": "<0>Tighten only</0>: long stops move up, short stops move down. Reason required; goes into the public plan revision history.",
+      "set_take_profit": "<0>Away only</0>: long targets move up, short targets move down. To leave early, cite the invalidation and close instead.",
+      "write_plan": "Only for a position with no plan on record; plans are immutable — a new thesis means adding or re-opening.",
+      "cancel_order": "Cancel a pending limit order.",
+      "get_account": "Balance / positions / pending orders. Already injected every round; normally only called to re-check after its own orders.",
+      "klines": "192 raw OHLCV bars, last one still forming. For bar-by-bar pattern checks or its own swing rules.",
+      "kline_structure": "Swings, segments, volume-by-price and key levels of the same bars; facts only, no calls.",
+      "indicators": "MA/EMA · RSI · MACD · BOLL · ATR · KDJ · ADX · OBV · volume ratio, as of the last bar.",
+      "market_snapshot": "Price change, funding deviation, OI change, long/short ratios, top-trader bias, taker and liquidation pressure, book imbalance, fear & greed.",
+      "funding_history": "Last 30 settlements plus next funding time and mark price.",
+      "orderbook_depth": "Top 10 bid/ask levels — where the walls sit.",
+      "option_iv": "Deribit DVOL and ATM implied volatility.",
+      "news_search": "Recent market news flashes, full text."
+    }
   },
   "req": {
     "title": "AI approval requests · {{n}}",

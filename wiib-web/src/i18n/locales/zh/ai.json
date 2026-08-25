@@ -83,11 +83,10 @@
     "toolCalls_other": "{{count}}次工具",
     "modelCalls_other": "{{count}}次模型",
     "thisRound": "本局",
-    "equityCurve": "{{round}}净值（初始 10000）",
+    "equityCurve": "{{round}}净值",
     "notEnoughPoints": "数据点不足，等它多醒几次",
     "rangeDays": "{{n}}天",
     "rangeAll": "全部",
-    "inRange": "区间内",
     "historyRoundBanner": "正在看 R{{viewing}}（历史局）：净值与时间线是它的；持仓、计划、已了结交易是当前局 R{{cur}} 的实时数据",
     "positionsTitle": "当前持仓 / 挂单",
     "flat": "空仓观望中",
@@ -101,22 +100,29 @@
     "closeLong": "平多",
     "closeShort": "平空",
     "limitPrice": "限价",
-    "learnNotesTitle": "学习笔记 · 向同侪学的",
-    "memoryTitle": "记忆笔记 · 复盘沉淀的",
+    "learnNotesTitle": "学习笔记",
+    "memoryTitle": "记忆笔记",
     "plansTitle": "交易计划 · 生效中",
     "lastAt": "最近 {{time}}",
     "noLearnNotes": "还没有学习笔记，等全体复盘跑完后的学习轮",
     "noMemory": "还没有记忆笔记，等第一次每日复盘",
     "noPlans": "没有生效中的计划",
-    "tradesTitle": "已了结交易 · 论点→结局",
+    "tradesTitle": "已了结交易",
     "noTrades": "本局还没有了结的交易",
-    "timeline": "决策时间线 · 看它怎么想",
+    "timeline": "决策时间线",
     "allDays": "全部日期",
     "prevDay": "前一天",
     "nextDay": "后一天",
     "noDecisions": "还没有任何决策，启动后每根K线醒一次，每日复盘另记一条",
     "noDecisionsDay": "这天没有决策",
-    "loadMore": "加载更早"
+    "loadMore": "加载更早",
+    "round": "局次",
+    "equityLabel": "权益 · 初始 10000",
+    "dayN": "第 {{n}} 天",
+    "closedCount": "已了结",
+    "tradesN_other": "{{count}} 笔",
+    "winRate": "胜率",
+    "lookedAt": "看了"
   },
   "tool": {
     "openPosition": "开仓",
@@ -132,7 +138,8 @@
     "fundingHistory": "资金费",
     "orderbookDepth": "盘口",
     "optionIv": "期权IV",
-    "newsSearch": "快讯"
+    "newsSearch": "快讯",
+    "klineStructure": "K线结构"
   },
   "args": {
     "long": "做多",
@@ -150,9 +157,7 @@
     "skipped": "跳过",
     "reviewFailed": "复盘失败",
     "learnFailed": "学习失败",
-    "alert": "波动警报",
-    "alertRound": "警报轮",
-    "manualRound": "手动轮"
+    "alert": "波动警报"
   },
   "plan": {
     "title": "交易计划",
@@ -297,6 +302,32 @@
     "save": "保存配置",
     "create": "创建 Trader",
     "rules": "规则：每根 K 线唤醒一次（极端波动可能被临时叫醒，每日还有一次复盘），你的 key 你的 token 钱；仓位规格你说了算（杠杆/保证金区间、仓位数、双开、能否自主加减仓），AI 只能遵守不得评价，越界的调用当场被拒；强制止损+失效条件、止损只许收紧。开仓即立交易计划，每次唤醒原样喂回，退出只认止损/止盈/失效条件三条路。模拟盘不涉真实资金，竞技场决策日志与计划修订历史公开可见。别指望它赚钱——看它怎么想才是重点。"
+  },
+  "skills": {
+    "title": "相关 skills",
+    "summary": "{{trade}} 个交易动作 · {{data}} 项行情数据 · 每次唤醒最多 8 次模型调用、600 秒",
+    "trade": "交易动作",
+    "tradeHint": "会动账本；越过你配的规格当场被拒并告知原因",
+    "data": "行情数据",
+    "dataHint": "只读；周期均可选 5m / 15m / 1h / 4h / 1d",
+    "foot": "每次唤醒它按「先大周期定方向 → 回本周期找位置 → 求证 → 决定」自己挑工具；账户状态、交易计划、记忆笔记与学习笔记每轮自动注入，不占调用次数。时间线上每条决策都列出它看了哪些数据、做了哪些动作。",
+    "desc": {
+      "open_position": "市价/限价开多空，开仓即立交易计划（论点 · 依据 · 失效条件）。<0>必须带止损</0>；杠杆与新仓保证金须落在你配的区间内；限价不得偏离标记价 5%。",
+      "close_position": "按仓位市价平掉全部或部分，须给一句理由。关掉「自主减仓」时改为发请求等你确认。",
+      "set_stop_loss": "<0>只许收紧</0>：多单只上移、空单只下移。理由必填并进公开的计划修订史。",
+      "set_take_profit": "<0>只许远离入场</0>：多单只上移、空单只下移。想提前离场须引用失效条件走平仓。",
+      "write_plan": "只给没有计划记录的仓位补一份；计划不可改写，改论点只能加仓或平了重开。",
+      "cancel_order": "撤销未成交的限价单。",
+      "get_account": "余额 / 持仓 / 挂单。每轮已注入提示词，一般只在本轮自己下单后复核时才调。",
+      "klines": "192 根原始 OHLCV，末根未收盘。逐根验形态、套自己的摆动定义时用。",
+      "kline_structure": "同一段行情的摆动点、分段量价、量能密集带与关键价位，只给事实不下结论。",
+      "indicators": "MA/EMA · RSI · MACD · BOLL · ATR · KDJ · ADX · OBV · 量比，末根点状态。",
+      "market_snapshot": "价格变动、资金费偏离、持仓量变化、多空比、大户偏向、taker 与清算压力、盘口失衡、恐贪指数。",
+      "funding_history": "最近 30 次结算 + 下次结算时间与标记价。",
+      "orderbook_depth": "买卖各十档挂单，看大单墙在哪。",
+      "option_iv": "Deribit DVOL 与 ATM 隐含波动率。",
+      "news_search": "最近市场快讯全文。"
+    }
   },
   "req": {
     "title": "AI 请求确认 · {{n}}",

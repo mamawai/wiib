@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
-  ArrowDownRight, ArrowUpRight, Bot, ChevronLeft, ChevronRight, ClipboardList, GraduationCap, Loader2,
+  ArrowDownRight, ArrowUpRight, Bot, ChevronDown, ChevronLeft, ChevronRight, ClipboardList, GraduationCap, Loader2,
   NotebookPen, RefreshCcw, X, type LucideIcon,
 } from 'lucide-react';
 import { traderApi } from '../api';
@@ -11,10 +11,9 @@ import { EquityChart } from '../components/EquityChart';
 import { Markdown } from '../components/Markdown';
 import { DecisionCard } from '../components/arena/DecisionCard';
 import { PlanBlock } from '../components/arena/PlanBlock';
-import { ReasoningFold } from '../components/arena/ReasoningFold';
 import { TradeCard } from '../components/arena/TradeCard';
 import { cn, fmtDate, fmtDateTime, fmtNum } from '../lib/utils';
-import type { AiTraderDecisionView, TradeRecordView, TraderDetailView, TraderEquityPoint } from '../types';
+import type { AiTraderDecisionView, TradeDecisionRef, TradeRecordView, TraderDetailView, TraderEquityPoint } from '../types';
 import type { TnEquityPoint } from '../types/testnet';
 
 const REFRESH_MS = 60_000;
@@ -23,6 +22,7 @@ const PAGE = 50;
 /** 净值曲线可选区间（天）；0=整局 */
 const RANGES = [3, 7, 14, 30, 0] as const;
 type Range = typeof RANGES[number];
+type Tab = 'timeline' | 'trades';
 
 /** 新加坡时区 yyyy-MM-dd 那一天的 [起, 止) 毫秒——时间线按天查询与 fmtDate/fmtDateTime 同一时区 */
 function dayBounds(day: string): { from: number; to: number } {
@@ -30,7 +30,7 @@ function dayBounds(day: string): { from: number; to: number } {
   return { from, to: from + DAY_MS };
 }
 
-/** 局次条 / 区间切换共用的小段选钮 */
+/** 局次 / 区间切换共用的小段选钮 */
 function SegButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) {
   return (
     <button type="button" onClick={onClick}
@@ -43,37 +43,65 @@ function SegButton({ active, onClick, children }: { active: boolean; onClick: ()
 
 const ICON_BTN = 'w-6 h-6 rounded border border-border flex items-center justify-center text-muted-foreground hover:text-primary disabled:opacity-40 disabled:hover:text-muted-foreground';
 
-/** 笔记卡（学习/记忆）：桌面限高 48vh 卡内滚，跟同行的卡等高；手机折叠成预览+展开——三块笔记堆在单列里全文铺开会把页面拉得没法翻 */
+/** 记分牌上的一格：微标签 + 一个数 */
+function Stat({ label, value, tone }: { label: string; value: ReactNode; tone?: string }) {
+  return (
+    <div className="px-3 py-1 bg-card-2 flex flex-col min-w-[5rem]">
+      <span className="microlabel">{label}</span>
+      <b className={cn('num text-[13px] font-extrabold leading-tight', tone)}>{value}</b>
+    </div>
+  );
+}
+
+/** 主栏卡的 tab 头 */
+function TabButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) {
+  return (
+    <button type="button" onClick={onClick}
+            className={cn('px-2.5 pt-1.5 pb-2 -mb-px text-xs font-extrabold border-b-2 inline-flex items-center gap-1.5',
+              active ? 'text-foreground border-primary' : 'text-muted-foreground border-transparent hover:text-foreground')}>
+      {children}
+    </button>
+  );
+}
+
+/**
+ * 笔记卡（记忆/学习）：默认一行——标题 + 首句预览 + 最近时间，点开才铺 markdown；两份笔记是参考资料，不跟实时数据抢版面。
+ * PC 上展开封顶 50vh、正文卡内滚；手机不限高跟页面滚
+ */
 function NotesCard({ icon: Icon, tone, title, time, content, empty }: {
   icon: LucideIcon; tone: string; title: string; time: number | null | undefined; content: string | null | undefined; empty: string;
 }) {
   const { t } = useTranslation('ai');
+  const [open, setOpen] = useState(false);
   const text = content?.trim() || '';
+  // 预览是纯文本，去掉 markdown 符号免得一行井号
+  const preview = text.replace(/[#*`>_-]/g, '').replace(/\s+/g, ' ').slice(0, 120);
   return (
-    <div className="rounded-lg pt-card p-4 flex flex-col gap-2 lg:max-h-[48vh]">
-      <div className="flex items-center gap-2 flex-wrap shrink-0">
-        <span className="microlabel inline-flex items-center gap-1"><Icon className={cn('w-3 h-3', tone)} />{title}</span>
+    <div className={cn('rounded-lg pt-card flex flex-col', open && 'lg:max-h-[50vh]')}>
+      <button type="button" onClick={() => text && setOpen(o => !o)} disabled={!text}
+              className="w-full flex items-center gap-2 px-4 py-3 text-left disabled:cursor-default shrink-0">
+        <Icon className={cn('w-3 h-3 shrink-0', tone)} />
+        <span className="microlabel shrink-0">{title}</span>
+        {text
+          ? <span className="flex-1 min-w-0 truncate text-[11px] text-muted-foreground">{preview}</span>
+          : <span className="flex-1 min-w-0 truncate text-[11px] text-muted-foreground/70">{empty}</span>}
         {time != null && text && (
-          <span className="ml-auto text-[10px] num text-muted-foreground/70">{t('detail.lastAt', { time: fmtDateTime(time) })}</span>
+          <span className="text-[10px] num text-muted-foreground/70 whitespace-nowrap">{t('detail.lastAt', { time: fmtDateTime(time) })}</span>
         )}
-      </div>
-      {!text ? (
-        <div className="flex-1 flex items-center justify-center py-6 text-xs text-muted-foreground">{empty}</div>
-      ) : (
-        <>
-          <div className="hidden lg:block flex-1 min-h-0 overflow-y-auto pr-1 text-xs leading-relaxed text-foreground/90">
-            <Markdown content={text} />
-          </div>
-          <div className="lg:hidden"><ReasoningFold reasoning={text} /></div>
-        </>
+        {text && <ChevronDown className={cn('w-3.5 h-3.5 shrink-0 text-muted-foreground transition-transform', open && 'rotate-180')} />}
+      </button>
+      {open && (
+        <div className="px-4 pb-4 text-xs leading-relaxed text-foreground/90 lg:flex-1 lg:min-h-0 lg:overflow-y-auto">
+          <Markdown content={text} />
+        </div>
       )}
     </div>
   );
 }
 
 /**
- * trader 详情：局次条 → 净值曲线（可切区间）| 实时持仓挂单 → 学习笔记 | 记忆笔记 | 生效中的计划
- * → 已了结交易 | 决策时间线（可按天翻）。
+ * trader 详情：记分牌 → 净值曲线（可切区间）| 实时持仓挂单 → 主栏【决策时间线（可按天翻）| 已了结交易】+ 副栏【生效中的计划 · 记忆笔记 · 学习笔记】。
+ * PC（lg+）每张卡各有高度上限，内容多了卡内滚，卡的位置不随内容跑；手机不限高，整页滚。
  */
 export function ArenaDetail() {
   const { t } = useTranslation(['ai', 'common']);
@@ -90,6 +118,10 @@ export function ArenaDetail() {
   const [range, setRange] = useState<Range>(3);
   // 时间线按天：null=不限日期；yyyy-MM-dd 是新加坡时区那一天
   const [day, setDay] = useState<string | null>(null);
+  const [tab, setTab] = useState<Tab>('timeline');
+  // 从已了结交易跳过来要找的那一条决策：描边 + 滚到它
+  const [focusId, setFocusId] = useState<number | null>(null);
+  const listRef = useRef<HTMLDivElement>(null);
 
   const load = useCallback(() => {
     if (!Number.isFinite(traderId)) return;
@@ -133,10 +165,25 @@ export function ArenaDetail() {
   }, [traderId, decisions, round, day]);
 
   // 局与局的日期不重叠，切局时日期筛选一并清掉
-  const pickRound = (r: number | null) => { setRound(r); setDay(null); };
+  const pickRound = (r: number | null) => { setRound(r); setDay(null); setFocusId(null); };
+  const changeDay = (d: string | null) => { setDay(d); setFocusId(null); };
   const today = fmtDate();
   // 没选日期时从今天起步
-  const shiftDay = (delta: number) => setDay(d => fmtDate(dayBounds(d ?? today).from + delta * DAY_MS));
+  const shiftDay = (delta: number) => changeDay(fmtDate(dayBounds(day ?? today).from + delta * DAY_MS));
+
+  // 已了结交易 → 它的开/平仓那一轮：切回时间线、筛到那一天、当前局（已了结只有当前局的）
+  const jumpToDecision = (d: TradeDecisionRef) => {
+    setTab('timeline');
+    setRound(null);
+    setDay(fmtDate(d.wakeTime));
+    setFocusId(d.id);
+    listRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+  // 那一天的列表到位后再滚到目标那条
+  useEffect(() => {
+    if (focusId == null) return;
+    document.getElementById(`decision-${focusId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, [focusId, decisions]);
 
   // 区间锚在曲线最后一个点而不是"现在"：看历史局时 3 天＝那局的最后 3 天
   const windowed = useMemo(() => {
@@ -166,67 +213,88 @@ export function ArenaDetail() {
     ? Array.from({ length: Math.min(tr.roundNo, 10) }, (_, i) => Math.max(1, tr.roundNo - 9) + i)
     : [];
 
+  // 记分牌：第几天＝曲线首点到末点（末点就是最近一次唤醒）；笔数/胜率从已了结交易现算，只有当前局的
+  const dayNo = curve.length > 0
+    ? Math.floor((curve[curve.length - 1].wakeTime - curve[0].wakeTime) / DAY_MS) + 1
+    : null;
+  const closed = trades.filter(r => r.closedPnl != null);
+  const winRate = closed.length > 0 ? Math.round(closed.filter(r => (r.closedPnl as number) > 0).length / closed.length * 100) : null;
+
   return (
     <div className="page-shell page-shell-wide p-4 md:p-6 space-y-4">
-      <div className="flex items-center gap-2.5 flex-wrap">
+      {/* 记分牌一行：身份在左，收益率·权益·四格·局次·刷新在右，窄屏右组整体换到下一行 */}
+      <div className="rounded-lg pt-card px-3 py-2 md:px-4 flex items-center gap-x-3 gap-y-2 flex-wrap">
         <Link to="/arena" className="border border-border hover:bg-surface-hover w-8 h-8 rounded-lg flex items-center justify-center text-muted-foreground hover:text-primary" aria-label={t('term.backToArena')}>
           <ChevronLeft className="w-4 h-4" />
         </Link>
         <Bot className="w-5 h-5 text-primary" />
-        <h1 className="text-lg font-black">{tr?.name ?? '…'}</h1>
+        <h1 className="text-base font-black">{tr?.name ?? '…'}</h1>
         {tr && st && (
           <>
             <span className={cn('text-[10px] font-bold px-1.5 py-0.5 rounded', st.tone)}>{t(st.labelKey)}</span>
             <span className="text-[11px] text-muted-foreground break-all">{tr.model ?? t('term.noModel')} · {tr.intervalCode}{tr.wakeWindow && ` · ${tr.wakeWindow}`}</span>
-            <span className={cn('num font-black', tr.pnlPct >= 0 ? 'text-gain' : 'text-loss')}>
-              {tr.pnlPct >= 0 ? '+' : ''}{tr.pnlPct.toFixed(2)}%
-            </span>
           </>
         )}
-        <button
-          onClick={() => { load(); loadDecisions(); }}
-          className="ml-auto border border-border hover:bg-surface-hover w-8 h-8 rounded-lg flex items-center justify-center text-muted-foreground hover:text-primary"
-          aria-label={t('common:refresh')}
-        >
-          <RefreshCcw className="w-3.5 h-3.5" />
-        </button>
+        <div className="ml-auto flex items-center gap-x-4 gap-y-2 flex-wrap">
+          {tr && (
+            <>
+              <div className={cn('num text-2xl font-black leading-none tracking-tight', tr.pnlPct >= 0 ? 'text-gain' : 'text-loss')}>
+                {tr.pnlPct >= 0 ? '+' : ''}{tr.pnlPct.toFixed(2)}%
+              </div>
+              <div className="flex flex-col">
+                <span className="microlabel">{t('detail.equityLabel')}</span>
+                <b className="num text-sm font-extrabold leading-tight">{fmtNum(tr.equity)}</b>
+              </div>
+              <div className="grid grid-flow-col rounded-md border border-border overflow-hidden divide-x divide-border">
+                <Stat label={viewingHistory ? `R${viewingRound}` : t('detail.thisRound')} value={dayNo != null ? t('detail.dayN', { n: dayNo }) : '—'} />
+                <Stat label={t('detail.closedCount')} value={t('detail.tradesN', { count: closed.length })} />
+                <Stat label={t('detail.winRate')} value={winRate != null ? `${winRate}%` : '—'} />
+                <Stat label={effectiveRange === 0 ? t('detail.rangeAll') : t('detail.rangeDays', { n: effectiveRange })}
+                      tone={windowDelta != null ? (windowDelta >= 0 ? 'text-gain' : 'text-loss') : undefined}
+                      value={windowDelta != null && windowPct != null
+                        ? `${windowDelta >= 0 ? '+' : ''}${fmtNum(windowDelta)} · ${windowDelta >= 0 ? '+' : ''}${windowPct.toFixed(2)}%`
+                        : '—'} />
+              </div>
+            </>
+          )}
+          {/* 局次：每局是独立子账户各自注资 10000，曲线与时间线同进同出；只有一局时不出现 */}
+          {rounds.length > 1 && (
+            <div className="flex items-center gap-1.5">
+              <span className="text-[11px] text-muted-foreground">{t('detail.round')}</span>
+              {rounds.map(r => (
+                <SegButton key={r} active={r === viewingRound} onClick={() => pickRound(r === tr?.roundNo ? null : r)}>R{r}</SegButton>
+              ))}
+            </div>
+          )}
+          <button
+            onClick={() => { load(); loadDecisions(); }}
+            className="border border-border hover:bg-surface-hover w-8 h-8 rounded-lg flex items-center justify-center text-muted-foreground hover:text-primary"
+            aria-label={t('common:refresh')}
+          >
+            <RefreshCcw className="w-3.5 h-3.5" />
+          </button>
+        </div>
       </div>
 
-      {/* 局次条：每局是独立子账户各自注资 10000，曲线与时间线必须同进同出，不能混排 */}
-      {rounds.length > 0 && (
-        <div className="flex items-center gap-1 flex-wrap">
-          {rounds.map(r => (
-            <SegButton key={r} active={r === viewingRound} onClick={() => pickRound(r === tr?.roundNo ? null : r)}>R{r}</SegButton>
-          ))}
-        </div>
-      )}
-
       {tr?.pausedReason && (
-        <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-2.5 text-xs text-amber-600 font-bold">
+        <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-1.5 text-[11px] text-amber-600 font-bold">
           {tr.pausedReason}
         </div>
       )}
       {/* 持仓/计划/已了结是实时现查当前账户的，看历史局时跟曲线不是同一局，一条横幅说清楚 */}
       {viewingHistory && (
-        <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-2.5 text-xs text-amber-600 font-bold">
+        <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-1.5 text-[11px] text-amber-600 font-bold">
           {t('detail.historyRoundBanner', { viewing: viewingRound, cur: tr.roundNo })}
         </div>
       )}
 
+      {/* 第一行：曲线 | 持仓——两张卡底边齐：持仓更高时曲线跟着长，持仓封顶 26rem 后卡内滚 */}
       <div className="grid lg:grid-cols-5 gap-4">
         <div className="lg:col-span-3 rounded-lg pt-card p-4 flex flex-col gap-2">
           <div className="flex items-center gap-2 flex-wrap shrink-0">
             <span className="microlabel">
               {t('detail.equityCurve', { round: viewingHistory ? `R${viewingRound}` : t('detail.thisRound') })}
             </span>
-            {windowDelta != null && windowPct != null && (
-              <span className="text-[11px] text-muted-foreground">
-                {t('detail.inRange')}{' '}
-                <span className={cn('num font-bold', windowDelta >= 0 ? 'text-gain' : 'text-loss')}>
-                  {windowDelta >= 0 ? '+' : ''}{fmtNum(windowDelta)} · {windowDelta >= 0 ? '+' : ''}{windowPct.toFixed(2)}%
-                </span>
-              </span>
-            )}
             <div className="ml-auto flex gap-1">
               {RANGES.map(r => (
                 <SegButton key={r} active={r === effectiveRange} onClick={() => setRange(r)}>
@@ -235,18 +303,17 @@ export function ArenaDetail() {
               ))}
             </div>
           </div>
-          {/* 曲线撑满卡片剩余高度：右侧持仓卡更高时曲线跟着长，两张卡底边始终齐 */}
           {chartPoints.length > 1
             ? <EquityChart points={chartPoints} className="flex-1 min-h-[260px]" />
             : <div className="flex-1 min-h-[260px] flex items-center justify-center text-xs text-muted-foreground">{t('detail.notEnoughPoints')}</div>}
         </div>
 
-        <div className="lg:col-span-2 rounded-lg pt-card p-4 flex flex-col gap-2">
+        <div className="lg:col-span-2 rounded-lg pt-card p-4 flex flex-col gap-2 lg:max-h-[26rem]">
           <span className="microlabel shrink-0">{t('detail.positionsTitle')}</span>
           {detail && (detail.positions.length === 0 && detail.pendingOrders.length === 0 ? (
             <div className="flex-1 flex items-center justify-center py-6 text-xs text-muted-foreground">{t('detail.flat')}</div>
           ) : (
-            <div className="space-y-2">
+            <div className="space-y-2 lg:flex-1 lg:min-h-0 lg:overflow-y-auto lg:pr-1">
               {detail.positions.map(p => {
                 const isLong = p.side === 'LONG';
                 return (
@@ -295,92 +362,99 @@ export function ArenaDetail() {
         </div>
       </div>
 
-      {/* 两份笔记是 trader 每次唤醒真正读到的东西，跨局累积不随局次切换；计划是本局存活的，归档的配在已了结卡里。
-          三张都限高 48vh 卡内滚，行高取最高那张、底边齐；1024–1279 三列太挤，计划卡退到第二行独占整行 */}
-      <div className="grid lg:grid-cols-2 xl:grid-cols-3 gap-4">
-        <NotesCard icon={GraduationCap} tone="text-sky-500" title={t('detail.learnNotesTitle')}
-                   time={detail?.lastLearnAt} content={detail?.learningNotes} empty={t('detail.noLearnNotes')} />
-        <NotesCard icon={NotebookPen} tone="text-violet-500" title={t('detail.memoryTitle')}
-                   time={detail?.lastReviewAt} content={detail?.memory} empty={t('detail.noMemory')} />
-        <div className="lg:col-span-2 xl:col-span-1 rounded-lg pt-card p-4 flex flex-col gap-2 lg:max-h-[48vh]">
-          <span className="microlabel inline-flex items-center gap-1 shrink-0"><ClipboardList className="w-3 h-3 text-primary" />{t('detail.plansTitle')}</span>
-          {detail && (detail.plans.length === 0 ? (
-            <div className="flex-1 flex items-center justify-center py-6 text-xs text-muted-foreground">{t('detail.noPlans')}</div>
-          ) : (
-            <div className="flex-1 min-h-0 lg:overflow-y-auto lg:pr-1 space-y-2">
-              {detail.plans.map(pl => {
-                const isLong = pl.side === 'LONG';
-                return (
-                  <div key={pl.id} className="text-[11px]">
-                    <div className="flex items-center gap-2">
-                      {isLong ? <ArrowUpRight className="w-3.5 h-3.5 text-gain" /> : <ArrowDownRight className="w-3.5 h-3.5 text-loss" />}
-                      <span className="font-black text-xs">{pl.symbol}</span>
-                      <span className={cn('text-[10px] font-bold px-1.5 py-0.5 rounded', isLong ? 'bg-gain/15 text-gain' : 'bg-loss/15 text-loss')}>
-                        {isLong ? t('term.long') : t('term.short')}
-                      </span>
-                    </div>
-                    <PlanBlock plan={pl} />
-                  </div>
-                );
-              })}
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* 两栏都限高卡内滚、底边齐；手机不限高跟页面滚——单栏堆叠再套双层滚动是灾难 */}
-      <div className="grid lg:grid-cols-2 gap-4">
-        <div className="rounded-lg pt-card p-4 flex flex-col gap-2 lg:max-h-[75vh]">
-          <span className="microlabel shrink-0">{t('detail.tradesTitle')}</span>
-          {trades.length === 0 ? (
-            <div className="flex-1 flex items-center justify-center py-6 text-xs text-muted-foreground">{t('detail.noTrades')}</div>
-          ) : (
-            <div className="flex-1 min-h-0 lg:overflow-y-auto lg:pr-1 space-y-2">
-              {trades.map(r => <TradeCard key={r.positionId} r={r} />)}
-            </div>
-          )}
-        </div>
-
-        <div className="rounded-lg pt-card p-4 flex flex-col gap-2.5 lg:max-h-[75vh]">
-          <div className="flex items-center gap-2 flex-wrap shrink-0">
-            <span className="microlabel">
+      {/* 第二行：主栏（时间线 | 已了结）+ 副栏（计划 · 两份笔记）。主栏封顶 75vh 列表卡内滚；
+          手机上副栏排在主栏前面：时间线可以无限加载，别把计划笔记压到底 */}
+      <div className="grid lg:grid-cols-5 gap-4 items-start">
+        <div ref={listRef} className="lg:col-span-3 rounded-lg pt-card p-4 flex flex-col gap-2.5 lg:max-h-[75vh] scroll-mt-16">
+          <div className="flex items-center gap-1 flex-wrap border-b border-border -mx-4 px-3 -mt-1 shrink-0">
+            <TabButton active={tab === 'timeline'} onClick={() => setTab('timeline')}>
               {t('detail.timeline')}{viewingHistory && ` · R${viewingRound}`}
-            </span>
-            {/* 按天翻看：前后一天箭头 + 日期框；清掉回到不限日期 */}
-            <div className="ml-auto flex items-center gap-1">
-              <button type="button" className={ICON_BTN} aria-label={t('detail.prevDay')} onClick={() => shiftDay(-1)}>
-                <ChevronLeft className="w-3.5 h-3.5" />
-              </button>
-              <input type="date" value={day ?? ''} max={today}
-                     onChange={e => setDay(e.target.value || null)}
-                     className="h-6 px-1.5 rounded border border-border bg-input text-[10px] num" />
-              <button type="button" className={ICON_BTN} aria-label={t('detail.nextDay')}
-                      disabled={!day || day >= today} onClick={() => shiftDay(1)}>
-                <ChevronRight className="w-3.5 h-3.5" />
-              </button>
-              {day && (
-                <button type="button" className={ICON_BTN} aria-label={t('detail.allDays')} onClick={() => setDay(null)}>
-                  <X className="w-3.5 h-3.5" />
+            </TabButton>
+            <TabButton active={tab === 'trades'} onClick={() => setTab('trades')}>
+              {t('detail.tradesTitle')}
+              <span className="num text-[10px] px-1 rounded bg-muted text-muted-foreground">{trades.length}</span>
+            </TabButton>
+            {/* 按天翻看：前后一天箭头 + 日期框；清掉回到不限日期。只属于时间线 */}
+            {tab === 'timeline' && (
+              <div className="ml-auto flex items-center gap-1 pb-1.5">
+                <button type="button" className={ICON_BTN} aria-label={t('detail.prevDay')} onClick={() => shiftDay(-1)}>
+                  <ChevronLeft className="w-3.5 h-3.5" />
                 </button>
-              )}
-            </div>
+                <input type="date" value={day ?? ''} max={today}
+                       onChange={e => changeDay(e.target.value || null)}
+                       className="h-6 px-1.5 rounded border border-border bg-input text-[10px] num" />
+                <button type="button" className={ICON_BTN} aria-label={t('detail.nextDay')}
+                        disabled={!day || day >= today} onClick={() => shiftDay(1)}>
+                  <ChevronRight className="w-3.5 h-3.5" />
+                </button>
+                {day && (
+                  <button type="button" className={ICON_BTN} aria-label={t('detail.allDays')} onClick={() => changeDay(null)}>
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+            )}
           </div>
-          {decisions.length === 0 ? (
-            <div className="flex-1 flex items-center justify-center py-10 text-xs text-muted-foreground">{day ? t('detail.noDecisionsDay') : t('detail.noDecisions')}</div>
+
+          {tab === 'timeline' ? (
+            decisions.length === 0 ? (
+              <div className="flex-1 flex items-center justify-center py-10 text-xs text-muted-foreground">{day ? t('detail.noDecisionsDay') : t('detail.noDecisions')}</div>
+            ) : (
+              <div className="space-y-2.5 lg:flex-1 lg:min-h-0 lg:overflow-y-auto lg:pr-1">
+                {decisions.map(d => <DecisionCard key={d.id} d={d} highlight={d.id === focusId} />)}
+                {hasMore && (
+                  <button
+                    onClick={loadMore}
+                    disabled={loadingMore}
+                    className="w-full border border-border hover:bg-surface-hover rounded-lg py-2 text-xs font-bold text-muted-foreground hover:text-primary flex items-center justify-center gap-1.5"
+                  >
+                    {loadingMore && <Loader2 className="w-3.5 h-3.5 animate-spin" />} {t('detail.loadMore')}
+                  </button>
+                )}
+              </div>
+            )
           ) : (
-            <div className="flex-1 min-h-0 lg:overflow-y-auto lg:pr-1 space-y-2.5">
-              {decisions.map(d => <DecisionCard key={d.id} d={d} />)}
-              {hasMore && (
-                <button
-                  onClick={loadMore}
-                  disabled={loadingMore}
-                  className="w-full border border-border hover:bg-surface-hover rounded-lg py-2 text-xs font-bold text-muted-foreground hover:text-primary flex items-center justify-center gap-1.5"
-                >
-                  {loadingMore && <Loader2 className="w-3.5 h-3.5 animate-spin" />} {t('detail.loadMore')}
-                </button>
-              )}
-            </div>
+            trades.length === 0 ? (
+              <div className="flex-1 flex items-center justify-center py-10 text-xs text-muted-foreground">{t('detail.noTrades')}</div>
+            ) : (
+              <div className="space-y-2 lg:flex-1 lg:min-h-0 lg:overflow-y-auto lg:pr-1">
+                {trades.map(r => <TradeCard key={r.positionId} r={r} onJump={jumpToDecision} />)}
+              </div>
+            )
           )}
+        </div>
+
+        {/* 副栏：计划卡封顶 45vh、展开的笔记封顶 50vh，各自卡内滚 */}
+        <div className="lg:col-span-2 flex flex-col gap-4 order-first lg:order-none">
+          {/* 计划是本局存活的，归档的配在已了结卡里；两份笔记跨局累积不随局次切换 */}
+          <div className="rounded-lg pt-card p-4 flex flex-col gap-2 lg:max-h-[45vh]">
+            <span className="microlabel inline-flex items-center gap-1 shrink-0"><ClipboardList className="w-3 h-3 text-primary" />{t('detail.plansTitle')}</span>
+            {detail && (detail.plans.length === 0 ? (
+              <div className="flex-1 flex items-center justify-center py-6 text-xs text-muted-foreground">{t('detail.noPlans')}</div>
+            ) : (
+              <div className="space-y-2 lg:flex-1 lg:min-h-0 lg:overflow-y-auto lg:pr-1">
+                {detail.plans.map(pl => {
+                  const isLong = pl.side === 'LONG';
+                  return (
+                    <div key={pl.id} className="text-[11px]">
+                      <div className="flex items-center gap-2">
+                        {isLong ? <ArrowUpRight className="w-3.5 h-3.5 text-gain" /> : <ArrowDownRight className="w-3.5 h-3.5 text-loss" />}
+                        <span className="font-black text-xs">{pl.symbol}</span>
+                        <span className={cn('text-[10px] font-bold px-1.5 py-0.5 rounded', isLong ? 'bg-gain/15 text-gain' : 'bg-loss/15 text-loss')}>
+                          {isLong ? t('term.long') : t('term.short')}
+                        </span>
+                      </div>
+                      <PlanBlock plan={pl} />
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+          <NotesCard icon={NotebookPen} tone="text-violet-500" title={t('detail.memoryTitle')}
+                     time={detail?.lastReviewAt} content={detail?.memory} empty={t('detail.noMemory')} />
+          <NotesCard icon={GraduationCap} tone="text-sky-500" title={t('detail.learnNotesTitle')}
+                     time={detail?.lastLearnAt} content={detail?.learningNotes} empty={t('detail.noLearnNotes')} />
         </div>
       </div>
     </div>

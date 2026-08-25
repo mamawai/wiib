@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Trans, useTranslation } from 'react-i18next';
-import { Bot, Check, ChevronLeft, GraduationCap, Loader2, Pause, Play, RotateCcw, Save, X } from 'lucide-react';
+import { BookOpen, Bot, Check, ChevronDown, ChevronLeft, Database, GraduationCap, Loader2, Pause, Play, RotateCcw, Save, Wrench, X } from 'lucide-react';
 import { llmEndpointApi, traderApi } from '../api';
+import { DATA_TOOLS, TRADE_TOOLS, toolName } from '../components/arena/traderTools';
 import { GuidedTour, type TourStep } from '../components/GuidedTour';
 import { LlmEndpointSelect } from '../components/LlmEndpointSelect';
 import { useCryptoStream } from '../hooks/useCryptoStream';
@@ -16,6 +17,12 @@ const SYMBOL_OPTIONS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'DOGEUSDT', 'XRPUSDT'];
 const INTERVAL_OPTIONS = ['5m', '15m', '1h', '4h'];
 /** 波动哨兵每币基准阈值%（平台下限，只能经系数调高）——与后端 VolatilitySentinel 同一份数字 */
 const ALERT_BASE: Record<string, number> = { BTCUSDT: 0.6, ETHUSDT: 0.8, XRPUSDT: 0.8, SOLUSDT: 0.9, DOGEUSDT: 1.0 };
+
+/** 相关 skills 卡的两组：交易动作会动账本，行情数据只读；名字与时间线共用 toolName，说明走 skills.desc.* 词表 */
+const SKILL_GROUPS = [
+  { key: 'trade', icon: Wrench, tools: TRADE_TOOLS },
+  { key: 'data', icon: Database, tools: DATA_TOOLS },
+] as const;
 
 const DEFAULT_SPEC: TraderSpec = {
   leverageMin: 3, leverageMax: 20, marginPctMin: 5, marginPctMax: 20,
@@ -231,6 +238,39 @@ export function MyTrader() {
           ))}
         </div>
       )}
+
+      {/* 相关 skills：它每次唤醒拿到的全部工具——配置前先知道它会什么；默认折叠 */}
+      <details className="rounded-lg pt-card group">
+        <summary className="list-none cursor-pointer px-4 py-3 flex items-center gap-2.5 flex-wrap">
+          <BookOpen className="w-3 h-3 text-primary" />
+          <span className="microlabel">{t('skills.title')}</span>
+          <span className="text-[11px] text-muted-foreground">{t('skills.summary', { trade: TRADE_TOOLS.length, data: DATA_TOOLS.length })}</span>
+          <ChevronDown className="ml-auto w-3.5 h-3.5 text-muted-foreground transition-transform group-open:rotate-180" />
+        </summary>
+        <div className="px-4 pb-4 space-y-3">
+          {SKILL_GROUPS.map(g => (
+            <div key={g.key} className="rounded-md border border-border overflow-hidden">
+              <div className="flex items-center gap-2 px-3 py-1.5 bg-card-2">
+                <g.icon className="w-3 h-3 text-primary" />
+                <b className="text-[11px] font-extrabold">{t(`skills.${g.key}`)}</b>
+                <span className="text-[10px] text-muted-foreground">{t(`skills.${g.key}Hint`)}</span>
+                <span className="ml-auto num text-[10px] text-muted-foreground">{g.tools.length}</span>
+              </div>
+              {/* 一行三列对齐：中文名 | 工具 id | 一句作用；手机竖排 */}
+              {g.tools.map(id => (
+                <div key={id} className="grid sm:grid-cols-[6rem_8.5rem_1fr] gap-x-3 gap-y-0.5 items-baseline px-3 py-1.5 border-t border-border/60 text-[11px] leading-relaxed">
+                  <b className="text-xs font-extrabold">{toolName(id)}</b>
+                  <code className="num text-[10px] text-muted-foreground">{id}</code>
+                  <p className="text-muted-foreground">
+                    <Trans ns="ai" i18nKey={`skills.desc.${id}`} components={[<span className="text-amber-600 font-bold" />]} />
+                  </p>
+                </div>
+              ))}
+            </div>
+          ))}
+          <p className="text-[10px] leading-relaxed text-muted-foreground border-l-2 border-border pl-2.5">{t('skills.foot')}</p>
+        </div>
+      </details>
 
       {/* 配置表单 */}
       <div className="rounded-lg pt-card p-4 space-y-4">
