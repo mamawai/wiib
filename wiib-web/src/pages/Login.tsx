@@ -2,10 +2,8 @@ import { useCallback, useEffect, useState, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import NumberFlow from '@number-flow/react';
-import { authApi, campaignApi } from '../api';
+import { authApi } from '../api';
 import { useUserStore } from '../stores/userStore';
-import { useToast } from '../components/ui/use-toast';
-import { fmtNum } from '../lib/utils';
 import { useCryptoStream } from '../hooks/useCryptoStream';
 import { DecryptedText } from '../components/fx/DecryptedText';
 import { DitherSmoke } from '../components/fx/DitherSmoke';
@@ -39,18 +37,12 @@ const LINUXDO_CONFIG = {
 //   redirectUri: 'http://localhost:3000/login',
 // };
 
-/** OAuth state 的 localStorage 键。登录与活动领取共用同一个键，不许各存各的 */
+/** OAuth state 的 localStorage 键，全站只此一份 */
 export const OAUTH_STATE_KEY = 'oauth_state';
 
 /**
- * 活动领取的 state 前缀。项目只在 LinuxDo 那边注册了 /login 这一个 redirect_uri，
- * 登录与领取两条链路共用这个落点，回调靠这个前缀区分该走哪边。
- */
-export const CLAIM_STATE_PREFIX = 'campaign-claim:';
-
-/**
- * 拼 LinuxDo 授权跳转 URL。登录与活动领取共用，全站只此一处拼。
- * 抄第二份的下场是切生产配置时漏改一处，领取链路静默指向 localhost。
+ * 拼 LinuxDo 授权跳转 URL，全站只此一处拼。
+ * 抄第二份的下场是切生产配置时漏改一处，某条链路静默指向 localhost。
  * <p>本文件导出非组件会让 react-refresh 退化成整页刷新（下面那行 disable）：
  * 挪进 lib 就得把 LINUXDO_CONFIG 一起挪或再导出一遍，等于给"只此一处"开口子，不划算。
  */
@@ -87,21 +79,9 @@ export function Login() {
   const { t } = useTranslation('account');
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { toast } = useToast();
   const { user, setToken, fetchUser } = useUserStore();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  // 首次渲染定格"这趟是不是活动领取的回调"。必须定格：下面处理回调时会清掉 oauth_state，
-  // 现算的话判断会中途翻转，"已登录就回首页"那个 effect 就把正在领取的人弹走了。
-  // 判据与下面那个回调 effect 逐字一致（code + state 都在），否则会定格成一个永不开始的领取
-  const [claimCallback] = useState(() => {
-    const q = new URLSearchParams(window.location.search);
-    return !!q.get('code') && !!q.get('state')
-      && (localStorage.getItem(OAUTH_STATE_KEY) ?? '').startsWith(CLAIM_STATE_PREFIX);
-  });
-  // 领取中：服务端最坏要 ~2 分钟（重试 8 次），这段时间要给个说法，不能干等一个"登录中"。
-  // 初值就取定格值，省掉"先闪一下登录卡再变成领取中"
-  const [claiming, setClaiming] = useState(claimCallback);
   // null=模式加载中；两个开关决定展示哪些登录入口
   const [mode, setMode] = useState<{ linuxDoEnabled: boolean; passwordLoginEnabled: boolean } | null>(null);
   const callbackHandled = useRef(false);
@@ -114,29 +94,10 @@ export function Login() {
   const handleOAuthCallback = useCallback(async (code: string, state: string) => {
     const savedState = localStorage.getItem(OAUTH_STATE_KEY);
     if (state !== savedState) {
-      // 这里必须把 claiming 落下来：领取回调的初值是 true，不清就永远转圈、错误提示谁也看不见
-      setClaiming(false);
       setError(t('login.stateMismatch'));
       return;
     }
     localStorage.removeItem(OAUTH_STATE_KEY);
-
-    // 回调分流：普通登录走 authApi，活动领取走 campaignApi。
-    // 只有一个 redirect_uri，两条链路共用 /login 这个落点，靠 state 前缀区分。
-    // 成功失败都回活动页：结果由 toast 讲，人不该被扔在登录页上
-    if (savedState.startsWith(CLAIM_STATE_PREFIX)) {
-      setClaiming(true);
-      try {
-        const reward = await campaignApi.claim(code);
-        toast(t('login.claimOk', { amount: fmtNum(reward.ldcAmount) }), 'success');
-      } catch (e: unknown) {
-        toast(e instanceof Error ? e.message : t('login.claimFailed'), 'error');
-      } finally {
-        setClaiming(false);
-        navigate('/campaign', { replace: true });
-      }
-      return;
-    }
 
     setLoading(true);
     setError('');
@@ -154,14 +115,13 @@ export function Login() {
     } finally {
       setLoading(false);
     }
-  }, [fetchUser, navigate, setToken, toast, t]);
+  }, [fetchUser, navigate, setToken, t]);
 
-  // 领取回调不能走这条：领取的人本来就是登录状态，弹回首页会把还没跑完的领取请求连页面一起掀掉
   useEffect(() => {
-    if (user && !claimCallback) {
+    if (user) {
       navigate('/');
     }
-  }, [user, navigate, claimCallback]);
+  }, [user, navigate]);
 
   // 拉登录模式：两个开关都关才展示管理员直登；失败兜底回 OAuth（既有行为）
   useEffect(() => {
@@ -307,7 +267,7 @@ export function Login() {
                 <span className="microlabel font-semibold">ACCOUNT ACCESS</span>
               </div>
               <h2 className="text-xl font-extrabold tracking-tight mt-2">
-                {claiming ? t('login.titleClaim') : mode?.passwordLoginEnabled && isRegister ? t('login.titleRegister') : t('login.titleLogin')}
+                {mode?.passwordLoginEnabled && isRegister ? t('login.titleRegister') : t('login.titleLogin')}
               </h2>
             </div>
 
@@ -317,11 +277,11 @@ export function Login() {
               </div>
             )}
 
-            {claiming || loading || mode === null ? (
+            {loading || mode === null ? (
               <div className="h-28 flex flex-col items-center justify-center gap-2 text-muted-foreground">
                 <Loader2 className="w-5 h-5 animate-spin text-primary" />
                 <span className="text-xs font-semibold">
-                  {claiming ? t('login.claiming') : loading ? t('login.loggingIn') : t('login.loading')}
+                  {loading ? t('login.loggingIn') : t('login.loading')}
                 </span>
               </div>
             ) : (

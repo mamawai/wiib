@@ -15,8 +15,7 @@ import java.time.temporal.TemporalAdjusters;
  * <p>
  * 手动重置（AccountResetService）与破产自动恢复（BankruptcyServiceImpl.resetUser）<b>共用同一份计数</b>：
  * 只记手动的话，穿仓破产就成了不占额度的免费重置通道。
- * 次数怎么用由调用方决定 —— 手动侧超额要么拒（平时）要么扣活动分（活动期），
- * 破产恢复永不被拦、只计数和扣分。
+ * 次数怎么用由调用方决定 —— 手动侧超额直接拒，破产恢复永不被拦、只计数。
  */
 @Service
 @RequiredArgsConstructor

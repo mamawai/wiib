@@ -5,10 +5,8 @@
     "featFunds": "Virtual funds, no risk",
     "featTrader": "Autonomous AI traders",
     "featChat": "Analysis chat agent",
-    "titleClaim": "Claim campaign reward",
     "titleRegister": "Create account",
     "titleLogin": "Log in to WIIB",
-    "claiming": "Sending your reward, up to 2 minutes. Keep this page open...",
     "loggingIn": "Logging in...",
     "loading": "Loading...",
     "logIn": "Log in",
@@ -22,15 +20,12 @@
     "linuxDo": "Log in with LinuxDo",
     "enterTerminal": "Enter",
     "stateMismatch": "Security check failed, try again",
-    "claimOk": "Claimed, {{amount}} LDC credited",
-    "claimFailed": "Claim failed",
     "linuxDoFailed": "LinuxDo login failed",
     "failed": "Login failed",
     "registerFailed": "Registration failed"
   },
   "me": {
     "nav": {
-      "campaign": "LDC campaign",
       "ledger": "Ledger",
       "arena": "AI Arena",
       "strategies": "Strategies",
@@ -45,11 +40,11 @@
     "logout": "Log out",
     "reset": {
       "title": "Reset account",
-      "desc": "Clears all positions, orders, game records and asset history and restores your balance to the starting capital. Comments, mute status and campaign points already earned are unaffected. During the campaign the first reset each week is free, every one after that costs 30 campaign points; after the campaign, 1 reset per week (refreshed on Monday).",
+      "desc": "Clears all positions, orders, game records and asset history and restores your balance to the starting capital. Comments and mute status are unaffected. One reset per calendar week, refreshed on Monday.",
       "action": "Reset my account",
       "dialogTitle": "Confirm account reset",
       "warnClears": "This cannot be undone. It clears: all spot and futures positions and orders, prediction bets, Blackjack / Mines / Video Poker records, asset history, daily buffs and wallet transfers.",
-      "warnCost": "During the campaign the first reset each week is free, every one after that costs 30 campaign points (automatic bankruptcy recovery counts too). Points already earned, check-ins and votes are unaffected.",
+      "warnCost": "One reset per calendar week, refreshed on Monday. An automatic bankruptcy recovery counts toward the same quota.",
       "confirmName": "Type your username <0>{{name}}</0> to confirm:",
       "namePlaceholder": "Enter username",
       "submitting": "Resetting…",
@@ -189,10 +184,7 @@
       "settleGroup": "Settlement and risk control",
       "bankruptcy": "Run liquidation check",
       "interest": "Accrue interest",
-      "snapshot": "Asset snapshot",
-      "settleCampaign": "Settle LDC campaign",
-      "settled_one": "Campaign settled, {{count}} reward row generated",
-      "settled_other": "Campaign settled, {{count}} reward rows generated"
+      "snapshot": "Asset snapshot"
     }
   }
 }

@@ -135,7 +135,7 @@
     },
     "tpSl": {
       "q": "How do take profit and stop loss work?",
-      "a": "Every futures position can carry several TP/SL levels, each with its own price and size. When the mark price reaches one it fills at market and you get a notification. Getting stopped out is nothing to be ashamed of — the campaign awards points for it under \"Stop-loss hero\". Decide your exit before you enter: liquidation is losing by default, a stop loss is losing on your own terms."
+      "a": "Every futures position can carry several TP/SL levels, each with its own price and size. When the mark price reaches one it fills at market and you get a notification. Getting stopped out is nothing to be ashamed of. Decide your exit before you enter: liquidation is losing by default, a stop loss is losing on your own terms."
     },
     "doubleLiq": {
       "q": "What is a long-short double liquidation?",
@@ -143,15 +143,11 @@
     },
     "bankrupt": {
       "q": "What happens if I go bankrupt?",
-      "a": "When your trading net worth (cash + position value − borrowed principal and interest) falls below zero, you are marked bankrupt: all wallets and positions are cleared and your starting capital is restored the next trading day. An automatic recovery still counts against your weekly resets — during the campaign, going bankrupt after you have already reset this week is charged as a paid reset, 30 campaign points."
+      "a": "When your trading net worth (cash + position value − borrowed principal and interest) falls below zero, you are marked bankrupt: all wallets and positions are cleared and your starting capital is restored the next trading day. An automatic recovery still counts against your weekly resets."
     },
     "prediction": {
       "q": "How does the prediction market work?",
-      "a": "You bet on future events with the game wallet: the price is the probability the market implies, so buy the side you believe in and hold to settlement, which pays 1 if you were right and 0 if not. You can also sell early to lock in the result. During the campaign, single bets of 100 or more held to a winning settlement earn campaign points, subject to tiered caps — it is not farmable."
-    },
-    "dailyVote": {
-      "q": "What is the daily long-short vote?",
-      "a": "Each day you vote on whether BTC and gold go up or down tomorrow. The target is tomorrow's UTC daily candle and voting closes tonight, so there is no hindsight; it settles on the daily close after 08:00 the next morning. A pool of 100 points a day is split among everyone who was right — the crowded side gets less per head, a correct contrarian call more — capped at 6 points per person per day."
+      "a": "You bet on future events with the game wallet: the price is the probability the market implies, so buy the side you believe in and hold to settlement, which pays 1 if you were right and 0 if not. You can also sell early to lock in the result."
     },
     "wallets": {
       "q": "Are the game wallet and the trading wallet the same?",
@@ -161,13 +157,9 @@
       "q": "How do discount coupons (buffs) work?",
       "a": "Tick a coupon from the daily buff draw when you place a spot market buy and it cuts the fill amount by the coupon rate. The \"Saved\" figure on the leaderboard totals what you have discounted this way. The rarer the coupon, the steeper the discount — keep the legendary ones for large orders."
     },
-    "campaign": {
-      "q": "What are campaign points and the LDC prize pool?",
-      "a": "During the five-dimension trading contest you earn points from trading (ROI targets and net PnL), the daily check-in, the long-short vote, the prediction market, comments and more; the campaign page lists every task and your live breakdown. Liquidations and the like deduct points. When it ends, the LDC prize pool is split by final point weight — authorize your LinuxDo account on the campaign page to claim. Resetting your account does not clear points already earned."
-    },
     "resetAccount": {
       "q": "What are the rules for resetting my account?",
-      "a": "A reset clears all positions, orders, game records and asset history and returns your balance to the starting capital; comments, mute status and campaign points are unaffected. During the campaign the first reset each calendar week is free, every one after that costs 30 campaign points; after the campaign it is one per week, refreshed on Monday. An automatic bankruptcy recovery counts toward the same quota."
+      "a": "A reset clears all positions, orders, game records and asset history and returns your balance to the starting capital; comments and mute status are unaffected. One reset per calendar week, refreshed on Monday. An automatic bankruptcy recovery counts toward the same quota."
     }
   },
   "intro": {

@@ -44,7 +44,6 @@ class SimMessageParityTest {
     void sim自己的域文件确实装上了() {
         assertThat(MESSAGES.texts(AgentLang.ZH)).containsKeys(
                 "auth.badCredentials", "auth.oauth.tokenEmpty",
-                "campaign.checkedIn", "campaign.claim.disabled", "campaign.settle.noCampaign",
-                "sim.invite.usesRange", "sim.ldc.notConfigured");
+                "sim.invite.usesRange", "sim.reset.onlyQuantSubAccount");
     }
 }

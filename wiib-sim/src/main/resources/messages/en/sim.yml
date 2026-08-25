@@ -11,10 +11,3 @@ sim:
   reset:
     onlyQuantSubAccount: "Only ai_trader quant sub-accounts may be deleted: {{name}}"
 
-  # LDC payout-channel diagnostics; these show up as the {{reason}} of campaign.claim.payoutFailed
-  ldc:
-    notConfigured: LDC payouts are off or the credentials are not configured
-    payeeIdNotNumeric: "The payee LinuxDo ID is not a number: {{id}}"
-    interrupted: The payout was interrupted
-    parseFailed: "Could not parse the response: {{raw}}"
-    noTradeNo: "HTTP 200 but no trade_no came back: {{raw}}"

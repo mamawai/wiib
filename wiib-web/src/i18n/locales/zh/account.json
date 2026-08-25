@@ -5,10 +5,8 @@
     "featFunds": "虚拟资金 零风险",
     "featTrader": "AI Trader 自主交易",
     "featChat": "研判对话 Agent",
-    "titleClaim": "领取活动奖励",
     "titleRegister": "创建账户",
     "titleLogin": "登录 WIIB",
-    "claiming": "发放中，最长约 2 分钟，请勿关闭页面...",
     "loggingIn": "登录中...",
     "loading": "加载中...",
     "logIn": "登录",
@@ -22,15 +20,12 @@
     "linuxDo": "使用 LinuxDo 登录",
     "enterTerminal": "进入",
     "stateMismatch": "安全验证失败，请重试",
-    "claimOk": "领取成功，{{amount}} LDC 已发放",
-    "claimFailed": "领取失败",
     "linuxDoFailed": "LinuxDo 登录失败",
     "failed": "登录失败",
     "registerFailed": "注册失败"
   },
   "me": {
     "nav": {
-      "campaign": "LDC 瓜分活动",
       "ledger": "资金账单",
       "arena": "AI竞技场",
       "strategies": "策略",
@@ -45,11 +40,11 @@
     "logout": "退出登录",
     "reset": {
       "title": "重置账户",
-      "desc": "清空全部持仓、订单、游戏记录与资产历史，余额恢复为初始资金。留言、禁言状态与已获得的活动积分不受影响。活动期内每周首次重置免费、之后每次扣 30 活动积分；活动结束后每周限 1 次（周一刷新）。",
+      "desc": "清空全部持仓、订单、游戏记录与资产历史，余额恢复为初始资金。留言与禁言状态不受影响。每自然周限 1 次（周一刷新）。",
       "action": "重置我的账户",
       "dialogTitle": "确认重置账户",
       "warnClears": "此操作不可撤销，将清空：现货与合约的全部持仓和订单、预测下注、21点/Mines/视频扑克记录、资产历史、每日 Buff、钱包划转流水。",
-      "warnCost": "活动期内每周第一次重置免费，之后每次扣 30 活动积分（破产自动恢复也计入次数）。已获得的活动积分、签到与投票记录不受重置影响。",
+      "warnCost": "每自然周限 1 次重置（周一刷新），破产自动恢复也计入次数。",
       "confirmName": "请输入你的用户名 <0>{{name}}</0> 以确认：",
       "namePlaceholder": "输入用户名",
       "submitting": "重置中…",
@@ -185,9 +180,7 @@
       "settleGroup": "结算与风控",
       "bankruptcy": "执行爆仓检查",
       "interest": "手动计息",
-      "snapshot": "资产快照",
-      "settleCampaign": "结算 LDC 活动",
-      "settled_other": "活动已结算，生成 {{count}} 行奖励"
+      "snapshot": "资产快照"
     }
   }
 }

@@ -7,7 +7,6 @@ import com.mawai.wiibcommon.entity.User;
 import com.mawai.wiibcommon.enums.ErrorCode;
 import com.mawai.wiibcommon.exception.BizException;
 import com.mawai.wiibcommon.i18n.MessageCatalog;
-import com.mawai.wiibsim.campaign.service.CampaignCarryoverService;
 import com.mawai.wiibsim.mapper.CryptoOrderMapper;
 import com.mawai.wiibsim.mapper.FuturesPositionMapper;
 import com.mawai.wiibsim.mapper.UserMapper;
@@ -43,7 +42,6 @@ public class AccountResetService {
     private final AccountPurgeTx purgeTx;
     private final StringRedisTemplate redis;
     private final ResetQuotaService resetQuota;
-    private final CampaignCarryoverService campaignCarryoverService;
     private final UserMapper userMapper;
     /** 管理页的拦阻提示也跟界面语言 */
     private final MessageCatalog messages;
@@ -62,20 +60,18 @@ public class AccountResetService {
      * 手动重置的额度闸。自然周（周一~周日）计数，破产自动恢复共用同一计数
      * （{@link ResetQuotaService}，那边永不被拦、只计数）。
      * <p>
-     * 活动进行中：每周首次免费，之后每次在活动积分里扣 30（不限次数，扣分与删表同事务）；
-     * 平时：每周限 1 次，超了直接拒。被拒或失败的尝试都退回额度。
+     * 每周限 1 次，超了直接拒。被拒或失败的尝试都退回额度。
      */
     public void resetWithGuard(long userId, String actualUsername, String confirmUsername) {
         assertResettable(actualUsername, confirmUsername);
 
         long used = resetQuota.recordUse(userId);
-        boolean extra = used > 1;
-        if (extra && !campaignCarryoverService.campaignRunning()) {
+        if (used > 1) {
             resetQuota.refund(userId);
             throw new BizException(ErrorCode.RESET_TOO_FREQUENT);
         }
         try {
-            reset(userId, extra);
+            reset(userId);
         } catch (RuntimeException e) {
             // 没重置成功就不占本周额度
             resetQuota.refund(userId);
@@ -84,11 +80,7 @@ public class AccountResetService {
     }
 
     void reset(long userId) {
-        reset(userId, false);
-    }
-
-    void reset(long userId, boolean chargeExtraReset) {
-        int cleared = wipe(userId, () -> purgeTx.purge(userId, chargeExtraReset));
+        int cleared = wipe(userId, () -> purgeTx.purge(userId));
         log.info("[AccountReset] 账户已重置 userId={} 清理仓位数={}", userId, cleared);
     }
 

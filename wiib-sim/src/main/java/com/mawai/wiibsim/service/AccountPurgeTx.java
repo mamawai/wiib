@@ -3,7 +3,6 @@ package com.mawai.wiibsim.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.toolkit.support.SFunction;
 import com.mawai.wiibcommon.entity.*;
-import com.mawai.wiibsim.campaign.service.CampaignCarryoverService;
 import com.mawai.wiibsim.mapper.*;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
@@ -13,7 +12,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 
 /**
- * 账户清除的事务段：重置路径先固化活动遗留积分，再 12 张用户表清空 + user 复位；
+ * 账户清除的事务段：重置路径 12 张用户表清空 + user 复位；
  * 销户路径清表后直接删行。全成功或全回滚。
  * <p>
  * 单独成 bean，这么写为了 @Transactional 走 Spring 代理（同类自调用会绕过代理，事务不生效）。
@@ -36,7 +35,6 @@ public class AccountPurgeTx {
     private final UserBuffMapper userBuffMapper;
     private final UserLedgerMapper userLedgerMapper;
     private final UserService userService;
-    private final CampaignCarryoverService campaignCarryoverService;
 
     @Value("${trading.initial-balance:10000}")
     BigDecimal initialBalance;
@@ -44,19 +42,10 @@ public class AccountPurgeTx {
     /**
      * 清空并复位。不碰 comment / comment_notification（社区内容不是交易数据，
      * 删根评论还会让别人的回复变孤儿），也不碰 workbench_chat_message。
-     *
-     * @param chargeExtraReset 本次是付费重置（本周非首次且活动进行中），在活动侧记 −30
      */
     @Transactional(rollbackFor = Exception.class)
-    public void purge(long userId, boolean chargeExtraReset) {
+    public void purge(long userId) {
         lockUserRow(userId);
-        // 活动遗留积分：删表前先把已达成次数固化进 campaign_carryover。
-        // 必须同一事务：删表回滚则快照也回滚，否则下次算分双算。无活动时是空操作
-        campaignCarryoverService.carryOver(userId);
-        if (chargeExtraReset) {
-            campaignCarryoverService.chargeExtraReset(userId);
-        }
-
         clearUserData(userId);
         userMapper.resetToInitial(userId, initialBalance);
         // 账本刚清空、resetToInitial 又是整体覆写（切面抓不到），补一条初始资金让不变量重新成立。
@@ -65,8 +54,8 @@ public class AccountPurgeTx {
     }
 
     /**
-     * 量化子账户销户：同一套清表后直接删 user 行（不复位不入金，也不动活动积分——
-     * 机器人不参加活动），AI Trader 过期轮次清理用。
+     * 量化子账户销户：同一套清表后直接删 user 行（不复位不入金），
+     * AI Trader 过期轮次清理用。
      */
     @Transactional(rollbackFor = Exception.class)
     public void deleteAccount(long userId) {

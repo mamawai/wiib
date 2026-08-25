@@ -103,19 +103,6 @@ export function Admin() {
     finally { setActionLoading(null); }
   };
 
-  /** 带结果文案的操作（活动结算等）：成功把返回的消息弹出来，失败弹错误 */
-  const handleMessageAction = async (action: () => Promise<string>, name: string) => {
-    setActionLoading(name);
-    try {
-      const message = await action();
-      toast(message, 'success');
-    } catch (e) {
-      toast((e as Error).message || t('admin.actionFailed'), 'error');
-    } finally {
-      setActionLoading(null);
-    }
-  };
-
   const handleSaveRate = async () => {
     const pct = Number(interestRatePct);
     if (!Number.isFinite(pct) || pct < 0 || pct > 100) return;
@@ -497,8 +484,6 @@ export function Admin() {
                   <Button variant="outline" className="h-9 text-xs" onClick={() => handleAction(adminApi.bankruptcyCheck, 'bankruptcyCheck')} disabled={actionLoading !== null}>{t('admin.manual.bankruptcy')}</Button>
                   <Button variant="outline" className="h-9 text-xs" onClick={() => handleAction(adminApi.accrueInterest, 'accrueInterest')} disabled={actionLoading !== null}>{t('admin.manual.interest')}</Button>
                   <Button variant="outline" className="h-9 text-xs" onClick={() => handleAction(adminApi.assetSnapshot, 'assetSnapshot')} disabled={actionLoading !== null}>{t('admin.manual.snapshot')}</Button>
-                  {/* 活动结算：end_at 之后才会成功（服务端校验），幂等可重点 */}
-                  <Button variant="outline" className="h-9 text-xs" onClick={() => void handleMessageAction(() => adminApi.settleCampaign().then(n => t('admin.manual.settled', { count: n })), 'settleCampaign')} disabled={actionLoading !== null}>{t('admin.manual.settleCampaign')}</Button>
                 </div>
               </div>
             </CardContent>

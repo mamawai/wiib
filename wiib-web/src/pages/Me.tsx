@@ -13,7 +13,7 @@ import { ProfilePublicToggle } from '../components/ProfilePublicToggle';
 import { LanguageSettingRow } from '../components/LanguageSwitcher';
 import { useNotificationPanel } from '../hooks/useNotificationPanel';
 import { userApi } from '../api';
-import { Trophy, Gamepad2, Sun, Moon, LogOut, ChevronRight, User, LineChart, RotateCcw, MessageSquare, Bell, Receipt, Gift, FlaskConical, Swords } from 'lucide-react';
+import { Trophy, Gamepad2, Sun, Moon, LogOut, ChevronRight, User, LineChart, RotateCcw, MessageSquare, Bell, Receipt, FlaskConical, Swords } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 export function Me() {
@@ -62,8 +62,6 @@ export function Me() {
   };
 
   const items = [
-    // 活动同样只有这一个手机端入口（底栏 5 格已满），放第一位——限时的东西藏深了就没人看
-    { icon: Gift, label: t('me.nav.campaign'), to: '/campaign', color: 'text-amber-400' },
     // 账单没进顶栏/底栏（导航已经满了），另一个入口在持仓页仓位历史旁边
     { icon: Receipt, label: t('me.nav.ledger'), to: '/ledger', color: 'text-primary' },
     // 竞技场原先只有桌面顶栏那一个入口，手机端零入口只能手敲 URL，排第三位补上

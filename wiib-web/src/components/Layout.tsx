@@ -17,7 +17,7 @@ import {
   Home, Briefcase, LogOut, LogIn, Sun, Moon,
   BarChart3, User, ChevronDown, List, DollarSign,
   Settings2, Gem, Globe,
-  LineChart, FlaskConical, Gift, MessageSquare,
+  LineChart, FlaskConical, MessageSquare,
 } from 'lucide-react';
 
 interface Props { children: React.ReactNode }
@@ -33,8 +33,6 @@ const MARKET_PATHS = ['/bstock', '/coin', '/commodity', '/tradfi'];
 const MORE_ITEMS = [
   { to: '/strategies', icon: <LineChart className="w-4 h-4" />, labelKey: 'nav.strategies' },
   { to: '/backtest', icon: <FlaskConical className="w-4 h-4" />, labelKey: 'nav.backtest' },
-  // 活动：桌面端入口。手机端底部 Tab 只有 5 格且已满，收在「我的」页里
-  { to: '/campaign', icon: <Gift className="w-4 h-4" />, labelKey: 'nav.campaign' },
   { to: '/comments', icon: <MessageSquare className="w-4 h-4" />, labelKey: 'nav.comments' },
 ];
 const MORE_PATHS = MORE_ITEMS.map(i => i.to);

@@ -3,7 +3,6 @@ import i18n, { currentLang, type Lang } from '../i18n';
 import type { TnOverview, TnTrade, TnDailyCell, TnEquityPoint, TnFillStats, TnManualOrderReq, TnOrderResult, TnAck } from '../types/testnet';
 import type { BacktestTaskStatus, BacktestEventsPage, BacktestKlinesPage, BacktestResultPayload, ReplayCoverage, HistoryKlinesPayload, ReplayCoachRequest, ReplayCoachEvent } from '../types';
 import type { LedgerEntry, LedgerBizTypeOption, PublicTrade, UserProfile, PositionHistoryItem, RankingSort } from '../types';
-import type { CampaignInfo, CampaignReward, CampaignScore, MyCampaignView } from '../types';
 import type { LlmEndpointView, LlmEndpointSaveRequest, LlmBindings, LlmPurpose } from '../types';
 import type { User, PageResult, RankingItem, CommentItem, NotificationItem, BuffStatus, UserBuff, BlackjackStatus, GameState, ConvertResult, MinesStatus, MinesGameState, VideoPokerStatus, VideoPokerGameState, CryptoPrice, CryptoOrderRequest, CryptoOrder, CryptoPosition, BStock, FuturesOpenRequest, FuturesCloseRequest, FuturesAddMarginRequest, FuturesReduceMarginRequest, FuturesStopLossRequest, FuturesTakeProfitRequest, FuturesAdjustLeverageRequest, FuturesCrossAccount, WalletTransferPreview, FuturesPosition, FuturesOrder, FuturesReverseResult, FuturesBracket, TradeFilterMap, PredictionRound, PredictionBet, PredictionBuyRequest, PredictionBetLive, PredictionPnl, AssetSnapshot, CategoryAverages, ForceOrder, AiKeyConfig, AiModelAssignment, InviteCode, ChatIntent, WorkbenchEvent, StrategyAccountView, TraderPublicView, TraderOwnerView, TraderDetailView, AiTraderDecisionView, TraderEquityPoint, TraderUpsertRequest, TraderSpec, TraderRequestView, StrategySignalState, FeedStreamHealth, WorkbenchSessionSummary, WorkbenchSessionStatus, WorkbenchChatMessage, NewsFlashItem, TraderActionPanel, TraderActionResult, TradeRecordView } from '../types';
 
@@ -208,9 +207,6 @@ export const adminApi = {
   setDailyInterestRate: (dailyInterestRate: number) =>
     api.post<unknown, number>('/admin/task/margin/daily-interest-rate', { dailyInterestRate }),
   assetSnapshot: () => api.post<unknown, void>('/admin/task/asset-snapshot'),
-  // LDC 活动结算：活动过了 end_at 后手动触发，幂等（已结算再点直接返回已有行数）。
-  // 结算会把 status 翻成 SETTLING，用户端领取入口随之出现
-  settleCampaign: () => api.post<unknown, number>('/campaign/settle'),
   // AI Key管理
   listAiKeys: () => api.get<unknown, AiKeyConfig[]>('/admin/ai-agent/keys'),
   saveAiKey: (key: AiKeyConfig) => api.post<unknown, AiKeyConfig>('/admin/ai-agent/keys', key),
@@ -630,30 +626,5 @@ export const backtestApi = {
   /** 复盘 AI 教练（SSE：token/done/error）：HINT 局中盘面提示 / REVIEW 结算后评估看法。走用户 BYOK 对话配置 */
   replayCoach: (req: ReplayCoachRequest, onEvent: (e: ReplayCoachEvent) => void, signal?: AbortSignal) =>
     postSse<ReplayCoachEvent>('/api/ai/backtest/replay/coach', req, onEvent, signal),
-};
-
-// ========== LDC 瓜分活动 ==========
-export const campaignApi = {
-  /** 当前活动（RUNNING/SETTLING）；没有则 null。活动页靠 status 分"未结算"与"结算了没分到" */
-  current: () => api.get<unknown, CampaignInfo | null>('/campaign/current'),
-  /** 我的活动数据；没有进行中的活动返回 null */
-  me: () => api.get<unknown, MyCampaignView | null>('/campaign/me'),
-  board: () => api.get<unknown, CampaignScore[]>('/campaign/board'),
-  /** 签到，返回签到后的最长连续天数 */
-  checkin: () => api.post<unknown, number>('/campaign/checkin'),
-  vote: (symbol: string, direction: 'UP' | 'DOWN') =>
-    api.post<unknown, void>('/campaign/vote', { symbol, direction }),
-  /** 我的奖励；未结算、或结算了但分配额为 0（不落行）都返回 null */
-  reward: () => api.get<unknown, CampaignReward | null>('/campaign/reward'),
-  /**
-   * 携带 LinuxDo 二次授权 code 领取，见 Login.tsx 的 state 分流。
-   *
-   * 【别给它加超时】这一个接口最坏要等 ~2 分钟：服务端对 LDC 分发接口最多重试 8 次 × 15s 超时
-   * （那边约一半请求会被误路由成 307，重试是必须的）。上面那个 axios 实例**刻意没有 timeout**——
-   * 加个全局 30s 之类的值，这里就会在服务端还在重试时被前端掐断：
-   * 用户看到"网络错误"，而库里那一行停在 CLAIMED、钱可能已经发出去了。
-   * 真要限时只能单独给这一个调用设，别往 axios.create 里塞全局值。
-   */
-  claim: (code: string) => api.post<unknown, CampaignReward>('/campaign/claim', null, { params: { code } }),
 };
 

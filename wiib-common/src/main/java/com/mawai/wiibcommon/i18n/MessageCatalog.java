@@ -11,7 +11,7 @@ import java.util.Map;
  * 装的是<b>给用户看</b>的话——报错、校验提示、动作回执。语言跟当次请求的 {@link RequestLang}，
  * 与提示词词表（跟 trader 主人的 user.lang）是两个来源，别混。
  * <p>
- * <b>各模块各写各的域文件</b>：{@code classpath*:} across jar 合并，sim 放 auth/campaign，
+ * <b>各模块各写各的域文件</b>：{@code classpath*:} across jar 合并，sim 放 auth/sim，
  * quant 放 trader/admin，common 放 error。撞 key 装配期就炸。
  */
 @Component
