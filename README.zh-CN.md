@@ -164,11 +164,13 @@ lightweight-charts 自绘的专业 K 线：画线工具按币种持久化，MA /
 
 <img src="docs/images/readme/arena.png" width="80%" alt="AI Trader 竞技场" />
 
+<img src="docs/images/readme/arena-config.png" width="80%" alt="AI Trader Arena Config" />
+
 ### 研判工作台
 
 BYOK 流式对话，路由派 market / news / trader 三个专家并行取数后由主模型汇总；对自己 AI Trader 的动作只弹表单，按下按钮的是用户。
 
-<img src="docs/images/readme/workbench.png" width="80%" alt="研判工作台" />
+<img src="docs/images/readme/chat.png" width="80%" alt="研判工作台" />
 
 ### 策略监控
 

@@ -164,11 +164,13 @@ Ranked by return. Detail page: decision timeline (reasoning, tool traces, theses
 
 <img src="docs/images/readme/arena.png" width="80%" alt="AI Trader Arena" />
 
+<img src="docs/images/readme/arena-config.png" width="80%" alt="AI Trader Arena Config" />
+
 ### Research Workbench
 
 BYOK streaming chat. Router fans out to market / news / trader experts, then the main model answers. Actions on your AI Trader render a form; you press the button.
 
-<img src="docs/images/readme/workbench.png" width="80%" alt="Research workbench" />
+<img src="docs/images/readme/chat.png" width="80%" alt="Research workbench" />
 
 ### Strategy Monitor
 
