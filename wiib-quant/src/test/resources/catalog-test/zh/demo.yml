@@ -1,0 +1,7 @@
+# PromptCatalog 单测词表（中文=回落语言）。刻意与生产 prompts/ 分开：改生产文案不该弄红单测
+demo:
+  plain: 你好
+  greet: |
+    你好 {{name}}，
+    欢迎回来
+  onlyZh: 只有中文词表有这条

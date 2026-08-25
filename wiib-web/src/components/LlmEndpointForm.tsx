@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { KeyRound, Loader2, PlugZap, ScanSearch } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { EFFORT_PRESETS } from '../lib/llmEffort';
@@ -39,6 +40,7 @@ export interface LlmEndpointFormProps {
  */
 export function LlmEndpointForm({ value, onChange, exists, keyTail, onDetect, onTest }: LlmEndpointFormProps) {
   const { toast } = useToast();
+  const { t } = useTranslation('ai');
   const [models, setModels] = useState<string[]>([]);
   const [detecting, setDetecting] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -50,10 +52,10 @@ export function LlmEndpointForm({ value, onChange, exists, keyTail, onDetect, on
     try {
       const list = await onDetect();
       setModels(list);
-      toast(list.length ? `检测到 ${list.length} 个模型` : '端点未返回模型，可直接手输',
+      toast(list.length ? t('endpoint.detected', { count: list.length }) : t('endpoint.noModels'),
             list.length ? 'success' : 'error');
     } catch (e) {
-      toast((e as Error).message || '检测失败', 'error');
+      toast((e as Error).message || t('endpoint.detectFailed'), 'error');
     } finally {
       setDetecting(false);
     }
@@ -65,9 +67,9 @@ export function LlmEndpointForm({ value, onChange, exists, keyTail, onDetect, on
     setTesting(true);
     try {
       await onTest();
-      toast('连接正常', 'success');
+      toast(t('endpoint.testOk'), 'success');
     } catch (e) {
-      toast((e as Error).message || '连接失败', 'error');
+      toast((e as Error).message || t('endpoint.testFailed'), 'error');
     } finally {
       setTesting(false);
     }
@@ -77,13 +79,13 @@ export function LlmEndpointForm({ value, onChange, exists, keyTail, onDetect, on
     <div className="space-y-3">
       <div className="grid sm:grid-cols-3 gap-3">
         <label className="space-y-1 text-xs">
-          <span className="text-muted-foreground font-bold">名称</span>
+          <span className="text-muted-foreground font-bold">{t('endpoint.name')}</span>
           <input value={value.name} onChange={e => onChange({ name: e.target.value })}
-                 placeholder="例：DeepSeek 主力 / Grok 轻量" maxLength={32}
+                 placeholder={t('endpoint.namePh')} maxLength={32}
                  className="w-full h-9 rounded-lg border border-border bg-card-2 px-3 text-xs" />
         </label>
         <label className="space-y-1 text-xs">
-          <span className="text-muted-foreground font-bold">协议</span>
+          <span className="text-muted-foreground font-bold">{t('endpoint.protocol')}</span>
           <div className="flex gap-1.5">
             {['openai', 'responses'].map(p => (
               <button key={p} type="button" onClick={() => onChange({ apiProtocol: p })}
@@ -97,7 +99,7 @@ export function LlmEndpointForm({ value, onChange, exists, keyTail, onDetect, on
           </div>
         </label>
         <label className="space-y-1 text-xs">
-          <span className="text-muted-foreground font-bold">Base URL（不含 /v1 后缀）</span>
+          <span className="text-muted-foreground font-bold">{t('endpoint.baseUrl')}</span>
           <input value={value.baseUrl} onChange={e => onChange({ baseUrl: e.target.value })}
                  placeholder="https://api.deepseek.com"
                  className="w-full h-9 rounded-lg border border-border bg-card-2 px-3 text-xs num" />
@@ -106,38 +108,38 @@ export function LlmEndpointForm({ value, onChange, exists, keyTail, onDetect, on
 
       <div className="grid sm:grid-cols-2 gap-3">
         <label className="space-y-1 text-xs">
-          <span className="text-muted-foreground font-bold">模型名</span>
+          <span className="text-muted-foreground font-bold">{t('endpoint.model')}</span>
           <div className="flex gap-1.5">
             <input value={value.model} onChange={e => onChange({ model: e.target.value })}
                    placeholder="deepseek-chat"
                    className="flex-1 min-w-0 h-9 rounded-lg border border-border bg-card-2 px-3 text-xs num" />
             <button type="button" onClick={() => void detect()}
                     disabled={detecting || !value.baseUrl.trim() || (!exists && !value.apiKey.trim())}
-                    title="拉取该端点可用的模型清单（需先填 Base URL 和 Key）"
+                    title={t('endpoint.detectTitle')}
                     className="shrink-0 border border-border hover:bg-surface-hover rounded-lg px-2.5 h-9 text-xs font-bold text-primary flex items-center gap-1 disabled:opacity-50">
               {detecting ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
                          : <ScanSearch className="w-3.5 h-3.5" />}
-              检测
+              {t('endpoint.detect')}
             </button>
           </div>
         </label>
         <label className="space-y-1 text-xs">
           <span className="text-muted-foreground font-bold flex items-center gap-1">
             <KeyRound className="w-3 h-3" /> API Key
-            {exists && <span className="text-muted-foreground/70 font-normal">（当前尾号 {keyTail}，留空=不换）</span>}
+            {exists && <span className="text-muted-foreground/70 font-normal">{t('endpoint.keyTail', { tail: keyTail })}</span>}
           </span>
           <input value={value.apiKey} onChange={e => onChange({ apiKey: e.target.value })}
                  type="password"
-                 placeholder={exists ? '留空保持不变' : 'sk-…（加密存储，只在服务端出网）'}
+                 placeholder={exists ? t('endpoint.keyPhExists') : t('endpoint.keyPh')}
                  className="w-full h-9 rounded-lg border border-border bg-card-2 px-3 text-xs num" />
         </label>
       </div>
 
       <div className="space-y-1 text-xs">
-        <span className="text-muted-foreground font-bold">思考档位</span>
+        <span className="text-muted-foreground font-bold">{t('endpoint.effort')}</span>
         {/* 输入框是唯一真值，下面的芯片只管往里填：各家档位名字自己定，写死五选一会挡住 xhigh 这类 */}
         <input value={value.reasoningEffort} onChange={e => onChange({ reasoningEffort: e.target.value })}
-               placeholder="留空=不传；可填 none / low / medium / high / xhigh…" maxLength={16}
+               placeholder={t('endpoint.effortPh')} maxLength={16}
                className="w-full h-9 rounded-lg border border-border bg-card-2 px-3 text-xs num" />
         <div className="flex flex-wrap gap-1.5">
           {EFFORT_PRESETS.map(o => (
@@ -146,26 +148,25 @@ export function LlmEndpointForm({ value, onChange, exists, keyTail, onDetect, on
                       (value.reasoningEffort ?? '') === o.value
                         ? 'border-primary/60 bg-card-2 text-primary font-bold'
                         : 'border-border text-muted-foreground hover:text-foreground')}>
-              {o.label}
+              {o.label ?? t('effort.default')}
             </button>
           ))}
         </div>
         {/* 模型支不支持这个参数查不到：协议的 /v1/models 只回 id/object/created/owned_by。
             传给不支持的模型各家表现不一致（有的忽略，OpenAI 官方直接 400），所以只能让用户自己试 */}
         <span className="text-[10px] text-muted-foreground/70 block">
-          留空＝不传这个参数，用模型自己的默认行为；也可以填模型认的其他档位（如 xhigh、minimal）。
-          不是所有模型都认这个参数——认不认没法提前查出来，填完点「测试连通性」试一下最稳。
+          {t('endpoint.effortHint')}
         </span>
       </div>
 
       <button type="button" onClick={() => void test()}
               disabled={testing || !value.baseUrl.trim() || !value.model.trim()
                         || (!exists && !value.apiKey.trim())}
-              title="用当前填的配置真发一次请求，确认端点和模型可用"
+              title={t('endpoint.testTitle')}
               className="border border-border hover:bg-surface-hover rounded-lg px-2.5 h-9 text-xs font-bold text-primary flex items-center gap-1 disabled:opacity-50">
         {testing ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
                  : <PlugZap className="w-3.5 h-3.5" />}
-        测试连通性
+        {t('endpoint.test')}
       </button>
 
       {/* 检测到的模型清单：模型名输入即过滤，点击填入；网关不支持 /models 时照常手输 */}
@@ -185,7 +186,7 @@ export function LlmEndpointForm({ value, onChange, exists, keyTail, onDetect, on
             ))}
             {hits.length === 0 && (
               <span className="text-[11px] text-muted-foreground px-1 py-1">
-                清单里无匹配「{value.model.trim()}」，可直接手输
+                {t('endpoint.noMatch', { kw: value.model.trim() })}
               </span>
             )}
           </div>

@@ -1,5 +1,6 @@
 package com.mawai.wiibquant.agent.chat;
 
+import com.mawai.wiibcommon.enums.AgentLang;
 import com.mawai.wiibcommon.entity.QuantDeepAnalysis;
 import com.mawai.wiibquant.agent.analysis.DeepAnalysisService;
 import org.bsc.langgraph4j.RunnableConfig;
@@ -39,20 +40,20 @@ class DeepAnalysisToolkitTest {
     private final WorkbenchRunRegistry runRegistry = new WorkbenchRunRegistry();
 
     private final DeepAnalysisToolkit toolkit =
-            new DeepAnalysisToolkit(model, deepAnalysisService, runRegistry);
+            new DeepAnalysisToolkit(model, deepAnalysisService, runRegistry, ChatTestEndpoints.PROMPTS, AgentLang.ZH);
 
     @Test
     void 执行成功时输出研判结论并落库() {
-        when(deepAnalysisService.buildNewsContext()).thenReturn("ctx");
-        when(deepAnalysisService.bullArgue(model, "BTCUSDT", "ctx")).thenReturn("bull");
-        when(deepAnalysisService.bearArgue(model, "BTCUSDT", "ctx")).thenReturn("bear");
+        when(deepAnalysisService.buildNewsContext(any())).thenReturn("ctx");
+        when(deepAnalysisService.bullArgue(model, "BTCUSDT", "ctx", AgentLang.ZH)).thenReturn("bull");
+        when(deepAnalysisService.bearArgue(model, "BTCUSDT", "ctx", AgentLang.ZH)).thenReturn("bear");
         QuantDeepAnalysis analysis = new QuantDeepAnalysis();
         analysis.setNarrative("研判叙事");
         analysis.setScenariosJson("{\"bullPct\":40,\"rangePct\":35,\"bearPct\":25}");
         analysis.setNoDirection(false);
         analysis.setInvalidation("若X则作废");
         when(deepAnalysisService.judge(eq(model), eq("BTCUSDT"), anyLong(), eq("chat"),
-                eq("ctx"), eq("bull"), eq("bear"))).thenReturn(analysis);
+                eq("ctx"), eq("bull"), eq("bear"), eq(AgentLang.ZH))).thenReturn(analysis);
 
         String result = toolkit.runDeepAnalysis("BTCUSDT");
 
@@ -62,11 +63,11 @@ class DeepAnalysisToolkitTest {
 
     @Test
     void 裁决失败时报FAILED且不落库() {
-        when(deepAnalysisService.buildNewsContext()).thenReturn("ctx");
-        when(deepAnalysisService.bullArgue(any(), anyString(), anyString())).thenReturn("b");
-        when(deepAnalysisService.bearArgue(any(), anyString(), anyString())).thenReturn("b");
+        when(deepAnalysisService.buildNewsContext(any())).thenReturn("ctx");
+        when(deepAnalysisService.bullArgue(any(), anyString(), anyString(), any())).thenReturn("b");
+        when(deepAnalysisService.bearArgue(any(), anyString(), anyString(), any())).thenReturn("b");
         when(deepAnalysisService.judge(any(), anyString(), anyLong(), anyString(),
-                anyString(), anyString(), anyString())).thenReturn(null);
+                anyString(), anyString(), anyString(), any())).thenReturn(null);
 
         String result = toolkit.runDeepAnalysis("BTCUSDT");
 
@@ -86,18 +87,18 @@ class DeepAnalysisToolkitTest {
     @Test
     void 工具执行的标的与闸门授权键一致() {
         ApprovalRegistry registry = new ApprovalRegistry();
-        new ApprovalGate(registry).applyWrap("tools", deepCallState("btc"),
+        new ApprovalGate(registry, ChatTestEndpoints.PROMPTS, AgentLang.ZH).applyWrap("tools", deepCallState("btc"),
                 RunnableConfig.builder().threadId(SESSION).build(),
                 (s, c) -> CompletableFuture.completedFuture(Command.emptyCommand())).join();
         String gateSymbol = registry.peekPending(SESSION).orElseThrow().symbol();
-        when(deepAnalysisService.buildNewsContext()).thenReturn("ctx");
+        when(deepAnalysisService.buildNewsContext(any())).thenReturn("ctx");
 
         toolkit.runDeepAnalysis("btc");
 
-        verify(deepAnalysisService).bullArgue(model, gateSymbol, "ctx");
-        verify(deepAnalysisService).bearArgue(model, gateSymbol, "ctx");
+        verify(deepAnalysisService).bullArgue(model, gateSymbol, "ctx", AgentLang.ZH);
+        verify(deepAnalysisService).bearArgue(model, gateSymbol, "ctx", AgentLang.ZH);
         verify(deepAnalysisService).judge(eq(model), eq(gateSymbol), anyLong(), eq("chat"),
-                anyString(), any(), any());
+                anyString(), any(), any(), any());
     }
 
     private static MessagesState<Message> deepCallState(String symbol) {

@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import * as echarts from 'echarts';
+import { useTranslation } from 'react-i18next';
 import { useIsDark } from '../hooks/useIsDark';
 import { chartUi, cssVar, rgba } from '../lib/chartTheme';
 import { fmtDateTime } from '../lib/utils';
@@ -7,15 +8,19 @@ import type { TnEquityPoint } from '../types/testnet';
 
 interface Props {
   points: TnEquityPoint[];
+  /** 画布高度 px；给了 className 则由外面定高（如 flex-1 撑满卡片），此项不用 */
+  height?: number;
+  className?: string;
 }
 
 /**
  * 累计已实现盈亏曲线。带 0 轴参考线；终值为正用 gain 色、为负用 loss 色，
  * 末点实心标记收口。轴/网格/tooltip 走 chartTheme，亮暗模式自动匹配拟物底色。
  */
-export function EquityChart({ points }: Props) {
+export function EquityChart({ points, height = 220, className }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const isDark = useIsDark();
+  const { t, i18n } = useTranslation('portfolio');
 
   useEffect(() => {
     if (!ref.current) return;
@@ -38,7 +43,7 @@ export function EquityChart({ points }: Props) {
           const p = params[0];
           const v = p.value[1] as number;
           const sign = v >= 0 ? '+' : '';
-          return `${fmtDateTime(p.value[0])}<br/><b>累计盈亏 ${sign}$${v.toFixed(2)}</b>`;
+          return `${fmtDateTime(p.value[0])}<br/><b>${t('chart.cumPnl', { value: `${sign}$${v.toFixed(2)}` })}</b>`;
         },
       },
       xAxis: {
@@ -92,10 +97,12 @@ export function EquityChart({ points }: Props) {
       ].filter(Boolean),
     });
 
-    const onResize = () => chart.resize();
-    window.addEventListener('resize', onResize);
-    return () => { chart.dispose(); window.removeEventListener('resize', onResize); };
-  }, [points, isDark]);
+    // 盯容器尺寸而不是 window：容器随卡片被撑高/收窄时也要重画
+    const ro = new ResizeObserver(() => chart.resize());
+    ro.observe(ref.current);
+    return () => { ro.disconnect(); chart.dispose(); };
+    // 依赖里必须带 i18n.language：少了它切语言后 option 不重算，tooltip 还是旧文案
+  }, [points, isDark, t, i18n.language]);
 
-  return <div ref={ref} style={{ width: '100%', height: 220 }} />;
+  return <div ref={ref} className={className} style={className ? undefined : { width: '100%', height }} />;
 }

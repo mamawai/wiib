@@ -1,5 +1,7 @@
 package com.mawai.wiibquant.agent.learning;
 
+import com.mawai.wiibquant.agent.i18n.PromptCatalog;
+import com.mawai.wiibcommon.enums.AgentLang;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
@@ -56,7 +58,7 @@ class PeerInsightServiceTest {
     private final ReviewMaterialAssembler assembler = mock(ReviewMaterialAssembler.class);
 
     private final PeerInsightService service = new PeerInsightService(
-            traderMapper, decisionMapper, planMapper, simTradeClient, assembler);
+            traderMapper, decisionMapper, planMapper, simTradeClient, assembler, new PromptCatalog());
 
     // ==================== 造数 ====================
 
@@ -169,7 +171,7 @@ class PeerInsightServiceTest {
         stubClosedCount(win, 3);
         stubClosedCount(lose, 1);
 
-        String out = service.leaderboard(7L);
+        String out = service.leaderboard(7L, AgentLang.ZH);
 
         // +20% > +5% > -10%
         assertThat(out).contains("+20.00%").contains("+5.00%").contains("-10.00%");
@@ -192,7 +194,7 @@ class PeerInsightServiceTest {
         stubClosedCount(me, 2);
         stubClosedCount(optOut, 3);
 
-        String out = service.leaderboard(7L);
+        String out = service.leaderboard(7L, AgentLang.ZH);
 
         assertThat(out).contains("[id=7]").doesNotContain("[id=8]").doesNotContain("独行侠");
     }
@@ -204,7 +206,7 @@ class PeerInsightServiceTest {
         optOut.setLearningEnabled(false);
         stubTraders(optOut);
 
-        assertThat(service.detail(8L)).contains("未开启同侪学习共享");
+        assertThat(service.detail(8L, AgentLang.ZH)).contains("未开启同侪学习共享");
     }
 
     /** 好的和差的都看：已暂停/已爆仓不许从榜上消失，爆仓那份是前车之鉴 */
@@ -219,7 +221,7 @@ class PeerInsightServiceTest {
         stubClosedCount(paused, 1);
         stubClosedCount(dead, 5);
 
-        String out = service.leaderboard(7L);
+        String out = service.leaderboard(7L, AgentLang.ZH);
 
         assertThat(lineOf(out, "[id=7]")).contains("运行中");
         assertThat(lineOf(out, "[id=8]")).contains("已暂停");
@@ -236,7 +238,7 @@ class PeerInsightServiceTest {
         stubClosedCount(a, 12);
         stubClosedCount(b, 1);
 
-        String out = service.leaderboard(7L);
+        String out = service.leaderboard(7L, AgentLang.ZH);
 
         assertThat(lineOf(out, "[id=7]")).contains("已了结 12 笔");
         assertThat(lineOf(out, "[id=8]")).contains("已了结 1 笔");
@@ -251,7 +253,7 @@ class PeerInsightServiceTest {
         stubEquity(Map.of());
         stubClosedCount(t, 0);
 
-        String out = service.leaderboard(7L);
+        String out = service.leaderboard(7L, AgentLang.ZH);
 
         assertThat(lineOf(out, "[id=7]")).contains("+0.00%").contains("已了结 0 笔");
     }
@@ -266,7 +268,7 @@ class PeerInsightServiceTest {
         String longLine = "战绩：" + "长".repeat(120);
         when(assembler.lastReview(7L, 1)).thenReturn(reviewRow("【本期复盘】\n" + longLine + "\n下期纪律：等回踩"));
 
-        String out = service.leaderboard(7L);
+        String out = service.leaderboard(7L, AgentLang.ZH);
 
         // 标题行被跳过，取到的是下一行正文；正文只留前 80 字加省略号
         assertThat(out).doesNotContain("【本期复盘】");
@@ -284,7 +286,7 @@ class PeerInsightServiceTest {
         stubClosedCount(t, 0);
         when(assembler.lastReview(7L, 1)).thenReturn(null);
 
-        assertThat(service.leaderboard(7L)).contains("（尚无复盘）");
+        assertThat(service.leaderboard(7L, AgentLang.ZH)).contains("（尚无复盘）");
     }
 
     // ==================== 单 trader 详情 ====================
@@ -312,7 +314,7 @@ class PeerInsightServiceTest {
         livePlan.setInvalidationCondition("4h收盘跌破99000");
         when(planMapper.selectList(any())).thenReturn(List.of(closedPlan, livePlan));
 
-        String out = service.detail(8L);
+        String out = service.detail(8L, AgentLang.ZH);
 
         // 头部与排行榜同口径
         assertThat(out).contains("老手").contains("[id=8]").contains("运行中")
@@ -348,7 +350,7 @@ class PeerInsightServiceTest {
                 plan(AiTraderPlan.STATUS_CLOSED, T0 + 3600_000L, "A论点早"),
                 plan(AiTraderPlan.STATUS_CLOSED, T0 + 18000_000L, "B论点晚")));
 
-        String out = service.detail(8L);
+        String out = service.detail(8L, AgentLang.ZH);
 
         assertThat(out).contains("A论点早").contains("B论点晚");
         assertThat(out.indexOf("B论点晚")).isLessThan(out.indexOf("A论点早"));
@@ -364,7 +366,7 @@ class PeerInsightServiceTest {
         when(simTradeClient.getClosedPositions(eq(90L), anyInt())).thenReturn(List.of());
         when(planMapper.selectList(any())).thenReturn(List.of());
 
-        String out = service.detail(9L);
+        String out = service.detail(9L, AgentLang.ZH);
 
         assertThat(out).contains("（尚无复盘）").contains("（尚无学习笔记）")
                 .contains("（当前空仓，无在场计划）").contains("（本局尚无已了结交易）");
@@ -376,7 +378,7 @@ class PeerInsightServiceTest {
     void 未知traderId返回中文错误文本() {
         when(traderMapper.selectById(404L)).thenReturn(null);
 
-        String out = service.detail(404L);
+        String out = service.detail(404L, AgentLang.ZH);
 
         assertThat(out).contains("查无此 trader").contains("404");
     }

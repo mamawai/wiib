@@ -9,13 +9,8 @@ import java.util.List;
 
 /**
  * 全站成交时间线：现货单与合约单 UNION 成一条流。
- * <p>
- * 【为什么合并而不是两个 tab 各查各的】首页"最新成交"本来就是两者混排的一条时间线，
- * 点"更多"进去理应还是同一条。两张表分别分页再在前端归并，会在页边界处漏记录
- * （各取第 2 页，合起来根本不是全局第 2 页）。
- * <p>
- * 【不带 userId 入参，是故意的】开了就等于"按用户筛全站记录"，枚举 userId 就能反查假名，
- * 匿名当场失效。按人查那条路在 RankingController 下，走隐私开关门控。
+ * 合并查为了全局分页正确（两表各自分页再归并会在页边界漏记录）。
+ * 故意不带 userId 入参：开了就能枚举 userId 反查假名；按人查在 RankingController 下走隐私门控。
  */
 @Mapper
 public interface PublicTradeMapper {

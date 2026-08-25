@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { MonitorCard } from './MonitorCard';
 import { cn } from '../lib/utils';
 
 // 三进程 JVM，统一订 /topic/monitor/{进程}（sim 自推，feed/quant 经 sim 中继）
+// label 是进程代号不翻；desc 存词表 key，渲染时现查
 const PROCESSES = [
-  { topic: '/topic/monitor/sim', label: 'sim', desc: '模拟盘' },
-  { topic: '/topic/monitor/feed', label: 'feed', desc: '行情上游' },
-  { topic: '/topic/monitor/quant', label: 'quant', desc: '量化引擎' },
+  { topic: '/topic/monitor/sim', label: 'sim', descKey: 'monitor.proc.sim' },
+  { topic: '/topic/monitor/feed', label: 'feed', descKey: 'monitor.proc.feed' },
+  { topic: '/topic/monitor/quant', label: 'quant', descKey: 'monitor.proc.quant' },
 ];
 
 /**
@@ -14,6 +16,7 @@ const PROCESSES = [
  * 6s 自动轮播，hover 暂停，进程标签在卡片标题行内可点选（三张卡渲染同一组标签，高度恒定）。无第三方轮播库。
  */
 export function MonitorCarousel() {
+  const { t } = useTranslation('strategy');
   const [idx, setIdx] = useState(0);
   const [paused, setPaused] = useState(false);
 
@@ -52,7 +55,7 @@ export function MonitorCarousel() {
         >
           {PROCESSES.map(p => (
             <div key={p.label} className="w-full shrink-0 p-4">
-              <MonitorCard topic={p.topic} label={p.label} desc={p.desc} actions={switcher} />
+              <MonitorCard topic={p.topic} label={p.label} desc={t(p.descKey)} actions={switcher} />
             </div>
           ))}
         </div>

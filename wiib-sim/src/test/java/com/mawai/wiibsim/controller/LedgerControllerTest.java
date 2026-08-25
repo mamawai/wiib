@@ -147,12 +147,8 @@ class LedgerControllerTest {
      * {@code "bizType":{"label":"合约开仓保证金"}}，<b>枚举名整个消失</b>（Jackson 按 bean 序列化枚举，
      * name() 不带 get 前缀不算属性），前端连筛选参数该传什么都拿不到了。
      * <p>
-     * 【这个 mapper 的口径】用 tools.jackson（Jackson 3）是为了跟生产同 major——Boot 4.1 的
-     * spring-boot-starter-jackson 拉的是 tools.jackson.core:jackson-databind:3.1.4，
-     * 而 com.fasterxml（Jackson 2）在 classpath 上只是 Sa-Token 那条链传递来的。
-     * 但这仍是<b>手搓的 mapper，只验 bean 属性形态，不代表 web 层的实际配置</b>：
-     * 谁给 web 层加 mapper 定制（改日期格式、挂 NamingStrategy、加 Mixin），本用例照样绿。
-     * 要连 web 层配置一起验就得起上下文取那个真 mapper，为这三条断言不值当。
+     * 用 tools.jackson（Jackson 3）为了跟生产同 major。手搓的 mapper 只验 bean 属性形态，
+     * 不代表 web 层实际配置——web 层加 mapper 定制本用例照样绿。
      */
     @Test
     void 中文label平铺进JSON而bizType仍是枚举名() {
@@ -186,19 +182,10 @@ class LedgerControllerTest {
     }
 
     /**
-     * 【只能查自己的】handler 上除了 {@code @CurrentUserId} 那个，形参只准是这三个。
-     * <p>
-     * 守的是"哪天有人图省事加个 userId 参数方便调试/做后台"——那等于任何登录用户都能翻别人的账单。
-     * <p>
-     * 【为什么收集的是"除 @CurrentUserId 之外的全部形参"，而不是"挂了
-     * @RequestParam/@PathVariable/@RequestBody 的形参"】因为按注解收根本拦不住：Spring 的兜底解析器
-     * 会把<b>不带任何注解的简单类型形参</b>（Long/String 这些过 BeanUtils.isSimpleProperty 的）
-     * 当查询参数绑定，非简单类型则落到 ServletModelAttributeMethodProcessor 按 bean 从查询参数
-     * data-bind。所以一个裸的 {@code Long targetId}、或一个带 userId 字段的参数对象，
-     * 按注解收<b>一个都收不到</b>，白名单照绿。收全部形参才对得上"加任何参数都得来这儿改一次"这句话。
-     * <p>
-     * 用白名单而不是"名字里不许含 userid"：后者一个 uid/targetId 就绕过去了。名字那条检查留着，
-     * 是因为它对最危险的那种写法能给一句更准的失败信息。
+     * 只能查自己的：handler 上除 {@code @CurrentUserId} 外形参只准是这三个——加 userId 参数
+     * 等于任何登录用户都能翻别人的账单。
+     * 收"除 @CurrentUserId 外的全部形参"不按注解收：Spring 兜底解析器把无注解的简单类型形参
+     * 也当查询参数绑定，按注解收一个都收不到。白名单比"名字不许含 userid"严（uid/targetId 绕不过）。
      * <p>
      * 拦得住"加参数"，<b>拦不住"改语义"</b>——有人把 beforeId 的含义偷偷改成"要查谁的"，
      * 名字没变、白名单不动，这条全绿。那种只能靠审查。

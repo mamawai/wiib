@@ -1,5 +1,6 @@
 import * as echarts from 'echarts';
 import { useEffect, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import type { CategoryAverages } from '../types';
 import { useIsDark } from '../hooks/useIsDark';
 
@@ -7,20 +8,23 @@ interface Props {
   userData: CategoryAverages;
 }
 
-// 五分类能力轴：与后端 CategoryAveragesDTO 一一对应
+// 五分类能力轴：与后端 CategoryAveragesDTO 一一对应。表里存词表 key，渲染时现查——
+// 存成文案会在模块加载那一刻定死，切语言不跟着变
 const INDICATORS = [
-  { name: '加密货币', key: 'cryptoProfit' },
-  { name: '大宗商品', key: 'commodityProfit' },
-  { name: 'bStock', key: 'bstockProfit' },
-  { name: '预测', key: 'predictionProfit' },
-  { name: '游戏', key: 'gameProfit' },
+  { labelKey: 'radar.crypto', key: 'cryptoProfit' },
+  { labelKey: 'radar.commodity', key: 'commodityProfit' },
+  { labelKey: 'radar.bstock', key: 'bstockProfit' },
+  { labelKey: 'radar.prediction', key: 'predictionProfit' },
+  { labelKey: 'radar.game', key: 'gameProfit' },
 ];
 
 export function RadarChart({ userData }: Props) {
   const chartRef = useRef<HTMLDivElement>(null);
   const chartInstanceRef = useRef<echarts.ECharts | null>(null);
   const isDark = useIsDark();
+  const { t, i18n } = useTranslation('strategy');
 
+  // 依赖带 i18n.language：切语言时整张图重建，legend/tooltip/轴名才跟着换
   useEffect(() => {
     if (!chartRef.current) return;
     const chart = echarts.init(chartRef.current, isDark ? 'dark' : 'light');
@@ -32,7 +36,7 @@ export function RadarChart({ userData }: Props) {
       return {
         backgroundColor: 'transparent',
         legend: {
-          data: [`超过${Math.round(avgVal)}%的其他用户`],
+          data: [t('radar.betterThan', { pct: Math.round(avgVal) })],
           bottom: 0,
           textStyle: { color: d ? '#878b96' : '#71737b', fontSize: 11 },
         },
@@ -43,12 +47,13 @@ export function RadarChart({ userData }: Props) {
           textStyle: { color: d ? '#eceef0' : '#17181a', fontSize: 12 },
           formatter: (params: { value: number[] }) => {
             const vals = params.value;
-            return INDICATORS.map((ind, i) => `${ind.name}: <b>超过${Number(vals[i]).toFixed(2)}%的其他用户</b>`).join('<br/>');
+            return INDICATORS.map((ind, i) =>
+              `${t(ind.labelKey)}: <b>${t('radar.betterThan', { pct: Number(vals[i]).toFixed(2) })}</b>`).join('<br/>');
           },
         },
         radar: {
           indicator: INDICATORS.map(ind => ({
-            name: ind.name,
+            name: t(ind.labelKey),
             max: 100,
           })),
           shape: 'polygon',
@@ -75,7 +80,7 @@ export function RadarChart({ userData }: Props) {
             data: [
               {
                 value: userValues,
-                name: `超过${Math.round(avgVal)}%的其他用户`,
+                name: t('radar.betterThan', { pct: Math.round(avgVal) }),
                 lineStyle: { color: '#635bff', width: 2 },
                 areaStyle: { color: 'rgba(99, 91, 255, 0.3)' },
                 itemStyle: { color: '#635bff' },
@@ -96,7 +101,7 @@ export function RadarChart({ userData }: Props) {
       window.removeEventListener('resize', onResize);
       chartInstanceRef.current?.dispose();
     };
-  }, [userData, isDark]);
+  }, [userData, isDark, t, i18n.language]);
 
   return (
     <div className="w-full">
@@ -107,7 +112,7 @@ export function RadarChart({ userData }: Props) {
           const v = Number(userData[ind.key as keyof CategoryAverages] || 0);
           return (
             <div key={ind.key} className="text-center">
-              <div className="text-[10px] text-muted-foreground leading-tight">{ind.name}</div>
+              <div className="text-[10px] text-muted-foreground leading-tight">{t(ind.labelKey)}</div>
               <div className={`text-xs font-bold tabular-nums ${v >= 50 ? 'text-green-400' : 'text-muted-foreground'}`}>
                 {v.toFixed(0)}%
               </div>

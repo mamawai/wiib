@@ -20,16 +20,12 @@ import java.util.function.BiPredicate;
 public class WorkbenchRunRegistry {
 
     /**
-     * 事件出口：返回 true=真推出去了。用 BiPredicate 而不是 BiConsumer，是因为"推没推出去"
-     * 必须能一路答给调用方——表单卡最怕的就是回模型一句"已弹出"，而用户那边什么都没有。
+     * 事件出口：返回 true=真推出去了。用 BiPredicate 为了把"推没推出去"答给调用方。
      */
     public interface Emitter extends BiPredicate<String, JSONObject> {
     }
 
-    /** 无通道占位：补答轮只要"运行中"这个标记，它没有 SSE 可推，一律推不出去。 */
-    public static final Emitter NO_EMITTER = (event, data) -> false;
-
-    /** value=SSE 事件出口（没有通道可推时放 {@link #NO_EMITTER} 占位，key 存在即"运行中"） */
+    /** value=SSE 事件出口（key 存在即"运行中"） */
     private final Map<String, Emitter> runs = new ConcurrentHashMap<>();
 
     /** 一轮对话开跑：登记运行中 + 挂事件出口。 */
@@ -54,7 +50,7 @@ public class WorkbenchRunRegistry {
     /**
      * 工具侧：请前端弹一张表单卡（模型只出预填，执行权归用户点击）。
      * <p>
-     * 返回值不能省：断连、会话已结束、补答轮这几种情况下卡根本推不出去，
+     * 返回值不能省：断连、会话已结束这几种情况下卡根本推不出去，
      * 调用方必须据此如实告诉模型"没弹出来"，否则模型会宣称已弹卡，用户却永远等不到。
      *
      * @param formType note / wake / review
@@ -68,7 +64,20 @@ public class WorkbenchRunRegistry {
         return publish(sessionId, "form_request", data);
     }
 
-    /** 统一出口：会话已结束、补答轮无通道、通道已断连，三种都返回 false。 */
+    /**
+     * 工具侧：把一份结构化行为分析报告推给前端渲染成卡片。
+     * <p>
+     * 返回值同 {@link #publishForm} 不能省：推不出去时调用方必须如实告诉模型"卡没上屏"，
+     * 好让它把结论用文字讲一遍——否则模型说"报告已展示"，用户屏幕上一片空白。
+     * <p>
+     * 整份报告只经这条通道给前端，回模型的是裁剪版（见 {@code BehaviorToolkit}）：
+     * 30 天逐日快照对模型是纯噪音，对卡片却是那条资产曲线。
+     */
+    public boolean publishBehaviorReport(String sessionId, JSONObject report) {
+        return publish(sessionId, "behavior_report", new JSONObject().fluentPut("report", report));
+    }
+
+    /** 统一出口：会话已结束、通道已断连，两种都返回 false。 */
     private boolean publish(String sessionId, String event, JSONObject data) {
         Emitter emitter = runs.get(sessionId);
         return emitter != null && emitter.test(event, data);

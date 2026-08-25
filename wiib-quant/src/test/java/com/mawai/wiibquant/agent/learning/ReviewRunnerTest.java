@@ -1,5 +1,8 @@
 package com.mawai.wiibquant.agent.learning;
 
+import com.mawai.wiibquant.agent.i18n.UserLangResolver;
+import com.mawai.wiibquant.agent.i18n.PromptCatalog;
+import com.mawai.wiibcommon.enums.AgentLang;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
@@ -33,7 +36,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * ReviewRunner 回路测试：两段解析/降级安全（缺分隔符不动 memory）/2000字截断/
+ * ReviewRunner 回路测试：两段解析/降级安全（缺分隔符不动 memory）/超预算照存全文/
  * 无素材跳过/失败只留 ERROR 行不计连败。提示词按习惯配套断言。
  */
 class ReviewRunnerTest {
@@ -51,11 +54,20 @@ class ReviewRunnerTest {
     private final AiTraderMapper traderMapper = mock(AiTraderMapper.class);
     private final AiTraderDecisionMapper decisionMapper = mock(AiTraderDecisionMapper.class);
 
-    private final ReviewRunner runner = new ReviewRunner(assembler, modelFactory, traderMapper, decisionMapper);
+    /** 语言解析钉在中文：本类钉的是复盘回路行为，双语文案由 PromptI18nTest 单管 */
+    private final UserLangResolver langResolver = mock(UserLangResolver.class);
+
+    private final ReviewRunner runner = new ReviewRunner(assembler, modelFactory, traderMapper,
+            decisionMapper, new PromptCatalog(), langResolver);
+
+    {
+        when(langResolver.of(anyLong())).thenReturn(AgentLang.ZH);
+    }
 
     private AiTrader trader() {
         AiTrader t = new AiTrader();
         t.setId(7L);
+        t.setUserId(1L);
         t.setRoundNo(1);
         t.setSimUserId(99L);
         t.setSymbols("BTCUSDT");
@@ -78,7 +90,7 @@ class ReviewRunnerTest {
     private void stubMaterial() {
         when(assembler.lastReview(7L, 1)).thenReturn(priorReview());
         when(assembler.hasNewMaterial(eq(7L), eq(1), anyLong(), anyLong())).thenReturn(true);
-        when(assembler.assemble(any(), anyLong(), anyLong())).thenReturn(
+        when(assembler.assemble(any(), anyLong(), anyLong(), any())).thenReturn(
                 new ReviewMaterialAssembler.ReviewMaterial(
                         "【战绩表】起始权益 10000.00 → 期末权益 9800.00，期间收益率 -2.00%\n",
                         "【已了结交易配对表】1. BTCUSDT LONG [BREAKOUT] …止损带走\n",
@@ -197,10 +209,11 @@ class ReviewRunnerTest {
         verify(traderMapper, never()).update(any(), any());
     }
 
+    /** 篇幅只由提示词那句"≤N"约束：模型写超了照样整段落库，代码不替它裁 */
     @Test
-    void memoryTruncatedAtLimit() {
+    void memoryStoredInFullEvenOverBudget() {
         stubMaterial();
-        String longMemory = "长".repeat(ReviewRunner.MEMORY_MAX_CHARS + 500);
+        String longMemory = "记忆里每一句都以句号收尾。".repeat(160);
         ChatModel model = modelReturning("【本期复盘】\n战绩：……\n【记忆更新】\n" + longMemory);
         when(modelFactory.modelFor(any())).thenReturn(model);
 
@@ -211,9 +224,10 @@ class ReviewRunnerTest {
                 ArgumentCaptor.forClass((Class) LambdaUpdateWrapper.class);
         verify(traderMapper).update(any(), up.capture());
         String written = up.getValue().getParamNameValuePairs().values().stream()
-                .filter(v -> v instanceof String s && s.startsWith("长"))
+                .filter(v -> v instanceof String s && s.startsWith("记"))
                 .map(String.class::cast).findFirst().orElseThrow();
-        assertThat(written).hasSize(ReviewRunner.MEMORY_MAX_CHARS);
+        assertThat(written.length()).isGreaterThan(NoteBudget.maxChars(AgentLang.ZH));   // 确实超了预算
+        assertThat(written).isEqualTo(longMemory);
     }
 
     @Test
@@ -238,8 +252,25 @@ class ReviewRunnerTest {
         verify(decisionMapper).insert(dec.capture());
         assertThat(dec.getValue().getKind()).isEqualTo(AiTraderDecision.KIND_REVIEW);
         assertThat(dec.getValue().getStatus()).isEqualTo(AiTraderDecision.STATUS_ERROR);
-        assertThat(dec.getValue().getError()).contains("401");
+        // 公开行只存归类文案，上游原文不落库
+        assertThat(dec.getValue().getError()).contains("API key").doesNotContain("上游401");
         // 不动 memory、不计连败（复盘失败没有资金风险，trader 行一个字段都不碰）
+        verify(traderMapper, never()).update(any(), any());
+    }
+
+    /** 模型空输出：ERROR 行写"输出为空"这句给用户看的话，不走异常归类 */
+    @Test
+    void emptyOutputWritesErrorRow() {
+        stubMaterial();
+        ChatModel model = modelReturning("");
+        when(modelFactory.modelFor(any())).thenReturn(model);
+
+        runner.review(trader(), BOUNDARY);
+
+        ArgumentCaptor<AiTraderDecision> dec = ArgumentCaptor.forClass(AiTraderDecision.class);
+        verify(decisionMapper).insert(dec.capture());
+        assertThat(dec.getValue().getStatus()).isEqualTo(AiTraderDecision.STATUS_ERROR);
+        assertThat(dec.getValue().getError()).contains("输出为空");
         verify(traderMapper, never()).update(any(), any());
     }
 

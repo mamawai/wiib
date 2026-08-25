@@ -14,6 +14,7 @@ import type {
   PrimitiveHoveredItem, SeriesAttachedParameter, SeriesType, Time,
 } from 'lightweight-charts';
 import type { CanvasRenderingTarget2D } from 'fancy-canvas';
+import i18n from '../../i18n';
 import {
   anchorToPoint, coordToTime, distToSegment, FIB_COLORS, FIB_LEVELS, fmtDuration, GAIN_COLOR, HIT_HANDLE,
   HIT_LINE, LOSS_COLOR, pointInPoly, POSITION_RR, rayEnd, timeToLogical,
@@ -352,9 +353,10 @@ class PaneRenderer implements IPrimitivePaneRenderer {
 
     // 标签贴在各自区间的内侧（止盈/止损线朝入场线的那一边），右对齐到区间右缘，不飘出框外
     const inward = (y: number) => y + (yE >= y ? 9 : -9);
-    chip(c, xR - 4, inward(yT), `止盈 ${target.p.toFixed(dec)} ${pct(target.p - entry.p)}`, GAIN_COLOR, 'right');
-    chip(c, xR - 4, inward(yS), `止损 ${stop.p.toFixed(dec)} ${pct(stop.p - entry.p)}`, LOSS_COLOR, 'right');
-    chip(c, xL + 4, yE - 9, `${d.kind === 'long' ? '多' : '空'} ${entry.p.toFixed(dec)} · RR ${rr.toFixed(2)}`, d.color);
+    // 标签文案每帧现查词表：画布内容不随 React 重渲染刷新，切语言由 useDrawings 主动触发重绘
+    chip(c, xR - 4, inward(yT), `${i18n.t('market:draw.tp')} ${target.p.toFixed(dec)} ${pct(target.p - entry.p)}`, GAIN_COLOR, 'right');
+    chip(c, xR - 4, inward(yS), `${i18n.t('market:draw.sl')} ${stop.p.toFixed(dec)} ${pct(stop.p - entry.p)}`, LOSS_COLOR, 'right');
+    chip(c, xL + 4, yE - 9, `${i18n.t(d.kind === 'long' ? 'market:draw.long' : 'market:draw.short')} ${entry.p.toFixed(dec)} · RR ${rr.toFixed(2)}`, d.color);
     if (sel) this._handles(c, d.color, p[0], p[1], p[2]);
   }
 
@@ -375,7 +377,7 @@ class PaneRenderer implements IPrimitivePaneRenderer {
     const bars = l0 !== null && l1 !== null ? Math.abs(Math.round(l1 - l0)) : 0;
     const sign = dp >= 0 ? '+' : '';
     const text = `${sign}${dp.toFixed(L.opts.decimals)} (${sign}${a.p ? (dp / a.p * 100).toFixed(2) : '0.00'}%)`
-      + ` · ${bars}根 · ${fmtDuration(b.t - a.t)}`;
+      + ` · ${i18n.t('market:draw.bars', { count: bars })} · ${fmtDuration(b.t - a.t)}`;
     chip(c, x + w / 2, y - 10, text, d.color, 'center');
     if (sel) this._handles(c, d.color, p[0], p[1]);
   }

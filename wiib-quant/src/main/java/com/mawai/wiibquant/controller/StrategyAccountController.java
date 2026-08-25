@@ -2,7 +2,9 @@ package com.mawai.wiibquant.controller;
 
 import cn.dev33.satoken.stp.StpUtil;
 import com.mawai.wiibcommon.annotation.RequireAdmin;
+import com.mawai.wiibcommon.exception.BizException;
 import com.mawai.wiibcommon.util.Result;
+import com.mawai.wiibcommon.i18n.MessageCatalog;
 import com.mawai.wiibquant.strategy.core.StrategyRuntime;
 import com.mawai.wiibquant.strategy.core.StrategySignalState;
 import com.mawai.wiibquant.strategy.monitor.StrategyAccountService;
@@ -19,6 +21,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * 三策略模拟盘账户监控 + 受控平仓。
@@ -36,6 +39,8 @@ public class StrategyAccountController {
 
     private final StrategyAccountService strategyAccountService;
     private final StrategyRuntime strategyRuntime;
+    /** 管理页的提示跟界面语言 */
+    private final MessageCatalog messages;
 
     @Data
     public static class ClosePositionRequest {
@@ -61,16 +66,16 @@ public class StrategyAccountController {
     @RequireAdmin // 平仓是干预性写操作，仅管理员可执行
     public Result<Void> close(@PathVariable String strategyId, @RequestBody ClosePositionRequest request) {
         if (request == null || request.getPositionId() == null) {
-            return Result.fail("positionId 不能为空");
+            return Result.fail(messages.get("quant.strategy.positionIdRequired"));
         }
         try {
             strategyAccountService.closePosition(strategyId, request.getPositionId());
             return Result.ok(null);
-        } catch (IllegalArgumentException e) {
-            return Result.fail(e.getMessage());
+        } catch (BizException e) {
+            throw e;   // 已成文的业务拒因（仓位不存在），交全局处理器原样下发，别再包一层"平仓失败"
         } catch (Exception e) {
             log.error("[StrategyAccount] 平仓失败 strategyId={} posId={}", strategyId, request.getPositionId(), e);
-            return Result.fail("平仓失败：" + e.getMessage());
+            return Result.fail(messages.get("quant.strategy.closeFailed", Map.of("reason", String.valueOf(e.getMessage()))));
         }
     }
 }

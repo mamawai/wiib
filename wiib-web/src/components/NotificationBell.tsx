@@ -1,4 +1,5 @@
 import { useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { Bell } from 'lucide-react';
 import { useUserStore } from '../stores/userStore';
@@ -8,10 +9,11 @@ import { NotificationList } from './NotificationList';
 
 /**
  * 顶栏信封：未读角标 + 下拉面板。点开即全部标已读，面板仍列最近 50 条历史。
- * 只在 PC 显示（顶栏整体 hidden md:flex），手机端的通知入口在「我的」页。
+ * 只在 PC 显示（顶栏操作区整体 hidden lg:flex），手机端的通知入口在「我的」页。
  */
 export function NotificationBell() {
   const navigate = useNavigate();
+  const { t } = useTranslation('account');
   // 只取 id：fetchUser 每次都换一个新 user 对象，盯整个对象会反复退订重订，
   // 而退订到 0 时 stompClient 会直接断开连接，白白抖一次 WS
   const userId = useUserStore(s => s.user?.id ?? null);
@@ -29,7 +31,7 @@ export function NotificationBell() {
         type="button"
         onClick={() => void toggle()}
         className="relative w-8 h-8 rounded-md flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-surface-hover transition-colors cursor-pointer"
-        aria-label="通知"
+        aria-label={t('notif.title')}
       >
         <Bell className="w-4 h-4" />
         {unread > 0 && (
@@ -41,7 +43,7 @@ export function NotificationBell() {
 
       {open && (
         <div className="absolute right-0 top-full mt-2 w-80 rounded-lg pt-card shadow-lg overflow-hidden z-50 animate-in fade-in slide-in-from-top-2">
-          <div className="px-4 py-2.5 microlabel font-semibold border-b border-border/60">通知</div>
+          <div className="px-4 py-2.5 microlabel font-semibold border-b border-border/60">{t('notif.title')}</div>
           <NotificationList
             items={items}
             loading={loading}

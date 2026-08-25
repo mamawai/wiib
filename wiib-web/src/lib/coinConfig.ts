@@ -1,3 +1,4 @@
+import i18n from '../i18n';
 import { fmtNum } from './utils';
 import {Bitcoin, Coins, Cpu, Flag, Fuel, HardDrive, MemoryStick, Rocket, type LucideProps} from 'lucide-react';
 import type {ComponentType} from "react";
@@ -6,6 +7,7 @@ import type {MarketId} from './marketSession';
 
 export interface CoinCfg {
   symbol: string;
+  /** 展示名。BTC/SOXL 这类本身就是代号，写死字面量；黄金/闪迪这类要随语言变的写成 getter（见 COIN_MAP） */
   name: string;
   pair: string;
   tvSymbol: string;
@@ -18,7 +20,6 @@ export interface CoinCfg {
   hoverBgClass: string;
   gradientClass: string;
   chartColor: string;
-  desc: string;
   // 实物换算（如 XAU 黄金盎司/克数）
   unitLabel?: string;
   unitFactor?: number;
@@ -30,90 +31,95 @@ export interface CoinCfg {
   market?: MarketId;
 }
 
+/**
+ * 要翻译的展示名走 getter 而不是存一份 key：全站十来处直接读 cfg.name（行情表、交易面板、成交记录），
+ * 改成 nameKey 就得跟着全改一遍。getter 每次读现查词表，等价于"存 key 渲染时再 t()"，
+ * 却不用动任何调用方 —— 关键是**别写成模块顶层常量**，那会在加载那一刻定死、切语言不跟着变。
+ */
 export const COIN_MAP: Record<string, CoinCfg> = {
   BTCUSDT: {
     symbol: 'BTCUSDT', name: 'BTC', pair: 'BTC / USDT', tvSymbol: 'BINANCE:BTCUSD', futuresTvSymbol: 'BINANCE:BTCUSDT.P',
     icon: Bitcoin,
     colorClass: 'text-orange-500', bgClass: 'bg-orange-500/10', hoverBgClass: 'hover:bg-orange-500/20', gradientClass: 'from-orange-500/5',
-    chartColor: '#f97316', desc: '比特币 / USDT 模拟交易',
+    chartColor: '#f97316',
   },
   ETHUSDT: {
     symbol: 'ETHUSDT', name: 'ETH', pair: 'ETH / USDT', tvSymbol: 'BINANCE:ETHUSD', futuresTvSymbol: 'BINANCE:ETHUSDT.P',
     icon: Eth,
     colorClass: 'text-indigo-400', bgClass: 'bg-indigo-500/10', hoverBgClass: 'hover:bg-indigo-500/20', gradientClass: 'from-indigo-500/5',
-    chartColor: '#818cf8', desc: '以太坊 / USDT 模拟交易',
+    chartColor: '#818cf8',
   },
   DOGEUSDT: {
     symbol: 'DOGEUSDT', name: 'DOGE', pair: 'DOGE / USDT', tvSymbol: 'BINANCE:DOGEUSDT', futuresTvSymbol: 'BINANCE:DOGEUSDT.P',
     priceDecimals: 5, icon: Doge,
     colorClass: 'text-amber-500', bgClass: 'bg-amber-500/10', hoverBgClass: 'hover:bg-amber-500/20', gradientClass: 'from-amber-500/5',
-    chartColor: '#f59e0b', desc: '狗狗币 / USDT 模拟交易',
+    chartColor: '#f59e0b',
   },
   SOLUSDT: {
     symbol: 'SOLUSDT', name: 'SOL', pair: 'SOL / USDT', tvSymbol: 'BINANCE:SOLUSDT', futuresTvSymbol: 'BINANCE:SOLUSDT.P',
     icon: Sol,
     colorClass: 'text-purple-500', bgClass: 'bg-purple-500/10', hoverBgClass: 'hover:bg-purple-500/20', gradientClass: 'from-purple-500/5',
-    chartColor: '#a855f7', desc: 'Solana / USDT 模拟交易',
+    chartColor: '#a855f7',
   },
   XRPUSDT: {
     symbol: 'XRPUSDT', name: 'XRP', pair: 'XRP / USDT', tvSymbol: 'BINANCE:XRPUSDT', futuresTvSymbol: 'BINANCE:XRPUSDT.P',
     priceDecimals: 4, icon: Xrp,
     colorClass: 'text-sky-500', bgClass: 'bg-sky-500/10', hoverBgClass: 'hover:bg-sky-500/20', gradientClass: 'from-sky-500/5',
-    chartColor: '#0ea5e9', desc: '瑞波币 / USDT 模拟交易',
+    chartColor: '#0ea5e9',
   },
   BNBUSDT: {
     symbol: 'BNBUSDT', name: 'BNB', pair: 'BNB / USDT', tvSymbol: 'BINANCE:BNBUSDT', futuresTvSymbol: 'BINANCE:BNBUSDT.P',
     icon: Bnb,
     colorClass: 'text-yellow-400', bgClass: 'bg-yellow-400/10', hoverBgClass: 'hover:bg-yellow-400/20', gradientClass: 'from-yellow-400/5',
-    chartColor: '#f0b90b', desc: 'BNB / USDT 模拟交易',
+    chartColor: '#f0b90b',
   },
   XAUUSDT: {
-    symbol: 'XAUUSDT', name: '黄金', pair: 'XAU / USDT', tvSymbol: 'TVC:GOLD', futuresTvSymbol: 'BINANCE:XAUUSDT.P',
+    symbol: 'XAUUSDT', get name() { return i18n.t('market:coinName.XAUUSDT'); }, pair: 'XAU / USDT', tvSymbol: 'TVC:GOLD', futuresTvSymbol: 'BINANCE:XAUUSDT.P',
     icon: Coins,
     colorClass: 'text-yellow-500', bgClass: 'bg-yellow-500/10', hoverBgClass: 'hover:bg-yellow-500/20', gradientClass: 'from-yellow-500/5',
-    chartColor: '#eab308', desc: '黄金 / USDT · TradFi 永续合约', category: 'commodity', futuresOnly: true,
+    chartColor: '#eab308', category: 'commodity', futuresOnly: true,
   },
   CLUSDT: {
-    symbol: 'CLUSDT', name: '原油', pair: 'CL / USDT', tvSymbol: 'TVC:USOIL', futuresTvSymbol: 'BINANCE:CLUSDT.P',
+    symbol: 'CLUSDT', get name() { return i18n.t('market:coinName.CLUSDT'); }, pair: 'CL / USDT', tvSymbol: 'TVC:USOIL', futuresTvSymbol: 'BINANCE:CLUSDT.P',
     icon: Fuel,
     colorClass: 'text-stone-500', bgClass: 'bg-stone-500/10', hoverBgClass: 'hover:bg-stone-500/20', gradientClass: 'from-stone-500/5',
-    chartColor: '#78716c', desc: 'WTI 原油 / USDT · TradFi 永续合约', category: 'commodity', futuresOnly: true,
+    chartColor: '#78716c', category: 'commodity', futuresOnly: true,
   },
   SNDKUSDT: {
-    symbol: 'SNDKUSDT', name: '闪迪', pair: 'SNDK / USDT', tvSymbol: 'NASDAQ:SNDK', futuresTvSymbol: 'BINANCE:SNDKUSDT.P',
+    symbol: 'SNDKUSDT', get name() { return i18n.t('market:coinName.SNDKUSDT'); }, pair: 'SNDK / USDT', tvSymbol: 'NASDAQ:SNDK', futuresTvSymbol: 'BINANCE:SNDKUSDT.P',
     icon: HardDrive,
     colorClass: 'text-red-500', bgClass: 'bg-red-500/10', hoverBgClass: 'hover:bg-red-500/20', gradientClass: 'from-red-500/5',
-    chartColor: '#ef4444', desc: '闪迪 SanDisk / USDT · TradFi 永续合约', category: 'tradfi', futuresOnly: true, market: 'US',
+    chartColor: '#ef4444', category: 'tradfi', futuresOnly: true, market: 'US',
   },
   SOXLUSDT: {
     symbol: 'SOXLUSDT', name: 'SOXL', pair: 'SOXL / USDT', tvSymbol: 'AMEX:SOXL', futuresTvSymbol: 'BINANCE:SOXLUSDT.P',
     icon: Cpu,
     colorClass: 'text-emerald-500', bgClass: 'bg-emerald-500/10', hoverBgClass: 'hover:bg-emerald-500/20', gradientClass: 'from-emerald-500/5',
-    chartColor: '#10b981', desc: '三倍做多半导体ETF / USDT · TradFi 永续合约', category: 'tradfi', futuresOnly: true, market: 'US',
+    chartColor: '#10b981', category: 'tradfi', futuresOnly: true, market: 'US',
   },
   SKHYNIXUSDT: {
-    symbol: 'SKHYNIXUSDT', name: 'SK海力士', pair: 'SKHYNIX / USDT', tvSymbol: 'KRX:000660', futuresTvSymbol: 'BINANCE:SKHYNIXUSDT.P',
+    symbol: 'SKHYNIXUSDT', get name() { return i18n.t('market:coinName.SKHYNIXUSDT'); }, pair: 'SKHYNIX / USDT', tvSymbol: 'KRX:000660', futuresTvSymbol: 'BINANCE:SKHYNIXUSDT.P',
     icon: MemoryStick,
     colorClass: 'text-orange-600', bgClass: 'bg-orange-600/10', hoverBgClass: 'hover:bg-orange-600/20', gradientClass: 'from-orange-600/5',
-    chartColor: '#ea580c', desc: 'SK海力士 / USDT · TradFi 永续合约', category: 'tradfi', futuresOnly: true, market: 'KRX',
+    chartColor: '#ea580c', category: 'tradfi', futuresOnly: true, market: 'KRX',
   },
   MUUSDT: {
-    symbol: 'MUUSDT', name: '美光', pair: 'MU / USDT', tvSymbol: 'NASDAQ:MU', futuresTvSymbol: 'BINANCE:MUUSDT.P',
+    symbol: 'MUUSDT', get name() { return i18n.t('market:coinName.MUUSDT'); }, pair: 'MU / USDT', tvSymbol: 'NASDAQ:MU', futuresTvSymbol: 'BINANCE:MUUSDT.P',
     icon: Cpu,
     colorClass: 'text-blue-500', bgClass: 'bg-blue-500/10', hoverBgClass: 'hover:bg-blue-500/20', gradientClass: 'from-blue-500/5',
-    chartColor: '#3b82f6', desc: '美光科技 / USDT · TradFi 永续合约', category: 'tradfi', futuresOnly: true, market: 'US',
+    chartColor: '#3b82f6', category: 'tradfi', futuresOnly: true, market: 'US',
   },
   KORUUSDT: {
     symbol: 'KORUUSDT', name: 'KORU', pair: 'KORU / USDT', tvSymbol: 'AMEX:KORU', futuresTvSymbol: 'BINANCE:KORUUSDT.P',
     icon: Flag,
     colorClass: 'text-rose-500', bgClass: 'bg-rose-500/10', hoverBgClass: 'hover:bg-rose-500/20', gradientClass: 'from-rose-500/5',
-    chartColor: '#f43f5e', desc: '三倍做多韩国ETF / USDT · TradFi 永续合约', category: 'tradfi', futuresOnly: true, market: 'US',
+    chartColor: '#f43f5e', category: 'tradfi', futuresOnly: true, market: 'US',
   },
   SPCXUSDT: {
     symbol: 'SPCXUSDT', name: 'SpaceX', pair: 'SPCX / USDT', tvSymbol: 'BINANCE:SPCXUSDT.P', futuresTvSymbol: 'BINANCE:SPCXUSDT.P',
     icon: Rocket,
     colorClass: 'text-violet-500', bgClass: 'bg-violet-500/10', hoverBgClass: 'hover:bg-violet-500/20', gradientClass: 'from-violet-500/5',
-    chartColor: '#8b5cf6', desc: 'SpaceX pre-IPO / USDT · TradFi 永续合约', category: 'tradfi', futuresOnly: true, market: 'US',
+    chartColor: '#8b5cf6', category: 'tradfi', futuresOnly: true, market: 'US',
   },
 };
 

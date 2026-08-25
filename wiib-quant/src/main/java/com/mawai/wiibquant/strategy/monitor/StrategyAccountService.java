@@ -2,6 +2,8 @@ package com.mawai.wiibquant.strategy.monitor;
 
 import com.mawai.wiibcommon.dto.FuturesCloseRequest;
 import com.mawai.wiibcommon.dto.FuturesPositionDTO;
+import com.mawai.wiibcommon.exception.BizException;
+import com.mawai.wiibcommon.i18n.MessageCatalog;
 import com.mawai.wiibquant.strategy.core.TradingStrategySpi;
 import com.mawai.wiibquant.external.sim.SimTradeClient;
 import com.mawai.wiibquant.strategy.execution.StrategyAccountRegistry;
@@ -29,12 +31,15 @@ public class StrategyAccountService {
     private final SimTradeClient client;
     private final StrategyAccountRegistry accounts;
     private final List<TradingStrategySpi> strategies;
+    /** 平仓拒因跟界面语言（只走管理员手动平仓，都在请求线程上） */
+    private final MessageCatalog messages;
 
     public StrategyAccountService(SimTradeClient client, StrategyAccountRegistry accounts,
-                                  List<TradingStrategySpi> strategies) {
+                                  List<TradingStrategySpi> strategies, MessageCatalog messages) {
         this.client = client;
         this.accounts = accounts;
         this.strategies = strategies;
+        this.messages = messages;
     }
 
     /** 单策略账户全景：余额/权益/累计盈亏/胜率 + 持仓 + 已平仓历史。 */
@@ -100,7 +105,7 @@ public class StrategyAccountService {
         FuturesPositionDTO pos = client.getAllPositions(userId).stream()
                 .filter(p -> positionId.equals(p.getId()) && "OPEN".equals(p.getStatus()))
                 .findFirst()
-                .orElseThrow(() -> new IllegalArgumentException("仓位不存在或已平仓"));
+                .orElseThrow(() -> new BizException(messages.get("quant.strategy.positionNotFound")));
         FuturesCloseRequest req = new FuturesCloseRequest();
         req.setPositionId(positionId);
         req.setQuantity(pos.getQuantity());

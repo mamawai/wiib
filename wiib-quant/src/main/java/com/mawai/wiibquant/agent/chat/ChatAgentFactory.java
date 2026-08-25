@@ -1,8 +1,13 @@
 package com.mawai.wiibquant.agent.chat;
 
 import com.mawai.wiibcommon.entity.UserLlmEndpoint;
+import com.mawai.wiibcommon.enums.AgentLang;
+import com.mawai.wiibquant.agent.i18n.LocalizedToolCallbacks;
+import com.mawai.wiibquant.agent.i18n.PromptCatalog;
+import com.mawai.wiibquant.agent.llm.AgentGraphs;
 import com.mawai.wiibquant.agent.llm.ChatEndpoints;
 import com.mawai.wiibquant.agent.analysis.DeepAnalysisService;
+import com.mawai.wiibquant.agent.behavior.BehaviorAnalysisService;
 import com.mawai.wiibquant.agent.llm.ConversationSummarizer;
 import com.mawai.wiibquant.agent.llm.MessagesSchema;
 import com.mawai.wiibquant.agent.llm.ModelCallLimiter;
@@ -18,7 +23,6 @@ import org.bsc.langgraph4j.CompiledGraph;
 import org.bsc.langgraph4j.hook.EdgeHook;
 import org.bsc.langgraph4j.hook.NodeHook;
 import org.bsc.langgraph4j.prebuilt.MessagesState;
-import org.bsc.langgraph4j.serializer.StateSerializer;
 import org.bsc.langgraph4j.spring.ai.agent.ReactAgent;
 import org.bsc.langgraph4j.state.AgentState;
 import org.bsc.langgraph4j.state.AppenderChannel;
@@ -36,12 +40,13 @@ import java.util.function.Supplier;
  * 每个都是独立编译的 ReactAgent。
  * <p>
  * <b>这里只管"造"，不管"怎么用"</b>：派谁、派几轮、结果怎么拼、历史怎么存，全在
- * {@link ChatTurnRunner} 的平铺 Java 循环里。曾经的父 StateGraph 编排已退役——
- * 图带来的全部东西（条件边、并行 fan-in、回环）在这个链路上都能用几十行普通代码写清楚，
- * 而图额外附赠了一堆代价：hook 内联丢失、迭代硬顶算账、并行分支拿不到子流。
+ * {@link ChatTurnRunner} 的平铺 Java 循环里。
  * <p>
  * 模型是建叶子时绑死的（工具方法体里拿不到用户身份，{@code ChatService.execute} 的签名里
  * 没有 RunnableConfig），所以叶子按配置指纹缓存，见 {@link #leavesFor}。
+ * <p>
+ * 语言与模型一样是建叶子时烤死的：系统提示词与工具描述按 {@link AgentLang} 取好写进图里，
+ * 所以语言也在缓存键里，见 {@link #leafKey}。
  */
 @Slf4j
 @Component
@@ -68,9 +73,12 @@ public class ChatAgentFactory {
      * @param deep       深模型（summarizer 作答与深研判走它）。透出来是为了取用量——它本身就是本轮的账本
      * @param light      浅模型本体：{@link ChatTurnRunner} 的路由问答是一次性的结构化调用，
      *                   没有 ReAct 循环也没有工具执行，用不上包一层 agent
+     * @param lang       这套叶子按哪门语言建的。它在缓存键里（见 {@link #leafKey}），拿到的叶子
+     *                   必与请求语言一致；带出来供编排层（过程文案、路由工具描述）直接用
      */
     public record Leaves(String modelLabel, UsageTrackingChatModel deep, UsageTrackingChatModel light,
-                         Map<String, Expert> experts, CompiledGraph<MessagesState<Message>> summarizer) {
+                         Map<String, Expert> experts, CompiledGraph<MessagesState<Message>> summarizer,
+                         AgentLang lang) {
 
         /** 轮开始清零，划出本轮账本的起点 */
         public void resetUsage() {
@@ -93,12 +101,14 @@ public class ChatAgentFactory {
     private final MarketToolkit marketToolkit;
     private final NewsToolkit newsToolkit;
     private final DeepAnalysisService deepAnalysisService;
+    /** 行为分析的准入层（缓存/负缓存/并发闸门都在它那儿），工具只经它跑 */
+    private final BehaviorAnalysisService behaviorAnalysisService;
     /** 对话轨读写 trader 的唯一入口；两条 agent 链路只经它与 DB 打交道，从不互相对话 */
     private final TraderChatService traderChatService;
     private final WorkbenchRunRegistry runRegistry;
     private final ApprovalRegistry approvalRegistry;
-    /** 叶子与 {@link ChatContextStore} 共用同一个：会话历史存进去读出来要靠它，两边不一致就写得进读不出 */
-    private final StateSerializer<MessagesState<Message>> stateSerializer;
+    private final PromptCatalog prompts;
+    private final LocalizedToolCallbacks localizedTools;
     private final int runModelCallLimit;
     private final int summarizeThresholdTokens;
     private final int summarizeKeepMessages;
@@ -134,10 +144,12 @@ public class ChatAgentFactory {
                             MarketToolkit marketToolkit,
                             NewsToolkit newsToolkit,
                             DeepAnalysisService deepAnalysisService,
+                            BehaviorAnalysisService behaviorAnalysisService,
                             TraderChatService traderChatService,
                             WorkbenchRunRegistry runRegistry,
                             ApprovalRegistry approvalRegistry,
-                            StateSerializer<MessagesState<Message>> stateSerializer,
+                            PromptCatalog prompts,
+                            LocalizedToolCallbacks localizedTools,
                             @Value("${quant.workbench.run-model-call-limit:8}") int runModelCallLimit,
                             @Value("${quant.workbench.summarize-threshold-tokens:32000}") int summarizeThresholdTokens,
                             @Value("${quant.workbench.summarize-keep-messages:6}") int summarizeKeepMessages,
@@ -146,10 +158,12 @@ public class ChatAgentFactory {
         this.marketToolkit = marketToolkit;
         this.newsToolkit = newsToolkit;
         this.deepAnalysisService = deepAnalysisService;
+        this.behaviorAnalysisService = behaviorAnalysisService;
         this.traderChatService = traderChatService;
         this.runRegistry = runRegistry;
         this.approvalRegistry = approvalRegistry;
-        this.stateSerializer = stateSerializer;
+        this.prompts = prompts;
+        this.localizedTools = localizedTools;
         this.runModelCallLimit = runModelCallLimit;
         this.summarizeThresholdTokens = summarizeThresholdTokens;
         this.summarizeKeepMessages = summarizeKeepMessages;
@@ -173,15 +187,15 @@ public class ChatAgentFactory {
      * <b>先查后建，不用 computeIfAbsent</b>：它会在整个 mapping 函数执行期间攥着互斥锁，
      * 于是任何一个用户首次建叶子期间，<b>其余所有用户的 /chat 请求全堵在这把锁上</b>。
      */
-    public Leaves leavesFor(ChatEndpoints eps) {
-        String fp = ChatModelFactory.fingerprint(eps);
+    public Leaves leavesFor(ChatEndpoints eps, AgentLang lang) {
+        String fp = leafKey(eps, lang);
         Leaves hit = cache.get(fp);
         if (hit != null) {
             return hit;
         }
         Leaves built;
         try {
-            built = build(eps);                     // 锁外建，慢也只慢自己
+            built = build(eps, lang);               // 锁外建，慢也只慢自己
         } catch (Exception e) {
             // build 抛检查异常；包成运行时，让上层当"这份配置建不出模型"处理
             throw new IllegalStateException("对话叶子构建失败", e);
@@ -191,12 +205,24 @@ public class ChatAgentFactory {
         if (prev != null) {
             return prev;
         }
-        log.info("对话工作台叶子已构建 model={} 缓存数={}", eps.deep().getModel(), cache.size());
+        log.info("对话工作台叶子已构建 model={} lang={} 缓存数={}",
+                eps.deep().getModel(), lang.code(), cache.size());
         return built;
     }
 
+    /**
+     * 叶子的缓存键 = 模型配置指纹 + 语言。语言变则整套系统提示词与工具描述变，叶子须重建。
+     * <p>
+     * 语言只加在这一层，不进 {@link ChatModelFactory#fingerprint}：模型实例与语言无关，
+     * 切语言不重建 SDK 客户端与连接池。
+     */
+    static String leafKey(ChatEndpoints eps, AgentLang lang) {
+        // 指纹是十六进制串，用冒号接语言码不会与它的任何取值相撞
+        return ChatModelFactory.fingerprint(eps) + ':' + lang.code();
+    }
+
     // 形参不叫 config：这个包里 config 一律指 RunnableConfig，重名读起来会误导
-    private Leaves build(ChatEndpoints eps) throws Exception {
+    private Leaves build(ChatEndpoints eps, AgentLang lang) throws Exception {
         ChatModelFactory.Models models = chatModelFactory.modelsFor(eps);
         // 用量装饰器包在这一层而不是 ChatModelFactory：叶子与模型同指纹、同寿命、同为每用户一份，
         // 而闸门保证一个用户同时只有一轮在跑——于是它能当"轮级账本"使（轮开头 resetUsage 划边界）。
@@ -209,34 +235,22 @@ public class ChatAgentFactory {
         // LinkedHashMap 保序：派发顺序、结论拼进历史的顺序都跟着它，market 在前 news 在后
         Map<String, Expert> experts = new LinkedHashMap<>();
         // market 的工具要按问题选 symbol，只能交给模型现取，所以没有 preload
-        experts.put(MARKET_AGENT, new Expert(expertGraph(light, marketToolkit, "required", """
-                你是市场状态专家。用工具获取真实数据回答，所有结论必须引用工具返回的具体数字；
-                数据不可用(available=false)时如实告知，绝不编造。
-                只回答行情/持仓/清算/期权，新闻等其他领域即使知道也不要写，有对应专家负责。
-                回答精炼中文。"""), null));
+        experts.put(MARKET_AGENT, new Expert(expertGraph(lang, light, marketToolkit, "required",
+                prompts.get(lang, "chat.expert.market")), null));
         // 新闻专家只管 BlockBeats：数据走"预取"（news_search 无参数，预取 100% 保证快讯在
         // 上下文里，不依赖模型行为；不挂 function tool——实测挂着它 auto 下还会再调一次纯浪费）。
         // 联网补的那一路不归它：模型的服务端搜索关不掉（grok 实测所有请求参数/换模型均无效），
         // 与其在两处禁，不如把搜索正式划给 summarizer 当职责、这里明令禁用——预取喂饱后它没有搜索动机，禁得住
-        experts.put(NEWS_AGENT, new Expert(expertGraph(light, null, null, """
-                你是加密新闻专家。对话里已附上 BlockBeats 快讯原文（约20条），只基于它输出清单：
-                每条格式：[BlockBeats] + 事件一句话 + 可能影响一句话，按市场影响力从高到低排序，
-                同一事件的多条快讯合并为一条，除合并外不要删减。
-                严禁把你联网搜索到的任何内容写进回答——这部分由上游汇总者负责。
-                不评价真伪、不给投资建议。原文为空时如实说"暂无快讯"，绝不编造。输出精炼中文。"""),
-                newsToolkit::newsSearch));
+        experts.put(NEWS_AGENT, new Expert(expertGraph(lang, light, null, null,
+                prompts.get(lang, "chat.expert.news")), () -> newsToolkit.newsSearch(lang)));
         // trader 专家只读这个用户自己的 trader：userId 在这里烤进工具实例，不做成模型可填的参数
         //（做成参数就等于让模型自己说要看谁的档案）。无预取——四个工具各答一类问题，取哪个得看问题
-        experts.put(TRADER_AGENT, new Expert(expertGraph(light,
-                new TraderQueryToolkit(traderChatService, eps.userId()), "required", """
-                你是用户那个 AI 交易员的档案员。用工具读取真实数据回答，所有结论只能引用工具返回的内容；
-                工具返回 hasTrader=false 就直接说"你还没有创建 AI Trader"，绝不编造持仓、决策或复盘内容。
-                被问"为什么做那笔交易"时，把对应决策的 reasoning 原文摘出来说，不要自己另编一套理由。
-                只回答这个 trader 自身的状态/持仓/决策/计划/复盘笔记，大盘行情与新闻有别的专家负责。
-                回答精炼中文。"""), null));
+        experts.put(TRADER_AGENT, new Expert(expertGraph(lang, light,
+                new TraderQueryToolkit(traderChatService, eps.userId()), "required",
+                prompts.get(lang, "chat.expert.trader")), null));
 
         return new Leaves(modelLabel(eps.deep()), deep, light, experts,
-                summarizerLeaf(deep, light, eps.userId()));
+                summarizerLeaf(deep, light, eps.userId(), lang), lang);
     }
 
     /** 端点名 · 模型名：站内展示模型的统一口径（见 LlmEndpointSelect / ReplayPanel）；没起名就只报模型 */
@@ -270,8 +284,8 @@ public class ChatAgentFactory {
      * 都从 schema 起算，计数自然每轮从 0 开始，不需要任何显式清零。
      */
     static List<EdgeHook.WrapCall<MessagesState<Message>>> summarizerToolHooks(
-            ApprovalRegistry registry, int limit) {
-        return List.of(new ApprovalGate(registry), new ModelCallLimiter(limit));  // 内层 → 外层
+            ApprovalRegistry registry, PromptCatalog prompts, AgentLang lang, int limit) {
+        return List.of(new ApprovalGate(registry, prompts, lang), new ModelCallLimiter(limit));  // 内层 → 外层
     }
 
     /**
@@ -283,16 +297,13 @@ public class ChatAgentFactory {
      * @param forceFirstToolChoice "required"=首轮强制调工具（工具带参数、数据必须模型现取的专家）；
      *                             null=不强制
      */
-    CompiledGraph<MessagesState<Message>> expertGraph(ChatModel model, Object toolkit,
+    CompiledGraph<MessagesState<Message>> expertGraph(AgentLang lang, ChatModel model, Object toolkit,
                                                       String forceFirstToolChoice, String instruction)
             throws Exception {
-        ReactAgent.Builder<MessagesState<Message>> builder = ReactAgent.builder()
-                .chatModel(model)
-                .stateSerializer(stateSerializer)
-                .schema(MessagesSchema.SCHEMA)
-                .defaultSystem(instruction);
+        ReactAgent.Builder<MessagesState<Message>> builder = AgentGraphs.reactAgent(model, instruction);
         if (toolkit != null) {
-            builder.toolsFromObject(toolkit);
+            // 工具描述也跟语言走：@Tool 的 description 是编译期常量，这一层替它换（词表里没有的照旧用注解）
+            builder.tools(localizedTools.of(lang, toolkit));
             // 有工具才有 ReAct 循环，没保险丝就一路顶到框架 25 次迭代硬顶抛异常；而 market 的工具
             // 每调一次就打一次真实上游，是行情配额账里唯一没封顶的一项
             builder.addExecuteToolsHook(new ModelCallLimiter(runModelCallLimit));
@@ -310,58 +321,31 @@ public class ChatAgentFactory {
      * 派谁、还要不要再派，全归 {@link ChatTurnRunner} 的显式循环管，这里一个字都不提——
      * 角色单一，模型不会再纠结"该作答还是该派发"（那正是之前无限循环的病根）。
      * <p>
-     * 三个 hook 就挂在框架自己的挂载点上：叶子是独立 {@code compile()} 的，
-     * {@code addCallModelHook} 落到模型节点、{@code addExecuteToolsHook} 落到工具边，
-     * 都真执行（从前挂不上是因为这张图会被 {@code addNode(id, StateGraph)} 内联进父图，
-     * 内联只搬 nodes/edges）。工具边那两个按 {@link #summarizerToolHooks} 的列表顺序注册，
-     * 末尾的保险丝因此在最外层。
+     * 三个 hook 挂在框架自己的挂载点上：叶子是独立 {@code compile()} 的，
+     * {@code addCallModelHook} 落到模型节点、{@code addExecuteToolsHook} 落到工具边。
+     * 工具边那两个按 {@link #summarizerToolHooks} 的列表顺序注册，末尾的保险丝因此在最外层。
      *
      * @param light  压缩用浅模型：摘要是简单活，用深模型纯烧钱
      * @param userId 动作类工具烤死的归属；查询归专家，动手归汇总者，理由见 {@link TraderActionToolkit}
      */
     private CompiledGraph<MessagesState<Message>> summarizerLeaf(ChatModel deep, ChatModel light,
-                                                                 long userId) throws Exception {
+                                                                 long userId, AgentLang lang) throws Exception {
         // 工具的模型在这一层绑死："当前用的是谁的 key"只有这里知道
-        ReactAgent.Builder<MessagesState<Message>> builder = ReactAgent.builder()
-                .chatModel(deep)
-                .stateSerializer(stateSerializer)
-                .schema(MessagesSchema.SCHEMA)
+        ReactAgent.Builder<MessagesState<Message>> builder = AgentGraphs.reactAgent(deep,
+                        prompts.get(lang, "chat.summarizer",
+                                Map.of("supplementTag", supplementTag, "mergedTag", mergedTag)))
                 .streaming(true) // 答案要逐字推给前端
-                .toolsFromObject(new DeepAnalysisToolkit(deep, deepAnalysisService, runRegistry))
-                // 可以多次调用：两套工具分别是"研判"与"对 trader 动手"，合成一个类只会让职责糊掉
-                .toolsFromObject(new TraderActionToolkit(runRegistry, userId))
-                .defaultSystem("""
-                        你是加密货币研判工作台的分析师。对话里已经有专家 agent 取回的真实数据，
-                        你的职责是据此写出最终回答（新闻的联网补充也归你，见原则2）。
-                        不要提及调度、专家名或内部流程。
-
-                        回答原则：
-                        1. 结论必须可追溯到专家给的数据，不编造；专家没给的数据就说没有；
-                           行情/预测数字只能引用 market/quant 专家给的，不得用你搜到的行情数字替换
-                        2. 新闻的分工（news_agent 只管 BlockBeats，联网补充归你）：对话里有 news_agent 的
-                           [BlockBeats] 清单时，用你的联网搜索再收集约20条最新加密要闻并合并——
-                           news_agent 的条目一条不丢、保留 [BlockBeats] 标；你搜到的独有条目一律标 %s 并尽量附出处；
-                           同一事件两边都有则合并为一条标 %s。按市场影响力排序取前30条，
-                           不足30就全部输出，除去重外不删减。只列真实搜到的，搜不到就只用专家清单
-                        3. 被问涨跌方向时直接给出你的方向判断（偏多/偏空/震荡）与大致把握，鼓励表态：
-                           判断必须落在专家给的实测数据上（资金费/持仓/清算等），并附失效条件与仓位/止损等风控参考
-                        4. 信号确实矛盾、给不出任何倾向时才说"看不清"，并点出关键分歧在哪——这是例外，不是回避表态的出口
-                        5. 仅当用户明确说出"深度研判/全面分析"这类字眼时 → 调 run_deep_analysis 工具（昂贵，需用户确认：
-                           返回 PENDING_APPROVAL 时告知用户确认卡片已弹出，等确认后你会被再次唤起执行）；
-                           "怎么看走势"这类普通提问不要调它、也不要主动推销，直接按专家数据作答
-                        6. 对用户自己 AI 交易员动手的三个工具，同样只在用户明确要求时才调，绝不主动推销：
-                           · wake_trader（立刻唤醒它做一次决策，可能真开/平仓）、review_trader_now（立刻复盘）、
-                             leave_note_to_trader（给它留一句话，按用户设定的轮次逐轮注入，上限24轮）
-                           · 这三个工具只会给用户打开一张表单，真正执不执行由用户点击决定：调用后如实说
-                             "表单已打开，请确认后提交"，绝不能说已经唤醒了／已经复盘了／留言已记下
-                           · 工具返回说表单没能打开时，如实告诉用户去 trader 面板手动操作，不要假装已经打开
-                           查询类问题（它现在怎么样/持了什么仓/那笔为什么开）不归你，trader_agent 专家已经取回数据了
-
-                        输出精炼中文。""".formatted(supplementTag, mergedTag))
-                .addCallModelHook(wrapBefore(
-                        new ConversationSummarizer(light, summarizeThresholdTokens, summarizeKeepMessages)));
+                .tools(localizedTools.of(lang,
+                        new DeepAnalysisToolkit(deep, deepAnalysisService, runRegistry, prompts, lang),
+                        // 可以多次给：三套工具分别是"研判"、"对 trader 动手"、"分析本人行为"，
+                        // 合成一个类只会让职责糊掉
+                        new TraderActionToolkit(runRegistry, userId, prompts, lang),
+                        // 行为分析的模型也是这份 deep：平台 behavior 功能位已退休，账记在用户自己的 key 上
+                        new BehaviorToolkit(deep, behaviorAnalysisService, runRegistry, userId, lang)))
+                .addCallModelHook(wrapBefore(new ConversationSummarizer(
+                        light, summarizeThresholdTokens, summarizeKeepMessages, prompts, lang)));
         for (EdgeHook.WrapCall<MessagesState<Message>> hook :
-                summarizerToolHooks(approvalRegistry, runModelCallLimit)) {
+                summarizerToolHooks(approvalRegistry, prompts, lang, runModelCallLimit)) {
             builder.addExecuteToolsHook(hook);
         }
         return builder.build(ResilientChatService.builder()

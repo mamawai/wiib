@@ -1,5 +1,7 @@
 package com.mawai.wiibquant.agent.llm;
 
+import com.mawai.wiibcommon.enums.AgentLang;
+import com.mawai.wiibquant.agent.i18n.PromptCatalog;
 import org.bsc.langgraph4j.prebuilt.MessagesState;
 import org.bsc.langgraph4j.state.AppenderChannel;
 import org.junit.jupiter.api.Test;
@@ -35,10 +37,13 @@ import static org.mockito.Mockito.when;
 
 class ConversationSummarizerTest {
 
+    private static final PromptCatalog PROMPTS = new PromptCatalog();
+
     private final ChatModel summaryModel = mock(ChatModel.class);
 
     private ConversationSummarizer summarizer(int thresholdTokens, int messagesToKeep) {
-        return new ConversationSummarizer(summaryModel, thresholdTokens, messagesToKeep);
+        return new ConversationSummarizer(summaryModel, thresholdTokens, messagesToKeep,
+                PROMPTS, AgentLang.ZH);
     }
 
     private void stubSummary(String text) {
@@ -167,7 +172,7 @@ class ConversationSummarizerTest {
     @Test
     void oversizedToolPayloadIsTruncatedInSummaryInput() {
         String huge = "行情".repeat(5000);
-        String text = ConversationSummarizer.textOf(ToolResponseMessage.builder().responses(List.of(
+        String text = summarizer(999_999, 6).textOf(ToolResponseMessage.builder().responses(List.of(
                 new ToolResponseMessage.ToolResponse("call_1", "deep_analysis", huge))).build());
 
         assertThat(text).contains("deep_analysis").contains("截断");

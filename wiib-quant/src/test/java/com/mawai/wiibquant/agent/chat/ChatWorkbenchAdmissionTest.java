@@ -1,6 +1,7 @@
 package com.mawai.wiibquant.agent.chat;
 
 import com.mawai.wiibquant.agent.llm.ChatEndpoints;
+import com.mawai.wiibcommon.i18n.MessageCatalog;
 import com.mawai.wiibquant.agent.llm.LlmEndpointService;
 import com.mawai.wiibcommon.exception.BizException;
 import jakarta.servlet.http.HttpServletResponse;
@@ -36,14 +37,15 @@ class ChatWorkbenchAdmissionTest {
 
     private ChatWorkbenchController controller(ChatConcurrencyGate gate) {
         // mock runner 默认返回 null，controller 会在 result.yielded() 上 NPE——真跑到 run 的用例要正常收尾
-        when(turnRunner.run(any(), anyLong(), any(), any(), any(), any(), any()))
+        when(turnRunner.run(any(), anyLong(), any(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(ChatTurnRunner.TurnResult.COMPLETED);
         ChatHistoryService history = mock(ChatHistoryService.class);
         WorkbenchRunRegistry runRegistry = mock(WorkbenchRunRegistry.class);
         return new ChatWorkbenchController(factory, llmConfigService, new ApprovalRegistry(),
                 history, mock(ChatContextStore.class), turnRunner,
-                runRegistry, gate,
-                new ChatYieldCoordinator(gate, runRegistry, turnRunner, history));
+                runRegistry, gate, new MessageCatalog(),
+                new ChatYieldCoordinator(),
+                ChatTestEndpoints.PROMPTS, ChatTestEndpoints.zhLang());
     }
 
     private static void chat(ChatWorkbenchController controller, long userId) {
@@ -78,7 +80,7 @@ class ChatWorkbenchAdmissionTest {
     @Test
     void 建不出模型时拒绝并给出配置无效码() {
         when(llmConfigService.chatEndpoints(1L)).thenReturn(ChatTestEndpoints.eps(1L, "gpt-5"));
-        when(factory.leavesFor(any())).thenThrow(new IllegalStateException("对话叶子构建失败"));
+        when(factory.leavesFor(any(), any())).thenThrow(new IllegalStateException("对话叶子构建失败"));
         ChatConcurrencyGate gate = new ChatConcurrencyGate(1);
 
         assertRejectedWithCode(2202, () -> chat(controller(gate), 1L));
@@ -112,7 +114,7 @@ class ChatWorkbenchAdmissionTest {
     @Test
     void 任务提交失败时当场还回名额() {
         when(llmConfigService.chatEndpoints(1L)).thenReturn(ChatTestEndpoints.eps(1L, "gpt-5"));
-        when(factory.leavesFor(any())).thenReturn(null); // 跑不到用它的那一步
+        when(factory.leavesFor(any(), any())).thenReturn(null); // 跑不到用它的那一步
         ChatConcurrencyGate gate = new ChatConcurrencyGate(1);
         ChatWorkbenchController controller = controller(gate);
         controller.streamExecutor.shutdown(); // 之后 submit 必被拒
@@ -126,7 +128,7 @@ class ChatWorkbenchAdmissionTest {
     @Test
     void 一轮跑完把名额还回去() throws Exception {
         when(llmConfigService.chatEndpoints(1L)).thenReturn(ChatTestEndpoints.eps(1L, "gpt-5"));
-        when(factory.leavesFor(any())).thenReturn(null);   // runner 是 mock，一帧不吐就返回
+        when(factory.leavesFor(any(), any())).thenReturn(null);   // runner 是 mock，一帧不吐就返回
         CountDownLatch released = new CountDownLatch(1);
         ChatConcurrencyGate gate = new ChatConcurrencyGate(1) {
             @Override

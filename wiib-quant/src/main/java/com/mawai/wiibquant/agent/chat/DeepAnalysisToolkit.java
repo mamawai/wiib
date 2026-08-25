@@ -3,21 +3,23 @@ package com.mawai.wiibquant.agent.chat;
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONObject;
 import com.mawai.wiibcommon.entity.QuantDeepAnalysis;
+import com.mawai.wiibcommon.enums.AgentLang;
 import com.mawai.wiibquant.agent.analysis.DeepAnalysisService;
+import com.mawai.wiibquant.agent.i18n.PromptCatalog;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
 
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
 /**
  * 深研判工具（仅对话轨）：贵操作——Bull∥Bear + Judge 共 3 次深模型调用
  * （新闻上下文是缓存拼接，零 LLM）。
  * <p>
- * <b>这里没有 HITL 判断</b>：授权闸门在 {@link ApprovalGate}（工具执行边上的 hook），
- * 因为只有那一层同时看得到 sessionId 和本次 tool_call 的参数。工具方法体两样都看不到，
- * 判断做在这里就只能绑 sessionId、绑不住标的。
+ * <b>这里没有 HITL 判断</b>：授权闸门在 {@link ApprovalGate}——
+ * 只有那一层同时看得到 sessionId 和本次 tool_call 的参数。
  * <p>
  * 模型建图时构造注入（同配置的用户共享同一张图和同一个模型实例）；
  * sessionId 是请求级的，从 {@link ToolRunContext} 取，只用来推进度。
@@ -28,12 +30,17 @@ public class DeepAnalysisToolkit {
     private final ChatModel model;
     private final DeepAnalysisService deepAnalysisService;
     private final WorkbenchRunRegistry runRegistry;
+    private final PromptCatalog prompts;
+    /** 辩论/裁决的提示词与推给用户的阶段进度都按它取；工具是建叶子时造的，语言跟着叶子走 */
+    private final AgentLang lang;
 
     public DeepAnalysisToolkit(ChatModel model, DeepAnalysisService deepAnalysisService,
-                               WorkbenchRunRegistry runRegistry) {
+                               WorkbenchRunRegistry runRegistry, PromptCatalog prompts, AgentLang lang) {
         this.model = model;
         this.deepAnalysisService = deepAnalysisService;
         this.runRegistry = runRegistry;
+        this.prompts = prompts;
+        this.lang = lang;
     }
 
     @Tool(name = "run_deep_analysis", description = """
@@ -53,32 +60,33 @@ public class DeepAnalysisToolkit {
 
         long closeTime = System.currentTimeMillis();
         // 全程静默数分钟，按阶段推进度给 SSE，前端才知道跑到哪了
-        progress(sessionId, "深研判 " + normalized + " 启动：Bull/Bear 并行辩论中（约需数分钟）");
-        String newsContext = deepAnalysisService.buildNewsContext();
+        progress(sessionId, prompts.get(lang, "chat.deepAnalysis.progress.start",
+                Map.of("symbol", normalized)));
+        String newsContext = deepAnalysisService.buildNewsContext(lang);
         // Bull∥Bear 虚拟线程并行（对话场景无图结构，服务级并行等价）
         CompletableFuture<String> bullF = CompletableFuture.supplyAsync(() -> {
-            String r = deepAnalysisService.bullArgue(model, normalized, newsContext);
-            progress(sessionId, "Bull 多方论证完成");
+            String r = deepAnalysisService.bullArgue(model, normalized, newsContext, lang);
+            progress(sessionId, prompts.get(lang, "chat.deepAnalysis.progress.bullDone"));
             return r;
         });
         CompletableFuture<String> bearF = CompletableFuture.supplyAsync(() -> {
-            String r = deepAnalysisService.bearArgue(model, normalized, newsContext);
-            progress(sessionId, "Bear 空方论证完成");
+            String r = deepAnalysisService.bearArgue(model, normalized, newsContext, lang);
+            progress(sessionId, prompts.get(lang, "chat.deepAnalysis.progress.bearDone"));
             return r;
         });
         String bull = bullF.join();
         String bear = bearF.join();
-        progress(sessionId, "辩论汇齐，Judge 裁决中");
+        progress(sessionId, prompts.get(lang, "chat.deepAnalysis.progress.judging"));
         QuantDeepAnalysis analysis = deepAnalysisService.judge(model, normalized, closeTime, "chat",
-                newsContext, bull, bear);
+                newsContext, bull, bear, lang);
         if (analysis == null) {
             JSONObject out = new JSONObject();
             out.put("status", "FAILED");
-            out.put("message", "深度研判裁决失败（LLM 异常），请稍后重试");
+            out.put("message", prompts.get(lang, "chat.deepAnalysis.judgeFailed"));
             return out.toJSONString();
         }
         deepAnalysisService.persist(analysis);
-        progress(sessionId, "裁决完成，正在生成回答");
+        progress(sessionId, prompts.get(lang, "chat.deepAnalysis.progress.judged"));
 
         JSONObject out = new JSONObject();
         out.put("status", "OK");

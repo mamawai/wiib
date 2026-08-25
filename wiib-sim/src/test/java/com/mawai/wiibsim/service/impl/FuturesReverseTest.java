@@ -5,8 +5,11 @@ import com.mawai.wiibcommon.dto.FuturesCloseRequest;
 import com.mawai.wiibcommon.dto.FuturesOpenRequest;
 import com.mawai.wiibcommon.dto.FuturesOrderResponse;
 import com.mawai.wiibcommon.entity.FuturesPosition;
+import com.mawai.wiibcommon.enums.AgentLang;
 import com.mawai.wiibcommon.enums.ErrorCode;
 import com.mawai.wiibcommon.exception.BizException;
+import com.mawai.wiibcommon.i18n.MessageCatalog;
+import com.mawai.wiibcommon.i18n.RequestLang;
 import com.mawai.wiibcommon.market.BinanceRestClient;
 import com.mawai.wiibsim.config.FuturesLeverageBracketRegistry;
 import com.mawai.wiibsim.config.TradeFilterRegistry;
@@ -43,6 +46,8 @@ class FuturesReverseTest {
     private static final Long POS_ID = 1L;
     private static final String SYMBOL = "BTCUSDT";
 
+    private static final MessageCatalog MESSAGES = new MessageCatalog();
+
     private FuturesPositionMapper positionMapper;
     private FuturesTradingServiceImpl service;
 
@@ -53,7 +58,8 @@ class FuturesReverseTest {
                 mock(UserService.class), mock(UserMapper.class), positionMapper, mock(FuturesOrderMapper.class),
                 new TradingConfig(), mock(RedisLockUtil.class), mock(CacheService.class),
                 mock(FuturesPositionIndexService.class), mock(FuturesLeverageBracketRegistry.class),
-                mock(CrossMarginService.class), new TradeFilterRegistry(mock(BinanceRestClient.class))));
+                mock(CrossMarginService.class), new TradeFilterRegistry(mock(BinanceRestClient.class)),
+                MESSAGES));
     }
 
     /** 平仓回执＝反向开仓的唯一参数来源（doClosePosition 在仓位锁内读的那份快照） */
@@ -151,9 +157,30 @@ class FuturesReverseTest {
         FuturesTradingService.ReverseResult result = service.reversePosition(UID, POS_ID);
 
         assertThat(result.opened()).isNull();
-        assertThat(result.openError()).isEqualTo(ErrorCode.FUTURES_INSUFFICIENT_BALANCE.getMsg());
+        // 带回前端的必须是成文的话，不是词表 key——这条路绕开了全局处理器，得自己渲染
+        assertThat(result.openError()).isEqualTo(MESSAGES.get(AgentLang.ZH, ErrorCode.FUTURES_INSUFFICIENT_BALANCE.getMsgKey()));
+        assertThat(result.openError()).doesNotStartWith("error.");
         assertThat(result.closed().getQuantity()).isEqualByComparingTo("2");
         assertThat(result.closed().getRealizedPnl()).isEqualByComparingTo("50");
+    }
+
+    /** 半成功的原因也跟界面语言：英文用户不该在"已空仓"这种要紧提示上看见一行中文 */
+    @Test
+    void 反向开仓失败的原因跟当次请求的界面语言() {
+        RequestLang.set(AgentLang.EN);
+        try {
+            doReturn(closedOrder("CLOSE_LONG", FuturesPosition.CROSS, 20, "2", "50"))
+                    .when(service).closePosition(eq(UID), any());
+            doThrow(new BizException(ErrorCode.FUTURES_INSUFFICIENT_BALANCE)).when(service).openPosition(eq(UID), any());
+
+            FuturesTradingService.ReverseResult result = service.reversePosition(UID, POS_ID);
+
+            assertThat(result.openError())
+                    .isEqualTo(MESSAGES.get(AgentLang.EN, ErrorCode.FUTURES_INSUFFICIENT_BALANCE.getMsgKey()))
+                    .doesNotMatch("(?s).*[\\u4e00-\\u9fff].*");
+        } finally {
+            RequestLang.clear();
+        }
     }
 
     /** 平仓这步失败照常抛：什么都没发生，没有半成功要交代 */

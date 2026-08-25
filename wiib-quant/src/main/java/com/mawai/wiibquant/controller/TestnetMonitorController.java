@@ -26,6 +26,9 @@ import java.util.List;
 @RequiredArgsConstructor
 public class TestnetMonitorController {
 
+    /** days 上限：下游按 ≤7 天一段滚动翻页拉 testnet，天数即翻页次数；看板最长视图 90 天。 */
+    private static final int MAX_DAYS = 365;
+
     private final TestnetMonitorService monitorService;
 
     /** 实时总览：账户 + 持仓 + 挂单。 */
@@ -39,7 +42,7 @@ public class TestnetMonitorController {
     public Result<List<UserTrade>> trades(
             @RequestParam(required = false) String symbol,
             @RequestParam(defaultValue = "30") int days) {
-        return Result.ok(monitorService.trades(symbol, days));
+        return Result.ok(monitorService.trades(symbol, days(days)));
     }
 
     /** 日交易网格（近 days 天按天聚合盈亏）。 */
@@ -47,7 +50,7 @@ public class TestnetMonitorController {
     public Result<List<DailyCell>> dailyGrid(
             @RequestParam(required = false) String symbol,
             @RequestParam(defaultValue = "90") int days) {
-        return Result.ok(monitorService.dailyGrid(symbol, days));
+        return Result.ok(monitorService.dailyGrid(symbol, days(days)));
     }
 
     /** 权益曲线（近 days 天累计已实现盈亏）。 */
@@ -55,7 +58,7 @@ public class TestnetMonitorController {
     public Result<List<EquityPoint>> equity(
             @RequestParam(required = false) String symbol,
             @RequestParam(defaultValue = "90") int days) {
-        return Result.ok(monitorService.equity(symbol, days));
+        return Result.ok(monitorService.equity(symbol, days(days)));
     }
 
     /** fill 对账（近 days 天进场单成交质量）。 */
@@ -63,6 +66,11 @@ public class TestnetMonitorController {
     public Result<FillStats> fillStats(
             @RequestParam(required = false) String symbol,
             @RequestParam(defaultValue = "30") int days) {
-        return Result.ok(monitorService.fillStats(symbol, days));
+        return Result.ok(monitorService.fillStats(symbol, days(days)));
+    }
+
+    /** 夹住而不报错：看板只读展示，传超了给能给的最长那段。 */
+    private static int days(int days) {
+        return Math.clamp(days, 1, MAX_DAYS);
     }
 }

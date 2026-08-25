@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { minesApi } from '../api';
 import { useToast } from '../components/ui/use-toast';
 import { Button } from '../components/ui/button';
@@ -14,6 +15,7 @@ const fmtMult = (n: number) => n.toFixed(2);
 
 export function Mines() {
   const { toast } = useToast();
+  const { t } = useTranslation(['games', 'common']);
   const [status, setStatus] = useState<MinesStatus | null>(null);
   const [game, setGame] = useState<MinesGameState | null>(null);
   const [loading, setLoading] = useState(true);
@@ -33,11 +35,11 @@ export function Mines() {
       setStatus(s);
       if (s.activeGame) setGame(s.activeGame);
     } catch (e: unknown) {
-      toast((e as Error).message || '加载失败', 'error');
+      toast((e as Error).message || t('common:loadFailed'), 'error');
     } finally {
       setLoading(false);
     }
-  }, [toast]);
+  }, [toast, t]);
 
   useEffect(() => { void fetchStatus(); }, [fetchStatus]);
 
@@ -50,7 +52,7 @@ export function Mines() {
       setShowResult(false);
       flippedRef.current = new Set();
     } catch (e: unknown) {
-      toast((e as Error).message || '下注失败', 'error');
+      toast((e as Error).message || t('toast.betFailed'), 'error');
     } finally {
       setActing(false);
     }
@@ -67,7 +69,7 @@ export function Mines() {
         setShowResult(true);
       }
     } catch (e: unknown) {
-      toast((e as Error).message || '操作失败', 'error');
+      toast((e as Error).message || t('toast.actionFailed'), 'error');
     } finally {
       setActing(false);
     }
@@ -81,7 +83,7 @@ export function Mines() {
       setGame(state);
       setShowResult(true);
     } catch (e: unknown) {
-      toast((e as Error).message || '提现失败', 'error');
+      toast((e as Error).message || t('toast.cashoutFailed'), 'error');
     } finally {
       setActing(false);
     }
@@ -131,7 +133,7 @@ export function Mines() {
             <Pickaxe className="w-5 h-5 text-amber-400" />
           </div>
           <div>
-            <div className="text-xs text-muted-foreground">游戏钱包</div>
+            <div className="text-xs text-muted-foreground">{t('gameWallet')}</div>
             <div className="text-xl font-bold tabular-nums flex items-center gap-1.5">
               <Wallet className="w-4 h-4 text-muted-foreground" />
               {fmtNum(balance)}
@@ -139,13 +141,13 @@ export function Mines() {
           </div>
           <Button variant="outline" size="sm" onClick={() => setTransferOpen(true)}>
             <ArrowLeftRight className="w-3.5 h-3.5" />
-            划转
+            {t('transfer')}
           </Button>
         </div>
 
         {isPlaying && game && (
           <div className="text-right">
-            <div className="text-xs text-muted-foreground">当前倍率</div>
+            <div className="text-xs text-muted-foreground">{t('mines.currentMultiplier')}</div>
             <div className="text-xl font-bold tabular-nums text-amber-400">
               {fmtMult(game.currentMultiplier)}×
             </div>
@@ -154,7 +156,7 @@ export function Mines() {
 
         {isPlaying && game && game.revealed.length > 0 && (
           <div className="text-right">
-            <div className="text-xs text-muted-foreground">可得</div>
+            <div className="text-xs text-muted-foreground">{t('mines.potential')}</div>
             <div className="text-xl font-bold tabular-nums text-emerald-400">
               {fmtNum(game.potentialPayout)}
             </div>
@@ -171,9 +173,9 @@ export function Mines() {
             : 'bg-red-500/20 text-red-400 border border-red-500/30'
         )}>
           {game.result === 'CASHED_OUT' ? (
-            <span>提现成功 +{fmtNum(game.payout ?? 0)} ({fmtMult(game.currentMultiplier)}×)</span>
+            <span>{t('mines.cashedOut', { amount: fmtNum(game.payout ?? 0), mult: fmtMult(game.currentMultiplier) })}</span>
           ) : (
-            <span>踩雷了！失去 {fmtNum(game.betAmount)}</span>
+            <span>{t('mines.hitMine', { amount: fmtNum(game.betAmount) })}</span>
           )}
         </div>
       )}
@@ -242,7 +244,7 @@ export function Mines() {
       {!game || (isSettled && showResult) ? (
         <div className="space-y-4 rounded-lg pt-card p-5">
           <div className="text-center">
-            <div className="text-xs text-muted-foreground mb-2">下注金额</div>
+            <div className="text-xs text-muted-foreground mb-2">{t('betAmount')}</div>
             <input
               type="number"
               value={betInput}
@@ -274,7 +276,7 @@ export function Mines() {
 
           {isSettled && showResult ? (
             <Button onClick={handleNewGame} className="w-full h-12 text-base">
-              再来一局
+              {t('playAgain')}
             </Button>
           ) : (
             <Button
@@ -283,21 +285,21 @@ export function Mines() {
               className="w-full h-12 text-base"
             >
               <Pickaxe className="w-4 h-4" />
-              开始挖矿
+              {t('mines.start')}
             </Button>
           )}
         </div>
       ) : isPlaying && game ? (
         <div className="space-y-3">
           <div className="text-center">
-            <div className="text-xs text-muted-foreground mb-1">当前可提现</div>
+            <div className="text-xs text-muted-foreground mb-1">{t('mines.cashoutTitle')}</div>
             <div className="text-3xl font-bold tabular-nums text-emerald-400">
               {game.revealed.length > 0 ? fmtNum(game.potentialPayout) : fmtNum(0)}
             </div>
             {game.nextMultiplier && (
               <div className="text-xs text-muted-foreground mt-1 flex items-center justify-center gap-1">
                 <TrendingUp className="w-3 h-3" />
-                下一格 {fmtMult(game.nextMultiplier)}×
+                {t('mines.nextTile', { mult: fmtMult(game.nextMultiplier) })}
               </div>
             )}
           </div>
@@ -306,7 +308,9 @@ export function Mines() {
             disabled={acting || game.revealed.length === 0}
             className="w-full h-12 text-base bg-emerald-600 hover:bg-emerald-500 border-emerald-500/30 text-white"
           >
-            提现 {game.revealed.length > 0 ? fmtNum(game.potentialPayout) : ''}
+            {game.revealed.length > 0
+              ? t('mines.cashoutAmount', { amount: fmtNum(game.potentialPayout) })
+              : t('mines.cashout')}
           </Button>
         </div>
       ) : null}
@@ -315,7 +319,7 @@ export function Mines() {
       {isPlaying && game && (
         <div className="space-y-2">
           <div className="flex justify-between text-xs text-muted-foreground">
-            <span>已翻开 {game.revealed.length}/20</span>
+            <span>{t('mines.revealed', { n: game.revealed.length })}</span>
             <span>{fmtMult(game.currentMultiplier)}×</span>
           </div>
           <div className="h-2 bg-muted rounded-full overflow-hidden">
@@ -329,11 +333,11 @@ export function Mines() {
 
       {/* 规则 */}
       <div className="rounded-lg pt-card p-5 space-y-3">
-        <h3 className="font-semibold text-sm">规则</h3>
+        <h3 className="font-semibold text-sm">{t('mines.rules.title')}</h3>
         <ul className="text-xs text-muted-foreground space-y-1 leading-relaxed">
-          <li>5×5 格子中藏有 5 颗雷，每翻开一个安全格倍率递增。</li>
-          <li>可随时提现，踩雷则下注金额全部归零。</li>
-          <li>下注范围 100 ~ 50,000，含 1% 手续费（已计入倍率）。</li>
+          <li>{t('mines.rules.item1')}</li>
+          <li>{t('mines.rules.item2')}</li>
+          <li>{t('mines.rules.item3')}</li>
         </ul>
       </div>
 

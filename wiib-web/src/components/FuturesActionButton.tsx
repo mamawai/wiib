@@ -1,5 +1,6 @@
 import { Loader2, Coins, HandCoins } from 'lucide-react';
 import { useState, useRef, useEffect, type CSSProperties } from 'react';
+import { useTranslation } from 'react-i18next';
 
 const MOBILE_ANIM_DURATION = 1200;
 
@@ -28,6 +29,7 @@ export function FuturesActionButton({
   className,
   onClick,
 }: FuturesActionButtonProps) {
+  const { t } = useTranslation('trade');
   const [activated, setActivated] = useState(false);
   const activatedRef = useRef(false);
   const timerRef = useRef<number | null>(null);
@@ -65,8 +67,8 @@ export function FuturesActionButton({
 
   const isSpot = side === 'BUY' || side === 'SELL';
   const actionText = isSpot
-    ? `${side === 'BUY' ? '买入' : '卖出'}${label ? ` ${label}` : ''}`
-    : `${side === 'LONG' ? '做多' : '做空'} ${leverage}x`;
+    ? `${side === 'BUY' ? t('side.buy') : t('side.sell')}${label ? ` ${label}` : ''}`
+    : `${side === 'LONG' ? t('side.long') : t('side.short')} ${leverage}x`;
   const accent = isSpot ? '#f59e0b' : side === 'LONG' ? '#089981' : '#f23645';
   const accentSoft = isSpot ? '#fef3c7' : side === 'LONG' ? '#bbf7d0' : '#fecaca';
   const accentLine = isSpot ? '#fbbf24' : side === 'LONG' ? '#4ade80' : '#f87171';

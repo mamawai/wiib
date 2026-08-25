@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { Trans, useTranslation } from 'react-i18next';
 import { videoPokerApi } from '../api';
 import { useToast } from '../components/ui/use-toast';
 import { Button } from '../components/ui/button';
@@ -22,16 +23,24 @@ const SUIT_COLORS: Record<string, string> = { H: 'text-red-500', D: 'text-red-50
 const RANK_DISPLAY: Record<string, string> = { T: '10', A: 'A', J: 'J', Q: 'Q', K: 'K' };
 
 // key 对齐后端 handRank（中奖行高亮靠它匹配）；8/5 Jacks or Better 标准表，倍率含本金
+// nameKey 存词表 key 字面量，渲染时才 t()，别拼动态 key
 const PAYOUT_TABLE = [
-  { key: 'Royal Flush', name: '皇家同花顺', mult: '800x' },
-  { key: 'Straight Flush', name: '同花顺', mult: '50x' },
-  { key: 'Four of a Kind', name: '四条', mult: '25x' },
-  { key: 'Full House', name: '葫芦', mult: '8x' },
-  { key: 'Flush', name: '同花', mult: '5x' },
-  { key: 'Straight', name: '顺子', mult: '4x' },
-  { key: 'Three of a Kind', name: '三条', mult: '3x' },
-  { key: 'Two Pair', name: '两对', mult: '2x' },
-  { key: 'Jacks or Better', name: 'J对或更大', mult: '1x' },
+  { key: 'Royal Flush', nameKey: 'videoPoker.hands.royalFlush', mult: '800x' },
+  { key: 'Straight Flush', nameKey: 'videoPoker.hands.straightFlush', mult: '50x' },
+  { key: 'Four of a Kind', nameKey: 'videoPoker.hands.fourOfAKind', mult: '25x' },
+  { key: 'Full House', nameKey: 'videoPoker.hands.fullHouse', mult: '8x' },
+  { key: 'Flush', nameKey: 'videoPoker.hands.flush', mult: '5x' },
+  { key: 'Straight', nameKey: 'videoPoker.hands.straight', mult: '4x' },
+  { key: 'Three of a Kind', nameKey: 'videoPoker.hands.threeOfAKind', mult: '3x' },
+  { key: 'Two Pair', nameKey: 'videoPoker.hands.twoPair', mult: '2x' },
+  { key: 'Jacks or Better', nameKey: 'videoPoker.hands.jacksOrBetter', mult: '1x' },
+];
+
+// 牌型说明每条固定三个加粗名，样式留在这儿，词表里只写 <0>/<1>/<2>
+const HAND_DESC_TAGS = [
+  <strong key="a" className="text-foreground/80" />,
+  <strong key="b" className="text-foreground/80" />,
+  <strong key="c" className="text-foreground/80" />,
 ];
 
 function parseCard(card: string) {
@@ -102,6 +111,7 @@ function PokerCard({ card, isHeld, isOldHeld, isReplacing, onClick, disabled, de
 
 export function VideoPoker() {
   const { toast } = useToast();
+  const { t } = useTranslation(['games', 'common']);
   const [status, setStatus] = useState<VideoPokerStatus | null>(null);
   const [game, setGame] = useState<VideoPokerGameState | null>(null);
   const [loading, setLoading] = useState(true);
@@ -127,11 +137,11 @@ export function VideoPoker() {
         setHeld(new Set());
       }
     } catch (e: unknown) {
-      toast((e as Error).message || '加载失败', 'error');
+      toast((e as Error).message || t('common:loadFailed'), 'error');
     } finally {
       setLoading(false);
     }
-  }, [toast]);
+  }, [toast, t]);
 
   useEffect(() => { void fetchStatus(); }, [fetchStatus]);
 
@@ -161,7 +171,7 @@ export function VideoPoker() {
       setGame(state);
       setHeld(new Set());
     } catch (e: unknown) {
-      toast((e as Error).message || '下注失败', 'error');
+      toast((e as Error).message || t('toast.betFailed'), 'error');
     } finally {
       setActing(false);
     }
@@ -184,7 +194,7 @@ export function VideoPoker() {
       const state = await videoPokerApi.draw(Array.from(held));
       setGame(state);
     } catch (e: unknown) {
-      toast((e as Error).message || '换牌失败', 'error');
+      toast((e as Error).message || t('toast.drawFailed'), 'error');
     } finally {
       setActing(false);
     }
@@ -208,6 +218,8 @@ export function VideoPoker() {
   }
 
   const winRank = isSettled && game?.handRank && game.handRank !== 'No Win' ? game.handRank : null;
+  // 赔率表里找不到这个 handRank（后端加了新牌型）就原样显示后端下发的名字
+  const winRankKey = winRank ? PAYOUT_TABLE.find(r => r.key === winRank)?.nameKey : undefined;
   const cards = game?.cards ?? [];
 
   return (
@@ -219,7 +231,7 @@ export function VideoPoker() {
             <span className="text-xl">♠️</span>
           </div>
           <div>
-            <div className="text-[10px] text-muted-foreground uppercase tracking-wider">游戏钱包</div>
+            <div className="text-[10px] text-muted-foreground uppercase tracking-wider">{t('gameWallet')}</div>
             <div className="text-xl font-bold tabular-nums flex items-center gap-1.5">
               <Wallet className="w-4 h-4 text-muted-foreground" />
               {fmtNum(balance)}
@@ -228,7 +240,7 @@ export function VideoPoker() {
         </div>
         <Button variant="outline" size="sm" onClick={() => setTransferOpen(true)}>
           <ArrowLeftRight className="w-3.5 h-3.5" />
-          划转
+          {t('transfer')}
         </Button>
       </div>
 
@@ -247,7 +259,7 @@ export function VideoPoker() {
                     : 'text-muted-foreground',
                 )}
               >
-                <span className={winRank === row.key ? 'text-emerald-800 dark:text-emerald-200' : 'text-foreground/70'}>{row.name}</span>
+                <span className={winRank === row.key ? 'text-emerald-800 dark:text-emerald-200' : 'text-foreground/70'}>{t(row.nameKey)}</span>
                 <span className="tabular-nums font-medium ml-2">{row.mult}</span>
               </div>
             ))}
@@ -266,11 +278,11 @@ export function VideoPoker() {
             )}>
               {winRank ? (
                 <div>
-                  <div className="text-lg">{PAYOUT_TABLE.find(r => r.key === winRank)?.name ?? winRank}</div>
+                  <div className="text-lg">{winRankKey ? t(winRankKey) : winRank}</div>
                   <div className="text-sm font-normal text-emerald-800 dark:text-emerald-300/80">+{fmtNum(game.payout)} ({game.multiplier}x)</div>
                 </div>
               ) : (
-                <span className="text-sm">未中奖 · -{fmtNum(game.betAmount)}</span>
+                <span className="text-sm">{t('videoPoker.noWin', { amount: fmtNum(game.betAmount) })}</span>
               )}
             </div>
           )}
@@ -294,7 +306,7 @@ export function VideoPoker() {
           {/* DEALING阶段提示 */}
           {isDealing && (
             <div className="text-center mt-3 text-xs text-muted-foreground">
-              点击选择保留的牌
+              {t('videoPoker.holdHint')}
             </div>
           )}
         </div>
@@ -306,13 +318,13 @@ export function VideoPoker() {
               onClick={handleNewGame}
               className="w-full h-12 text-base font-bold bg-emerald-600 hover:bg-emerald-500"
             >
-              再来一局
+              {t('playAgain')}
             </Button>
           ) : !game ? (
             <div className="space-y-4">
               {/* 下注金额 */}
               <div className="text-center">
-                <div className="text-xs text-muted-foreground uppercase tracking-widest mb-1">下注金额</div>
+                <div className="text-xs text-muted-foreground uppercase tracking-widest mb-1">{t('betAmount')}</div>
                 <div className="text-4xl sm:text-5xl font-bold text-foreground tabular-nums">
                   {betAmount.toLocaleString()}
                 </div>
@@ -342,7 +354,7 @@ export function VideoPoker() {
                 disabled={acting || betAmount < 10 || betAmount > 5000 || betAmount > balance}
                 className="w-full h-12 text-base font-bold bg-amber-500 hover:bg-amber-400 text-black"
               >
-                ♠️ 发牌
+                ♠️ {t('videoPoker.deal')}
               </Button>
             </div>
           ) : isDealing ? (
@@ -351,7 +363,7 @@ export function VideoPoker() {
               disabled={acting}
               className="w-full h-12 text-base font-bold bg-purple-600 hover:bg-purple-500"
             >
-              换牌（已 HOLD {held.size} 张）
+              {t('videoPoker.draw', { n: held.size })}
             </Button>
           ) : null}
         </div>
@@ -363,15 +375,15 @@ export function VideoPoker() {
           onClick={() => setShowDisclaimer(!showDisclaimer)}
           className="w-full flex items-center justify-between px-3 py-2 text-xs text-red-600/70 dark:text-red-400/80 hover:text-red-600 dark:hover:text-red-400 transition-colors"
         >
-          <span>风险提示与免责声明</span>
+          <span>{t('disclaimer.toggle')}</span>
           <ChevronDown className={cn('w-3.5 h-3.5 transition-transform', showDisclaimer && 'rotate-180')} />
         </button>
         {showDisclaimer && (
           <div className="px-3 pb-2.5">
             <ul className="list-disc list-inside text-[11px] text-red-600/60 dark:text-red-300/70 space-y-0.5 leading-relaxed">
-              <li>本小游戏不涉及任何赌博行为，不涉及任何现实资金下注或交易。</li>
-              <li>仅用于为用户提供一个每日资金获取途径的趣味化体验，所有结算均为站内机制。</li>
-              <li>赌博可能导致成瘾、债务风险、家庭关系破裂及心理健康问题，请远离任何现实赌博活动。</li>
+              <li>{t('disclaimer.item1')}</li>
+              <li>{t('disclaimer.item2')}</li>
+              <li>{t('disclaimer.item3')}</li>
             </ul>
           </div>
         )}
@@ -381,19 +393,20 @@ export function VideoPoker() {
       <div className="rounded-lg border border-border/50 bg-muted/30">
         <CardContent className="space-y-3 text-sm leading-relaxed pt-4 pb-3">
           <section>
-            <h3 className="font-semibold mb-1.5 text-xs uppercase tracking-wider text-muted-foreground">基础规则</h3>
+            <h3 className="font-semibold mb-1.5 text-xs uppercase tracking-wider text-muted-foreground">{t('videoPoker.rules.basicsTitle')}</h3>
             <ul className="list-disc list-inside text-muted-foreground space-y-0.5 text-xs">
-              <li>标准52张一副牌（无鬼牌），目标凑最高牌型</li>
-              <li>下注后发5张，选择保留（HOLD）或不保留</li>
-              <li>换牌后未保留的牌被替换，按赔率表结算</li>
+              <li>{t('videoPoker.rules.basics1')}</li>
+              <li>{t('videoPoker.rules.basics2')}</li>
+              <li>{t('videoPoker.rules.basics3')}</li>
             </ul>
           </section>
           <section>
-            <h3 className="font-semibold mb-1.5 text-xs uppercase tracking-wider text-muted-foreground">牌型说明</h3>
+            <h3 className="font-semibold mb-1.5 text-xs uppercase tracking-wider text-muted-foreground">{t('videoPoker.rules.handsTitle')}</h3>
             <ul className="text-muted-foreground space-y-0.5 text-xs">
-              <li><strong className="text-foreground/80">皇家同花顺</strong> A K Q J 10 同花 · <strong className="text-foreground/80">同花顺</strong> 连续五张同花 · <strong className="text-foreground/80">四条</strong> 四张同点</li>
-              <li><strong className="text-foreground/80">葫芦</strong> 三条+一对 · <strong className="text-foreground/80">同花</strong> 五张同花 · <strong className="text-foreground/80">顺子</strong> 连续五张</li>
-              <li><strong className="text-foreground/80">三条</strong> 三张同点 · <strong className="text-foreground/80">两对</strong> 两组对子 · <strong className="text-foreground/80">J对或更大</strong> J以上的一对（保本返还）</li>
+              {/* 牌型名加粗夹在解释里，中英语序不同，整条交给 Trans 摆位 */}
+              <li><Trans ns="games" i18nKey="videoPoker.rules.handDesc1" components={HAND_DESC_TAGS} /></li>
+              <li><Trans ns="games" i18nKey="videoPoker.rules.handDesc2" components={HAND_DESC_TAGS} /></li>
+              <li><Trans ns="games" i18nKey="videoPoker.rules.handDesc3" components={HAND_DESC_TAGS} /></li>
             </ul>
           </section>
         </CardContent>

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ChevronDown, Moon, Sunrise, Sunset } from 'lucide-react';
 import { Dialog } from '../ui/dialog';
 import {
@@ -22,7 +23,8 @@ const ICON_COLOR: Record<SessionKind, string> = {
   closed: 'text-muted-foreground',
 };
 
-const DAY_NAMES = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
+/** 周一起排，存词表 key（数组是模块常量，拿不到 t，渲染时再查） */
+const DAY_KEYS = ['week.mon', 'week.tue', 'week.wed', 'week.thu', 'week.fri', 'week.sat', 'week.sun'];
 /** 行标列宽 3rem；刻度/气泡/竖线都得同宽缩进才能和彩条对齐（写死字面量，Tailwind 才扫得到） */
 const LABEL_W = 'w-12';
 const LABEL_INSET = 'left-12';
@@ -40,6 +42,7 @@ function KindIcon({ kind, box }: { kind: SessionKind; box: string }) {
 }
 
 export function MarketSessionBadge({ market }: { market: MarketId }) {
+  const { t } = useTranslation('trade');
   const [open, setOpen] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   // 分钟级展示，30 秒刷一次够用
@@ -52,7 +55,7 @@ export function MarketSessionBadge({ market }: { market: MarketId }) {
   const week = useMemo(() => (open ? getWeekView(market, now) : null), [market, now, open]);
 
   const isOpen = st.kind === 'open';
-  const countdown = `${fmtDuration(st.targetAt - now)} 后${isOpen ? '收盘' : '开盘'}`;
+  const countdown = t(isOpen ? 'session.closesIn' : 'session.opensIn', { d: fmtDuration(st.targetAt - now) });
   const nowD = new Date(now);
   const nowPct = ((nowD.getHours() * 60 + nowD.getMinutes()) / 1440) * 100;
   const todayIdx = (nowD.getDay() + 6) % 7;
@@ -62,7 +65,7 @@ export function MarketSessionBadge({ market }: { market: MarketId }) {
       <button
         onClick={() => setOpen(true)}
         className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full border border-border bg-card text-[10px] font-semibold hover:bg-surface-hover transition-colors cursor-pointer"
-        title="标的市场交易时段"
+        title={t('session.badgeTitle')}
       >
         <KindIcon kind={st.kind} box="w-3 h-3" />
         <span>{SESSION_META[st.kind].label}</span>
@@ -81,7 +84,7 @@ export function MarketSessionBadge({ market }: { market: MarketId }) {
             <div className="num text-sm font-bold mt-1.5">
               {fmtHm(st.start)} - {fmtHm(st.end)}, {localTzLabel()}
             </div>
-            <div className="text-xs text-muted-foreground mt-0.5">市场将于 {countdown}</div>
+            <div className="text-xs text-muted-foreground mt-0.5">{t('session.marketWill', { countdown })}</div>
           </div>
 
           {week && (
@@ -117,7 +120,7 @@ export function MarketSessionBadge({ market }: { market: MarketId }) {
               {/* 7 行周视图：灰底槽 = 非交易时段，彩条叠在上面 */}
               {week.rows.map((row, i) => (
                 <div key={row.dayStart} className={`flex items-center py-2 rounded-md ${i === todayIdx ? 'bg-surface-hover' : ''}`}>
-                  <div className={`${LABEL_W} shrink-0 text-xs font-bold`}>{DAY_NAMES[i]}</div>
+                  <div className={`${LABEL_W} shrink-0 text-xs font-bold`}>{t(DAY_KEYS[i])}</div>
                   <div className="relative flex-1 h-2">
                     <div className="absolute inset-0 rounded-full bg-muted-foreground/15" />
                     {row.bars.map((b, j) => (
@@ -144,7 +147,7 @@ export function MarketSessionBadge({ market }: { market: MarketId }) {
           </div>
 
           <p className="text-xs text-muted-foreground leading-relaxed">
-            该永续合约全天候交易，但流动性会随标的市场交易时段而变化。
+            {t('session.note')}
           </p>
         </div>
       </Dialog>

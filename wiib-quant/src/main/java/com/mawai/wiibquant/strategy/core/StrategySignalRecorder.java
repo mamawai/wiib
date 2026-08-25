@@ -16,7 +16,6 @@ import java.math.RoundingMode;
 @RequiredArgsConstructor
 public class StrategySignalRecorder {
 
-    private static final int TEXT_LIMIT = 512;
     private static final String LIVE_MODE = "LIVE";
 
     private final StrategySignalLogMapper mapper;
@@ -33,8 +32,8 @@ public class StrategySignalRecorder {
             row.setStopLoss(signal.stopLossPrice());
             row.setTakeProfit(signal.takeProfitPrice());
             row.setScore(BigDecimal.valueOf(signal.score()).setScale(4, RoundingMode.HALF_UP));
-            row.setReason(clip(signal.reason()));
-            row.setLegTags(clip(legTags));
+            row.setReason(signal.reason());
+            row.setLegTags(legTags);
             row.setBarCloseTime(signal.barCloseTime());
             mapper.insert(row);
             log.info("[StrategySignal] mode={} strategy={} symbol={} side={} tags={}",
@@ -47,10 +46,5 @@ public class StrategySignalRecorder {
             log.warn("[StrategySignal] 落库失败 strategy={} symbol={} msg={}",
                     signal.strategyId(), signal.symbol(), e.getMessage());
         }
-    }
-
-    private String clip(String text) {
-        if (text == null || text.length() <= TEXT_LIMIT) return text;
-        return text.substring(0, TEXT_LIMIT);
     }
 }

@@ -1,0 +1,134 @@
+# Error-code text: keys mirror the ErrorCode enum names (underscores to lowerCamelCase).
+# The numeric code lives in the enum, the wording lives here.
+error:
+  success: OK
+  paramError: Bad parameter
+  unauthorized: Not logged in
+  forbidden: Not allowed
+  notFound: Not found
+  systemError: Something went wrong
+  # Business codes 1000+
+  userNotFound: No such user
+  stockNotFound: No such stock
+  balanceNotEnough: Not enough balance
+  positionNotEnough: Not enough of that holding
+  tradeQuantityInvalid: Invalid quantity
+  marketClosed: The market is closed
+  orderNotFound: No such order
+  orderCannotCancel: This order cannot be cancelled
+  duplicateRequest: Duplicate request
+  limitPriceInvalid: Invalid limit price
+  # Concurrency codes 1100+
+  concurrentUpdateFailed: Someone else got there first - try again
+  frozenBalanceNotEnough: Not enough frozen balance
+  frozenPositionNotEnough: Not enough frozen holding
+  acquireLockFailed: Could not get the lock - try again shortly
+  orderProcessing: That order is being processed - try again shortly
+  # 1106 is reserved for idempotency: the order really is in flight, outcome unknown. 1105 is a lock miss, which definitely did not fill
+  orderInFlight: The same request is already in flight - retry with the same clientRequestId
+  # Trading-limit codes 1200+
+  slippageExceeded: The price moved too much - place the order again
+  rateLimitExceeded: Too many requests - try again shortly
+  userBankrupt: You have been liquidated; trading is disabled
+  leverageOnlyForMarketBuy: Leverage is only supported on market buys
+  leverageMultipleInvalid: Invalid leverage
+  # WebSocket codes 1300+
+  websocketConnectionLimit: Connection limit reached
+  websocketAuthRequired: Log in before connecting
+  # Buff codes 1400+
+  buffAlreadyDrawn: You already drew today
+  buffNotFound: No such buff
+  buffExpired: That buff has expired
+  buffAlreadyUsed: That buff has been used
+  discountNoLeverage: Leverage is not available while using a discount
+  # Blackjack codes 1500+
+  bjGameInProgress: You have an unfinished hand
+  bjNoActiveGame: No hand in progress
+  bjChipsNotEnough: Not enough chips
+  bjInvalidBet: Invalid bet
+  bjActionNotAllowed: That move is not available right now
+  bjConvertLimit: Over the daily transfer-out limit
+  bjConvertInsufficient: Not enough transferable chips
+  bjPoolExhausted: Today's chip pool is used up
+  # Crypto codes 1600+
+  cryptoPriceUnavailable: Live price unavailable
+  cryptoSymbolInvalid: Invalid pair
+  tradeStepInvalid: Quantity does not match the minimum step size
+  tradeMinNotional: Order value is below the minimum notional
+  # Mines codes 1700+
+  minesGameInProgress: You have an unfinished Mines game
+  minesNoActiveGame: No Mines game in progress
+  minesBalanceNotEnough: Not enough balance
+  minesInvalidBet: Invalid bet
+  minesInvalidCell: Invalid cell number
+  minesCellAlreadyRevealed: That cell is already revealed
+  minesMustRevealFirst: Reveal at least one cell before cashing out
+  # Futures codes 1750+
+  futuresPositionNotFound: No such position
+  futuresInsufficientBalance: Not enough balance
+  futuresInvalidLeverage: Invalid leverage
+  futuresInvalidQuantity: Invalid quantity
+  futuresInvalidStopLoss: Invalid stop-loss price
+  futuresInvalidTakeProfit: Invalid take-profit price
+  futuresSplitLimit: At most 4 split targets
+  futuresPositionClosed: That position is already closed
+  futuresLiquidated: That position has been liquidated
+  futuresSymbolNotConfigured: No leverage tiers configured for this coin
+  futuresMarginTooLow: Margin would be too low after the reduction
+  futuresCrossMarginAdjust: Cross-margin positions cannot have their margin adjusted
+  # Isolated opens, spot buys and wallet transfers hit this too - nobody may touch money locked by a cross position, so the wording cannot say only "cross"
+  futuresCrossAvailableNotEnough: Not enough available balance - a cross-margin position is holding it
+  futuresLeverageOnlyUp: Leverage on an isolated position can only go up; use add-margin to top it up
+  futuresLeverageMismatch: Leverage differs from your existing position on this coin - adjust it first
+  futuresMarginModeConflict: Margin mode differs from your existing position on this coin
+  # VideoPoker codes 1851+
+  vpGameInProgress: You have an unfinished video poker hand
+  vpNoActiveGame: No video poker hand in progress
+  vpBalanceNotEnough: Not enough balance
+  vpInvalidBet: Invalid bet
+  vpInvalidHold: Invalid HOLD position
+  # Prediction codes 1900+
+  predictionRoundLocked: This round is locked
+  predictionRoundNotFound: No such round
+  predictionBetNotFound: No such bet
+  predictionPriceUnavailable: BTC price unavailable
+  predictionAmountInvalid: Invalid amount
+  # Wallet codes 1950+
+  gameBalanceNotEnough: Not enough in the games wallet
+  walletTransferInvalid: Invalid transfer amount
+  # Account-reset codes 2000+ (1200/1600 are taken by leverage and Crypto)
+  resetTooFrequent: You have used this week's reset (once a week, refreshes Monday)
+  resetNotAllowed: This account cannot be reset
+  # Comment-board codes 2100+
+  commentMuted: You are muted
+  commentContentInvalid: A comment must be non-empty and at most 500 characters
+  commentTooFrequent: You are commenting too fast - try again shortly
+  commentNotFound: That comment does not exist or was deleted
+  commentAlreadyVoted: You already voted on this
+  # Chat workbench codes 2200+ (1600 is taken by Crypto, do not add there)
+  llmConfigMissing: No LLM endpoint configured yet
+  llmConfigInvalid: The LLM config cannot connect
+  chatAlreadyRunning: You already have a round in progress
+  chatCapacityFull: The chat is at capacity - try again shortly
+  replayAiBusy: The previous AI analysis is still running
+  chatRegenerateUnavailable: This answer cannot be regenerated
+  chatMessageTooLong: Message too long (limit 10000 characters) - trim it and resend
+  chatNothingDeferred: This session has no deferred answer pending
+
+  # Login-state failures: the various sa-token NotLoginException types, all returned as 401
+  token:
+    missing: No token supplied
+    invalid: Invalid token
+    timeout: Your session expired - log in again
+    replaced: Signed out because the account signed in elsewhere
+    kickedOut: Signed out by an administrator
+    frozen: This token is frozen
+    noPrefix: The token was not submitted with the required prefix
+    notLoggedIn: Not signed in
+
+  # The request itself does not hold up - stopped at the framework layer, before any business logic
+  request:
+    validationFailed: Parameter validation failed
+    bodyMalformed: Malformed request body
+    missingParam: "Missing parameter: {{name}}"
+    typeMismatch: "Wrong parameter type: {{name}}"

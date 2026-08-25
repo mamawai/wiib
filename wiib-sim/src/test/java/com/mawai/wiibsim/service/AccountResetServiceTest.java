@@ -1,6 +1,7 @@
 package com.mawai.wiibsim.service;
 
 import com.mawai.wiibcommon.entity.CryptoOrder;
+import com.mawai.wiibcommon.i18n.MessageCatalog;
 import com.mawai.wiibcommon.entity.FuturesPosition;
 import com.mawai.wiibcommon.entity.User;
 import com.mawai.wiibcommon.exception.BizException;
@@ -27,8 +28,6 @@ import static org.mockito.Mockito.*;
  *       原样加回去（FuturesLiquidationServiceImpl 的 catch 里 zAdd 恢复），形成永久重试循环</li>
  *   <li>删表失败必须把索引重新注册回去。否则仓位还在、触发保护没了，等于静默关掉强平</li>
  * </ol>
- * （曾经还有第三件"待结算队列按 userId 前缀匹配"——现货卖出取消 5min 延迟后
- * 那条队列连同整套延迟结算一并删除，用例随之移除。）
  */
 class AccountResetServiceTest {
 
@@ -38,6 +37,7 @@ class AccountResetServiceTest {
     private AccountPurgeTx purgeTx;
     private StringRedisTemplate redis;
     private ZSetOperations<String, String> zSetOps;
+    private ResetQuotaService resetQuota;
     private UserMapper userMapper;
     private AccountResetService service;
 
@@ -48,6 +48,7 @@ class AccountResetServiceTest {
         cryptoOrderMapper = mock(CryptoOrderMapper.class);
         indexService = mock(FuturesPositionIndexService.class);
         purgeTx = mock(AccountPurgeTx.class);
+        resetQuota = mock(ResetQuotaService.class);
         userMapper = mock(UserMapper.class);
 
         redis = mock(StringRedisTemplate.class);
@@ -57,7 +58,8 @@ class AccountResetServiceTest {
         when(positionMapper.selectList(any())).thenReturn(List.of());
         when(cryptoOrderMapper.selectList(any())).thenReturn(List.of());
 
-        service = new AccountResetService(positionMapper, cryptoOrderMapper, indexService, purgeTx, redis, userMapper);
+        service = new AccountResetService(positionMapper, cryptoOrderMapper, indexService,
+                purgeTx, redis, resetQuota, userMapper, new MessageCatalog());
     }
 
     private static FuturesPosition openPosition() {
@@ -99,6 +101,29 @@ class AccountResetServiceTest {
         service.reset(7L);
 
         verify(redis).delete("buff:status:7:" + LocalDate.now());
+    }
+
+    /** 每周限 1 次：第二次直接拒，额度退回，业务一步不走 */
+    @Test
+    void 每周第二次重置被拒且退回额度() {
+        when(resetQuota.recordUse(7L)).thenReturn(1L, 2L);
+
+        service.resetWithGuard(7L, "alice", "alice");
+        assertThrows(BizException.class, () -> service.resetWithGuard(7L, "alice", "alice"));
+
+        verify(purgeTx, times(1)).purge(7L);
+        verify(resetQuota, times(1)).refund(7L);
+    }
+
+    /** 重置失败必须把本周额度退回去，否则一次故障吃掉一次额度 */
+    @Test
+    void 重置失败退回本周额度() {
+        when(resetQuota.recordUse(7L)).thenReturn(1L);
+        doThrow(new RuntimeException("db down")).when(purgeTx).purge(7L);
+
+        assertThrows(RuntimeException.class, () -> service.resetWithGuard(7L, "alice", "alice"));
+
+        verify(resetQuota).refund(7L);
     }
 
     @Test

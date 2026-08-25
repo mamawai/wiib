@@ -1,0 +1,186 @@
+{
+  "login": {
+    "tagline": "虚拟资金 · 真实行情。股票、加密货币、永续合约，外加一个自己下单的 AI Trader 和随时能问的研判对话，零风险体验“如果当初买了会怎样”。",
+    "featQuotes": "Binance 实时行情",
+    "featFunds": "虚拟资金 零风险",
+    "featTrader": "AI Trader 自主交易",
+    "featChat": "研判对话 Agent",
+    "titleRegister": "创建账户",
+    "titleLogin": "登录 WIIB",
+    "loggingIn": "登录中...",
+    "loading": "加载中...",
+    "logIn": "登录",
+    "register": "注册",
+    "registerSubmit": "注册并进入",
+    "usernamePh": "用户名",
+    "passwordPh": "密码",
+    "passwordNewPh": "密码（至少6位）",
+    "invitePh": "邀请码",
+    "or": "或",
+    "linuxDo": "使用 LinuxDo 登录",
+    "enterTerminal": "进入",
+    "stateMismatch": "安全验证失败，请重试",
+    "linuxDoFailed": "LinuxDo 登录失败",
+    "failed": "登录失败",
+    "registerFailed": "注册失败"
+  },
+  "me": {
+    "nav": {
+      "ledger": "资金账单",
+      "arena": "AI竞技场",
+      "strategies": "策略",
+      "backtest": "回测",
+      "testnet": "模拟盘",
+      "ranking": "排行榜",
+      "games": "游戏中心",
+      "comments": "留言板"
+    },
+    "themeDark": "深色模式",
+    "themeLight": "浅色模式",
+    "logout": "退出登录",
+    "reset": {
+      "title": "重置账户",
+      "desc": "清空全部持仓、订单、游戏记录与资产历史，余额恢复为初始资金。留言与禁言状态不受影响。每自然周限 1 次（周一刷新）。",
+      "action": "重置我的账户",
+      "dialogTitle": "确认重置账户",
+      "warnClears": "此操作不可撤销，将清空：现货与合约的全部持仓和订单、预测下注、21点/Mines/视频扑克记录、资产历史、每日 Buff、钱包划转流水。",
+      "warnCost": "每自然周限 1 次重置（周一刷新），破产自动恢复也计入次数。",
+      "confirmName": "请输入你的用户名 <0>{{name}}</0> 以确认：",
+      "namePlaceholder": "输入用户名",
+      "submitting": "重置中…",
+      "submit": "确认重置",
+      "done": "账户已重置为初始状态",
+      "failed": "重置失败"
+    }
+  },
+  "toggle": {
+    "title": "公开我的持仓与仓位历史",
+    "desc": "开启后，别人可以从排行榜点进你的主页，看到你的当前持仓、合约仓位历史和成交明细。关掉不影响上榜——榜上只有总资产和收益率。",
+    "on": "已公开你的持仓与仓位历史",
+    "off": "已隐藏，别人点不进你的详情页",
+    "failed": "设置失败"
+  },
+  "notif": {
+    "title": "通知",
+    "loading": "加载中…",
+    "empty": "还没有通知",
+    "like": {
+      "anon": "赞了你的评论",
+      "one": "{{a}} 赞了你的评论",
+      "two": "{{a}}、{{b}} 赞了你的评论",
+      "more_other": "{{a}}、{{b}} 和另外 {{count}} 人赞了你的评论"
+    },
+    "reply": {
+      "anon": "评论了你",
+      "one": "{{a}} 评论了你",
+      "two": "{{a}}、{{b}} 评论了你",
+      "more_other": "{{a}}、{{b}} 和另外 {{count}} 人评论了你"
+    },
+    "side": {
+      "long": "多单",
+      "short": "空单"
+    },
+    "trade": {
+      "liquidation": "{{symbol}} {{side}}强平",
+      "stopLoss": "{{symbol}} {{side}}止损",
+      "takeProfit": "{{symbol}} {{side}}止盈",
+      "cross": "全仓爆仓",
+      "crossCount_other": "全仓爆仓 · {{count}} 个仓位"
+    }
+  },
+  "profile": {
+    "back": "返回排行榜",
+    "private": "该用户没有公开自己的持仓与仓位历史",
+    "long": "做多",
+    "short": "做空",
+    "cross": "全仓",
+    "isolated": "逐仓",
+    "avgPrice": "均价 {{price}}",
+    "lastPrice": "现价 {{price}}",
+    "count_other": "{{count}} 个",
+    "totalAssets": "总资产",
+    "return": "收益率",
+    "tradingProfit": "交易盈利",
+    "tradingProfitHint": "合约 + 现货 + 预测的净盈亏，不含优惠券",
+    "spotTitle": "现货持仓",
+    "futuresTitle": "合约持仓",
+    "noPositions": "当前没有持仓",
+    "tabPositions": "仓位历史",
+    "tabTrades": "成交明细",
+    "emptyHistory": "该用户没有已平仓的合约仓位",
+    "emptyTrades": "暂无成交记录",
+    "futuresTag": "合约",
+    "page": "第 {{page}} / {{pages}} 页"
+  },
+  "admin": {
+    "title": "任务管理",
+    "actionFailed": "操作失败",
+    "fn": {
+      "newsTagging": "新闻打标"
+    },
+    "rate": {
+      "title": "杠杆日利率",
+      "current": "当前：{{value}}",
+      "value": "{{pct}}%/天（{{decimal}}）",
+      "placeholder": "输入百分比，例如 0.05 表示 0.05%/天",
+      "hint": "输入为百分比；例如 0.05%/天 对应 decimal=0.0005。"
+    },
+    "invite": {
+      "title": "邀请码",
+      "maxUses": "每码可用次数",
+      "count": "生成个数",
+      "generate": "生成",
+      "empty": "暂无邀请码",
+      "revoked": "已作废",
+      "usedUp": "已用完",
+      "active": "可用",
+      "copyTitle": "点击复制",
+      "revoke": "作废",
+      "badArgs": "次数和个数需为正整数",
+      "generated": "邀请码已生成",
+      "generateFailed": "生成失败",
+      "revokeFailed": "作废失败",
+      "copied": "已复制 {{code}}",
+      "copyFailed": "复制失败"
+    },
+    "llm": {
+      "title": "配置 LLM",
+      "add": "新增",
+      "hint": "一条配置 = 一个具体 LLM（API Key + Base URL + 模型名）；同一 Key 不同模型就建多条。",
+      "empty": "暂无 LLM 配置",
+      "effortBadge": "思考:{{value}}",
+      "editTitle": "编辑 LLM 配置",
+      "addTitle": "新增 LLM 配置",
+      "namePh": "名称，如 OpenAI、DeepSeek",
+      "urlPh": "Base URL，如 https://api.openai.com",
+      "modelPh": "模型名，如 gpt-4o、deepseek-chat",
+      "protoChat": "协议：OpenAI Chat Completions（/v1/chat/completions，DeepSeek 等通用）",
+      "protoResponses": "协议：OpenAI Responses（/v1/responses，CPA/OpenAI官方/xAI）",
+      "effortPh": "思考档位，留空=模型默认（不传）",
+      "effortDefault": "默认",
+      "effortHint": "none=关思考最省 token（仅部分模型支持）；也可填模型认的其他档位如 xhigh。认不认查不到，存完自己试。",
+      "required": "名称、API Key、Base URL、Model 不能为空",
+      "saved": "LLM 配置已保存",
+      "saveFailed": "保存失败",
+      "deleted": "已删除",
+      "deleteFailed": "删除失败"
+    },
+    "assign": {
+      "title": "更换 LLM",
+      "hint": "每个功能位下拉选择要用的 LLM，保存后立即生效；模型名在上方「配置 LLM」维护。",
+      "select": "选择 LLM",
+      "option": "{{name}}（{{model}}）",
+      "noModel": "未设模型",
+      "noneSelected": "{{name}} 未选择 LLM",
+      "saved": "LLM 已切换并生效",
+      "save": "保存并生效"
+    },
+    "manual": {
+      "title": "手动触发",
+      "settleGroup": "结算与风控",
+      "bankruptcy": "执行爆仓检查",
+      "interest": "手动计息",
+      "snapshot": "资产快照"
+    }
+  }
+}

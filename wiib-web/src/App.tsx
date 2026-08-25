@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { useMemo, type ReactNode, useEffect } from 'react';
 import { Layout } from './components/Layout';
+import { LanguageGate } from './components/LanguageGate';
 import { Home } from './pages/Home';
 import { BStockList } from './pages/BStockList';
 import { BStockRoute } from './pages/BStockDetail';
@@ -43,8 +44,8 @@ declare global {
 
 /**
  * 全站唯一登录守卫，挂在 /* 上。
- * 判 token 不判 user：token 是 localStorage 同步恢复的，user 要等 fetchUser 异步回来，
- * 判 user 会让每次刷新都先被弹一下。页面内要用 user 的自己判 null 等它到（见 Portfolio）
+ * 判 token 不判 user，这么写为了刷新不闪登录页（token 同步恢复、user 异步）；
+ * 页面内要用 user 的自己判 null 等它到（见 Portfolio）
  */
 function RequireAuth({ children }: { children: ReactNode }) {
   const token = useUserStore(s => s.token);
@@ -65,6 +66,8 @@ function App() {
 
   return (
     <BrowserRouter>
+      {/* 挂在路由外层而不是 Layout 里：/login 在 Layout 之外，挂 Layout 游客就看不到 */}
+      <LanguageGate />
       <Routes>
         <Route path="/login" element={<Login />} />
         {/* 全站唯一免登录页。其余页面进来都要发 API，游客第一个 401 就被响应拦截器弹去 /login，

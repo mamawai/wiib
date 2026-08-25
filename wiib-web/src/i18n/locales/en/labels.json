@@ -1,0 +1,12 @@
+{
+  "orderSide": {
+    "openLong": "Open long",
+    "openShort": "Open short",
+    "closeLong": "Close long",
+    "closeShort": "Close short",
+    "increaseLong": "Add long",
+    "increaseShort": "Add short",
+    "buy": "Buy",
+    "sell": "Sell"
+  }
+}

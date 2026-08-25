@@ -1,0 +1,190 @@
+{
+  "login": {
+    "tagline": "Virtual funds · live market data. Stocks, crypto and perpetual futures, plus an AI trader that trades on its own and an analysis chat you can ask anything — find out what if you had bought, at zero risk.",
+    "featQuotes": "Live Binance data",
+    "featFunds": "Virtual funds, no risk",
+    "featTrader": "Autonomous AI traders",
+    "featChat": "Analysis chat agent",
+    "titleRegister": "Create account",
+    "titleLogin": "Log in to WIIB",
+    "loggingIn": "Logging in...",
+    "loading": "Loading...",
+    "logIn": "Log in",
+    "register": "Register",
+    "registerSubmit": "Register and enter",
+    "usernamePh": "Username",
+    "passwordPh": "Password",
+    "passwordNewPh": "Password (6+ characters)",
+    "invitePh": "Invite code",
+    "or": "or",
+    "linuxDo": "Log in with LinuxDo",
+    "enterTerminal": "Enter",
+    "stateMismatch": "Security check failed, try again",
+    "linuxDoFailed": "LinuxDo login failed",
+    "failed": "Login failed",
+    "registerFailed": "Registration failed"
+  },
+  "me": {
+    "nav": {
+      "ledger": "Ledger",
+      "arena": "AI Arena",
+      "strategies": "Strategies",
+      "backtest": "Backtest",
+      "testnet": "Testnet",
+      "ranking": "Leaderboard",
+      "games": "Games",
+      "comments": "Comments"
+    },
+    "themeDark": "Dark mode",
+    "themeLight": "Light mode",
+    "logout": "Log out",
+    "reset": {
+      "title": "Reset account",
+      "desc": "Clears all positions, orders, game records and asset history and restores your balance to the starting capital. Comments and mute status are unaffected. One reset per calendar week, refreshed on Monday.",
+      "action": "Reset my account",
+      "dialogTitle": "Confirm account reset",
+      "warnClears": "This cannot be undone. It clears: all spot and futures positions and orders, prediction bets, Blackjack / Mines / Video Poker records, asset history, daily buffs and wallet transfers.",
+      "warnCost": "One reset per calendar week, refreshed on Monday. An automatic bankruptcy recovery counts toward the same quota.",
+      "confirmName": "Type your username <0>{{name}}</0> to confirm:",
+      "namePlaceholder": "Enter username",
+      "submitting": "Resetting…",
+      "submit": "Confirm reset",
+      "done": "Account reset to its initial state",
+      "failed": "Reset failed"
+    }
+  },
+  "toggle": {
+    "title": "Make my holdings and position history public",
+    "desc": "When on, anyone can open your profile from the leaderboard and see your current holdings, futures position history and trades. Turning it off does not affect the leaderboard — that only shows total assets and return.",
+    "on": "Your holdings and position history are now public",
+    "off": "Hidden — others can no longer open your profile",
+    "failed": "Failed to save"
+  },
+  "notif": {
+    "title": "Notifications",
+    "loading": "Loading…",
+    "empty": "No notifications yet",
+    "like": {
+      "anon": "Someone liked your comment",
+      "one": "{{a}} liked your comment",
+      "two": "{{a}} and {{b}} liked your comment",
+      "more_one": "{{a}}, {{b}} and {{count}} other liked your comment",
+      "more_other": "{{a}}, {{b}} and {{count}} others liked your comment"
+    },
+    "reply": {
+      "anon": "Someone replied to you",
+      "one": "{{a}} replied to you",
+      "two": "{{a}} and {{b}} replied to you",
+      "more_one": "{{a}}, {{b}} and {{count}} other replied to you",
+      "more_other": "{{a}}, {{b}} and {{count}} others replied to you"
+    },
+    "side": {
+      "long": "long",
+      "short": "short"
+    },
+    "trade": {
+      "liquidation": "{{symbol}} {{side}} liquidated",
+      "stopLoss": "{{symbol}} {{side}} stop loss filled",
+      "takeProfit": "{{symbol}} {{side}} take profit filled",
+      "cross": "Cross-margin liquidation",
+      "crossCount_one": "Cross-margin liquidation · {{count}} position",
+      "crossCount_other": "Cross-margin liquidation · {{count}} positions"
+    }
+  },
+  "profile": {
+    "back": "Back to leaderboard",
+    "private": "This user's holdings and position history are private",
+    "long": "Long",
+    "short": "Short",
+    "cross": "Cross",
+    "isolated": "Isolated",
+    "avgPrice": "Avg {{price}}",
+    "lastPrice": "Last {{price}}",
+    "count_one": "{{count}} position",
+    "count_other": "{{count}} positions",
+    "totalAssets": "Total assets",
+    "return": "Return",
+    "tradingProfit": "Trading PnL",
+    "tradingProfitHint": "Net PnL from futures, spot and prediction, coupons excluded",
+    "spotTitle": "Spot holdings",
+    "futuresTitle": "Futures positions",
+    "noPositions": "No open positions",
+    "tabPositions": "Position history",
+    "tabTrades": "Trades",
+    "emptyHistory": "This user has no closed futures positions",
+    "emptyTrades": "No trades yet",
+    "futuresTag": "Futures",
+    "page": "Page {{page}} of {{pages}}"
+  },
+  "admin": {
+    "title": "Task management",
+    "actionFailed": "Action failed",
+    "fn": {
+      "newsTagging": "News tagging"
+    },
+    "rate": {
+      "title": "Daily margin interest rate",
+      "current": "Current: {{value}}",
+      "value": "{{pct}}%/day ({{decimal}})",
+      "placeholder": "Percentage, e.g. 0.05 means 0.05%/day",
+      "hint": "The input is a percentage; 0.05%/day is decimal=0.0005."
+    },
+    "invite": {
+      "title": "Invite codes",
+      "maxUses": "Uses per code",
+      "count": "Quantity",
+      "generate": "Generate",
+      "empty": "No invite codes",
+      "revoked": "Revoked",
+      "usedUp": "Used up",
+      "active": "Active",
+      "copyTitle": "Click to copy",
+      "revoke": "Revoke",
+      "badArgs": "Uses and quantity must both be positive integers",
+      "generated": "Invite codes generated",
+      "generateFailed": "Generation failed",
+      "revokeFailed": "Revoke failed",
+      "copied": "Copied {{code}}",
+      "copyFailed": "Copy failed"
+    },
+    "llm": {
+      "title": "LLM configuration",
+      "add": "Add",
+      "hint": "One entry = one LLM (API Key + Base URL + model name); the same key with a different model needs its own entry.",
+      "empty": "No LLM configs",
+      "effortBadge": "Effort: {{value}}",
+      "editTitle": "Edit LLM config",
+      "addTitle": "New LLM config",
+      "namePh": "Name, e.g. OpenAI, DeepSeek",
+      "urlPh": "Base URL, e.g. https://api.openai.com",
+      "modelPh": "Model name, e.g. gpt-4o, deepseek-chat",
+      "protoChat": "Protocol: OpenAI Chat Completions (/v1/chat/completions, for DeepSeek and most others)",
+      "protoResponses": "Protocol: OpenAI Responses (/v1/responses, CPA / OpenAI / xAI)",
+      "effortPh": "Reasoning effort, blank = model default (not sent)",
+      "effortDefault": "Default",
+      "effortHint": "none turns reasoning off and uses the fewest tokens (only some models support it); you can also enter any other level the model accepts, such as xhigh. No way to check up front — save it and try.",
+      "required": "Name, API Key, Base URL and Model are all required",
+      "saved": "LLM config saved",
+      "saveFailed": "Save failed",
+      "deleted": "Deleted",
+      "deleteFailed": "Delete failed"
+    },
+    "assign": {
+      "title": "Switch LLM",
+      "hint": "Pick the LLM for each slot; it applies as soon as you save. Model names live under LLM configuration above.",
+      "select": "Select LLM",
+      "option": "{{name}} ({{model}})",
+      "noModel": "no model set",
+      "noneSelected": "No LLM selected for {{name}}",
+      "saved": "LLM switched and now live",
+      "save": "Save and apply"
+    },
+    "manual": {
+      "title": "Manual triggers",
+      "settleGroup": "Settlement and risk control",
+      "bankruptcy": "Run liquidation check",
+      "interest": "Accrue interest",
+      "snapshot": "Asset snapshot"
+    }
+  }
+}

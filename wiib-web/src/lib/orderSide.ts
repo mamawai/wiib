@@ -1,22 +1,27 @@
+import i18n from '../i18n';
 import { COIN_MAP } from './coinConfig';
 
-/** 成交方向的中文名与涨跌配色。首页「最新成交」和全站成交页共用一份，两处各写一份迟早对不上 */
-const FUTURES_SIDE: Record<string, { label: string; tone: 'buy' | 'sell' }> = {
-  OPEN_LONG: { label: '开多', tone: 'buy' },
-  OPEN_SHORT: { label: '开空', tone: 'sell' },
-  CLOSE_LONG: { label: '平多', tone: 'sell' },
-  CLOSE_SHORT: { label: '平空', tone: 'buy' },
+/**
+ * 成交方向的词表 key 与涨跌配色。首页「最新成交」、全站成交页、仓位历史、用户详情共用一份，
+ * 各写一份迟早对不上。
+ * <p>表里存 key 不存文案：直接存 i18n.t(...) 的结果会在模块加载那一刻定死，切语言不跟着变。
+ */
+const FUTURES_SIDE: Record<string, { labelKey: string; tone: 'buy' | 'sell' }> = {
+  OPEN_LONG: { labelKey: 'labels:orderSide.openLong', tone: 'buy' },
+  OPEN_SHORT: { labelKey: 'labels:orderSide.openShort', tone: 'sell' },
+  CLOSE_LONG: { labelKey: 'labels:orderSide.closeLong', tone: 'sell' },
+  CLOSE_SHORT: { labelKey: 'labels:orderSide.closeShort', tone: 'buy' },
   // 加仓：后端 order_side 注释里列了这两个值，漏掉会退化成显示原始英文
-  INCREASE_LONG: { label: '加多', tone: 'buy' },
-  INCREASE_SHORT: { label: '加空', tone: 'sell' },
+  INCREASE_LONG: { labelKey: 'labels:orderSide.increaseLong', tone: 'buy' },
+  INCREASE_SHORT: { labelKey: 'labels:orderSide.increaseShort', tone: 'sell' },
 };
 
 export function orderSideView(orderSide: string): { label: string; tone: 'buy' | 'sell' } {
   const futures = FUTURES_SIDE[orderSide];
-  if (futures) return futures;
+  if (futures) return { label: i18n.t(futures.labelKey), tone: futures.tone };
   // 现货只有 BUY/SELL；认不出的方向按卖处理并原样显示，别悄悄画成买
-  if (orderSide === 'BUY') return { label: '买', tone: 'buy' };
-  if (orderSide === 'SELL') return { label: '卖', tone: 'sell' };
+  if (orderSide === 'BUY') return { label: i18n.t('labels:orderSide.buy'), tone: 'buy' };
+  if (orderSide === 'SELL') return { label: i18n.t('labels:orderSide.sell'), tone: 'sell' };
   return { label: orderSide, tone: 'sell' };
 }
 

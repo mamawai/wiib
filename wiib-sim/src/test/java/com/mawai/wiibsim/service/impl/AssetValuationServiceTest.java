@@ -9,7 +9,7 @@ import java.math.BigDecimal;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
- * 资产估值统一口径回归。锁死曾经的三种坏口径：
+ * 资产估值统一口径回归，锁死三种坏口径：
  * 缺价整仓蒸发(快照)、缺价按0计天文亏损(排行榜)、永远不算浮盈亏(破产判定)。
  */
 class AssetValuationServiceTest {

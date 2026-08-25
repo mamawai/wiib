@@ -3,6 +3,8 @@ import { createRoot } from 'react-dom/client'
 import '@fontsource-variable/plus-jakarta-sans'
 import '@fontsource-variable/jetbrains-mono'
 import './index.css'
+// 国际化初始化：必须排在 App 之前，组件首次渲染时词表就得在位
+import './i18n'
 import App from './App.tsx'
 import { ToastProvider } from './components/ui/toast.tsx'
 

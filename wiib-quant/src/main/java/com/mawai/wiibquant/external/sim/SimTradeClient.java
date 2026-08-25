@@ -4,7 +4,9 @@ import com.mawai.wiibcommon.dto.FuturesCloseRequest;
 import com.mawai.wiibcommon.dto.FuturesOpenRequest;
 import com.mawai.wiibcommon.dto.FuturesOrderResponse;
 import com.mawai.wiibcommon.dto.FuturesPositionDTO;
+import com.mawai.wiibcommon.enums.AgentLang;
 import com.mawai.wiibcommon.enums.ErrorCode;
+import com.mawai.wiibcommon.i18n.MessageCatalog;
 import com.mawai.wiibcommon.util.Result;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
@@ -24,10 +26,16 @@ import java.util.Map;
  * quant → sim 合约交易 internal API 客户端（SimInternalClient 同款配置：同机 localhost、
  * X-Internal-Token 鉴权、短超时快速失败），DTO 走 wiib-common 与 sim 编译解耦。
  *
- * <p>端点定义在 {@link SimTradeApi}（Spring 6 HTTP Interface 声明式接口），本类只做两件事：
+ * <p>端点定义在 {@link SimTradeApi}（Spring 6 HTTP Interface 声明式接口），本类做三件事：
  * 构造时装配 RestClient 并生成代理；每方法 unwrap 拆 Result 壳——业务失败（sim 返回
  * Result.fail，如余额不足/止损价非法/订单不可撤）与传输失败同样抛异常，
- * 由 {@link com.mawai.wiibquant.strategy.execution.SimExecutionService} 按操作粒度捕获并保持状态机安全。</p>
+ * 由 {@link com.mawai.wiibquant.strategy.execution.SimExecutionService} 按操作粒度捕获并保持状态机安全；
+ * 以及 {@link #describe} 把失败按调用方那门语言成文。</p>
+ *
+ * <p><b>不给 sim 传 X-Lang</b>：{@link SimBizException} 带回来的是错误码，话由调用方自己查词表。
+ * 这条链上真正知道该用哪门语言的只有调用方——trader 唤醒要跟 trader 主人的 AgentLang，
+ * 而唤醒的图跑在另一条虚拟线程上，请求线程那份 {@code RequestLang} 根本传不过去；
+ * 同一笔拒因还会被别的语言的人在竞技场时间线上读到。</p>
  */
 @Component
 public class SimTradeClient {
@@ -126,22 +134,63 @@ public class SimTradeClient {
     }
 
     /**
-     * sim 幂等占位回的"处理中"：同一笔还在跑，结果同样未知，同键再来即可（错误码由 unwrap 拼进消息）。
+     * sim 幂等占位回的"处理中"：同一笔还在跑，结果同样未知，同键再来即可。
      * 只认 1106 不认 1105——1105 是 sim 侧抢 Redis 锁失败，那种是确定没成交，当"未知"处理
      * 会让模型收到一句"可能已经成交、别重下"，白丢一次交易。
      */
     public static boolean isProcessing(Throwable e) {
-        return e.getMessage() != null
-                && e.getMessage().contains("code=" + ErrorCode.ORDER_IN_FLIGHT.getCode());
+        return e instanceof SimBizException sim && sim.code() == ErrorCode.ORDER_IN_FLIGHT.getCode();
     }
 
-    /** 拆 Result 壳：sim 业务失败统一转异常抛出（sim 异常一律 200+Result.fail，不靠 HTTP 状态码）。 */
+    /**
+     * 异常成文给人和模型看：sim 业务失败按码查词表跟给定语言，其余照原样
+     * （传输失败、上游原文、代码异常都没有码可查，那些是诊断信息不是给用户的话）。
+     * <p>
+     * 静态：调用方常把本类换成 mock，成了实例方法就会被静默返回 null，而这句话是要落库展示的。
+     */
+    public static String describe(Throwable e, MessageCatalog messages, AgentLang lang) {
+        if (e instanceof SimBizException sim) {
+            return sim.render(messages, lang);
+        }
+        return e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
+    }
+
+    /**
+     * sim 侧业务失败（一律 200 + Result.fail，不靠 HTTP 状态码）。
+     * <p>
+     * 带的是<b>码</b>不是话：成文要用哪门语言只有调用方知道。{@code getMessage()} 是给日志与堆栈用的。
+     */
+    public static class SimBizException extends RuntimeException {
+        private final int code;
+        /** sim 那边按它自己那门语言渲染好的原话，只在码查不回词条时兜底 */
+        private final String simMsg;
+
+        public SimBizException(int code, String simMsg) {
+            super("sim code=" + code + ": " + simMsg);
+            this.code = code;
+            this.simMsg = simMsg;
+        }
+
+        public int code() {
+            return code;
+        }
+
+        /** 与 {@code BizException.render} 同一套路，只是语言得显式给——这异常常抛在没有请求语言的线程上。 */
+        public String render(MessageCatalog messages, AgentLang lang) {
+            ErrorCode ec = ErrorCode.of(code);
+            // 只有 1000+ 的业务码查得回词条；1000 以下那批（400/500）在 sim 侧多半是
+            // Result.fail(自己写的话)，那句话本身就是全部信息，退回它比渲染成"系统错误"强
+            return ec != null && code >= 1000 ? messages.get(lang, ec.getMsgKey()) : simMsg;
+        }
+    }
+
+    /** 拆 Result 壳：sim 业务失败统一转异常抛出。 */
     private static <T> T unwrap(Result<T> result) {
         if (result == null) {
             throw new IllegalStateException("sim internal api 空响应");
         }
         if (result.getCode() != ErrorCode.SUCCESS.getCode()) {
-            throw new IllegalStateException("sim api 业务失败 code=" + result.getCode() + " msg=" + result.getMsg());
+            throw new SimBizException(result.getCode(), result.getMsg());
         }
         return result.getData();
     }

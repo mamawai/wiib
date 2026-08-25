@@ -19,10 +19,8 @@ import java.util.function.LongSupplier;
 /**
  * K 线取数层：工具层共用的那一份行情，带 TTL 缓存；同一份数据并发要时只放一个去拉。
  * <p>
- * <b>为什么缓存建在这里而不是各工具的结果上</b>：一次 REST 是几十到几百毫秒加配额权重，
- * 而把 192 根算成指标或结构摘要只要几毫秒——该挡的是网络那一侧。而且结果缓存的键必须带参数
- * （swing 半窗一改就 miss），K 线缓存的键只有 symbol+interval，一份数据能同时喂
- * klines / indicators / kline_structure 的任意参数组合。
+ * 缓存建在取数层而不是各工具结果上，这么写为了挡住网络那一侧：
+ * 键只有 symbol+interval，一份数据能同时喂 klines / indicators / kline_structure 的任意参数组合。
  * <p>
  * <b>按 symbol+interval 存一份，根数够就切片</b>：Binance 返回的是"最近 N 根"，
  * 所以 192 根天然含着 120 根。谁先拉了长的，后面要短的直接切，不再打网络。

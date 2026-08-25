@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { Trans, useTranslation } from 'react-i18next';
 import { useUserStore } from '../stores/userStore';
 import { userApi, cryptoOrderApi, cryptoApi, futuresApi, predictionApi, bstockApi } from '../api';
 import { Card, CardContent } from '../components/ui/card';
@@ -34,6 +35,7 @@ import {
   Landmark,
   RotateCcw,
   History,
+  Receipt,
 } from 'lucide-react';
 import type { CryptoPosition, FuturesPosition, PredictionPnl, AssetSnapshot, CategoryAverages, BStock } from '../types';
 import { formatCoinPrice, getCoin } from '../lib/coinConfig';
@@ -52,6 +54,7 @@ interface BStockRow extends CryptoRow {
 
 export function Portfolio() {
   const navigate = useNavigate();
+  const { t } = useTranslation(['portfolio', 'common']);
   const { user } = useUserStore();
   const { toast } = useToast();
   const [cryptoRows, setCryptoRows] = useState<CryptoRow[]>([]);
@@ -167,7 +170,7 @@ export function Portfolio() {
           setBstockRows([]);
           setFuturesPositions([]);
           setPredictionPnl(null);
-          toast('获取账户数据失败', 'error', { description: '请稍后重试' });
+          toast(t('toast.loadFailed'), 'error', { description: t('toast.loadFailedHint') });
           setWalletReady(true);
         })
         .finally(() => {
@@ -196,9 +199,9 @@ export function Portfolio() {
       setRefreshNonce(n => n + 1);
       setProfitLoaded(false);
       setRealtimeSnapshot(null);
-      toast('账户已重置为初始状态', 'success');
+      toast(t('toast.resetDone'), 'success');
     } catch (e) {
-      toast((e as Error).message || '重置失败', 'error');
+      toast((e as Error).message || t('toast.resetFailed'), 'error');
     } finally {
       setResetting(false);
     }
@@ -231,11 +234,11 @@ export function Portfolio() {
   const holdingsProfit = cryptoProfit + bstockProfit + futuresProfit;
   const holdingsItems = [
     { label: 'bStock', value: bstockTotal },
-    { label: '币种', value: cryptoTotal },
-    { label: '合约', value: futuresTotal },
+    { label: t('holdings.crypto'), value: cryptoTotal },
+    { label: t('holdings.futures'), value: futuresTotal },
   ];
   const walletAssets: WalletAsset[] = [
-    { name: '持仓', count: holdingsItems, value: holdingsTotal, profit: holdingsProfit, bg: 'linear-gradient(135deg, #4338ca, #635bff)' },
+    { name: t('holdings.title'), count: holdingsItems, value: holdingsTotal, profit: holdingsProfit, bg: 'linear-gradient(135deg, #4338ca, #635bff)' },
   ];
 
   return (
@@ -243,9 +246,12 @@ export function Portfolio() {
       {user.bankrupt && (
         <Card className="border-destructive/30 bg-destructive/5">
           <CardContent className="p-4 text-sm">
-            <div className="font-medium text-destructive">已爆仓，交易已禁用</div>
+            <div className="font-medium text-destructive">{t('bankrupt.title')}</div>
             <div className="mt-1 text-muted-foreground">
-              破产次数 {user.bankruptCount} · 将在 {user.bankruptResetDate ?? '下个交易日'} 09:00 恢复初始资金
+              {t('bankrupt.detail', {
+                times: user.bankruptCount,
+                date: user.bankruptResetDate ?? t('bankrupt.nextTradingDay'),
+              })}
             </div>
           </CardContent>
         </Card>
@@ -273,7 +279,7 @@ export function Portfolio() {
               )}
               <div>
                 <h2 className="text-sm font-semibold leading-tight">{user.username}</h2>
-                <p className="text-[11px] text-muted-foreground leading-tight mt-0.5 tracking-wide uppercase">模拟账户</p>
+                <p className="text-[11px] text-muted-foreground leading-tight mt-0.5 tracking-wide uppercase">{t('overview.paperAccount')}</p>
               </div>
             </div>
             <div className="flex flex-wrap gap-1.5">
@@ -287,7 +293,7 @@ export function Portfolio() {
                 )}
               >
                 <PieChart className="w-3.5 h-3.5" />
-                分布
+                {t('panel.chart')}
               </button>
               <button
                 onClick={() => setPanel(p => p === 'profit' ? null : 'profit')}
@@ -299,7 +305,7 @@ export function Portfolio() {
                 )}
               >
                 <LineChart className="w-3.5 h-3.5" />
-                收益
+                {t('panel.profit')}
               </button>
               <button
                 onClick={() => setPanel(p => p === 'radar' ? null : 'radar')}
@@ -311,7 +317,7 @@ export function Portfolio() {
                 )}
               >
                 <Radar className="w-3.5 h-3.5" />
-                能力
+                {t('panel.radar')}
               </button>
               <button
                 onClick={() => setPanel(p => p === 'wallet' ? null : 'wallet')}
@@ -323,7 +329,7 @@ export function Portfolio() {
                 )}
               >
                 <Wallet className="w-3.5 h-3.5" />
-                钱包
+                {t('panel.wallet')}
               </button>
             </div>
           </div>
@@ -357,7 +363,7 @@ export function Portfolio() {
                     {realtimeSnapshot && (
                       <div className="mb-3">
                         <div className="flex items-center justify-between mb-3">
-                          <span className="text-xs sm:text-[11px] text-muted-foreground uppercase tracking-wider">今日收益</span>
+                          <span className="text-xs sm:text-[11px] text-muted-foreground uppercase tracking-wider">{t('daily.title')}</span>
                           <span className={cn(
                             "text-sm sm:text-xs font-bold num",
                             realtimeSnapshot.dailyProfit >= 0 ? "text-gain" : "text-loss"
@@ -370,13 +376,13 @@ export function Portfolio() {
                         </div>
                         <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-3 gap-y-2 text-xs">
                           {[
-                            { label: '加密', value: realtimeSnapshot.dailyCryptoProfit },
-                            { label: '大宗商品', value: realtimeSnapshot.dailyCommodityProfit },
-                            { label: 'bStock', value: realtimeSnapshot.dailyBstockProfit },
-                            { label: '预测', value: realtimeSnapshot.dailyPredictionProfit },
-                            { label: '游戏', value: realtimeSnapshot.dailyGameProfit },
+                            { key: 'crypto', label: t('daily.crypto'), value: realtimeSnapshot.dailyCryptoProfit },
+                            { key: 'commodity', label: t('cat.commodity'), value: realtimeSnapshot.dailyCommodityProfit },
+                            { key: 'bstock', label: t('cat.bstock'), value: realtimeSnapshot.dailyBstockProfit },
+                            { key: 'prediction', label: t('cat.prediction'), value: realtimeSnapshot.dailyPredictionProfit },
+                            { key: 'game', label: t('cat.game'), value: realtimeSnapshot.dailyGameProfit },
                           ].filter(item => item.value !== 0).map(item => (
-                            <div key={item.label} className="flex justify-between">
+                            <div key={item.key} className="flex justify-between">
                               <span className="text-muted-foreground">{item.label}</span>
                               <span className={cn("num font-medium", item.value >= 0 ? "text-gain" : "text-loss")}>
                                 {item.value >= 0 ? '+' : ''}{fmtNum(item.value)}
@@ -422,7 +428,7 @@ export function Portfolio() {
               <div className={cn("flex flex-col justify-center", panel ? "sm:flex-1 sm:pl-5 pt-3 sm:pt-0" : "w-full")}>
               {/* 总资产主指标 */}
               <div className="mb-4">
-                <span className="text-[11px] text-muted-foreground uppercase tracking-widest">总资产</span>
+                <span className="text-[11px] text-muted-foreground uppercase tracking-widest">{t('overview.totalAssets')}</span>
                 <div className="flex items-baseline gap-2 mt-0.5">
                   <span className="text-3xl font-bold num tracking-tight"><AnimNum value={user.totalAssets} /></span>
                   <span className="text-xs text-muted-foreground font-normal">USDT</span>
@@ -435,17 +441,17 @@ export function Portfolio() {
               {/* 次要指标列表：页面拉宽到 page-shell 后单列行太长，宽屏两列 */}
               <div className="divide-y divide-border/20 lg:grid lg:grid-cols-2 lg:gap-x-12 lg:divide-y-0">
                 <div className="flex items-center justify-between py-2 lg:border-b lg:border-border/20">
-                  <span className="text-[12px] text-muted-foreground">余额钱包</span>
+                  <span className="text-[12px] text-muted-foreground">{t('overview.balanceWallet')}</span>
                   <span className="text-[13px] font-semibold num"><AnimNum value={user.balance} /></span>
                 </div>
 
                 <div className="flex items-center justify-between py-2 lg:border-b lg:border-border/20">
-                  <span className="text-[12px] text-muted-foreground">游戏钱包</span>
+                  <span className="text-[12px] text-muted-foreground">{t('overview.gameWallet')}</span>
                   <span className="text-[13px] font-semibold num"><AnimNum value={user.gameBalance} /></span>
                 </div>
 
                 <div className="flex items-center justify-between py-2 lg:border-b lg:border-border/20">
-                  <span className="text-[12px] text-muted-foreground">总盈亏</span>
+                  <span className="text-[12px] text-muted-foreground">{t('overview.totalPnl')}</span>
                   <div className={cn(
                     "flex items-center gap-1 px-2 py-0.5 rounded-md text-[12px] font-bold num",
                     isProfit ? "bg-gain/10 text-gain" : "bg-loss/10 text-loss"
@@ -460,7 +466,7 @@ export function Portfolio() {
                 </div>
 
                 <div className="flex items-center justify-between py-2 lg:border-b lg:border-border/20">
-                  <span className="text-[12px] text-muted-foreground">杠杆借款</span>
+                  <span className="text-[12px] text-muted-foreground">{t('overview.marginLoan')}</span>
                   <span className={cn(
                     "text-[13px] font-semibold num",
                     user.marginLoanPrincipal > 0 ? "text-warning" : "text-muted-foreground"
@@ -468,7 +474,7 @@ export function Portfolio() {
                 </div>
 
                 <div className="flex items-center justify-between py-2 lg:border-b lg:border-border/20">
-                  <span className="text-[12px] text-muted-foreground">应计利息</span>
+                  <span className="text-[12px] text-muted-foreground">{t('overview.interestAccrued')}</span>
                   <span className={cn(
                     "text-[13px] font-semibold num",
                     user.marginInterestAccrued > 0 ? "text-destructive/80" : "text-muted-foreground"
@@ -478,11 +484,11 @@ export function Portfolio() {
                 {hasFutures && (
                   <>
                     <div className="flex items-center justify-between py-2 lg:border-b lg:border-border/20">
-                      <span className="text-[12px] text-muted-foreground">合约保证金</span>
+                      <span className="text-[12px] text-muted-foreground">{t('overview.futuresMargin')}</span>
                       <span className="text-[13px] font-semibold num"><AnimNum value={futuresMargin} /></span>
                     </div>
                     <div className="flex items-center justify-between py-2 lg:border-b lg:border-border/20">
-                      <span className="text-[12px] text-muted-foreground">合约浮盈</span>
+                      <span className="text-[12px] text-muted-foreground">{t('overview.futuresUnrealized')}</span>
                       <span className={cn(
                         "text-[13px] font-semibold num",
                         futuresProfit >= 0 ? "text-gain" : "text-loss"
@@ -512,9 +518,14 @@ export function Portfolio() {
       {/* 仓位历史入口 + 刷新。入口没放进上面那张合约持仓卡——那张卡没持仓时整个 return null，
           而"手上一个仓都没有"恰恰是最想翻历史的时候。摆这行才一直在 */}
       <div className="flex items-center justify-end gap-2">
+        {/* 资金账单：全站唯一的桌面入口（顶栏那格已撤），跟仓位历史挨着——都是"翻旧账"的去处 */}
+        <Button variant="outline" size="sm" onClick={() => navigate('/ledger')}>
+          <Receipt className="w-4 h-4" />
+          {t('overview.ledgerEntry')}
+        </Button>
         <Button variant="outline" size="sm" onClick={() => navigate('/portfolio/history')}>
           <History className="w-4 h-4" />
-          合约持仓历史
+          {t('overview.historyEntry')}
         </Button>
         <Button
           variant="outline"
@@ -523,11 +534,11 @@ export function Portfolio() {
             setRefreshNonce((n) => n + 1);
             setProfitLoaded(false);
             setRealtimeSnapshot(null);
-            toast('已刷新', 'info');
+            toast(t('toast.refreshed'), 'info');
           }}
         >
           <RefreshCcw className="w-4 h-4" />
-          刷新
+          {t('common:refresh')}
         </Button>
       </div>
 
@@ -552,7 +563,7 @@ export function Portfolio() {
             </CardContent>
           </Card>
         ) : !hasPositions ? (
-          <Card className="lg:col-span-2"><CardContent className="p-0"><EmptyState icon={<Briefcase />} text="暂无持仓" /></CardContent></Card>
+          <Card className="lg:col-span-2"><CardContent className="p-0"><EmptyState icon={<Briefcase />} text={t('holdings.empty')} /></CardContent></Card>
         ) : (
           <>
             {/* 币种持仓 */}
@@ -564,8 +575,8 @@ export function Portfolio() {
                       <CircleDollarSign className="w-4 h-4 text-orange-400" />
                     </div>
                     <div>
-                      <span className="text-sm font-semibold tracking-tight">币种持仓</span>
-                      <span className="text-[11px] text-muted-foreground ml-1.5">{cryptoRows.length}种</span>
+                      <span className="text-sm font-semibold tracking-tight">{t('spot.cryptoTitle')}</span>
+                      <span className="text-[11px] text-muted-foreground ml-1.5">{t('spot.cryptoCount', { count: cryptoRows.length })}</span>
                     </div>
                   </div>
                   <div className="text-right">
@@ -598,14 +609,14 @@ export function Portfolio() {
                                 <span className="font-semibold text-[13px] group-hover:text-primary transition-colors">{coin.name}</span>
                                 <span className="text-[11px] text-muted-foreground/60">/ USDT</span>
                                 {coin.unitLabel && (
-                                  <span className={`text-[10px] ${coin.colorClass}/60`}>1枚=1盎司（{coin.unitFactor}g）</span>
+                                  <span className={`text-[10px] ${coin.colorClass}/60`}>{t('row.unitHint', { grams: coin.unitFactor })}</span>
                                 )}
                               </div>
                               <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
-                                <span>持有 {c.quantity}{coin.unitLabel && <span className={`${coin.colorClass}/60 ml-0.5`}>约合 {(c.quantity * coin.unitFactor!).toFixed(1)} {coin.unitLabel}</span>}</span>
+                                <span>{t('row.qty', { qty: c.quantity })}{coin.unitLabel && <span className={`${coin.colorClass}/60 ml-0.5`}>{t('row.approx', { value: (c.quantity * coin.unitFactor!).toFixed(1), unit: coin.unitLabel })}</span>}</span>
                                 <span className="text-border">·</span>
-                                <span>均价 {fmtCryptoPrice(c.avgCost)}</span>
-                                {c.currentPrice > 0 && (<><span className="text-border">·</span><span>现价 {fmtCryptoPrice(c.currentPrice)}</span></>)}
+                                <span>{t('row.avgCost', { price: fmtCryptoPrice(c.avgCost) })}</span>
+                                {c.currentPrice > 0 && (<><span className="text-border">·</span><span>{t('row.lastPrice', { price: fmtCryptoPrice(c.currentPrice) })}</span></>)}
                               </div>
                             </div>
                           </div>
@@ -637,8 +648,8 @@ export function Portfolio() {
                       <Landmark className="w-4 h-4 text-primary" />
                     </div>
                     <div>
-                      <span className="text-sm font-semibold tracking-tight">股票持仓</span>
-                      <span className="text-[11px] text-muted-foreground ml-1.5">{bstockRows.length}只 · bStock</span>
+                      <span className="text-sm font-semibold tracking-tight">{t('spot.bstockTitle')}</span>
+                      <span className="text-[11px] text-muted-foreground ml-1.5">{t('spot.bstockCount', { count: bstockRows.length })}</span>
                     </div>
                   </div>
                   <div className="text-right">
@@ -669,10 +680,10 @@ export function Portfolio() {
                                 <span className="text-[11px] text-muted-foreground/70 shrink-0">{b.ticker}</span>
                               </div>
                               <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
-                                <span>{fmtNum(b.quantity)}股</span>
+                                <span>{t('row.shares', { qty: fmtNum(b.quantity) })}</span>
                                 <span className="text-border">·</span>
-                                <span>均价 {fmtNum(b.avgCost)}</span>
-                                {b.currentPrice > 0 && (<><span className="text-border">·</span><span>现价 {fmtNum(b.currentPrice)}</span></>)}
+                                <span>{t('row.avgCost', { price: fmtNum(b.avgCost) })}</span>
+                                {b.currentPrice > 0 && (<><span className="text-border">·</span><span>{t('row.lastPrice', { price: fmtNum(b.currentPrice) })}</span></>)}
                               </div>
                             </div>
                           </div>
@@ -709,8 +720,8 @@ export function Portfolio() {
                         <Target className="w-4 h-4 text-amber-400" />
                       </div>
                       <div>
-                        <span className="text-sm font-semibold tracking-tight">BTC涨跌预测</span>
-                        <span className="text-[11px] text-muted-foreground ml-1.5">{predictionPnl.totalBets}笔</span>
+                        <span className="text-sm font-semibold tracking-tight">{t('prediction.title')}</span>
+                        <span className="text-[11px] text-muted-foreground ml-1.5">{t('prediction.bets', { count: predictionPnl.totalBets })}</span>
                       </div>
                     </div>
                     <div className="text-right flex items-center gap-2">
@@ -719,7 +730,7 @@ export function Portfolio() {
                           {predictionProfit >= 0 ? '+' : ''}{fmtNum(predictionProfit)}
                         </div>
                         <div className="text-[11px] text-muted-foreground num">
-                          胜率 {predictionPnl.winRate}%
+                          {t('prediction.winRate', { rate: predictionPnl.winRate })}
                         </div>
                       </div>
                       <ChevronRight className="w-3.5 h-3.5 text-muted-foreground/40" />
@@ -728,22 +739,22 @@ export function Portfolio() {
                 </button>
                 <CardContent className="p-0 divide-y divide-border/30">
                   <div className="px-4 py-3 flex items-center justify-between">
-                    <span className="text-[12px] text-muted-foreground">已实现盈亏</span>
+                    <span className="text-[12px] text-muted-foreground">{t('field.realizedPnl')}</span>
                     <span className={cn("text-[13px] font-semibold num", predictionPnl.realizedPnl >= 0 ? "text-gain" : "text-loss")}>
                       {predictionPnl.realizedPnl >= 0 ? '+' : ''}{fmtNum(predictionPnl.realizedPnl)}
                     </span>
                   </div>
                   {predictionPnl.activeBets > 0 && (
                     <div className="px-4 py-3 flex items-center justify-between">
-                      <span className="text-[12px] text-muted-foreground">活跃持仓 ({predictionPnl.activeBets}笔)</span>
+                      <span className="text-[12px] text-muted-foreground">{t('prediction.active', { count: predictionPnl.activeBets })}</span>
                       <div className="flex items-center gap-2">
-                        <span className="text-[12px] text-muted-foreground num">成本 {fmtNum(predictionPnl.activeCost)}</span>
-                        <span className="text-[13px] font-semibold num">市值 {fmtNum(predictionPnl.activeValue)}</span>
+                        <span className="text-[12px] text-muted-foreground num">{t('prediction.cost', { value: fmtNum(predictionPnl.activeCost) })}</span>
+                        <span className="text-[13px] font-semibold num">{t('prediction.value', { value: fmtNum(predictionPnl.activeValue) })}</span>
                       </div>
                     </div>
                   )}
                   <div className="px-4 py-3 flex items-center justify-between">
-                    <span className="text-[12px] text-muted-foreground">胜/负</span>
+                    <span className="text-[12px] text-muted-foreground">{t('prediction.record')}</span>
                     <span className="text-[13px] num">
                       <span className="text-gain font-semibold">{predictionPnl.wonBets}</span>
                       <span className="text-muted-foreground mx-1">/</span>
@@ -763,7 +774,7 @@ export function Portfolio() {
                 <div className="lg:col-span-2 rounded-xl border border-dashed border-border/60 bg-card/50 backdrop-blur-sm px-4 py-3 flex items-center justify-between">
                   <div className="flex items-center gap-2 text-sm text-muted-foreground">
                     <Briefcase className="w-3.5 h-3.5" />
-                    <span>持仓合计</span>
+                    <span>{t('holdings.total')}</span>
                   </div>
                   <div className="flex items-center gap-3">
                     <span className="text-sm font-bold num"><AnimNum value={allTotal} /></span>
@@ -778,8 +789,8 @@ export function Portfolio() {
         )}
       </div>
 
-      {/* 隐私开关 + 重置账户。只在 PC 出现——手机端底栏有「我的」页，同一个入口不重复摆两处 */}
-      <div className="hidden md:block space-y-4">
+      {/* 隐私开关 + 重置账户。只在 ≥1024 出现——底栏 lg:hidden，1023 及以下有「我的」页，同一个入口不重复摆两处 */}
+      <div className="hidden lg:block space-y-4">
         <ProfilePublicToggle />
 
         <Card className="border-destructive/20">
@@ -787,11 +798,10 @@ export function Portfolio() {
             <div className="space-y-1.5 min-w-0">
               <div className="flex items-center gap-2">
                 <RotateCcw className="w-4 h-4 text-destructive shrink-0" />
-                <h2 className="text-sm font-bold text-destructive">重置账户</h2>
+                <h2 className="text-sm font-bold text-destructive">{t('reset.title')}</h2>
               </div>
               <p className="text-xs text-muted-foreground leading-relaxed">
-                清空全部持仓、订单、游戏记录与资产历史，余额恢复为初始资金。
-                留言和禁言状态不受影响。每周只能重置一次。
+                {t('reset.desc')}
               </p>
             </div>
             <Button
@@ -800,7 +810,7 @@ export function Portfolio() {
               className="shrink-0 text-destructive hover:text-destructive hover:bg-destructive/8"
               onClick={() => setResetOpen(true)}
             >
-              重置我的账户
+              {t('reset.action')}
             </Button>
           </CardContent>
         </Card>
@@ -808,34 +818,42 @@ export function Portfolio() {
         {/* 二次确认：必须逐字输入用户名，防误点 */}
         <Dialog open={resetOpen} onClose={closeReset}>
           <DialogHeader>
-            <h2 className="text-lg font-bold text-destructive">确认重置账户</h2>
+            <h2 className="text-lg font-bold text-destructive">{t('reset.dialogTitle')}</h2>
           </DialogHeader>
           <DialogContent>
             <div className="space-y-3">
               <p className="text-xs text-muted-foreground leading-relaxed">
-                此操作不可撤销，将清空：现货与合约的全部持仓和订单、预测下注、
-                21点/Mines/视频扑克记录、资产历史、每日 Buff、钱包划转流水。
+                {t('reset.warnClears')}
+              </p>
+              <p className="text-xs leading-relaxed text-warning">
+                {t('reset.warnCost')}
               </p>
               <p className="text-xs">
-                请输入你的用户名 <strong className="text-foreground">{user.username}</strong> 以确认：
+                {/* 用户名夹在句子中间，中英语序不同，整句交给 Trans 摆位 */}
+                <Trans
+                  ns="portfolio"
+                  i18nKey="reset.confirmName"
+                  values={{ name: user.username }}
+                  components={[<strong key="name" className="text-foreground" />]}
+                />
               </p>
               <Input
                 value={confirmName}
                 onChange={e => setConfirmName(e.target.value)}
-                placeholder="输入用户名"
+                placeholder={t('reset.namePlaceholder')}
                 autoComplete="off"
               />
             </div>
           </DialogContent>
           <DialogFooter>
-            <Button variant="ghost" size="sm" onClick={closeReset}>取消</Button>
+            <Button variant="ghost" size="sm" onClick={closeReset}>{t('common:cancel')}</Button>
             <Button
               size="sm"
               className="bg-destructive text-white hover:bg-destructive/90"
               disabled={confirmName !== user.username || resetting}
               onClick={handleReset}
             >
-              {resetting ? '重置中…' : '确认重置'}
+              {resetting ? t('reset.submitting') : t('reset.submit')}
             </Button>
           </DialogFooter>
         </Dialog>

@@ -159,11 +159,8 @@ public class RankingService {
 
     /**
      * 榜单排序维度。
-     * <p>
-     * 【为什么没有"收益率"这一档】初始资金全站是同一个常数，
-     * 收益率 =(总资产−初始资金)/初始资金 与总资产是同一个序，加进来就是同一张榜换个名字。
-     * <p>
-     * 【为什么没有"游戏钱包/余额钱包"】那是现金构成，不是成绩。
+     * 没有"收益率"档：初始资金全站同一常数，收益率与总资产同序，是同一张榜换个名字。
+     * 没有"钱包余额"档：那是现金构成，不是成绩。
      */
     public enum RankingSort {
         /** 总资产。默认榜，含游戏盈亏和优惠券带来的便宜 */
@@ -191,25 +188,14 @@ public class RankingService {
      * 整榜内存切片分页。排名是全局的，必须先算完整榜才有名次，所以不做 SQL 分页。
      * <p>
      * 换排序维度也在内存里重排，不重新查库——整榜本来就已经全在手上（最多 500 人）。
-     * <b>名次跟着当前维度重算</b>：按交易盈利排却显示总资产名次，会排出 01、07、03 这种跳号，
-     * 看的人只会以为榜坏了。
-     * <p>
-     * 直接改 DTO 上的 rank 是安全的：{@link #getRanking()} 命中缓存时是从 Redis 反序列化出来的新对象，
-     * 未命中时是 {@link #refreshRanking()} 刚 new 出来、且已经写完缓存的那批——两条路都不会回写缓存。
+     * <b>名次跟着当前维度重算</b>（见 {@link #sortedBy}）：按交易盈利排却显示总资产名次，
+     * 会排出 01、07、03 这种跳号，看的人只会以为榜坏了。
      */
     public Page<RankingDTO> getRankingPage(String sort, int pageNum, int pageSize) {
         int safeNum = Math.max(pageNum, 1);
         int safeSize = Math.clamp(pageSize, 1, MAX_PAGE_SIZE);
-        RankingSort dimension = RankingSort.of(sort);
 
-        List<RankingDTO> all = getRanking();
-        if (dimension != RankingSort.ASSETS) {
-            all = new ArrayList<>(all);
-            all.sort(dimension.comparator.reversed());
-            for (int i = 0; i < all.size(); i++) {
-                all.get(i).setRank(i + 1);
-            }
-        }
+        List<RankingDTO> all = sortedBy(getRanking(), RankingSort.of(sort));
 
         int from = Math.min((safeNum - 1) * safeSize, all.size());
         int to = Math.min(from + safeSize, all.size());
@@ -220,17 +206,42 @@ public class RankingService {
     }
 
     /**
-     * 单个用户的榜单行；从没成交过的人返回 null。
+     * 整榜按指定维度重排，名次跟着重编。ASSETS 就是刷榜时排好的那份，原样返回。
+     * <p>
+     * 改 rank 不会污染缓存：{@link #getRanking()} 命中时是从 Redis 反序列化出来的新对象，
+     * 未命中时是 {@link #refreshRanking()} 刚 new 出来、且已经写完缓存的那批。
+     */
+    private static List<RankingDTO> sortedBy(List<RankingDTO> all, RankingSort dimension) {
+        if (dimension == RankingSort.ASSETS) return all;
+        List<RankingDTO> sorted = new ArrayList<>(all);
+        sorted.sort(dimension.comparator.reversed());
+        for (int i = 0; i < sorted.size(); i++) {
+            sorted.get(i).setRank(i + 1);
+        }
+        return sorted;
+    }
+
+    /** 单个用户的榜单行，名次按总资产维度。等价于 {@code findRanking(userId, null)} */
+    public RankingDTO findRanking(Long userId) {
+        return findRanking(userId, null);
+    }
+
+    /**
+     * 单个用户的榜单行，名次按 sort 维度算（认不出的取值退回 ASSETS，同分页那条口径）；没上榜返回 null。
      * <p>
      * 缓存最长 15 分钟，刚下完第一单的人还没进榜，直接返 null 会让他点自己的详情页扑空。
-     * 所以缓存里没有时再刷一次——但<b>先用一条 count 确认这人真交易过才刷</b>：
-     * 不设这道，拿不存在的 userId 循环打详情接口，每次请求都会触发一次全量刷榜。
+     * 所以缓存里没有时再刷一次，但要先过两道闸：
+     * 一是<b>整榜没被 MAX_RANKED 截断</b>——截断了说明榜外还排着人，刷完他多半照样进不来，白刷一次全量；
+     * 二是<b>一条 count 确认这人真交易过</b>——不设这道，拿不存在的 userId 循环打接口，每次请求都触发全量刷榜。
      */
-    public RankingDTO findRanking(Long userId) {
-        RankingDTO hit = lookup(getRanking(), userId);
+    public RankingDTO findRanking(Long userId, String sort) {
+        RankingSort dimension = RankingSort.of(sort);
+        List<RankingDTO> all = getRanking();
+        RankingDTO hit = lookup(sortedBy(all, dimension), userId);
         if (hit != null) return hit;
+        if (all.size() >= MAX_RANKED) return null;
         if (publicTradeMapper.countByUser(userId) == 0) return null;
-        return lookup(refreshRanking(), userId);
+        return lookup(sortedBy(refreshRanking(), dimension), userId);
     }
 
     private static RankingDTO lookup(List<RankingDTO> list, Long userId) {

@@ -1,6 +1,8 @@
 package com.mawai.wiibquant.external.sim;
 
 import com.mawai.wiibcommon.dto.FuturesOpenRequest;
+import com.mawai.wiibcommon.enums.AgentLang;
+import com.mawai.wiibcommon.i18n.MessageCatalog;
 import com.mawai.wiibcommon.dto.FuturesOrderResponse;
 import com.mawai.wiibcommon.dto.FuturesPositionDTO;
 import com.sun.net.httpserver.HttpServer;
@@ -123,7 +125,7 @@ class SimTradeClientTest {
 
     /**
      * 读超时抛什么，AI Trader 的"同键重发确认"整条链路都押在这上面：必须是
-     * ResourceAccessException 而不是业务失败那种 IllegalStateException，
+     * ResourceAccessException 而不是业务失败那种 SimBizException，
      * 否则 isTransportFailure 认不出来，超时会被当明确失败回给模型，模型重下就是双仓。
      */
     @Test
@@ -165,7 +167,50 @@ class SimTradeClientTest {
         responseJson = "{\"code\":500,\"msg\":\"余额不足\",\"data\":null}";
 
         assertThatThrownBy(() -> client.getBalance(42L))
-                .isInstanceOf(IllegalStateException.class)
+                .isInstanceOf(SimTradeClient.SimBizException.class)
                 .hasMessageContaining("余额不足");
+    }
+
+    /**
+     * ★ 拒因成文跟<b>调用方</b>那门语言，不跟 sim 渲染时用的那门。★
+     * <p>
+     * sim 收不到语言（quant 打的是 internal API，没有请求线程也没有 X-Lang），
+     * 它只会按自己的回落语言渲染。所以 quant 拿码回来自己查词表 —— 英文 trader
+     * 的拒因既要回给模型（跟着混语言模型立刻跟着混）又要进公开时间线。
+     */
+    @Test
+    void 业务码按调用方语言成文_而不是sim渲染的那句() {
+        MessageCatalog messages = new MessageCatalog();
+        // 1751 = FUTURES_INSUFFICIENT_BALANCE，sim 那边渲染成了中文
+        responseJson = "{\"code\":1751,\"msg\":\"余额不足\",\"data\":null}";
+        Throwable e = catchThrowable(() -> client.openPosition(42L, new FuturesOpenRequest()));
+
+        assertThat(SimTradeClient.describe(e, messages, AgentLang.EN)).isEqualTo("Not enough balance");
+        assertThat(SimTradeClient.describe(e, messages, AgentLang.ZH)).isEqualTo("余额不足");
+    }
+
+    /**
+     * 1000 以下的码（sim 侧 Result.fail(自己写的话)）没有词表条目可查，退回原话。
+     * 渲染成通用的"系统错误"会把唯一有用的信息弄丢——比如护栏为什么拒绝删号。
+     */
+    @Test
+    void 通用码退回sim原话_不渲染成系统错误() {
+        MessageCatalog messages = new MessageCatalog();
+        responseJson = "{\"code\":500,\"msg\":\"仅允许删除 ai_trader 量化子账户\",\"data\":null}";
+        Throwable e = catchThrowable(() -> client.deleteAccount("quant-FIBO"));
+
+        assertThat(SimTradeClient.describe(e, messages, AgentLang.EN))
+                .isEqualTo("仅允许删除 ai_trader 量化子账户");
+    }
+
+    /** 非 sim 业务失败（传输失败、代码异常）没有码可查，照原样 —— 那是诊断信息不是给用户的话 */
+    @Test
+    void 非业务失败照原样不进词表() {
+        MessageCatalog messages = new MessageCatalog();
+        assertThat(SimTradeClient.describe(new IllegalStateException("boom"), messages, AgentLang.EN))
+                .isEqualTo("boom");
+        // 无 message 的异常退回类名，绝不能是 null —— 这句要落库展示
+        assertThat(SimTradeClient.describe(new NullPointerException(), messages, AgentLang.EN))
+                .isEqualTo("NullPointerException");
     }
 }

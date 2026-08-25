@@ -8,6 +8,7 @@ import com.mawai.wiibcommon.entity.FuturesStopLoss;
 import com.mawai.wiibcommon.entity.User;
 import com.mawai.wiibcommon.enums.ErrorCode;
 import com.mawai.wiibcommon.exception.BizException;
+import com.mawai.wiibcommon.i18n.MessageCatalog;
 import com.mawai.wiibcommon.market.BinanceRestClient;
 import com.mawai.wiibsim.config.FuturesLeverageBracketRegistry;
 import com.mawai.wiibsim.config.TradeFilterRegistry;
@@ -87,7 +88,8 @@ class FuturesOpenMergeTest {
                 userService, userMapper, positionMapper, orderMapper,
                 new TradingConfig(), mock(RedisLockUtil.class), cacheService,
                 positionIndexService, bracketRegistry, crossMarginService,
-                new TradeFilterRegistry(mock(BinanceRestClient.class)));
+                new TradeFilterRegistry(mock(BinanceRestClient.class)),
+                new MessageCatalog());
     }
 
     private static FuturesPosition pos(long id, String side, String mode, int leverage,

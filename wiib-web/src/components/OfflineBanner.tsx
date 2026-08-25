@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { WifiOff } from 'lucide-react';
 
 /**
@@ -9,6 +10,7 @@ import { WifiOff } from 'lucide-react';
  */
 export function OfflineBanner() {
   const [offline, setOffline] = useState(() => !navigator.onLine);
+  const { t } = useTranslation('layout');
 
   useEffect(() => {
     const on = () => setOffline(false);
@@ -29,7 +31,7 @@ export function OfflineBanner() {
       className="flex items-center justify-center gap-2 h-7 border-b border-warning/30 bg-warning/15 text-warning text-[11px] font-semibold"
     >
       <WifiOff className="w-3.5 h-3.5" />
-      网络已断开，行情停止更新
+      {t('offline')}
     </div>
   );
 }

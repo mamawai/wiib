@@ -1,5 +1,7 @@
 package com.mawai.wiibquant.agent.chat;
 
+import com.mawai.wiibcommon.enums.AgentLang;
+import com.mawai.wiibcommon.i18n.MessageCatalog;
 import com.mawai.wiibquant.agent.llm.SseChannel;
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONObject;
@@ -7,12 +9,12 @@ import com.mawai.wiibquant.agent.llm.ChatEndpoints;
 import com.mawai.wiibquant.agent.llm.LlmEndpointService;
 import com.mawai.wiibcommon.util.Result;
 import com.mawai.wiibquant.agent.analysis.DeepAnalysisService;
+import com.mawai.wiibquant.agent.behavior.BehaviorAnalysisService;
 import com.mawai.wiibquant.agent.toolkit.MarketToolkit;
 import com.mawai.wiibquant.agent.toolkit.NewsToolkit;
 import com.mawai.wiibquant.agent.trader.TraderChatService;
 import com.mawai.wiibquant.mapper.WorkbenchChatContextMapper;
 import org.bsc.langgraph4j.prebuilt.MessagesState;
-import org.bsc.langgraph4j.spring.ai.serializer.jackson.SpringAIJacksonStateSerializer;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.model.ChatModel;
@@ -145,10 +147,11 @@ class ChatWorkbenchHitlTest {
 
         ChatEndpoints llmConfig = ChatTestEndpoints.eps(1L, "gpt-5");   // 叶子指纹含 userId（trader 工具按它认人）
         return new ChatAgentFactory(chatModelFactory, mock(MarketToolkit.class), mock(NewsToolkit.class),
-                deepAnalysisService, mock(TraderChatService.class), mock(WorkbenchRunRegistry.class),
-                registry, new SpringAIJacksonStateSerializer<>(MessagesState::new),
+                deepAnalysisService, mock(BehaviorAnalysisService.class),
+                mock(TraderChatService.class), mock(WorkbenchRunRegistry.class),
+                registry, ChatTestEndpoints.PROMPTS, ChatTestEndpoints.TOOLS,
                 PRODUCTION_LIMIT, NO_COMPRESSION, 6, "X")
-                .leavesFor(llmConfig);
+                .leavesFor(llmConfig, AgentLang.ZH);
     }
 
     /** 叶子改由 chat() 取好传进 run()，这条测试直接调 run()，所以工厂和配置服务都用不上了 */
@@ -162,16 +165,15 @@ class ChatWorkbenchHitlTest {
             contextRows.put(inv.getArgument(0), inv.getArgument(2));
             return 1;
         });
-        ChatContextStore contextStore = new ChatContextStore(
-                contextMapper, new SpringAIJacksonStateSerializer<>(MessagesState::new));
-        ChatTurnRunner turnRunner = new ChatTurnRunner(contextStore, registry);
+        ChatContextStore contextStore = new ChatContextStore(contextMapper);
+        ChatTurnRunner turnRunner = new ChatTurnRunner(contextStore, registry, ChatTestEndpoints.PROMPTS, ChatTestEndpoints.TOOLS);
         ChatConcurrencyGate gate = new ChatConcurrencyGate(10);
         WorkbenchRunRegistry runRegistry = mock(WorkbenchRunRegistry.class);
         ChatHistoryService history = mock(ChatHistoryService.class);
-        yieldCoordinator = new ChatYieldCoordinator(gate, runRegistry, turnRunner, history);
+        yieldCoordinator = new ChatYieldCoordinator();
         return new ChatWorkbenchController(mock(ChatAgentFactory.class), mock(LlmEndpointService.class),
                 registry, history, contextStore, turnRunner,
-                runRegistry, gate, yieldCoordinator);
+                runRegistry, gate, new MessageCatalog(), yieldCoordinator, ChatTestEndpoints.PROMPTS, ChatTestEndpoints.zhLang());
     }
 
     /** 跑一轮，返回这一轮发出去的全部 SSE 事件 */
@@ -180,7 +182,7 @@ class ChatWorkbenchHitlTest {
         deepCallsThisTurn.set(0);
         RecordingEmitter emitter = new RecordingEmitter();
         controller.run(new SseChannel(emitter), 1L, SESSION, message, leaves,
-                yieldCoordinator.openTurn(1L), null);
+                yieldCoordinator.openTurn(1L), null, null, null);
         return emitter;
     }
 
@@ -260,7 +262,7 @@ class ChatWorkbenchHitlTest {
         assertThat(registry.peekPending(SESSION)).isEmpty();   // 没有登记新的待确认
         // 三条一起才钉得住"走的是拒绝分支"：没卡 + 没登记 + 工具也没跑
         //（只断前两条的话，"闸门放行、工具真跑了 3 次深模型"也满足）
-        verify(deepAnalysisService, never()).buildNewsContext();
+        verify(deepAnalysisService, never()).buildNewsContext(any());
     }
 
     /**

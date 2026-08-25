@@ -1,9 +1,10 @@
 import axios from 'axios';
+import i18n, { currentLang, type Lang } from '../i18n';
 import type { TnOverview, TnTrade, TnDailyCell, TnEquityPoint, TnFillStats, TnManualOrderReq, TnOrderResult, TnAck } from '../types/testnet';
-import type { BacktestStrategyMeta, BacktestTaskStatus, BacktestEventsPage, BacktestKlinesPage, BacktestResultPayload, ReplayCoverage, HistoryKlinesPayload, ReplayCoachRequest, ReplayCoachEvent } from '../types';
+import type { BacktestTaskStatus, BacktestEventsPage, BacktestKlinesPage, BacktestResultPayload, ReplayCoverage, HistoryKlinesPayload, ReplayCoachRequest, ReplayCoachEvent } from '../types';
 import type { LedgerEntry, LedgerBizTypeOption, PublicTrade, UserProfile, PositionHistoryItem, RankingSort } from '../types';
 import type { LlmEndpointView, LlmEndpointSaveRequest, LlmBindings, LlmPurpose } from '../types';
-import type { User, PageResult, RankingItem, CommentItem, NotificationItem, BuffStatus, UserBuff, BlackjackStatus, GameState, ConvertResult, MinesStatus, MinesGameState, VideoPokerStatus, VideoPokerGameState, CryptoPrice, CryptoOrderRequest, CryptoOrder, CryptoPosition, BStock, FuturesOpenRequest, FuturesCloseRequest, FuturesAddMarginRequest, FuturesReduceMarginRequest, FuturesStopLossRequest, FuturesTakeProfitRequest, FuturesAdjustLeverageRequest, FuturesCrossAccount, WalletTransferPreview, FuturesPosition, FuturesOrder, FuturesReverseResult, FuturesBracket, TradeFilterMap, PredictionRound, PredictionBet, PredictionBuyRequest, PredictionBetLive, PredictionPnl, AssetSnapshot, CategoryAverages, BehaviorAnalysisReport, ForceOrder, AiKeyConfig, AiModelAssignment, InviteCode, WorkbenchEvent, StrategyAccountView, TraderPublicView, TraderOwnerView, TraderDetailView, AiTraderDecisionView, TraderEquityPoint, TraderUpsertRequest, TraderSpec, TraderRequestView, StrategySignalState, FeedStreamHealth, WorkbenchSessionSummary, WorkbenchChatMessage, NewsFlashItem, TraderActionPanel, TraderActionResult, TradeRecordView } from '../types';
+import type { User, PageResult, RankingItem, CommentItem, NotificationItem, BuffStatus, UserBuff, BlackjackStatus, GameState, ConvertResult, MinesStatus, MinesGameState, VideoPokerStatus, VideoPokerGameState, CryptoPrice, CryptoOrderRequest, CryptoOrder, CryptoPosition, BStock, FuturesOpenRequest, FuturesCloseRequest, FuturesAddMarginRequest, FuturesReduceMarginRequest, FuturesStopLossRequest, FuturesTakeProfitRequest, FuturesAdjustLeverageRequest, FuturesCrossAccount, WalletTransferPreview, FuturesPosition, FuturesOrder, FuturesReverseResult, FuturesBracket, TradeFilterMap, PredictionRound, PredictionBet, PredictionBuyRequest, PredictionBetLive, PredictionPnl, AssetSnapshot, CategoryAverages, ForceOrder, AiKeyConfig, AiModelAssignment, InviteCode, ChatIntent, WorkbenchEvent, StrategyAccountView, TraderPublicView, TraderOwnerView, TraderDetailView, AiTraderDecisionView, TraderEquityPoint, TraderUpsertRequest, TraderSpec, TraderRequestView, StrategySignalState, FeedStreamHealth, WorkbenchSessionSummary, WorkbenchSessionStatus, WorkbenchChatMessage, NewsFlashItem, TraderActionPanel, TraderActionResult, TradeRecordView } from '../types';
 
 const api = axios.create({
   baseURL: '/api',
@@ -23,8 +24,15 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * 界面语言头。后端的报错文案按它查词表现渲染（服务端 RequestLangFilter），
+ * 未登录的那些报错（登录失败、邀请码无效）也照样有语言可依——user.lang 那时候还没得查。
+ */
+const LANG_HEADER = 'X-Lang';
+
 // 请求拦截器：添加Token到Header
 api.interceptors.request.use((config) => {
+  config.headers[LANG_HEADER] = currentLang();
   const stored = localStorage.getItem('wiib-user');
   if (stored) {
     try {
@@ -41,13 +49,14 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   (res) => {
     const { code, msg, data } = res.data;
+    // msg 是后端下发的，原样透传；只有后端没给话时才用词表兜底那半句
     if (code === 401) {
       localStorage.removeItem('wiib-user');
       window.location.href = '/login';
-      return Promise.reject(new ApiError(msg || '未登录', code));
+      return Promise.reject(new ApiError(msg || i18n.t('errors:unauthorized'), code));
     }
     if (code !== 0) {
-      return Promise.reject(new ApiError(msg || '请求失败', code));
+      return Promise.reject(new ApiError(msg || i18n.t('errors:requestFailed'), code));
     }
     return data;
   },
@@ -87,13 +96,16 @@ export const userApi = {
   /** 指定月份逐日快照（首页月度盈亏网格）。month 形如 2026-07；快照只写到昨天，返回里没有今天 */
   assetDaily: (month: string) => api.get<unknown, AssetSnapshot[]>('/user/asset-daily', { params: { month } }),
   categoryAverages: (days = 30) => api.get<unknown, CategoryAverages>('/user/category-averages', { params: { days } }),
-  // 重置账户：清空交易与游戏数据回到初始资金，每周一次，需逐字输入用户名确认
+  // 重置账户：清空交易与游戏数据回到初始资金。活动期每周首次免费、之后每次扣 30 活动分；
+  // 平时每周限 1 次。需逐字输入用户名确认
   resetAccount: (confirmUsername: string) =>
     api.post<unknown, void>('/user/reset', { confirmUsername }),
   /** 详情页公开开关（默认开）。关掉只挡别人看你的持仓与仓位历史，仍照常上排行榜 */
   getProfilePublic: () => api.get<unknown, boolean>('/user/profile-public'),
   setProfilePublic: (profilePublic: boolean) =>
     api.post<unknown, void>('/user/profile-public', { profilePublic }),
+  /** 只写不读：界面语言以本地 localStorage 为准，服务端这份只决定 AI 产出（提示词/回答）的语言 */
+  setLang: (lang: Lang) => api.put<unknown, void>('/user/lang', { lang }),
 };
 
 // ========== 钱包划转（余额钱包 ⇌ 游戏钱包） ==========
@@ -114,6 +126,13 @@ export const rankingApi = {
    */
   list: (sort: RankingSort = 'ASSETS', pageNum = 1, pageSize = 20) =>
     api.get<unknown, PageResult<RankingItem>>('/ranking', { params: { sort, pageNum, pageSize } }),
+  /**
+   * 当前用户的榜单行，名次跟着 sort 维度走（与 list 同口径）。
+   * 分页一次只给 20 条，自己在第几页无从得知，所以按 userId 单独直取。
+   * 没上榜返回 null（不是错误）；未登录别调，会 401 弹回登录页。
+   */
+  me: (sort: RankingSort = 'ASSETS') =>
+    api.get<unknown, RankingItem | null>('/ranking/me', { params: { sort } }),
   /** 用户详情：榜单行 + 当前持仓。对方关了公开开关时 403（本人除外） */
   userProfile: (userId: number) => api.get<unknown, UserProfile>(`/ranking/users/${userId}`),
   /** 该用户的成交历史分页，同样过隐私门控 */
@@ -367,19 +386,13 @@ export const predictionApi = {
   pnl: () => api.get<unknown, PredictionPnl>('/prediction/pnl'),
 };
 
-// ========== AI Agent 接口 ==========
-export const aiAgentApi = {
-  analyzeBehavior: () =>
-    api.post<unknown, BehaviorAnalysisReport>('/ai/analyze-behavior'),
-};
-
 // ========== P7 研判工作台 ==========
 /** SSE 事件流解析：named events 逐个回调（心跳注释帧无 data，忽略）。工作台对话与复盘 AI 教练共用 */
 const streamSseEvents = async <E,>(
   response: Response,
   onEvent: (e: E) => void,
 ) => {
-  if (!response.body) throw new Error('响应流不可用');
+  if (!response.body) throw new Error(i18n.t('errors:streamUnavailable'));
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
@@ -423,6 +436,7 @@ const postSse = async <E,>(url: string, body: unknown, onEvent: (e: E) => void, 
     credentials: 'include',
     headers: {
       'Content-Type': 'application/json',
+      [LANG_HEADER]: currentLang(),
       ...(token ? { satoken: token } : {}),
     },
     body: JSON.stringify(body),
@@ -431,16 +445,20 @@ const postSse = async <E,>(url: string, body: unknown, onEvent: (e: E) => void, 
   const contentType = response.headers.get('content-type') || '';
   if (contentType.includes('application/json')) {
     const payload = await response.json() as { code?: number; msg?: string };
-    throw new ApiError(payload.msg || '请求失败', payload.code ?? -1);
+    throw new ApiError(payload.msg || i18n.t('errors:requestFailed'), payload.code ?? -1);
   }
-  if (!response.ok) throw new Error(`请求失败: ${response.status}`);
+  if (!response.ok) throw new Error(i18n.t('errors:requestFailedStatus', { status: response.status }));
   await streamSseEvents<E>(response, onEvent);
 };
 
 export const workbenchApi = {
-  /** 工作台 SSE：POST /ai/workbench/chat，事件 session/agent_start/token/hitl_request/done/error */
-  chat: (sessionId: string | null, message: string, onEvent: (e: WorkbenchEvent) => void, signal?: AbortSignal) =>
-    postSse<WorkbenchEvent>('/api/ai/workbench/chat', { sessionId, message }, onEvent, signal),
+  /**
+   * 工作台 SSE：POST /ai/workbench/chat，事件 session/agent_start/token/hitl_request/done/error。
+   * intent 只有功能按钮直发时带（后端据此跳过专家派发直奔对应工具）
+   */
+  chat: (sessionId: string | null, message: string, onEvent: (e: WorkbenchEvent) => void,
+         signal?: AbortSignal, intent?: ChatIntent) =>
+    postSse<WorkbenchEvent>('/api/ai/workbench/chat', { sessionId, message, intent }, onEvent, signal),
   /**
    * 重新生成会话最后一条回答：后端把模型侧上下文回退到那条提问之前，再用原提问重跑，
    * 事件协议与 chat 完全一致。回不去的会话（末尾不是答案/补答行/本轮压缩过）返回 2206。
@@ -458,9 +476,15 @@ export const workbenchApi = {
     api.post<unknown, void>('/ai/workbench/approve', { sessionId, approved, requestId }),
   /** 历史会话列表（标题=首条提问，按最后活跃倒序） */
   sessions: () => api.get<unknown, WorkbenchSessionSummary[]>('/ai/workbench/sessions'),
-  /** 会话是否还在后台跑（切页/刷新回来判断，结束后拉历史补答案） */
+  /**
+   * 补答轮：让位时交出去的专家批次由这一轮接回，事件协议与 chat 一致（标头是第一帧答案 token）。
+   * 后端只在会话空闲时放行：占线回 2203（不做让位握手），没欠账回 2208
+   */
+  deferred: (sessionId: string, onEvent: (e: WorkbenchEvent) => void, signal?: AbortSignal) =>
+    postSse<WorkbenchEvent>('/api/ai/workbench/deferred', { sessionId }, onEvent, signal),
+  /** 会话运行状态（切页/刷新回来判断：还在跑→轮询；欠着补答→空闲时发起补答轮） */
   sessionStatus: (sessionId: string) =>
-    api.get<unknown, boolean>(`/ai/workbench/sessions/${sessionId}/status`),
+    api.get<unknown, WorkbenchSessionStatus>(`/ai/workbench/sessions/${sessionId}/status`),
   /** 单会话消息记录；续聊仍走 chat 带同一 sessionId */
   sessionMessages: (sessionId: string) =>
     api.get<unknown, WorkbenchChatMessage[]>(`/ai/workbench/sessions/${sessionId}/messages`),
@@ -526,9 +550,12 @@ export const traderApi = {
   reset: () => api.post<unknown, void>('/ai/trader/reset'),
   arena: () => api.get<unknown, TraderPublicView[]>('/ai/trader/arena'),
   detail: (id: number) => api.get<unknown, TraderDetailView>(`/ai/trader/${id}`),
-  /** 决策时间线；round 传空=当前局。必须按局看——局与局是两个独立子账户，混排对不上净值曲线 */
-  decisions: (id: number, limit = 50, before?: number, round?: number) =>
-    api.get<unknown, AiTraderDecisionView[]>(`/ai/trader/${id}/decisions`, { params: { limit, before, round } }),
+  /**
+   * 决策时间线；round 传空=当前局。必须按局看——局与局是两个独立子账户，混排对不上净值曲线。
+   * from/to 是 wakeTime 区间 [from, to)，按天翻看用；与 before 分页可叠加
+   */
+  decisions: (id: number, limit = 50, before?: number, round?: number, from?: number, to?: number) =>
+    api.get<unknown, AiTraderDecisionView[]>(`/ai/trader/${id}/decisions`, { params: { limit, before, round, from, to } }),
   equityCurve: (id: number, round?: number) =>
     api.get<unknown, TraderEquityPoint[]>(`/ai/trader/${id}/equity-curve`, { params: { round } }),
   /** 已了结交易（只有当前局：每局独立子账户，历史局的子账户查不回来） */
@@ -579,7 +606,6 @@ export const testnetApi = {
 
 // ========== 可视化回测页 ==========
 export const backtestApi = {
-  strategies: () => api.get<unknown, BacktestStrategyMeta[]>('/ai/backtest/strategies'),
   /** 提交回测（异步；同一时刻仅一个任务，冲突时后端 fail）。fromMs 含、toMs 不含 */
   run: (req: { strategyId: string; symbol: string; fromMs: number; toMs: number; initialBalance?: number; leverage?: number }) =>
     api.post<unknown, { taskId: string }>('/ai/backtest/run', req),

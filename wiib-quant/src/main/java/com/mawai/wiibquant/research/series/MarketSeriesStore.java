@@ -21,7 +21,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 链下时点序列落库 / 加载——统一复用 live 的 factor_history 表（Slice3 融合，废弃 Slice2 自建的 market_series_history）。
+ * 链下时点序列落库 / 加载——统一复用 live 的 factor_history 表，不单建序列表。
  * 资金费走 fundingRate（startTime/endTime 正向翻页），F&G 走 alternative.me（一次拉全）；按 factor_history 唯一键幂等 upsert。
  * backfill/load 是 DB+网络 I/O，不做单测（端到端验证）；解析与时间转换为纯静态函数，单测覆盖。
  */

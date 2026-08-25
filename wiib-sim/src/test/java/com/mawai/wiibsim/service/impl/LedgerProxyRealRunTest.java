@@ -169,16 +169,9 @@ class LedgerProxyRealRunTest {
      * 形态二：protected 方法 + getAopProxy 调用（CryptoOrderServiceImpl.doCancelOrder）。
      * 这是项目绕"同类自调用"的既定范式，也是本次标注最吃重的形态。
      * <p>
-     * 【为什么不是 doSettle】现货卖出取消 5min 延迟后，结算并进了 sell() 的同一个事务，
-     * 那个 protected 的结算入口没了。同形态里 doCancelOrder 最合适：同类、金额完全确定
-     * （解冻多少就是多少，不依赖任何配置项），换成计息那种按利率算的会把"注解生效没有"
-     * 和"利率配成了几"两件事绑在一起，配置一改用例就红得不知所以然。
-     * <p>
-     * 用 getAopProxy 取代理是<b>冗余保险不是必需</b>：@Autowired 注进来的
-     * CryptoOrderServiceImpl 本来就是容器里那个 CGLIB 代理，本用例又与目标类同包
-     * （protected 可见），直接调一样会被拦。写成 getAopProxy 只为和生产调用形态看起来一致——
-     * 严格说也不完全一致：生产是 getAopProxy(this)（查找键=原类），这里是 getAopProxy(代理)
-     * （键=代理类），不是同一次 getBean 查找。不影响本用例的有效性。
+     * 选 doCancelOrder：同类同形态且金额完全确定（解冻多少就是多少），
+     * 不把"注解生效没有"和配置项绑在一起。
+     * getAopProxy 是冗余保险不是必需（注入的本就是 CGLIB 代理），写成这样只为与生产调用形态一致。
      */
     @Test
     void protected方法经代理调用时Ledger真的生效() {
@@ -320,9 +313,8 @@ class LedgerProxyRealRunTest {
         req.setPositionId(posId);
         req.setAmount(new BigDecimal("100.00"));
 
-        // 【必须钉住是哪个异常】只断言"抛了"是不够的：要是它在 getUserPosition 那步就抛了，
-        // 钱压根没动，下面三条断言会全绿——一个什么都没验到的假绿。
-        // FUTURES_SYMBOL_NOT_CONFIGURED 只可能来自 calcStaticLiqPrice，而那已经在两次动钱之后。
+        // 必须钉住是哪个异常：FUTURES_SYMBOL_NOT_CONFIGURED 只可能来自 calcStaticLiqPrice（两次动钱之后），
+        // 只断言"抛了"的话前置校验抛出也假绿
         assertThatThrownBy(() -> SpringUtils.getAopProxy(futuresTradingServiceImpl).doAddMargin(uid, req))
                 .isInstanceOf(BizException.class)
                 .extracting(e -> ((BizException) e).getCode())

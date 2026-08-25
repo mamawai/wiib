@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Wallet, Warehouse, Scale, Sparkles } from 'lucide-react';
 import { cryptoOrderApi } from '../../api';
 import { useUserStore } from '../../stores/userStore';
@@ -29,6 +30,7 @@ export function SpotTradePanel({ symbol, currentPrice, position, onModeChange, o
   onModeChange: (m: 'spot' | 'futures') => void;
   onTraded: () => void;
 }) {
+  const { t } = useTranslation('trade');
   const cfg = getCoin(symbol);
   // 现货交易过滤器（对齐Binance）：步长 + 最小名义额（DOGE=1U 其余5U）
   const filter = useTradeFilter('spot', symbol);
@@ -82,14 +84,16 @@ export function SpotTradePanel({ symbol, currentPrice, position, onModeChange, o
   const handleSubmit = async () => {
     if (orderType === 'LIMIT') {
       const lp = parseFloat(limitPrice);
-      if (!lp || lp <= 0) { toast('请输入有效限价', 'error'); return; }
+      if (!lp || lp <= 0) { toast(t('toast.invalidLimit'), 'error'); return; }
     }
     // USDT 模式：输入是总花费预算（含手续费），先按当前价换算成数量，再走原有校验与提交。
     // 市价单实际按服务端提交时刻的价成交，与页面价的抖动差和仓位 % 按钮同级，模拟盘可接受
     const input = parseFloat(quantity);
     const qty = isUsdtInput ? (unitFactor > 0 ? (input || 0) / unitFactor : 0) : input;
     if (!qty || qty < MIN_QTY) {
-      toast(isUsdtInput ? `金额太小，买不到最小数量 ${MIN_QTY} ${cfg.name}` : `最小数量 ${MIN_QTY}`, 'error');
+      toast(isUsdtInput
+        ? t('toast.amountTooSmall', { qty: MIN_QTY, unit: cfg.name })
+        : t('toast.minQtySpot', { qty: MIN_QTY }), 'error');
       return;
     }
     // ×杠杆会产生浮点尾差，按步长向下对齐；全量卖出保留精确持仓量（后端豁免步长，尘埃能清干净）
@@ -99,7 +103,7 @@ export function SpotTradePanel({ symbol, currentPrice, position, onModeChange, o
     if (!isFullSell) actualQty = floorToStep(actualQty, filter.stepSize);
     // 买入需过最小名义额（对齐Binance；卖出为减持豁免）
     if (side === 'BUY' && price > 0 && actualQty * price < filter.minNotional) {
-      toast(`最小下单金额 ${filter.minNotional} USDT`, 'error'); return;
+      toast(t('toast.minNotional', { amount: filter.minNotional }), 'error'); return;
     }
     setSubmitting(true);
     try {
@@ -113,10 +117,10 @@ export function SpotTradePanel({ symbol, currentPrice, position, onModeChange, o
       };
       if (side === 'BUY') {
         await cryptoOrderApi.buy(req);
-        toast('买入成功', 'success');
+        toast(t('toast.buyOk'), 'success');
       } else {
         await cryptoOrderApi.sell(req);
-        toast('卖出成功', 'success');
+        toast(t('toast.sellOk'), 'success');
       }
       setActionSuccess(true);
       if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
@@ -126,7 +130,7 @@ export function SpotTradePanel({ symbol, currentPrice, position, onModeChange, o
       setLeverage(1);
       onTraded();
     } catch (e: unknown) {
-      toast((e as Error).message || '下单失败', 'error');
+      toast((e as Error).message || t('toast.orderFailed'), 'error');
     } finally { setSubmitting(false); }
   };
 
@@ -145,8 +149,8 @@ export function SpotTradePanel({ symbol, currentPrice, position, onModeChange, o
       {/* 买卖切换 + 现货/合约 + 爆仓 */}
       <div className="px-5 pt-5 flex flex-wrap items-center gap-3">
         <div className="flex flex-1 min-w-[140px] rounded-md border border-border overflow-hidden divide-x divide-border">
-          <button onClick={() => setSide('BUY')} className={`flex-1 py-2.5 text-sm font-bold transition-colors cursor-pointer ${side === 'BUY' ? 'bg-gain text-white' : 'text-muted-foreground hover:bg-surface-hover hover:text-foreground'}`}>买入</button>
-          <button onClick={() => setSide('SELL')} className={`flex-1 py-2.5 text-sm font-bold transition-colors cursor-pointer ${side === 'SELL' ? 'bg-loss text-white' : 'text-muted-foreground hover:bg-surface-hover hover:text-foreground'}`}>卖出</button>
+          <button onClick={() => setSide('BUY')} className={`flex-1 py-2.5 text-sm font-bold transition-colors cursor-pointer ${side === 'BUY' ? 'bg-gain text-white' : 'text-muted-foreground hover:bg-surface-hover hover:text-foreground'}`}>{t('side.buy')}</button>
+          <button onClick={() => setSide('SELL')} className={`flex-1 py-2.5 text-sm font-bold transition-colors cursor-pointer ${side === 'SELL' ? 'bg-loss text-white' : 'text-muted-foreground hover:bg-surface-hover hover:text-foreground'}`}>{t('side.sell')}</button>
         </div>
         <TradeModeSwitch mode="spot" futuresOnly={cfg.futuresOnly} onModeChange={onModeChange} />
       </div>
@@ -156,17 +160,17 @@ export function SpotTradePanel({ symbol, currentPrice, position, onModeChange, o
         {/* 执行方式：市价/限价 */}
         <div className="flex items-center gap-2">
           <NeuToggle
-            label="执行方式"
+            label={t('orderType.label')}
             value={orderType}
             onChange={setOrderType}
-            options={[{ value: 'MARKET', label: '市价' }, { value: 'LIMIT', label: '限价' }]}
+            options={[{ value: 'MARKET', label: t('orderType.market') }, { value: 'LIMIT', label: t('orderType.limit') }]}
           />
         </div>
         {/* 限价输入 */}
         {orderType === 'LIMIT' && (
           <div className="space-y-1.5">
-            <label className="text-xs font-bold text-muted-foreground">限价 (USDT)</label>
-            <Input type="number" placeholder="输入限价" value={limitPrice} onChange={e => setLimitPrice(e.target.value)} step={PRICE_STEP_TEXT} min="0" />
+            <label className="text-xs font-bold text-muted-foreground">{t('open.limitLabel')}</label>
+            <Input type="number" placeholder={t('open.limitPlaceholder')} value={limitPrice} onChange={e => setLimitPrice(e.target.value)} step={PRICE_STEP_TEXT} min="0" />
           </div>
         )}
 
@@ -175,7 +179,7 @@ export function SpotTradePanel({ symbol, currentPrice, position, onModeChange, o
           <div className="flex items-center justify-between">
             {side === 'BUY' ? (
               <div className="flex items-center gap-2">
-                <label className="text-xs font-bold text-muted-foreground">{buyUnit === 'USDT' ? '金额' : '数量'}</label>
+                <label className="text-xs font-bold text-muted-foreground">{buyUnit === 'USDT' ? t('spot.amount') : t('spot.quantity')}</label>
                 {/* 输入单位切换：按币数量买 / 按 USDT 预算买 */}
                 <div className="flex rounded border border-border overflow-hidden divide-x divide-border">
                   {(['COIN', 'USDT'] as const).map(u => (
@@ -191,7 +195,7 @@ export function SpotTradePanel({ symbol, currentPrice, position, onModeChange, o
                 </div>
               </div>
             ) : (
-              <label className="text-xs font-bold text-muted-foreground">数量 ({cfg.name})</label>
+              <label className="text-xs font-bold text-muted-foreground">{t('spot.quantityUnit', { unit: cfg.name })}</label>
             )}
             {user && (
               <span className="text-xs font-bold text-muted-foreground flex items-center gap-1">
@@ -205,7 +209,7 @@ export function SpotTradePanel({ symbol, currentPrice, position, onModeChange, o
           </div>
           <Input
             type="number"
-            placeholder={isUsdtInput ? '花费金额 (USDT，含手续费)' : String(MIN_QTY)}
+            placeholder={isUsdtInput ? t('spot.spendPlaceholder') : String(MIN_QTY)}
             value={quantity}
             onChange={e => setQuantity(e.target.value)}
             step={isUsdtInput ? '0.01' : String(MIN_QTY)}
@@ -214,7 +218,7 @@ export function SpotTradePanel({ symbol, currentPrice, position, onModeChange, o
           {currentPrice > 0 && (
             <div className="space-y-1.5 pt-1">
               <label className="text-xs font-bold text-muted-foreground flex items-center gap-1.5">
-                <Warehouse className="w-3.5 h-3.5" /> 仓位
+                <Warehouse className="w-3.5 h-3.5" /> {t('spot.positionPcts')}
               </label>
               <div className="flex gap-1.5">
                 {POSITION_PCTS.map(pct => {
@@ -257,7 +261,7 @@ export function SpotTradePanel({ symbol, currentPrice, position, onModeChange, o
         {side === 'BUY' && orderType === 'MARKET' && (
           <div className="space-y-1.5">
             <label className="text-xs font-bold text-muted-foreground flex items-center gap-1.5">
-              <Scale className="w-3.5 h-3.5" /> 杠杆{useBuff ? ' (使用折扣时不支持)' : ''}
+              <Scale className="w-3.5 h-3.5" /> {t('lev.label')}{useBuff ? ` ${t('spot.levDisabledByBuff')}` : ''}
             </label>
             <div className={useBuff ? 'opacity-40 pointer-events-none' : ''}>
               <select
@@ -267,7 +271,7 @@ export function SpotTradePanel({ symbol, currentPrice, position, onModeChange, o
                 style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2.5'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 12px center' }}
               >
                 {SPOT_LEVERAGE_OPTIONS.map(lv => (
-                  <option key={lv} value={lv}>{lv}x{lv === 1 ? ' (无杠杆)' : ''}</option>
+                  <option key={lv} value={lv}>{lv}x{lv === 1 ? ` ${t('spot.noLeverage')}` : ''}</option>
                 ))}
               </select>
             </div>
@@ -280,7 +284,7 @@ export function SpotTradePanel({ symbol, currentPrice, position, onModeChange, o
             <div className="flex items-center justify-between">
               <label className="text-xs font-bold text-muted-foreground flex items-center gap-1">
                 <Sparkles className="w-3.5 h-3.5 text-warning" />
-                折扣券{leverage > 1 ? ' (使用杠杆时不支持)' : ''}
+                {t('spot.discount')}{leverage > 1 ? ` ${t('spot.discountDisabledByLev')}` : ''}
               </label>
               <button
                 type="button"
@@ -294,7 +298,7 @@ export function SpotTradePanel({ symbol, currentPrice, position, onModeChange, o
             {useBuff && (
               <div className="flex items-center gap-2 text-xs bg-warning/10 border border-warning/40 rounded-md px-3 py-2">
                 <Badge variant="warning" className="text-[10px] px-2">{discountBuff.buffName}</Badge>
-                <span className="text-muted-foreground font-bold">本次买入整单折扣</span>
+                <span className="text-muted-foreground font-bold">{t('spot.discountLine')}</span>
               </div>
             )}
           </div>
@@ -306,18 +310,18 @@ export function SpotTradePanel({ symbol, currentPrice, position, onModeChange, o
             <div className="space-y-2">
               {isUsdtInput && (
                 <div className="flex justify-between text-xs font-bold text-muted-foreground">
-                  <span>预估买到{unitLv > 1 ? ` (${unitLv}x 总仓位)` : ''}</span>
+                  <span>{t('spot.estGet')}{unitLv > 1 ? ` ${t('spot.totalPosLev', { lev: unitLv })}` : ''}</span>
                   <span className="font-mono text-foreground">≈ {fmtNum(floorToStep(leveragedQty, filter.stepSize))} {cfg.name}</span>
                 </div>
               )}
               {side === 'BUY' && leverage > 1 && (
                 <div className="flex justify-between text-xs font-bold text-muted-foreground">
-                  <span>总仓位 ({leverage}x)</span>
+                  <span>{t('spot.totalPos', { lev: leverage })}</span>
                   <span className="font-mono text-foreground">${fmtNum(estimatedAmount)} USDT</span>
                 </div>
               )}
               <div className="flex justify-between text-xs font-bold text-muted-foreground">
-                <span>{side === 'BUY' && leverage > 1 ? '保证金' : `预估${side === 'BUY' ? '花费' : '收入'}`}</span>
+                <span>{side === 'BUY' && leverage > 1 ? t('spot.margin') : t(side === 'BUY' ? 'spot.estCost' : 'spot.estProceeds')}</span>
                 <span className="text-foreground">
                   {useBuff && discountRate < 1 && side === 'BUY' && (
                     <span className="line-through text-muted-foreground mr-1.5">${fmtNum(marginAmount)}</span>
@@ -326,12 +330,12 @@ export function SpotTradePanel({ symbol, currentPrice, position, onModeChange, o
                 </span>
               </div>
               <div className="flex justify-between text-xs font-bold text-muted-foreground">
-                <span>手续费 (0.1%)</span>
+                <span>{t('spot.fee')}</span>
                 <span className="font-mono">${fmtNum(estimatedCommission * discountRate)} USDT</span>
               </div>
               {side === 'BUY' && (
                 <div className="flex justify-between text-sm font-black pt-1">
-                  <span className="text-muted-foreground">合计</span>
+                  <span className="text-muted-foreground">{t('spot.total')}</span>
                   <span className="text-foreground">
                     ${fmtNum((marginAmount + estimatedCommission) * discountRate)} USDT
                   </span>

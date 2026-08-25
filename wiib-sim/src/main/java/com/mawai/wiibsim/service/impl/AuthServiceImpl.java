@@ -8,6 +8,7 @@ import com.mawai.wiibcommon.dto.UserDTO;
 import com.mawai.wiibcommon.entity.User;
 import com.mawai.wiibcommon.enums.ErrorCode;
 import com.mawai.wiibcommon.exception.BizException;
+import com.mawai.wiibcommon.i18n.MessageCatalog;
 import com.mawai.wiibsim.config.LinuxDoConfig;
 import com.mawai.wiibsim.dto.LinuxDoUserInfo;
 import com.mawai.wiibsim.mapper.InviteCodeMapper;
@@ -31,6 +32,7 @@ import org.springframework.web.client.RestClientResponseException;
 import org.springframework.web.client.RestTemplate;
 
 import java.math.BigDecimal;
+import java.util.Map;
 
 /**
  * 认证服务实现
@@ -44,18 +46,22 @@ public class AuthServiceImpl implements AuthService {
     private final LinuxDoConfig linuxDoConfig;
     private final RestTemplate linuxDoRestTemplate;
     private final InviteCodeMapper inviteCodeMapper;
+    /** 登录多半发生在未登录态，语言只能取自请求头（见 RequestLang） */
+    private final MessageCatalog messages;
 
     public AuthServiceImpl(
             UserService userService,
             LinuxDoConfig linuxDoConfig,
             @Qualifier("linuxDoRestTemplate") RestTemplate linuxDoRestTemplate,
-            InviteCodeMapper inviteCodeMapper
+            InviteCodeMapper inviteCodeMapper,
+            MessageCatalog messages
     )
     {
         this.userService = userService;
         this.linuxDoConfig = linuxDoConfig;
         this.linuxDoRestTemplate = linuxDoRestTemplate;
         this.inviteCodeMapper = inviteCodeMapper;
+        this.messages = messages;
     }
 
     @Value("${trading.initial-balance:10000}")
@@ -148,7 +154,8 @@ public class AuthServiceImpl implements AuthService {
             throw e;   // 内部已带具体错误码/文案，别降级成通用系统错误
         } catch (Exception e) {
             log.error("LinuxDo登录失败", e);
-            throw new BizException(ErrorCode.SYSTEM_ERROR.getCode(), "登录失败: " + e.getMessage());
+            throw new BizException(ErrorCode.SYSTEM_ERROR.getCode(),
+                    messages.get("auth.loginFailed", Map.of("reason", String.valueOf(e.getMessage()))));
         }
     }
 
@@ -182,7 +189,7 @@ public class AuthServiceImpl implements AuthService {
     @Override
     public String localLogin() {
         if (linuxDoConfig.isEnabled() || passwordLoginEnabled) {
-            throw new BizException("已启用正式登录方式，管理员直登不可用");
+            throw new BizException(messages.get("auth.localLoginDisabled"));
         }
         userService.ensureAdminUser();   // 幂等，保证 id=1 存在
         StpUtil.login(1L);
@@ -200,22 +207,22 @@ public class AuthServiceImpl implements AuthService {
     @Transactional(rollbackFor = Exception.class)
     public String register(String username, String password, String inviteCode) {
         if (!passwordLoginEnabled) {
-            throw new BizException("账号密码登录未启用");
+            throw new BizException(messages.get("auth.passwordLoginDisabled"));
         }
         String name = username == null ? "" : username.trim();
         if (!name.matches("[A-Za-z0-9_\\u4e00-\\u9fa5]{2,20}")) {
-            throw new BizException("用户名需为2-20位字母/数字/下划线/中文");
+            throw new BizException(messages.get("auth.usernameFormat"));
         }
         if (password == null || password.length() < 6 || password.length() > 64) {
-            throw new BizException("密码长度需为6-64位");
+            throw new BizException(messages.get("auth.passwordLength"));
         }
         if (inviteCode == null || inviteCode.isBlank()) {
-            throw new BizException("邀请码不能为空");
+            throw new BizException(messages.get("auth.inviteCodeRequired"));
         }
         // 原子扣码：无效/停用/次数用完都返回 null；后面用户名冲突时事务回滚，次数不白扣
         Long codeId = inviteCodeMapper.consume(inviteCode.trim());
         if (codeId == null) {
-            throw new BizException("邀请码无效或已用完");
+            throw new BizException(messages.get("auth.inviteCodeInvalid"));
         }
         User user = new User();
         user.setUsername(name);
@@ -225,7 +232,7 @@ public class AuthServiceImpl implements AuthService {
         try {
             userService.save(user);
         } catch (DuplicateKeyException e) {
-            throw new BizException("用户名已存在");
+            throw new BizException(messages.get("auth.usernameTaken"));
         }
         // 同 OAuth 首登：建号是 INSERT，切面抓不到，初始资金得自己补记
         userService.recordInitialGrant(user.getId(), initialBalance);
@@ -237,13 +244,13 @@ public class AuthServiceImpl implements AuthService {
     @Override
     public String passwordLogin(String username, String password) {
         if (!passwordLoginEnabled) {
-            throw new BizException("账号密码登录未启用");
+            throw new BizException(messages.get("auth.passwordLoginDisabled"));
         }
         User user = username == null ? null : userService.findByUsername(username.trim());
         // 统一文案，不暴露"账号存在但密码错"；OAuth 用户 password_hash 为空，同样拒绝
         if (user == null || user.getPasswordHash() == null
                 || password == null || !BCrypt.checkpw(password, user.getPasswordHash())) {
-            throw new BizException("用户名或密码错误");
+            throw new BizException(messages.get("auth.badCredentials"));
         }
         StpUtil.login(user.getId());
         log.info("密码登录成功: {} UserId={}", user.getUsername(), user.getId());
@@ -270,16 +277,16 @@ public class AuthServiceImpl implements AuthService {
         try {
             response = linuxDoRestTemplate.postForObject(linuxDoConfig.getTokenUrl(), entity, String.class);
         } catch (RestClientResponseException e) {
-            throw new BizException("获取access_token失败: " + e.getResponseBodyAsString());
+            throw new BizException(messages.get("auth.oauth.tokenFailed", Map.of("reason", e.getResponseBodyAsString())));
         }
 
         if (response == null) {
-            throw new BizException("获取access_token失败: 空响应");
+            throw new BizException(messages.get("auth.oauth.tokenEmpty"));
         }
 
         JSONObject json = JSONUtil.parseObj(response);
         if (json.getStr("access_token") == null) {
-            throw new BizException("获取access_token失败: " + response);
+            throw new BizException(messages.get("auth.oauth.tokenFailed", Map.of("reason", response)));
         }
 
         return json.getStr("access_token");
@@ -302,17 +309,17 @@ public class AuthServiceImpl implements AuthService {
                     LinuxDoUserInfo.class
             ).getBody();
         } catch (RestClientResponseException e) {
-            throw new BizException("获取用户信息失败: " + e.getResponseBodyAsString());
+            throw new BizException(messages.get("auth.oauth.userInfoFailed", Map.of("reason", e.getResponseBodyAsString())));
         } catch (RestClientException e) {
-            throw new BizException("解析用户信息失败: " + e.getMessage());
+            throw new BizException(messages.get("auth.oauth.userInfoParseFailed", Map.of("reason", String.valueOf(e.getMessage()))));
         }
 
         if (userInfo == null) {
-            throw new BizException("获取用户信息失败: 空响应");
+            throw new BizException(messages.get("auth.oauth.userInfoEmpty"));
         }
 
         if (userInfo.getId() == null) {
-            throw new BizException("获取用户信息失败: id为空");
+            throw new BizException(messages.get("auth.oauth.userIdEmpty"));
         }
         return userInfo;
     }

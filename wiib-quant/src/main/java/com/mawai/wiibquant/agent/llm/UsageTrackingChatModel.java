@@ -14,13 +14,9 @@ import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * ChatModel 装饰器：把一次运行里所有模型调用的 token 用量累加起来。
+ * 装饰器包在最外层，这么写为了把 ReAct 循环里的每一次调用都收进来。
  * <p>
- * 为什么要装饰器而不是在某处读一次：ReAct 是循环，一次唤醒会调模型很多次
- * （见 {@link ModelCallLimiter}），单次响应的 usage 只是其中一小段。
- * 包在最外层才能把每一次都收进来。
- * <p>
- * <b>getOptions 必须原样透传</b>：这里返回自己造的 options，
- * ReactAgent 拿到的工具列表就成了空数组，agent 一个工具都调不动（本项目踩过）。
+ * <b>getOptions 必须原样透传</b>：返回自己造的 options 会让 ReactAgent 的工具列表变成空数组。
  * <p>
  * 两种用法：交易员轨每次唤醒 new 一个实例、用完取 {@link #snapshot()}；
  * 对话轨的实例跟着叶子图跨轮缓存，靠 {@link #reset()} 划轮边界（同一用户同时只有一轮，见 ChatConcurrencyGate）。

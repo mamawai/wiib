@@ -12,10 +12,10 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 
 /**
- * 账户清除的事务段：12 张用户表清空后，重置路径复位 user 行、销户路径直接删行，全成功或全回滚。
+ * 账户清除的事务段：重置路径 12 张用户表清空 + user 复位；
+ * 销户路径清表后直接删行。全成功或全回滚。
  * <p>
- * 单独成 bean 而不是放 {@link AccountResetService} 里，是因为 @Transactional 走 Spring 代理，
- * 同类内部自调用会绕过代理导致事务根本不生效——这种 bug 平时看不出来，只在出错回滚时才暴露。
+ * 单独成 bean，这么写为了 @Transactional 走 Spring 代理（同类自调用会绕过代理，事务不生效）。
  */
 @Component
 @RequiredArgsConstructor
@@ -53,7 +53,10 @@ public class AccountPurgeTx {
         userService.recordInitialGrant(userId, initialBalance);
     }
 
-    /** 量化子账户销户：同一套清表后直接删 user 行（不复位不入金），AI Trader 过期轮次清理用。 */
+    /**
+     * 量化子账户销户：同一套清表后直接删 user 行（不复位不入金），
+     * AI Trader 过期轮次清理用。
+     */
     @Transactional(rollbackFor = Exception.class)
     public void deleteAccount(long userId) {
         lockUserRow(userId);

@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom';
+import { Trans, useTranslation } from 'react-i18next';
 import { cn } from '../lib/utils';
 import type { LlmEndpointView } from '../types';
 
@@ -18,11 +19,12 @@ export function LlmEndpointSelect({
   className?: string;
   disabled?: boolean;
 }) {
+  const { t } = useTranslation('ai');
   if (endpoints.length === 0) {
     return (
       <span className={cn('text-xs text-muted-foreground', className)}>
-        还没有可用的模型端点，
-        <Link to="/ai?tab=config" className="text-primary font-bold hover:underline">去 AI 页模型配置里添加</Link>
+        <Trans ns="ai" i18nKey="endpoint.selectEmpty"
+               components={[<Link to="/ai" className="text-primary font-bold hover:underline" />]} />
       </span>
     );
   }
@@ -34,10 +36,10 @@ export function LlmEndpointSelect({
       disabled={disabled}
       className={cn('h-9 rounded-lg border border-border bg-card-2 px-2.5 text-xs font-bold disabled:opacity-60', className)}
     >
-      <option value="">{followLabel ?? `跟随默认（${dft.name} · ${dft.model}）`}</option>
+      <option value="">{followLabel ?? t('endpoint.followDefault', { name: dft.name, model: dft.model })}</option>
       {endpoints.map(e => (
         <option key={e.id} value={String(e.id)}>
-          {e.name} · {e.model}{e.isDefault ? '（默认）' : ''}
+          {e.name} · {e.model}{e.isDefault ? t('model.viaDefault') : ''}
         </option>
       ))}
     </select>

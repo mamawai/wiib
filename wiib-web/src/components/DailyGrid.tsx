@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { cn, fmtDate } from '../lib/utils';
 
@@ -20,7 +21,8 @@ interface Props {
   className?: string;
 }
 
-const WEEKDAYS = ['一', '二', '三', '四', '五', '六', '日'];
+// 周一起头，存词表 key 不存文案（数组在组件外，拿不到 t）
+const WEEKDAY_KEYS = ['grid.mon', 'grid.tue', 'grid.wed', 'grid.thu', 'grid.fri', 'grid.sat', 'grid.sun'];
 // 热力分档（绿/红各4级，越深盈亏越大）；封顶 /70 保证格内数字可读
 const GAIN_BG = ['bg-gain/15', 'bg-gain/30', 'bg-gain/50', 'bg-gain/70'];
 const LOSS_BG = ['bg-loss/15', 'bg-loss/30', 'bg-loss/50', 'bg-loss/70'];
@@ -39,6 +41,8 @@ function fmtCell(v: number) {
  * 画成虚线"今"格而不是跟没数据的日子一样摆个灰点，免得被读成"今天白干了"。
  */
 export function DailyGrid({ cells, month, onMonthChange, selectedDate, onSelectDate, className }: Props) {
+  const { t } = useTranslation('home');
+
   const byDate = useMemo(() => {
     const m = new Map<string, DailyGridCell>();
     cells.forEach((c) => m.set(c.date, c));
@@ -91,8 +95,8 @@ export function DailyGrid({ cells, month, onMonthChange, selectedDate, onSelectD
 
       {/* 星期表头 */}
       <div className="grid grid-cols-7 gap-1 mb-1">
-        {WEEKDAYS.map((w) => (
-          <div key={w} className="text-center text-[10px] text-muted-foreground font-bold">{w}</div>
+        {WEEKDAY_KEYS.map((k) => (
+          <div key={k} className="text-center text-[10px] text-muted-foreground font-bold">{t(k)}</div>
         ))}
       </div>
 
@@ -131,11 +135,11 @@ export function DailyGrid({ cells, month, onMonthChange, selectedDate, onSelectD
                     {fmtCell(cell!.pnl)}
                   </span>
                   {cell!.tradeCount != null && (
-                    <span className="text-[8px] text-muted-foreground leading-none">{cell!.tradeCount}笔</span>
+                    <span className="text-[8px] text-muted-foreground leading-none">{t('grid.trades', { count: cell!.tradeCount })}</span>
                   )}
                 </>
               ) : isToday ? (
-                <span className="text-[10px] font-bold text-primary/70 leading-none">今</span>
+                <span className="text-[10px] font-bold text-primary/70 leading-none">{t('grid.today')}</span>
               ) : (
                 <span className={cn('text-xs', future ? 'text-transparent' : 'text-muted-foreground/30')}>·</span>
               )}

@@ -1,4 +1,5 @@
 import { useState, type CSSProperties } from 'react';
+import { useTranslation } from 'react-i18next';
 
 /**
  * 百分比滑杆（LeverageSlider 同款简化）：机加工细槽 + 净色填充 + 0/25/50/75/100 刻痕与可点标签，
@@ -12,6 +13,7 @@ export function PctSlider({ value, onChange, color = 'var(--color-primary)' }: {
   onChange: (pct: number) => void;
   color?: string;                // 填充/气泡色（CSS 颜色值或变量）
 }) {
+  const { t } = useTranslation('trade');
   const [dragging, setDragging] = useState(false);
   const pct = Math.min(100, Math.max(0, Math.round(value)));
 
@@ -37,7 +39,7 @@ export function PctSlider({ value, onChange, color = 'var(--color-primary)' }: {
           max={100}
           step={1}
           value={pct}
-          aria-label="百分比"
+          aria-label={t('pct.label')}
           onChange={e => onChange(Number(e.target.value))}
           onPointerDown={() => setDragging(true)}
           onPointerUp={() => setDragging(false)}

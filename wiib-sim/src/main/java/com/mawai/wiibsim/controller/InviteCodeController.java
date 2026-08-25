@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.mawai.wiibcommon.annotation.RequireAdmin;
 import com.mawai.wiibcommon.entity.InviteCode;
 import com.mawai.wiibcommon.exception.BizException;
+import com.mawai.wiibcommon.i18n.MessageCatalog;
 import com.mawai.wiibcommon.util.Result;
 import com.mawai.wiibsim.mapper.InviteCodeMapper;
 import io.swagger.v3.oas.annotations.Operation;
@@ -24,14 +25,16 @@ import java.util.List;
 public class InviteCodeController {
 
     private final InviteCodeMapper inviteCodeMapper;
+    /** 管理页的校验提示也跟界面语言 */
+    private final MessageCatalog messages;
 
     @PostMapping("/generate")
     @Operation(summary = "生成邀请码（可配次数和批量个数）")
     public Result<List<InviteCode>> generate(@RequestBody GenerateRequest request) {
         int maxUses = request.getMaxUses() != null ? request.getMaxUses() : 1;
         int count = request.getCount() != null ? request.getCount() : 1;
-        if (maxUses < 1 || maxUses > 10000) throw new BizException("次数需在1-10000之间");
-        if (count < 1 || count > 100) throw new BizException("批量个数需在1-100之间");
+        if (maxUses < 1 || maxUses > 10000) throw new BizException(messages.get("sim.invite.usesRange"));
+        if (count < 1 || count > 100) throw new BizException(messages.get("sim.invite.batchRange"));
         List<InviteCode> created = new ArrayList<>(count);
         for (int i = 0; i < count; i++) {
             InviteCode ic = new InviteCode();

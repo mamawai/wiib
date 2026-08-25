@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, type ElementType, type ReactNode } from 'react';
+import { useTranslation } from 'react-i18next';
 import { testnetApi } from '../api';
 import { useToast } from '../components/ui/use-toast';
 import { useUserStore } from '../stores/userStore';
@@ -15,7 +16,6 @@ import type {
 } from '../types/testnet';
 
 const SYMBOLS = ['ALL', 'BTCUSDT', 'ETHUSDT'] as const;
-const SYM_LABEL: Record<string, string> = { ALL: '全部', BTCUSDT: 'BTC', ETHUSDT: 'ETH' };
 
 /* ========== 格式化（与 AiTrader 同口径） ========== */
 function fmt$(n?: number | null, compact = false) {
@@ -57,6 +57,7 @@ function StatCard({ label, value, sub, icon: Icon, trend }: {
 
 /* ========== Position Card ========== */
 function PositionCard({ p }: { p: TnPosition }) {
+  const { t } = useTranslation('strategy');
   const isLong = p.side === 'LONG';
   const pnlUp = p.unrealizedProfit >= 0;
   const px = (v?: number | null) => formatCoinPrice(p.symbol, v);
@@ -82,9 +83,9 @@ function PositionCard({ p }: { p: TnPosition }) {
       </div>
       <div className="grid grid-cols-3 gap-2">
         {[
-          { label: '标记价', value: px(p.markPrice) },
-          { label: '强平价', value: px(p.liquidationPrice), warn: true },
-          { label: '开仓价', value: px(p.entryPrice) },
+          { label: t('testnet.pos.mark'), value: px(p.markPrice) },
+          { label: t('testnet.pos.liq'), value: px(p.liquidationPrice), warn: true },
+          { label: t('testnet.pos.entry'), value: px(p.entryPrice) },
         ].map((it) => (
           <div key={it.label} className="border border-border bg-card-2 rounded-md px-2 py-1.5 text-center">
             <div className="text-[10px] text-muted-foreground">{it.label}</div>
@@ -98,6 +99,7 @@ function PositionCard({ p }: { p: TnPosition }) {
 
 /* ========== Open Order Row ========== */
 function OpenOrderRow({ o }: { o: TnOpenOrder }) {
+  const { t } = useTranslation('strategy');
   const isEntry = o.type === 'LIMIT';
   const buy = o.side === 'BUY';
   return (
@@ -105,7 +107,7 @@ function OpenOrderRow({ o }: { o: TnOpenOrder }) {
       <span className="font-bold">{o.symbol.replace('USDT', '')}</span>
       <span className={cn('text-[10px] font-black px-1.5 py-0.5 rounded',
         isEntry ? 'bg-primary/10 text-primary' : 'bg-warning/10 text-warning')}>
-        {isEntry ? '进场' : o.type === 'STOP_MARKET' ? '止损' : '止盈'}
+        {isEntry ? t('testnet.order.entry') : o.type === 'STOP_MARKET' ? t('testnet.order.stopLoss') : t('testnet.order.takeProfit')}
       </span>
       <span className={cn('font-bold', buy ? 'text-gain' : 'text-loss')}>{o.side}</span>
       <span className="ml-auto tabular-nums text-muted-foreground">
@@ -164,6 +166,7 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
 }
 
 function ManualTradePanel({ onDone }: { onDone: () => void }) {
+  const { t } = useTranslation('strategy');
   const { toast } = useToast();
   const [open, setOpen] = useState(false);
   const [symbol, setSymbol] = useState('BTCUSDT');
@@ -181,32 +184,37 @@ function ManualTradePanel({ onDone }: { onDone: () => void }) {
     setResult(null);
     fn()
       .then((text) => { setResult({ ok: true, text }); onDone(); })
-      .catch((e) => { const msg = (e as Error).message || '操作失败'; setResult({ ok: false, text: msg }); toast(msg, 'error'); })
+      .catch((e) => { const msg = (e as Error).message || t('testnet.manual.opFailed'); setResult({ ok: false, text: msg }); toast(msg, 'error'); })
       .finally(() => setBusy(null));
   };
 
   const submitOrder = () => {
     const qty = Number(quantity);
-    if (!qty || qty <= 0) { toast('数量必须 > 0', 'error'); return; }
-    if (type === 'LIMIT' && (!Number(price) || Number(price) <= 0)) { toast('LIMIT 需填价格', 'error'); return; }
+    if (!qty || qty <= 0) { toast(t('testnet.manual.qtyPositive'), 'error'); return; }
+    if (type === 'LIMIT' && (!Number(price) || Number(price) <= 0)) { toast(t('testnet.manual.priceRequired'), 'error'); return; }
     run('order', async () => {
       const r = await testnetApi.manualOrder({
         symbol, side, type, quantity: qty,
         price: type === 'LIMIT' ? Number(price) : undefined,
         leverage: leverage ? Number(leverage) : undefined,
       });
-      return `#${r.orderId} ${r.status}${r.avgPrice ? ` @ ${r.avgPrice}` : ''}（${r.side} ${r.type} ${r.origQty}）`;
+      return t('testnet.manual.orderResult', {
+        id: r.orderId, status: r.status, at: r.avgPrice ? ` @ ${r.avgPrice}` : '',
+        side: r.side, type: r.type, qty: r.origQty,
+      });
     });
   };
 
   const submitClose = () => run('close', async () => {
     const r = await testnetApi.manualClose(symbol);
-    return `平仓 #${r.orderId} ${r.status}${r.avgPrice ? ` @ ${r.avgPrice}` : ''}`;
+    return t('testnet.manual.closeResult', {
+      id: r.orderId, status: r.status, at: r.avgPrice ? ` @ ${r.avgPrice}` : '',
+    });
   });
 
   const submitCancelAll = () => run('cancel', async () => {
     await testnetApi.manualCancelAll(symbol);
-    return `已撤 ${symbol} 全部挂单`;
+    return t('testnet.manual.cancelResult', { symbol });
   });
 
   const inputCls = 'border border-border bg-card-2 rounded-md px-2.5 py-1.5 text-xs tabular-nums w-24 bg-transparent outline-none';
@@ -215,8 +223,8 @@ function ManualTradePanel({ onDone }: { onDone: () => void }) {
     <div className="pt-card rounded-lg overflow-hidden">
       <button onClick={() => setOpen((o) => !o)} className="w-full flex items-center gap-2 px-4 py-3 text-sm font-bold">
         <Wrench className="w-4 h-4 text-warning" />
-        接口自检 · 手动交易
-        <span className="text-[11px] font-normal text-muted-foreground">仅管理员 · 直连 testnet</span>
+        {t('testnet.manual.title')}
+        <span className="text-[11px] font-normal text-muted-foreground">{t('testnet.manual.subtitle')}</span>
         <ChevronDown className={cn('w-4 h-4 ml-auto transition-transform', open && 'rotate-180')} />
       </button>
       {open && (
@@ -237,31 +245,32 @@ function ManualTradePanel({ onDone }: { onDone: () => void }) {
                 <button key={s} onClick={() => setSide(s)}
                   className={cn('text-[11px] font-bold px-2.5 py-1 rounded-lg transition-all',
                     side === s ? (s === 'BUY' ? 'border border-border bg-card-2 text-gain' : 'border border-border bg-card-2 text-loss') : 'border border-border text-muted-foreground')}>
-                  {s === 'BUY' ? '买/多' : '卖/空'}
+                  {s === 'BUY' ? t('testnet.manual.buy') : t('testnet.manual.sell')}
                 </button>
               ))}
             </div>
             <div className="flex gap-1">
-              {(['MARKET', 'LIMIT'] as const).map((t) => (
-                <button key={t} onClick={() => setType(t)}
+              {/* 循环变量避开 t：与 i18n 的 t 同名会遮蔽 */}
+              {(['MARKET', 'LIMIT'] as const).map((ty) => (
+                <button key={ty} onClick={() => setType(ty)}
                   className={cn('text-[11px] font-bold px-2.5 py-1 rounded-lg transition-all',
-                    type === t ? 'border border-border bg-card-2 text-primary' : 'border border-border text-muted-foreground hover:text-foreground')}>
-                  {t === 'MARKET' ? '市价' : '限价'}
+                    type === ty ? 'border border-border bg-card-2 text-primary' : 'border border-border text-muted-foreground hover:text-foreground')}>
+                  {ty === 'MARKET' ? t('testnet.manual.market') : t('testnet.manual.limit')}
                 </button>
               ))}
             </div>
           </div>
           {/* 行2：数量 / 限价(仅 LIMIT) / 杠杆 */}
           <div className="flex flex-wrap items-end gap-3">
-            <Field label="数量(张)">
+            <Field label={t('testnet.manual.qty')}>
               <input value={quantity} onChange={(e) => setQuantity(e.target.value)} inputMode="decimal" className={inputCls} placeholder="0.002" />
             </Field>
             {type === 'LIMIT' && (
-              <Field label="限价">
-                <input value={price} onChange={(e) => setPrice(e.target.value)} inputMode="decimal" className={inputCls} placeholder="挂单价" />
+              <Field label={t('testnet.manual.price')}>
+                <input value={price} onChange={(e) => setPrice(e.target.value)} inputMode="decimal" className={inputCls} placeholder={t('testnet.manual.pricePh')} />
               </Field>
             )}
-            <Field label="杠杆">
+            <Field label={t('testnet.manual.leverage')}>
               <input value={leverage} onChange={(e) => setLeverage(e.target.value)} inputMode="numeric" className={cn(inputCls, 'w-16')} placeholder="20" />
             </Field>
           </div>
@@ -269,15 +278,15 @@ function ManualTradePanel({ onDone }: { onDone: () => void }) {
           <div className="flex flex-wrap gap-2">
             <button onClick={submitOrder} disabled={busy !== null}
               className="border border-border hover:bg-surface-hover px-3 py-1.5 rounded-lg text-xs font-bold text-primary disabled:opacity-50">
-              {busy === 'order' ? '提交中…' : '下单'}
+              {busy === 'order' ? t('testnet.manual.submitting') : t('testnet.manual.submit')}
             </button>
             <button onClick={submitClose} disabled={busy !== null}
               className="border border-border hover:bg-surface-hover px-3 py-1.5 rounded-lg text-xs font-bold text-loss disabled:opacity-50">
-              {busy === 'close' ? '平仓中…' : '市价平仓'}
+              {busy === 'close' ? t('testnet.manual.closing') : t('testnet.manual.closeMarket')}
             </button>
             <button onClick={submitCancelAll} disabled={busy !== null}
               className="border border-border hover:bg-surface-hover px-3 py-1.5 rounded-lg text-xs font-bold text-muted-foreground disabled:opacity-50">
-              {busy === 'cancel' ? '撤单中…' : '撤挂单'}
+              {busy === 'cancel' ? t('testnet.manual.cancelling') : t('testnet.manual.cancelAll')}
             </button>
           </div>
           {/* 结果框 */}
@@ -288,8 +297,7 @@ function ManualTradePanel({ onDone }: { onDone: () => void }) {
             </div>
           )}
           <div className="text-[10px] text-muted-foreground/70 leading-relaxed">
-            数量为币本位张数(如 BTC 0.002)。需先在 application.yml 配置 binance-testnet 的 api-key/secret-key；
-            手动测试建议关闭自动执行(strategy.execution.enabled=false)，避免两套状态机冲突。
+            {t('testnet.manual.note')}
           </div>
         </div>
       )}
@@ -299,6 +307,7 @@ function ManualTradePanel({ onDone }: { onDone: () => void }) {
 
 /* ========== Main ========== */
 export function TestnetMonitor() {
+  const { t } = useTranslation(['strategy', 'common']);
   const { toast } = useToast();
   const user = useUserStore((s) => s.user);
   const [overview, setOverview] = useState<TnOverview | null>(null);
@@ -325,11 +334,11 @@ export function TestnetMonitor() {
       ]);
       setOverview(ov); setTrades(tr); setDaily(dg); setEquity(eq); setFill(fs);
     } catch (e) {
-      toast((e as Error).message || '加载失败', 'error');
+      toast((e as Error).message || t('common:loadFailed'), 'error');
     } finally {
       setLoading(false);
     }
-  }, [symbol, toast]);
+  }, [symbol, toast, t]);
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => { const t = setInterval(load, 300_000); return () => clearInterval(t); }, [load]);
@@ -366,8 +375,8 @@ export function TestnetMonitor() {
             <Activity className="w-5.5 h-5.5 text-primary" />
           </div>
           <div>
-            <h1 className="text-xl font-black tracking-tight">模拟盘监测</h1>
-            <p className="text-[11px] text-muted-foreground">Binance Testnet · 策略实盘验证轨 · 真实盘口撮合</p>
+            <h1 className="text-xl font-black tracking-tight">{t('testnet.title')}</h1>
+            <p className="text-[11px] text-muted-foreground">{t('testnet.subtitle')}</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -376,11 +385,11 @@ export function TestnetMonitor() {
               <button key={s} onClick={() => setSymbol(s)}
                 className={cn('text-[11px] font-bold px-2.5 py-1 rounded-lg transition-all',
                   symbol === s ? 'border border-border bg-card-2 text-primary' : 'border border-border text-muted-foreground hover:text-foreground')}>
-                {SYM_LABEL[s]}
+                {s === 'ALL' ? t('common:all') : s.replace('USDT', '')}
               </button>
             ))}
           </div>
-          <button onClick={() => { load(); toast('已刷新', 'info'); }}
+          <button onClick={() => { load(); toast(t('testnet.refreshed'), 'info'); }}
             className="border border-border hover:bg-surface-hover w-9 h-9 rounded-lg flex items-center justify-center text-muted-foreground hover:text-primary">
             <RefreshCcw className={cn('w-4 h-4', loading && 'animate-spin')} />
           </button>
@@ -390,12 +399,9 @@ export function TestnetMonitor() {
       {/* 历史轨横幅：执行目标已切 sim 时明示——本页旧交易与"策略账户"页 sim 记录不一致属预期 */}
       {overview?.executionTarget === 'sim' && (
         <div className="rounded-lg border border-border bg-card px-4 py-3 text-xs leading-relaxed border-l-4 border-l-warning">
-          <span className="font-black text-warning">Testnet 轨已停用：</span>
-          <span className="text-muted-foreground">
-            策略执行目标当前为本平台模拟盘（sim），本页展示的是切换前 Binance Testnet 的历史交易，不再产生新记录，
-            与「策略账户」页的记录不一致属正常。最新策略交易请看
-          </span>
-          <a href="/strategies" className="font-bold text-primary hover:underline ml-1">策略账户 →</a>
+          <span className="font-black text-warning">{t('testnet.banner.title')}</span>
+          <span className="text-muted-foreground">{t('testnet.banner.body')}</span>
+          <a href="/strategies" className="font-bold text-primary hover:underline ml-1">{t('testnet.banner.link')} →</a>
         </div>
       )}
 
@@ -405,48 +411,47 @@ export function TestnetMonitor() {
       {/* 空态提示 */}
       {isEmpty && (
         <div className="border border-border bg-card-2 rounded-lg py-10 text-center">
-          <p className="text-sm text-muted-foreground">暂无 testnet 数据</p>
-          <p className="text-[11px] text-muted-foreground/70 mt-1">
-            需在 application.yml 配置 binance-testnet 的 api-key/secret-key，并开启 strategy.execution.enabled 跑出成交后才有数据
-          </p>
+          <p className="text-sm text-muted-foreground">{t('testnet.empty.title')}</p>
+          <p className="text-[11px] text-muted-foreground/70 mt-1">{t('testnet.empty.hint')}</p>
         </div>
       )}
 
       {/* Stat Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <StatCard label="当前权益" value={`$${fmt$(equityNow, true)}`}
-          sub={`可用 $${fmt$(overview?.account.availableBalance, true)}`} icon={Wallet} />
-        <StatCard label="累计盈亏" value={`${cumPnl >= 0 ? '+' : ''}$${fmt$(cumPnl)}`}
-          sub="含手续费 · 实时直拉" icon={BarChart3} trend={cumPnl >= 0 ? 'up' : 'down'} />
-        <StatCard label="进场成交率" value={fill ? `${fillRatePct.toFixed(1)}%` : '-'}
-          sub={fill ? `${fill.filled}/${fill.placed} 成交 · 超时 ${fill.expired}` : 'fill 生死线'} icon={Target}
+        <StatCard label={t('testnet.stat.equity')} value={`$${fmt$(equityNow, true)}`}
+          sub={t('testnet.stat.available', { value: fmt$(overview?.account.availableBalance, true) })} icon={Wallet} />
+        <StatCard label={t('testnet.stat.cumPnl')} value={`${cumPnl >= 0 ? '+' : ''}$${fmt$(cumPnl)}`}
+          sub={t('testnet.stat.cumPnlSub')} icon={BarChart3} trend={cumPnl >= 0 ? 'up' : 'down'} />
+        <StatCard label={t('testnet.stat.fillRate')} value={fill ? `${fillRatePct.toFixed(1)}%` : '-'}
+          sub={fill ? t('testnet.stat.fillRateSub', { filled: fill.filled, placed: fill.placed, expired: fill.expired })
+            : t('testnet.stat.fillRateHint')} icon={Target}
           trend={fillRatePct >= 50 ? 'up' : fill ? 'down' : 'neutral'} />
-        <StatCard label="胜率" value={closed.length ? `${winRate.toFixed(1)}%` : '-'}
-          sub={`${wins}/${closed.length} 笔盈利`} icon={TrendingUp}
+        <StatCard label={t('testnet.stat.winRate')} value={closed.length ? `${winRate.toFixed(1)}%` : '-'}
+          sub={t('testnet.stat.winRateSub', { wins, total: closed.length })} icon={TrendingUp}
           trend={winRate >= 50 ? 'up' : closed.length ? 'down' : 'neutral'} />
       </div>
 
       {/* 权益曲线 */}
       {equity.length > 0 && (
         <div className="space-y-2">
-          <SectionTitle icon={BarChart3} title="权益曲线" hint="累计已实现盈亏（从0起）" />
+          <SectionTitle icon={BarChart3} title={t('testnet.equity.title')} hint={t('testnet.equity.hint')} />
           <div className="pt-card rounded-lg p-3"><EquityChart points={equity} /></div>
         </div>
       )}
 
       {/* 日交易网格 + 下钻 */}
       <div className="space-y-2">
-        <SectionTitle icon={Layers} title="日交易网格" hint="点格子看当天成交" />
+        <SectionTitle icon={Layers} title={t('testnet.grid.title')} hint={t('testnet.grid.hint')} />
         <DailyGrid cells={daily} month={gridMonth} onMonthChange={setPickedMonth}
           selectedDate={selectedDate} onSelectDate={setSelectedDate} className="pt-card rounded-lg p-4" />
         {selectedDate && (
           <div className="border border-border bg-card-2 rounded-lg p-3 space-y-2">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-bold">{selectedDate} 当天成交（{dayTrades.length}）</span>
-              <button onClick={() => setSelectedDate(undefined)} className="text-[11px] text-muted-foreground hover:text-primary">收起</button>
+              <span className="text-xs font-bold">{t('testnet.grid.dayTrades', { date: selectedDate, n: dayTrades.length })}</span>
+              <button onClick={() => setSelectedDate(undefined)} className="text-[11px] text-muted-foreground hover:text-primary">{t('common:collapse')}</button>
             </div>
-            {dayTrades.length ? dayTrades.map((t) => <TradeRow key={t.id} t={t} />)
-              : <div className="text-[11px] text-muted-foreground text-center py-4">当天无成交明细</div>}
+            {dayTrades.length ? dayTrades.map((tr) => <TradeRow key={tr.id} t={tr} />)
+              : <div className="text-[11px] text-muted-foreground text-center py-4">{t('testnet.grid.empty')}</div>}
           </div>
         )}
       </div>
@@ -454,7 +459,7 @@ export function TestnetMonitor() {
       {/* 当前持仓 */}
       {overview && overview.positions.length > 0 && (
         <div className="space-y-3">
-          <SectionTitle icon={Activity} title="当前持仓" hint={`${overview.positions.length}`} />
+          <SectionTitle icon={Activity} title={t('testnet.positions.title')} hint={`${overview.positions.length}`} />
           <div className="grid gap-3 md:grid-cols-2">
             {overview.positions.map((p) => <PositionCard key={p.symbol} p={p} />)}
           </div>
@@ -464,7 +469,7 @@ export function TestnetMonitor() {
       {/* 当前挂单 */}
       {overview && overview.openOrders.length > 0 && (
         <div className="space-y-2">
-          <SectionTitle icon={ListChecks} title="当前挂单" hint={`${overview.openOrders.length}`} />
+          <SectionTitle icon={ListChecks} title={t('testnet.orders.title')} hint={`${overview.openOrders.length}`} />
           <div className="space-y-1.5">
             {overview.openOrders.map((o) => <OpenOrderRow key={o.orderId} o={o} />)}
           </div>
@@ -474,32 +479,31 @@ export function TestnetMonitor() {
       {/* fill 对账 */}
       {fill && fill.placed > 0 && (
         <div className="space-y-2">
-          <SectionTitle icon={Gauge} title="fill 对账" hint="回测 touch=fill 假设的真实检验" />
+          <SectionTitle icon={Gauge} title={t('testnet.fill.title')} hint={t('testnet.fill.hint')} />
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <StatCard label="成交率" value={`${fillRatePct.toFixed(1)}%`} sub={`${fill.filled}/${fill.placed}`}
+            <StatCard label={t('testnet.fill.rate')} value={`${fillRatePct.toFixed(1)}%`} sub={`${fill.filled}/${fill.placed}`}
               icon={Target} trend={fillRatePct >= 50 ? 'up' : 'down'} />
-            <StatCard label="超时撤单" value={`${fill.expired}`} sub="挂了没排到" icon={Clock} />
-            <StatCard label="平均成交时长" value={fmtDuration(fill.avgFillSeconds)} sub="挂单→成交" icon={Clock} />
-            <StatCard label="零滑点确认" value={`${fill.makerConfirmed}/${fill.filled}`} sub="成交价=挂单价" icon={CheckCircle2}
+            <StatCard label={t('testnet.fill.expired')} value={`${fill.expired}`} sub={t('testnet.fill.expiredSub')} icon={Clock} />
+            <StatCard label={t('testnet.fill.avgTime')} value={fmtDuration(fill.avgFillSeconds)} sub={t('testnet.fill.avgTimeSub')} icon={Clock} />
+            <StatCard label={t('testnet.fill.maker')} value={`${fill.makerConfirmed}/${fill.filled}`} sub={t('testnet.fill.makerSub')} icon={CheckCircle2}
               trend={fill.makerConfirmed === fill.filled && fill.filled > 0 ? 'up' : 'neutral'} />
           </div>
           <div className="border border-border bg-card-2 rounded-md px-3 py-2 text-[11px] text-muted-foreground leading-relaxed">
-            成交率 = 挂在回撤位的进场单真正被回踩成交的比例。回测假设"价格触及即成交(100%)"，
-            实盘 GTX maker 单"触及还要排队"——此处成交率越接近回测假设，回测越可信；差距越大，回测越乐观。
+            {t('testnet.fill.note')}
           </div>
         </div>
       )}
 
       {/* 交易记录 */}
       <div className="space-y-2">
-        <SectionTitle icon={ListChecks} title="交易记录" hint="近30天真实成交" />
+        <SectionTitle icon={ListChecks} title={t('testnet.trades.title')} hint={t('testnet.trades.hint')} />
         <div className="space-y-1.5">
           {loading && trades.length === 0 ? (
             Array.from({ length: 3 }).map((_, i) => <div key={i} className="border border-border bg-card rounded-md h-9 animate-pulse bg-muted/20" />)
           ) : trades.length === 0 ? (
-            <div className="border border-border bg-card-2 rounded-lg py-8 text-center text-sm text-muted-foreground">暂无成交记录</div>
+            <div className="border border-border bg-card-2 rounded-lg py-8 text-center text-sm text-muted-foreground">{t('testnet.trades.empty')}</div>
           ) : (
-            trades.slice(0, 50).map((t) => <TradeRow key={t.id} t={t} />)
+            trades.slice(0, 50).map((tr) => <TradeRow key={tr.id} t={tr} />)
           )}
         </div>
       </div>

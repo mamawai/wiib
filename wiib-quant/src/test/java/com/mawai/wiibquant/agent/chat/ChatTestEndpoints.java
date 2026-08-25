@@ -1,12 +1,31 @@
 package com.mawai.wiibquant.agent.chat;
 
 import com.mawai.wiibcommon.entity.UserLlmEndpoint;
+import com.mawai.wiibcommon.enums.AgentLang;
+import com.mawai.wiibquant.agent.i18n.LocalizedToolCallbacks;
+import com.mawai.wiibquant.agent.i18n.PromptCatalog;
+import com.mawai.wiibquant.agent.i18n.UserLangResolver;
 import com.mawai.wiibquant.agent.llm.ChatEndpoints;
+
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 /** 对话测试共用：拼一份最小可用的端点/端点对（指纹要读的字段都填上） */
 final class ChatTestEndpoints {
 
+    /** 生产词表，全量装载一次给所有用例共用（只读，无状态） */
+    static final PromptCatalog PROMPTS = new PromptCatalog();
+    static final LocalizedToolCallbacks TOOLS = new LocalizedToolCallbacks(PROMPTS);
+
     private ChatTestEndpoints() {
+    }
+
+    /** 恒中文的语言解析器：默认路径都按中文断言，验切语言的用例自己另造 */
+    static UserLangResolver zhLang() {
+        UserLangResolver resolver = mock(UserLangResolver.class);
+        when(resolver.of(anyLong())).thenReturn(AgentLang.ZH);
+        return resolver;
     }
 
     static UserLlmEndpoint endpoint(String model) {

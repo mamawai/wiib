@@ -127,7 +127,7 @@ public class TraderChatService {
         }
         int n = limit == null ? DEFAULT_DECISIONS : Math.clamp(limit, 1, MAX_DECISIONS);
         JSONArray arr = new JSONArray();
-        for (AiTraderDecision d : traderService.decisions(t.getId(), n, null, null)) {
+        for (AiTraderDecision d : traderService.decisions(t.getId(), n, null, null, null, null)) {
             arr.add(new JSONObject()
                     .fluentPut("time", TIME_FMT.format(Instant.ofEpochMilli(d.getWakeTime())))
                     .fluentPut("wakeTime", d.getWakeTime())

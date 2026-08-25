@@ -10,6 +10,9 @@ import com.mawai.wiibcommon.dto.FuturesPositionDTO;
 import com.mawai.wiibcommon.dto.FuturesStopLossRequest;
 import com.mawai.wiibcommon.dto.FuturesTakeProfitRequest;
 import com.mawai.wiibcommon.entity.AiTraderPlan;
+import com.mawai.wiibquant.agent.i18n.PromptCatalog;
+import com.mawai.wiibcommon.enums.AgentLang;
+import com.mawai.wiibcommon.i18n.MessageCatalog;
 import com.mawai.wiibcommon.entity.AiTraderRequest;
 import com.mawai.wiibcommon.entity.FuturesPosition;
 import com.mawai.wiibcommon.entity.FuturesStopLoss;
@@ -22,6 +25,7 @@ import org.springframework.ai.tool.annotation.ToolParam;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
+import java.util.Map;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -35,8 +39,12 @@ import java.util.function.Function;
 @Slf4j
 public class TradeTools {
 
-    /** 唤醒上下文：计划落库与风险护栏所需的 trader 侧信息；deadlineMs＝本轮预算耗尽的墙钟时刻 */
-    public record WakeCtx(long traderId, int roundNo, long boundaryTime, long deadlineMs, TraderRiskConfig risk) {
+    /**
+     * 唤醒上下文：计划落库与风险护栏所需的 trader 侧信息；deadlineMs＝本轮预算耗尽的墙钟时刻。
+     * lang＝这只 trader 主人的语言：拒因既回给模型也公开在竞技场时间线上，两处都得跟它走。
+     */
+    public record WakeCtx(long traderId, int roundNo, long boundaryTime, long deadlineMs,
+                          TraderRiskConfig risk, AgentLang lang) {
     }
 
     /** 本类自带富记录（结果/拒因）的工具名——轨迹合并时用富记录替换 hook 的轻量占位 */
@@ -54,12 +62,17 @@ public class TradeTools {
     /** 自主加/减仓关掉时，工具调用转成待确认请求走这里 */
     private final TraderRequestService requestService;
     private final WakeCtx ctx;
+    /** 拒因文案：回给模型、也进公开时间线，跟 {@code ctx.lang()} 走 */
+    private final PromptCatalog prompts;
+    /** sim 那侧的拒因按错误码在这儿成文（余额不足/止损价非法等），同样跟 {@code ctx.lang()} */
+    private final MessageCatalog messages;
     /** 本次唤醒的动作轨迹，唤醒回路收走序列化进 ai_trader_decision.actions_json */
     private final List<JSONObject> actions = new ArrayList<>();
 
     public TradeTools(SimTradeClient simTradeClient, long simUserId, Set<String> symbolWhitelist,
                       BigDecimal equity, Function<String, BigDecimal> markPrice,
-                      TraderPlanStore planStore, TraderRequestService requestService, WakeCtx ctx) {
+                      TraderPlanStore planStore, TraderRequestService requestService, WakeCtx ctx,
+                      PromptCatalog prompts, MessageCatalog messages) {
         this.simTradeClient = simTradeClient;
         this.simUserId = simUserId;
         this.symbolWhitelist = symbolWhitelist;
@@ -68,6 +81,8 @@ public class TradeTools {
         this.planStore = planStore;
         this.requestService = requestService;
         this.ctx = ctx;
+        this.prompts = prompts;
+        this.messages = messages;
     }
 
     public List<JSONObject> actions() {
@@ -150,8 +165,8 @@ public class TradeTools {
         // 白名单挡在行情查询之前：模型重试时会丢参数（真实发生过），空 symbol 打到上游
         // 会拉回全市场 premiumIndex 数组炸掉解析，模型收到的就不是可修正的拒因了
         if (symbol == null || !symbolWhitelist.contains(symbol)) {
-            return rejected("open_position", argSummary, "symbol不在白名单内，可交易: " + symbolWhitelist
-                    + "，你给了" + symbol + "。重试时必须完整给出全部参数，不能只给改动项");
+            return rejected("open_position", argSummary, prompts.get(ctx.lang(), "trader.reject.symbolNotWhitelisted",
+                    Map.of("whitelist", symbolWhitelist, "given", String.valueOf(symbol))));
         }
         BigDecimal mark;
         try {
@@ -160,7 +175,8 @@ public class TradeTools {
             return fail("open_position", argSummary, e);
         }
         Account acct = account();
-        String reject = TradeGuard.validateOpen(req, equity, mark, symbolWhitelist, ctx.risk(), acct.snaps());
+        String reject = TradeGuard.validateOpen(req, equity, mark, symbolWhitelist, ctx.risk(), acct.snaps(),
+                prompts, ctx.lang());
         if (reject != null) {
             // action() 内部已入轨迹列表，不许再包一层 add——否则拒绝动作双计
             return rejected("open_position", argSummary, reject);
@@ -180,7 +196,7 @@ public class TradeTools {
             ask.setRequestPrice(mark);
             ask.setReason(req.signalsUsed());
             ask.setWakeTime(ctx.boundaryTime());
-            return pending("open_position", argSummary, requestService.submit(ask));
+            return pending("open_position", argSummary, requestService.submit(ask, ctx.lang()));
         }
         try {
             FuturesOpenRequest openReq = new FuturesOpenRequest();
@@ -255,7 +271,7 @@ public class TradeTools {
             if (!ctx.risk().allowSelfReduce()) {
                 FuturesPositionDTO pos = findPosition(positionId);
                 if (pos == null) {
-                    return rejected("close_position", args, "仓位不存在，先 get_account 看当前持仓");
+                    return rejected("close_position", args, prompts.get(ctx.lang(), "trader.reject.positionGone"));
                 }
                 AiTraderRequest ask = new AiTraderRequest();
                 ask.setTraderId(ctx.traderId());
@@ -268,7 +284,7 @@ public class TradeTools {
                 ask.setRequestPrice(markPrice.apply(pos.getSymbol()));
                 ask.setReason(reason);
                 ask.setWakeTime(ctx.boundaryTime());
-                return pending("close_position", args, requestService.submit(ask));
+                return pending("close_position", args, requestService.submit(ask, ctx.lang()));
             }
             FuturesCloseRequest req = new FuturesCloseRequest();
             req.setPositionId(positionId);
@@ -306,10 +322,10 @@ public class TradeTools {
         try {
             FuturesPositionDTO pos = findPosition(positionId);
             if (pos == null) {
-                return rejected("set_stop_loss", args, "positionId不存在，请先 get_account 查当前持仓");
+                return rejected("set_stop_loss", args, prompts.get(ctx.lang(), "trader.reject.positionIdNotFound"));
             }
             if (reason == null || reason.isBlank()) {
-                return rejected("set_stop_loss", args, "必须给reason：说明为什么现在移动止损（会进公开修订历史）");
+                return rejected("set_stop_loss", args, prompts.get(ctx.lang(), "trader.reject.stopReasonRequired"));
             }
             boolean isLong = "LONG".equals(pos.getSide());
             BigDecimal newStop = BigDecimal.valueOf(stopLossPrice);
@@ -318,11 +334,10 @@ public class TradeTools {
             // 只许收紧整条判定被短路，任意价格都能放行
             BigDecimal mark = markPrice.apply(pos.getSymbol());
             if (isLong ? newStop.compareTo(mark) >= 0 : newStop.compareTo(mark) <= 0) {
-                return rejected("set_stop_loss", args, "止损价站错边：当前现价"
-                        + mark.stripTrailingZeros().toPlainString() + "，"
-                        + (isLong ? "LONG止损必须低于现价" : "SHORT止损必须高于现价")
-                        + "，你给的" + newStop.stripTrailingZeros().toPlainString()
-                        + "会立刻触发＝变相市价平仓。真想离场就检查失效条件后用 close_position 说明理由");
+                return rejected("set_stop_loss", args, prompts.get(ctx.lang(), "trader.reject.stopWrongSide", Map.of(
+                        "mark", mark.stripTrailingZeros().toPlainString(),
+                        "rule", prompts.get(ctx.lang(), isLong ? "trader.reject.stopRuleLong" : "trader.reject.stopRuleShort"),
+                        "given", newStop.stripTrailingZeros().toPlainString())));
             }
             // 止损只许收紧：放宽止损=放大风险=移动球门柱；想给仓位更多空间说明论点已动摇，该查失效条件而不是松止损
             // 基准取最紧那档：sim 是整组替换，比最紧档松的新价会让原有某档变松，一律拒
@@ -330,9 +345,8 @@ public class TradeTools {
                     pos.getStopLosses() == null ? List.of()
                             : pos.getStopLosses().stream().map(FuturesStopLoss::getPrice).toList(), isLong);
             if (tightest != null && (isLong ? newStop.compareTo(tightest) < 0 : newStop.compareTo(tightest) > 0)) {
-                return rejected("set_stop_loss", args, "止损只许收紧（多单上移/空单下移，当前止损"
-                        + tightest.stripTrailingZeros().toPlainString()
-                        + "）——想给仓位更多空间说明论点已动摇，去检查失效条件");
+                return rejected("set_stop_loss", args, prompts.get(ctx.lang(), "trader.reject.stopOnlyTighter",
+                        Map.of("current", tightest.stripTrailingZeros().toPlainString())));
             }
             FuturesStopLossRequest req = new FuturesStopLossRequest();
             req.setPositionId(positionId);
@@ -343,8 +357,9 @@ public class TradeTools {
             item.setQuantity(pos.getQuantity());
             req.setStopLosses(List.of(item));
             simTradeClient.setStopLoss(simUserId, req);
-            revisePlan(pos, "移动止损",
-                    (tightest == null ? "无" : tightest.stripTrailingZeros().toPlainString())
+            revisePlan(pos, prompts.get(ctx.lang(), "trader.revise.moveStop"),
+                    (tightest == null ? prompts.get(ctx.lang(), "trader.revise.none")
+                            : tightest.stripTrailingZeros().toPlainString())
                             + "→" + newStop.stripTrailingZeros().toPlainString(), reason);
             return ok("set_stop_loss", args, "{\"ok\":true}");
         } catch (Exception e) {
@@ -371,10 +386,10 @@ public class TradeTools {
         try {
             FuturesPositionDTO pos = findPosition(positionId);
             if (pos == null) {
-                return rejected("set_take_profit", args, "positionId不存在，请先 get_account 查当前持仓");
+                return rejected("set_take_profit", args, prompts.get(ctx.lang(), "trader.reject.positionIdNotFound"));
             }
             if (reason == null || reason.isBlank()) {
-                return rejected("set_take_profit", args, "必须给reason：说明为什么现在移动目标位（会进公开修订历史）");
+                return rejected("set_take_profit", args, prompts.get(ctx.lang(), "trader.reject.targetReasonRequired"));
             }
             boolean isLong = "LONG".equals(pos.getSide());
             BigDecimal newTarget = BigDecimal.valueOf(takeProfitPrice);
@@ -382,20 +397,18 @@ public class TradeTools {
             // 且原仓没挂过止盈时基线为null，只许远离那条判定同样管不住
             BigDecimal mark = markPrice.apply(pos.getSymbol());
             if (isLong ? newTarget.compareTo(mark) <= 0 : newTarget.compareTo(mark) >= 0) {
-                return rejected("set_take_profit", args, "止盈价站错边：当前现价"
-                        + mark.stripTrailingZeros().toPlainString() + "，"
-                        + (isLong ? "LONG止盈必须高于现价" : "SHORT止盈必须低于现价")
-                        + "，你给的" + newTarget.stripTrailingZeros().toPlainString()
-                        + "会立刻触发＝变相市价平仓。想提前离场请检查失效条件并用 close_position 说明理由");
+                return rejected("set_take_profit", args, prompts.get(ctx.lang(), "trader.reject.targetWrongSide", Map.of(
+                        "mark", mark.stripTrailingZeros().toPlainString(),
+                        "rule", prompts.get(ctx.lang(), isLong ? "trader.reject.targetRuleLong" : "trader.reject.targetRuleShort"),
+                        "given", newTarget.stripTrailingZeros().toPlainString())));
             }
             // 止盈只许远离入场：把目标降到现价上方一点点秒触发＝"止盈带走"马甲下的恐慌平仓
             BigDecimal farthest = TradeGuard.extremePrice(
                     pos.getTakeProfits() == null ? List.of()
                             : pos.getTakeProfits().stream().map(FuturesTakeProfit::getPrice).toList(), isLong);
             if (farthest != null && (isLong ? newTarget.compareTo(farthest) < 0 : newTarget.compareTo(farthest) > 0)) {
-                return rejected("set_take_profit", args, "止盈只许向远离入场的方向移动（多单上移/空单下移，当前目标"
-                        + farthest.stripTrailingZeros().toPlainString()
-                        + "）——想提前离场请检查失效条件并用 close_position 说明理由");
+                return rejected("set_take_profit", args, prompts.get(ctx.lang(), "trader.reject.targetOnlyFarther",
+                        Map.of("current", farthest.stripTrailingZeros().toPlainString())));
             }
             FuturesTakeProfitRequest req = new FuturesTakeProfitRequest();
             req.setPositionId(positionId);
@@ -405,8 +418,9 @@ public class TradeTools {
             item.setQuantity(pos.getQuantity());
             req.setTakeProfits(List.of(item));
             simTradeClient.setTakeProfit(simUserId, req);
-            revisePlan(pos, "移动止盈",
-                    (farthest == null ? "无" : farthest.stripTrailingZeros().toPlainString())
+            revisePlan(pos, prompts.get(ctx.lang(), "trader.revise.moveTarget"),
+                    (farthest == null ? prompts.get(ctx.lang(), "trader.revise.none")
+                            : farthest.stripTrailingZeros().toPlainString())
                             + "→" + newTarget.stripTrailingZeros().toPlainString(), reason);
             return ok("set_take_profit", args, "{\"ok\":true}");
         } catch (Exception e) {
@@ -432,18 +446,19 @@ public class TradeTools {
         try {
             FuturesPositionDTO pos = findPosition(positionId);
             if (pos == null) {
-                return rejected("write_plan", args, "positionId不存在，请先 get_account 查当前持仓");
+                return rejected("write_plan", args, prompts.get(ctx.lang(), "trader.reject.positionIdNotFound"));
             }
             if (planStore.find(ctx.traderId(), ctx.roundNo(), pos.getSymbol(), pos.getSide()) != null) {
                 return rejected("write_plan", args,
-                        "该持仓已有计划，计划不可改写——加仓覆盖或平仓重开才是改论点的合法途径");
+                        prompts.get(ctx.lang(), "trader.reject.planAlreadyExists"));
             }
             if (playType == null || !TradeGuard.PLAY_TYPES.contains(playType)) {
-                return rejected("write_plan", args, "playType必须是: " + TradeGuard.PLAY_TYPES);
+                return rejected("write_plan", args, prompts.get(ctx.lang(), "trader.guard.playTypeInvalid",
+                        Map.of("types", TradeGuard.PLAY_TYPES)));
             }
             if (invalidationCondition == null || invalidationCondition.isBlank()) {
                 return rejected("write_plan", args,
-                        "必须给invalidationCondition失效条件：一句话说明什么市场状况会证明这个论点错了（市场条件，不是盈亏数字）");
+                        prompts.get(ctx.lang(), "trader.guard.invalidationRequired"));
             }
             boolean isLong = "LONG".equals(pos.getSide());
             AiTraderPlan plan = new AiTraderPlan();
@@ -462,8 +477,8 @@ public class TradeTools {
             plan.setOpenedWakeTime(pos.getCreatedAt() != null
                     ? pos.getCreatedAt().atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
                     : ctx.boundaryTime());
-            TraderPlanStore.appendRevision(plan, ctx.boundaryTime(), "补立",
-                    "为无计划持仓补立计划", signalsUsed);
+            TraderPlanStore.appendRevision(plan, ctx.boundaryTime(), prompts.get(ctx.lang(), "trader.revise.fileNew"),
+                    prompts.get(ctx.lang(), "trader.revise.fileNewNote"), signalsUsed);
             // 前置校验已确认无计划，走 insert 路径；isAddOn=false 语义上也对——补立不是加仓
             planStore.upsert(plan, false);
             return ok("write_plan", args, "{\"ok\":true}");
@@ -531,7 +546,7 @@ public class TradeTools {
     }
 
     private String expired(String tool, JSONObject args) {
-        return rejected(tool, args, "本轮已超时（预算耗尽），不再执行任何交易动作，本次调用未发出");
+        return rejected(tool, args, prompts.get(ctx.lang(), "trader.reject.expired"));
     }
 
     /** 结果未知：绝不能当普通失败回——模型看见 ERROR 会重下一单，那就是双仓。 */
@@ -542,8 +557,7 @@ public class TradeTools {
         }
         action(tool, args).fluentPut("status", "unknown").fluentPut("error", cause);
         log.warn("[TradeTools] {} 结果未知 simUserId={} msg={}", tool, simUserId, cause);
-        return "UNKNOWN: 下单结果未知，sim 未在重试内确认，这笔单可能已经成交。"
-                + "请先调用 get_account 核对持仓/挂单，切勿直接重复下单。原因: " + cause;
+        return prompts.get(ctx.lang(), "trader.reject.unknown", Map.of("cause", String.valueOf(cause)));
     }
 
     /** 护栏拒绝：与 open_position 的 REJECTED 同一语义，进动作轨迹，模型可修正重试。 */
@@ -558,7 +572,7 @@ public class TradeTools {
      */
     private String pending(String tool, JSONObject args, String receipt) {
         action(tool, args).fluentPut("status", "pending").fluentPut("result", receipt);
-        return "PENDING（本次调用未成交，已转为待主人确认的请求，不要按已成交继续推进）: " + receipt;
+        return prompts.get(ctx.lang(), "trader.reject.pending", Map.of("receipt", String.valueOf(receipt)));
     }
 
     @Tool(name = "cancel_order", description = "Cancel a pending limit order by orderId (from get_account pendingOrders).")
@@ -618,7 +632,9 @@ public class TradeTools {
     }
 
     private String fail(String tool, JSONObject args, Exception e) {
-        String msg = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
+        // sim 拒因按码查词表跟 ctx.lang()：这句既进模型上下文又进公开时间线，
+        // 跟不上语言的话英文 trader 会读到一句中文（模型立刻跟着混）
+        String msg = SimTradeClient.describe(e, messages, ctx.lang());
         // 上游异常可能拖着整段响应体（曾见全市场premiumIndex数组进拒因），截断防烧token防撑爆轨迹
         if (msg.length() > 300) {
             msg = msg.substring(0, 300) + "…";

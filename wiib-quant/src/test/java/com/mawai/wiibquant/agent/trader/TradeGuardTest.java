@@ -1,16 +1,26 @@
 package com.mawai.wiibquant.agent.trader;
 
+import com.mawai.wiibcommon.enums.AgentLang;
+import com.mawai.wiibquant.agent.i18n.PromptCatalog;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.Set;
 
-import static com.mawai.wiibquant.agent.trader.TradeGuard.validateOpen;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** 开仓硬护栏：盯主人设的仓位规格（杠杆区间/保证金区间/单仓/双开）与加仓的豁免边界。 */
 class TradeGuardTest {
+
+    private static final PromptCatalog PROMPTS = new PromptCatalog();
+
+    /** 本类只钉护栏判定，拒因文案固定按中文取（双语覆盖归 PromptI18nTest） */
+    private static String validateOpen(TradeGuard.OpenReq req, BigDecimal equity, BigDecimal mark,
+                                       Set<String> whitelist, TraderRiskConfig cfg,
+                                       List<TradeGuard.PosSnap> snaps) {
+        return TradeGuard.validateOpen(req, equity, mark, whitelist, cfg, snaps, PROMPTS, AgentLang.ZH);
+    }
 
     private static final Set<String> WL = Set.of("BTCUSDT");
     private static final BigDecimal EQUITY = new BigDecimal("10000");

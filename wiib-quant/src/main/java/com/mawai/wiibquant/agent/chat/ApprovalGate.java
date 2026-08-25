@@ -3,6 +3,8 @@ package com.mawai.wiibquant.agent.chat;
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONObject;
 import com.mawai.wiibcommon.constant.QuantConstants;
+import com.mawai.wiibcommon.enums.AgentLang;
+import com.mawai.wiibquant.agent.i18n.PromptCatalog;
 import lombok.extern.slf4j.Slf4j;
 import org.bsc.langgraph4j.RunnableConfig;
 import org.bsc.langgraph4j.action.AsyncCommandAction;
@@ -28,24 +30,13 @@ import java.util.concurrent.CompletableFuture;
  * 在卡上点击，再批准一次等于让用户确认两遍，第一道毫无信息量。
  * <p>
  * <b>但每个工具都得从这里走一趟</b>：{@link #passThrough} 里的 {@link ToolRunContext#set} 是
- * 工具方法体拿 sessionId 的唯一来源，受不受管辖都一样。绕开它，弹表单的工具就不知道
- * 该往哪个会话推 SSE，卡片哪儿也去不了。
+ * 工具方法体拿 sessionId 的唯一来源，受不受管辖都一样。
+ * 判断做在这一层，这么写为了同时拿到 sessionId 和 tool_call 的 name/arguments（工具方法体看不到 sessionId）。
  * <p>
- * <b>为什么在这一层而不在工具里</b>：授权要绑到"哪个会话、批准了哪个工具的哪个标的"。
- * 工具方法体看不到 sessionId（框架的 ChatService 签名里没有 RunnableConfig，
- * 而 ToolContext 是建图时算死的静态值），所以判断只能做在这里——
- * hook 同时拿得到 config.threadId() 和 tool_call 的 name/arguments。
+ * 挂在 summarizer 叶子的工具边（addExecuteToolsHook），且<b>必须先于 ModelCallLimiter 注册</b>——
+ * WrapCall 后注册的在外层先执行，保险丝必须在外层。
  * <p>
- * <b>挂在哪</b>：summarizer 叶子的工具边，走 {@code ReactAgent.Builder.addExecuteToolsHook}
- * 直接注册（叶子是独立 {@code compile()} 的，官方挂载点真生效）。
- * <p>
- * <b>挂载顺序</b>：必须先于 {@link com.mawai.wiibquant.agent.llm.ModelCallLimiter} 注册。
- * langgraph4j 的 WrapCall 是 reduce 左折叠，<b>后注册的在外层先执行</b>，
- * 保险丝必须在外层——否则会出现"卡片弹了但模型没配额告诉用户"的窗口。
- * <p>
- * <b>拒绝标记跨轮活着，而且必须如此</b>：卡片是一轮结束时才发出去的，用户点拒绝必然发生在
- * 两轮之间，下一轮模型重提同一件事时才轮到这里回执。它是一次性的——被读走就没了，
- * 所以用户改主意重新问不会被上一次的拒绝挡住。
+ * 拒绝标记跨轮活着（用户点拒绝发生在两轮之间）且一次性——被读走就没了，改主意重新问不被挡。
  */
 @Slf4j
 public class ApprovalGate implements EdgeHook.WrapCall<MessagesState<Message>> {
@@ -60,16 +51,25 @@ public class ApprovalGate implements EdgeHook.WrapCall<MessagesState<Message>> {
      */
     static final Set<String> GUARDED_TOOLS = Set.of(DEEP_ANALYSIS_TOOL);
 
-    /** 确认卡与回执上的中文名。 */
-    private static final String LABEL = "深度研判";
-
-    /** 卡片上给用户看的代价说明——用户要为"贵在哪"点头，笼统说一句"这很贵"等于没说。 */
-    private static final String REASON = "深度研判需 3 次深模型调用（Bull/Bear 辩论 + Judge 裁决）";
-
     private final ApprovalRegistry registry;
+    private final PromptCatalog prompts;
+    /** 确认卡与回执的语言：闸门是建叶子时挂上去的，语言跟着叶子走（见 ChatAgentFactory.leafKey） */
+    private final AgentLang lang;
 
-    public ApprovalGate(ApprovalRegistry registry) {
+    public ApprovalGate(ApprovalRegistry registry, PromptCatalog prompts, AgentLang lang) {
         this.registry = registry;
+        this.prompts = prompts;
+        this.lang = lang;
+    }
+
+    /** 确认卡与回执上的操作名 */
+    private String label() {
+        return prompts.get(lang, "chat.hitl.label");
+    }
+
+    /** 卡片上给用户看的代价说明——用户要为"贵在哪"点头，笼统说一句"这很贵"等于没说 */
+    private String reason() {
+        return prompts.get(lang, "chat.hitl.reason");
     }
 
     @Override
@@ -91,7 +91,7 @@ public class ApprovalGate implements EdgeHook.WrapCall<MessagesState<Message>> {
             log.info("[HITL] 用户已拒绝，回执告知模型 session={} tool={} symbol={}",
                     sessionId, call.name(), symbol);
             return CompletableFuture.completedFuture(shortCircuit(state, call.id(),
-                    "用户已拒绝本次" + LABEL + "，请如实告知并用现有数据作答，不要再次请求。"));
+                    prompts.get(lang, "chat.hitl.rejectedReply", Map.of("label", label()))));
         }
 
         if (registry.consumeApproval(sessionId, call.name(), symbol)) {
@@ -103,12 +103,12 @@ public class ApprovalGate implements EdgeHook.WrapCall<MessagesState<Message>> {
         // ChatTurnRunner 会在 TTL 内一直跳过专家派发，用户之后每问一句都拿不到真数据，
         // 且没有任何日志说明原因
         registry.discardApprovals(sessionId);
-        registry.requestApproval(sessionId, call.name(), symbol, REASON);
+        registry.requestApproval(sessionId, call.name(), symbol, reason());
         log.info("[HITL] 未授权，登记待确认 session={} tool={} symbol={}", sessionId, call.name(), symbol);
         JSONObject out = new JSONObject();
         out.put("status", "PENDING_APPROVAL");
-        out.put("message", LABEL + "是昂贵操作（" + REASON
-                + "），已向用户请求确认。请告知用户等待确认卡片，确认后你会被再次调用。");
+        out.put("message", prompts.get(lang, "chat.hitl.pendingMessage",
+                Map.of("label", label(), "reason", reason())));
         return CompletableFuture.completedFuture(shortCircuit(state, call.id(), out.toJSONString()));
     }
 
@@ -122,7 +122,7 @@ public class ApprovalGate implements EdgeHook.WrapCall<MessagesState<Message>> {
      * 短路后要让模型看到回执并转述给用户。action 节点的 EdgeMappings 只有这两个合法值
      *（{@code Agent.Builder.build()}：{@code .to("agent").toEND("end")}）。
      */
-    private static Command shortCircuit(MessagesState<Message> state, String guardedCallId, String body) {
+    private Command shortCircuit(MessagesState<Message> state, String guardedCallId, String body) {
         return new Command(Agent.AGENT_LABEL,
                 Map.of("messages", List.of(reply(state, guardedCallId, body))));
     }
@@ -211,8 +211,8 @@ public class ApprovalGate implements EdgeHook.WrapCall<MessagesState<Message>> {
      * BTC 和 ETH），按名字匹配会把只针对其中一个的说明同时发给两个——工具名一样，
      * 用户批的是 BTC，模型会以为 ETH 也批了。
      */
-    private static ToolResponseMessage reply(MessagesState<Message> state, String guardedCallId,
-                                             String body) {
+    private ToolResponseMessage reply(MessagesState<Message> state, String guardedCallId,
+                                      String body) {
         List<ToolResponseMessage.ToolResponse> responses = new ArrayList<>();
         state.lastMessage()
                 .filter(AssistantMessage.class::isInstance)
@@ -222,7 +222,7 @@ public class ApprovalGate implements EdgeHook.WrapCall<MessagesState<Message>> {
                     for (AssistantMessage.ToolCall c : a.getToolCalls()) {
                         responses.add(new ToolResponseMessage.ToolResponse(c.id(), c.name(),
                                 c.id().equals(guardedCallId) ? body
-                                        : "未执行：本轮存在待确认的贵操作。"));
+                                        : prompts.get(lang, "chat.hitl.notExecuted")));
                     }
                 });
         return ToolResponseMessage.builder().responses(responses).build();

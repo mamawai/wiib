@@ -1,9 +1,12 @@
 package com.mawai.wiibquant.agent.trader;
 
 import com.mawai.wiibcommon.entity.AiTrader;
+import com.mawai.wiibcommon.enums.AgentLang;
+import com.mawai.wiibcommon.i18n.MessageCatalog;
 import org.junit.jupiter.api.Test;
 
 import java.time.ZonedDateTime;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -33,12 +36,26 @@ class WakeWindowTest {
         assertThat(w.text()).isEqualTo("21:00-08:30");
     }
 
+    /**
+     * 四种不合法各抛各的 key（parse 抛的是词表 key 不是成文的话，见它的注释）。
+     * 顺带钉住 key 在两门语言的词表里都真有条目——抛出去却查不到，用户看到的就是一行 key。
+     */
     @Test
     void parseRejectsBadFormatGranularityAndSameEnds() {
-        assertThatThrownBy(() -> WakeWindow.parse("21:00~08:30")).hasMessageContaining("HH:mm-HH:mm");
-        assertThatThrownBy(() -> WakeWindow.parse("21:03-08:30")).hasMessageContaining("0/5");
-        assertThatThrownBy(() -> WakeWindow.parse("24:00-08:30")).hasMessageContaining("不合法");
-        assertThatThrownBy(() -> WakeWindow.parse("08:00-08:00")).hasMessageContaining("起止不能相同");
+        MessageCatalog messages = new MessageCatalog();
+        Map<String, String> cases = Map.of(
+                "21:00~08:30", "trader.config.window.format",
+                "21:03-08:30", "trader.config.window.minuteStep",
+                "24:00-08:30", "trader.config.window.badTime",
+                "08:00-08:00", "trader.config.window.sameEnds");
+        cases.forEach((text, key) -> {
+            assertThatThrownBy(() -> WakeWindow.parse(text))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessage(key);
+            for (AgentLang lang : AgentLang.values()) {
+                assertThat(messages.get(lang, key)).as("%s 的 %s", lang.code(), key).isNotBlank();
+            }
+        });
     }
 
     /** 不跨午夜：两端含 */

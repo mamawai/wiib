@@ -5,6 +5,8 @@ import com.mawai.wiibcommon.dto.FuturesPositionDTO;
 import com.mawai.wiibcommon.entity.AiTrader;
 import com.mawai.wiibcommon.entity.AiTraderDecision;
 import com.mawai.wiibcommon.entity.AiTraderPlan;
+import com.mawai.wiibcommon.enums.AgentLang;
+import com.mawai.wiibquant.agent.i18n.PromptCatalog;
 import com.mawai.wiibquant.external.sim.SimTradeClient;
 import com.mawai.wiibquant.mapper.AiTraderDecisionMapper;
 import com.mawai.wiibquant.mapper.AiTraderMapper;
@@ -18,10 +20,13 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
- * 同侪只读查询（learning agent 的眼睛）：排行榜快照 + 单 trader 深看详情，两个方法都返回拼好的中文文本块。
+ * 同侪只读查询（learning agent 的眼睛）：排行榜快照 + 单 trader 深看详情，两个方法都返回拼好的文本块。
+ * 文本块整块进 learning 的用户消息，所以段名跟<b>看的人</b>的语言走（{@code learning.label.peer.*}）；
+ * 块里回注的复盘/学习笔记是别人写的原文，是哪门语言就是哪门，不翻译。
  * 只读——不碰账本、不写任何人的数据，包括看的人自己的。
  * <b>互看以勾选为准</b>：learning_enabled=false 的 trader 不上榜、detail 也拒查——
  * 不同意学习的人，自己不学（调度侧过滤），数据也不进任何人的学习素材。
@@ -45,6 +50,7 @@ public class PeerInsightService {
     private final AiTraderPlanMapper planMapper;
     private final SimTradeClient simTradeClient;
     private final ReviewMaterialAssembler assembler;
+    private final PromptCatalog prompts;
 
     /** 榜单一行的已算好事实（排序要先算完再排，所以先落成对象） */
     private record Row(AiTrader trader, BigDecimal returnPct, int closed, String digest) {
@@ -55,7 +61,7 @@ public class PeerInsightService {
      * 每行 = 谁 + 什么状态 + 赚亏多少 + 几笔样本 + 一句话复盘画像，selfTraderId 那行标出来。
      * 每个 trader 三次查询（权益/复盘/已平仓）不合并：trader 数量级几十，省这点查询不值得把 SQL 绕复杂。
      */
-    public String leaderboard(long selfTraderId) {
+    public String leaderboard(long selfTraderId, AgentLang lang) {
         List<Row> rows = new ArrayList<>();
         for (AiTrader t : traderMapper.selectList(new LambdaQueryWrapper<AiTrader>()
                 .orderByAsc(AiTrader::getId))) {
@@ -68,23 +74,19 @@ public class PeerInsightService {
         }
         rows.sort(Comparator.comparing(Row::returnPct).reversed());
 
-        StringBuilder sb = new StringBuilder("""
-                【同侪排行榜】（本局快照，按收益率降序）
-                口径：收益率＝该 trader 本局最新权益 vs 初始资金 10000；已了结笔数＝这份战绩的样本量，\
-                引用同侪战绩必须连笔数一起说，3 笔的胜率不叫方法论。
-                已暂停与已爆仓的照样在榜上，它们的经历同样是素材。
-                """);
+        StringBuilder sb = new StringBuilder(prompts.get(lang, "learning.label.peer.leaderboardHeader"));
         int i = 1;
         for (Row r : rows) {
             sb.append(i++).append(". [id=").append(r.trader().getId()).append("] ")
-                    .append(r.trader().getName())
-                    .append(" ｜ ").append(statusText(r.trader().getStatus()))
-                    .append(" ｜ 本局收益率 ").append(ReviewMaterialAssembler.signed(r.returnPct())).append('%')
-                    .append(" ｜ 已了结 ").append(countText(r.closed())).append(" 笔")
-                    .append(" ｜ 最新复盘: ").append(digest(r.digest()));
+                    .append(prompts.get(lang, "learning.label.peer.row", Map.of(
+                            "name", r.trader().getName(),
+                            "status", statusText(r.trader().getStatus(), lang),
+                            "pct", ReviewMaterialAssembler.signed(r.returnPct()),
+                            "closed", countText(r.closed()),
+                            "digest", digest(r.digest(), lang))));
             // 不标出自己那行，模型会把自己的战绩当外人的经验学一遍
             if (r.trader().getId() == selfTraderId) {
-                sb.append("（这是你）");
+                sb.append(prompts.get(lang, "learning.label.peer.self"));
             }
             sb.append('\n');
         }
@@ -95,14 +97,14 @@ public class PeerInsightService {
      * 单 trader 深看：复盘全文 / 学习笔记 / 在场计划 / 最近已了结交易的论点→结局配对。
      * 查无此人返回中文错误文本而不是抛异常——调用方是工具，这段话要原样透传给模型自己纠正。
      */
-    public String detail(long traderId) {
+    public String detail(long traderId, AgentLang lang) {
         AiTrader t = traderMapper.selectById(traderId);
         if (t == null) {
-            return "查无此 trader（id=" + traderId + "）：可能已被删除，请回排行榜取有效 id。";
+            return prompts.get(lang, "learning.label.peer.notFound", Map.of("id", traderId));
         }
         if (Boolean.FALSE.equals(t.getLearningEnabled())) {
-            // 榜上没有它，但模型可能拿着旧笔记里的 id 来查：同样中文拒绝，透传给模型自己换人
-            return "该 trader（id=" + traderId + "）未开启同侪学习共享，数据不可查看，请回排行榜换一个。";
+            // 榜上没有它，但模型可能拿着旧笔记里的 id 来查：同样出一段话拒绝，透传给模型自己换人
+            return prompts.get(lang, "learning.label.peer.notShared", Map.of("id", traderId));
         }
         List<FuturesPositionDTO> closed = closedPositions(t);
         // 一次拉本局全部计划在内存里分用：LIVE 的进在场计划块，其余的给已了结交易配对
@@ -111,40 +113,43 @@ public class PeerInsightService {
                 .eq(AiTraderPlan::getRoundNo, t.getRoundNo()));
 
         StringBuilder sb = new StringBuilder();
-        sb.append("【").append(t.getName()).append("】[id=").append(t.getId()).append("] ")
-                .append(statusText(t.getStatus()))
-                .append(" ｜ 本局收益率 ").append(ReviewMaterialAssembler.signed(returnPct(t))).append('%')
-                .append(" ｜ 已了结 ").append(countText(closed.size())).append(" 笔\n\n");
+        sb.append(prompts.get(lang, "learning.label.peer.header", Map.of(
+                "name", t.getName(), "id", t.getId(),
+                "status", statusText(t.getStatus(), lang),
+                "pct", ReviewMaterialAssembler.signed(returnPct(t)),
+                "closed", countText(closed.size())))).append("\n\n");
 
         AiTraderDecision review = assembler.lastReview(t.getId(), t.getRoundNo());
-        sb.append("【最新复盘（全文）】\n")
+        sb.append(prompts.get(lang, "learning.label.peer.latestReview")).append('\n')
                 .append(blank(review == null ? null : review.getReasoning())
-                        ? "（尚无复盘）" : review.getReasoning().strip())
+                        ? prompts.get(lang, "learning.label.peer.noReview") : review.getReasoning().strip())
                 .append("\n\n");
 
-        sb.append("【学习笔记】（它向同侪学到的）\n")
-                .append(blank(t.getLearningNotes()) ? "（尚无学习笔记）" : t.getLearningNotes().strip())
+        sb.append(prompts.get(lang, "learning.label.peer.notes")).append('\n')
+                .append(blank(t.getLearningNotes())
+                        ? prompts.get(lang, "learning.label.peer.noNotes") : t.getLearningNotes().strip())
                 .append("\n\n");
 
-        sb.append("【当前在场计划】（论点与失效条件）\n");
+        sb.append(prompts.get(lang, "learning.label.peer.livePlans")).append('\n');
         List<AiTraderPlan> live = plans.stream()
                 .filter(p -> AiTraderPlan.STATUS_LIVE.equals(p.getStatus())).toList();
         if (live.isEmpty()) {
-            sb.append("（当前空仓，无在场计划）\n");
+            sb.append(prompts.get(lang, "learning.label.peer.noLivePlans")).append('\n');
         }
         for (AiTraderPlan p : live) {
             sb.append("- ").append(p.getSymbol()).append(' ').append(p.getSide())
                     .append(" [").append(ReviewMaterialAssembler.nullSafe(p.getPlayType())).append("]\n")
-                    .append("  论点: ").append(ReviewMaterialAssembler.nullSafe(p.getSignalsUsed()))
-                    .append(" ｜ 失效条件: ").append(ReviewMaterialAssembler.nullSafe(p.getInvalidationCondition()))
+                    .append("  ").append(ReviewMaterialAssembler.planLine(prompts,
+                            p.getSignalsUsed(), p.getInvalidationCondition(), lang))
                     .append('\n');
         }
 
-        sb.append("\n【最近已了结交易】（论点→结局，代码配对，最近 ").append(DETAIL_TRADES).append(" 笔，时间倒序）\n");
+        sb.append('\n').append(prompts.get(lang, "learning.label.peer.recentTrades",
+                Map.of("n", DETAIL_TRADES))).append('\n');
         // sim 侧已按 updatedAt 倒序返回（见 SimTradeClient.getClosedPositions），直接取前 N 就是最近 N 笔
         List<FuturesPositionDTO> recent = closed.stream().limit(DETAIL_TRADES).toList();
         if (recent.isEmpty()) {
-            sb.append("（本局尚无已了结交易）\n");
+            sb.append(prompts.get(lang, "learning.label.peer.noRecentTrades")).append('\n');
         }
         Set<AiTraderPlan> used = new HashSet<>();
         int i = 1;
@@ -154,19 +159,12 @@ public class PeerInsightService {
             if (plan != null && plan.getPlayType() != null) {
                 sb.append(" [").append(plan.getPlayType()).append(']');
             }
-            sb.append(" 入场 ").append(ReviewMaterialAssembler.plain(pos.getEntryPrice()))
-                    .append(" → 出场 ").append(ReviewMaterialAssembler.plain(pos.getClosedPrice()))
-                    .append("，毛盈亏 ").append(ReviewMaterialAssembler.signed(pos.getClosedPnl()))
-                    .append("，持有 ").append(ReviewMaterialAssembler.humanize(
-                            ReviewMaterialAssembler.msOf(pos.getUpdatedAt())
-                                    - ReviewMaterialAssembler.msOf(pos.getCreatedAt())))
-                    .append("，").append(ReviewMaterialAssembler.closeManner(pos)).append('\n');
+            sb.append(' ').append(ReviewMaterialAssembler.tradeRow(prompts, pos, lang)).append('\n');
             if (plan != null) {
-                sb.append("   论点: ").append(ReviewMaterialAssembler.nullSafe(plan.getSignalsUsed()))
-                        .append(" ｜ 失效条件: ")
-                        .append(ReviewMaterialAssembler.nullSafe(plan.getInvalidationCondition())).append('\n');
+                sb.append("   ").append(ReviewMaterialAssembler.planLine(prompts,
+                        plan.getSignalsUsed(), plan.getInvalidationCondition(), lang)).append('\n');
             } else {
-                sb.append("   （无计划记录）\n");
+                sb.append("   ").append(prompts.get(lang, "reviewer.label.noPlan")).append('\n');
             }
         }
         return sb.toString();
@@ -201,37 +199,43 @@ public class PeerInsightService {
                 ? ReviewMaterialAssembler.CLOSED_FETCH_LIMIT + "+" : String.valueOf(closed);
     }
 
-    /** 状态中文：三种状态都得有词，爆仓的同侪照样上榜（前车之鉴） */
-    private static String statusText(String status) {
-        return switch (status == null ? "" : status) {
-            case AiTrader.STATUS_RUNNING -> "运行中";
-            case AiTrader.STATUS_PAUSED -> "已暂停";
-            case AiTrader.STATUS_LIQUIDATED -> "已爆仓";
-            default -> "未知";
+    /** 状态词：三种状态都得有词，爆仓的同侪照样上榜（前车之鉴） */
+    private String statusText(String status, AgentLang lang) {
+        String key = switch (status == null ? "" : status) {
+            case AiTrader.STATUS_RUNNING -> "running";
+            case AiTrader.STATUS_PAUSED -> "paused";
+            case AiTrader.STATUS_LIQUIDATED -> "liquidated";
+            default -> "unknown";
         };
+        return prompts.get(lang, "learning.label.peer.status." + key);
     }
 
-    /** 复盘一句话画像：跳过【本期复盘】这类段标题，取首个有实质内容的行截断 */
-    private static String digest(String reasoning) {
+    /** 复盘一句话画像：跳过【本期复盘】/[REVIEW] 这类段标题，取首个有实质内容的行截断 */
+    private String digest(String reasoning, AgentLang lang) {
         if (blank(reasoning)) {
-            return "（尚无复盘）";
+            return prompts.get(lang, "learning.label.peer.noReview");
         }
         String line = reasoning.lines()
                 .map(l -> stripTitle(l.strip()))
                 .filter(l -> !l.isEmpty())
                 .findFirst().orElse("");
         if (line.isEmpty()) {
-            return "（尚无复盘）";
+            return prompts.get(lang, "learning.label.peer.noReview");
         }
         return line.length() > DIGEST_MAX_CHARS ? line.substring(0, DIGEST_MAX_CHARS) + "…" : line;
     }
 
-    /** 去掉行首的【段标题】：标题独占一行就变空行被跳过，标题后接着写正文就只留正文 */
+    /**
+     * 去掉行首的段标题：标题独占一行就变空行被跳过，标题后接着写正文就只留正文。
+     * 中文【】与英文[]两套都剥——复盘是写入时那门语言落库的，只剥一套换语言后画像就变成一行标题。
+     */
     private static String stripTitle(String line) {
-        if (!line.startsWith("【")) {
+        char open = line.isEmpty() ? ' ' : line.charAt(0);
+        char close = open == '【' ? '】' : open == '[' ? ']' : ' ';
+        if (close == ' ') {
             return line;
         }
-        int end = line.indexOf('】');
+        int end = line.indexOf(close);
         return end < 0 ? line : line.substring(end + 1).strip();
     }
 

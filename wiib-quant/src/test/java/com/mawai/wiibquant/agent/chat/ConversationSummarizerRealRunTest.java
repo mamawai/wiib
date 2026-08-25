@@ -1,5 +1,6 @@
 package com.mawai.wiibquant.agent.chat;
 
+import com.mawai.wiibcommon.enums.AgentLang;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
@@ -151,7 +152,7 @@ class ConversationSummarizerRealRunTest {
             "刚才我们都聊了什么？简单回顾一下",
             "结合前面聊过的，BTC 现在最需要注意的风险是什么？");
 
-    /** 挑 1 号不再是因为门只对管理员开（已对全体登录用户开放），纯粹因为真跑要烧的那份 BYOK 配在它名下 */
+    /** 挑 1 号：真跑要烧的那份 BYOK 配在它名下 */
     private static final long ADMIN_USER_ID = 1L;
 
     @Autowired
@@ -193,7 +194,7 @@ class ConversationSummarizerRealRunTest {
         ChatEndpoints llmConfig = endpointService.chatEndpoints(ADMIN_USER_ID);
         assertThat(llmConfig).as("先用管理员账号在 AI 页「模型配置」加一条 BYOK 端点再跑").isNotNull();
 
-        ChatAgentFactory.Leaves leaves = chatAgentFactory.leavesFor(llmConfig);
+        ChatAgentFactory.Leaves leaves = chatAgentFactory.leavesFor(llmConfig, AgentLang.ZH);
         // sessionId 跨轮不变：历史靠 ChatContextStore 累积，这才是生产形态
         String sessionId = "wb-1-summarize-realrun-" + UUID.randomUUID();
 
@@ -269,9 +270,9 @@ class ConversationSummarizerRealRunTest {
     /** 一轮对话，走的就是 Controller 那条路（{@link ChatTurnRunner#run}） */
     private String ask(ChatAgentFactory.Leaves leaves, String sessionId, String question) {
         StringBuilder answer = new StringBuilder();
-        chatTurnRunner.run(leaves, ADMIN_USER_ID, sessionId, question, answer::append,
+        chatTurnRunner.run(leaves, ADMIN_USER_ID, sessionId, question, null, answer::append,
                 event -> log.info("[SummarizeRealRun] 专家 {} {}", event.agent(), event.phase()),
-                ChatTurnRunner.TurnYield.NONE);
+                ChatTurnRunner.TurnYield.NONE, null);
         return answer.toString();
     }
 

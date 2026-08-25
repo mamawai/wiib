@@ -1,15 +1,16 @@
 package com.mawai.wiibquant.agent.chat;
 
+import com.mawai.wiibcommon.enums.AgentLang;
 import com.mawai.wiibcommon.entity.QuantDeepAnalysis;
 import com.mawai.wiibquant.agent.llm.ChatEndpoints;
 import com.mawai.wiibquant.agent.analysis.DeepAnalysisService;
+import com.mawai.wiibquant.agent.behavior.BehaviorAnalysisService;
 import com.mawai.wiibquant.agent.toolkit.MarketToolkit;
 import com.mawai.wiibquant.agent.toolkit.NewsToolkit;
 import com.mawai.wiibquant.agent.trader.TraderChatService;
 import org.bsc.langgraph4j.NodeOutput;
 import org.bsc.langgraph4j.RunnableConfig;
 import org.bsc.langgraph4j.prebuilt.MessagesState;
-import org.bsc.langgraph4j.spring.ai.serializer.jackson.SpringAIJacksonStateSerializer;
 import org.bsc.langgraph4j.streaming.StreamingOutput;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.messages.AssistantMessage;
@@ -87,10 +88,10 @@ class SummarizerLeafTest {
         // 工厂内部自己 new DeepAnalysisToolkit，天然就是真的，这里只喂它的依赖
         ChatEndpoints llmConfig = ChatTestEndpoints.eps(1L, "gpt-5");   // 叶子指纹含 userId（trader 工具按它认人）
         return new ChatAgentFactory(chatModelFactory, mock(MarketToolkit.class), mock(NewsToolkit.class),
-                deepAnalysisService, mock(TraderChatService.class), mock(WorkbenchRunRegistry.class),
-                registry, new SpringAIJacksonStateSerializer<>(MessagesState::new),
-                limit, threshold, keep, "X")
-                .leavesFor(llmConfig);
+                deepAnalysisService, mock(BehaviorAnalysisService.class),
+                mock(TraderChatService.class), mock(WorkbenchRunRegistry.class),
+                registry, ChatTestEndpoints.PROMPTS, ChatTestEndpoints.TOOLS, limit, threshold, keep, "X")
+                .leavesFor(llmConfig, AgentLang.ZH);
     }
 
     /** 与 {@code ChatTurnRunner} 同款消费：普通迭代 + 带 threadId（闸门要拿会话号） */
@@ -117,11 +118,11 @@ class SummarizerLeafTest {
         analysis.setNoDirection(Boolean.FALSE);
         analysis.setInvalidation("跌破前低即失效");
         analysis.setJudgeReasoning("裁决理由");
-        when(deepAnalysisService.buildNewsContext()).thenReturn("新闻上下文");
-        when(deepAnalysisService.bullArgue(any(), anyString(), anyString())).thenReturn("多方论证");
-        when(deepAnalysisService.bearArgue(any(), anyString(), anyString())).thenReturn("空方论证");
+        when(deepAnalysisService.buildNewsContext(any())).thenReturn("新闻上下文");
+        when(deepAnalysisService.bullArgue(any(), anyString(), anyString(), any())).thenReturn("多方论证");
+        when(deepAnalysisService.bearArgue(any(), anyString(), anyString(), any())).thenReturn("空方论证");
         when(deepAnalysisService.judge(any(), anyString(), anyLong(), anyString(),
-                anyString(), anyString(), anyString())).thenReturn(analysis);
+                anyString(), anyString(), anyString(), any())).thenReturn(analysis);
     }
 
     private void approveDeepAnalysis() {

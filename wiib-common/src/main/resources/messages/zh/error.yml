@@ -1,0 +1,133 @@
+# 错误码文案：key 与 ErrorCode 枚举名一一对应（下划线转小驼峰）。码在枚举里，话在这里。
+error:
+  success: 成功
+  paramError: 参数错误
+  unauthorized: 未登录
+  forbidden: 无权限
+  notFound: 资源不存在
+  systemError: 系统错误
+  # 业务错误码 1000+
+  userNotFound: 用户不存在
+  stockNotFound: 股票不存在
+  balanceNotEnough: 余额不足
+  positionNotEnough: 持仓不足
+  tradeQuantityInvalid: 交易数量无效
+  marketClosed: 市场已休市
+  orderNotFound: 订单不存在
+  orderCannotCancel: 订单无法取消
+  duplicateRequest: 重复请求
+  limitPriceInvalid: 限价无效
+  # 并发控制错误码 1100+
+  concurrentUpdateFailed: 并发更新失败，请重试
+  frozenBalanceNotEnough: 冻结余额不足
+  frozenPositionNotEnough: 冻结持仓不足
+  acquireLockFailed: 获取锁失败，请稍后重试
+  orderProcessing: 订单正在处理中，请稍后再试
+  # 1106 专给幂等占位：这笔单确实在跑，结果未知；1105 是抢锁失败，那是确定没成交
+  orderInFlight: 同一请求正在处理中，请用同一 clientRequestId 重试
+  # 交易限制错误码 1200+
+  slippageExceeded: 价格波动过大，请重新下单
+  rateLimitExceeded: 请求过于频繁，请稍后再试
+  userBankrupt: 已爆仓，交易已禁用
+  leverageOnlyForMarketBuy: 杠杆仅支持市价买入
+  leverageMultipleInvalid: 杠杆倍率无效
+  # WebSocket错误码 1300+
+  websocketConnectionLimit: 连接数已达上限
+  websocketAuthRequired: 需要登录后连接
+  # Buff错误码 1400+
+  buffAlreadyDrawn: 今日已抽奖
+  buffNotFound: Buff不存在
+  buffExpired: Buff已过期
+  buffAlreadyUsed: Buff已使用
+  discountNoLeverage: 使用折扣时不支持杠杆
+  # Blackjack错误码 1500+
+  bjGameInProgress: 有未完成的牌局
+  bjNoActiveGame: 没有进行中的牌局
+  bjChipsNotEnough: 积分不足
+  bjInvalidBet: 下注金额无效
+  bjActionNotAllowed: 当前不可执行此操作
+  bjConvertLimit: 超出每日转出上限
+  bjConvertInsufficient: 可转出积分不足
+  bjPoolExhausted: 今日积分池已耗尽
+  # Crypto错误码 1600+
+  cryptoPriceUnavailable: 无法获取实时价格
+  cryptoSymbolInvalid: 交易对无效
+  tradeStepInvalid: 数量不符合最小交易步长
+  tradeMinNotional: 下单金额低于最小名义额
+  # Mines错误码 1700+
+  minesGameInProgress: 有未完成的矿工游戏
+  minesNoActiveGame: 没有进行中的矿工游戏
+  minesBalanceNotEnough: 余额不足
+  minesInvalidBet: 下注金额无效
+  minesInvalidCell: 格子编号无效
+  minesCellAlreadyRevealed: 该格子已翻开
+  minesMustRevealFirst: 至少翻开一个格子才能提现
+  # Futures错误码 1750+
+  futuresPositionNotFound: 仓位不存在
+  futuresInsufficientBalance: 余额不足
+  futuresInvalidLeverage: 杠杆倍数无效
+  futuresInvalidQuantity: 数量无效
+  futuresInvalidStopLoss: 止损价无效
+  futuresInvalidTakeProfit: 止盈价无效
+  futuresSplitLimit: 分拆目标最多4个
+  futuresPositionClosed: 仓位已关闭
+  futuresLiquidated: 仓位已强平
+  futuresSymbolNotConfigured: 永续合约该币种未配置档位
+  futuresMarginTooLow: 减少后保证金不足
+  futuresCrossMarginAdjust: 全仓仓位不支持调整保证金
+  # 逐仓开仓/现货买入/钱包划转不够也抛它——全仓占用的钱谁都不能动，文案别只说"全仓"
+  futuresCrossAvailableNotEnough: 可用余额不足，全仓仓位占用中
+  futuresLeverageOnlyUp: 逐仓持仓杠杆只能调高，补保证金请用追加保证金
+  futuresLeverageMismatch: 杠杆与该币现有仓位不一致，请先调整杠杆
+  futuresMarginModeConflict: 保证金模式与该币现有仓位不一致
+  # VideoPoker错误码 1851+
+  vpGameInProgress: 有未完成的视频扑克
+  vpNoActiveGame: 没有进行中的视频扑克
+  vpBalanceNotEnough: 余额不足
+  vpInvalidBet: 下注金额无效
+  vpInvalidHold: HOLD位置无效
+  # Prediction错误码 1900+
+  predictionRoundLocked: 回合已锁定
+  predictionRoundNotFound: 回合不存在
+  predictionBetNotFound: 下注不存在
+  predictionPriceUnavailable: 无法获取BTC价格
+  predictionAmountInvalid: 金额无效
+  # 钱包错误码 1950+
+  gameBalanceNotEnough: 游戏钱包余额不足
+  walletTransferInvalid: 划转金额无效
+  # 账户重置错误码 2000+（1200/1600 段已被杠杆与 Crypto 占用）
+  resetTooFrequent: 本周重置次数已用完（每周限 1 次，周一刷新）
+  resetNotAllowed: 该账户不可重置
+  # 留言板错误码 2100+
+  commentMuted: 你已被禁言
+  commentContentInvalid: 评论内容为空或超过500字
+  commentTooFrequent: 评论过于频繁，请稍后再试
+  commentNotFound: 评论不存在或已删除
+  commentAlreadyVoted: 你已经表过态了
+  # 研判工作台错误码 2200+（1600 段已被 Crypto 占用，别再往那儿塞）
+  llmConfigMissing: 尚未配置 LLM 端点
+  llmConfigInvalid: LLM 配置无法建立连接
+  chatAlreadyRunning: 你已有一轮对话进行中
+  chatCapacityFull: 当前对话人数已满，请稍后再试
+  replayAiBusy: 上一次 AI 分析还在进行中
+  chatRegenerateUnavailable: 这条回答无法重新生成
+  chatMessageTooLong: 消息太长（上限 10000 字），请精简后再发
+  chatNothingDeferred: 这个会话没有欠着的补答
+
+  # 登录态异常：sa-token 的各类 NotLoginException，统一按 401 下发
+  token:
+    missing: 未提供token
+    invalid: token无效
+    timeout: token已过期，请重新登录
+    replaced: token已被顶下线
+    kickedOut: token已被踢下线
+    frozen: token已被冻结
+    noPrefix: 未按照指定前缀提交token
+    notLoggedIn: 当前会话未登录
+
+  # 请求本身不成立，框架层就拦下了，还没进业务
+  request:
+    validationFailed: 参数校验失败
+    bodyMalformed: 请求体格式错误
+    missingParam: "缺少参数: {{name}}"
+    typeMismatch: "参数类型错误: {{name}}"

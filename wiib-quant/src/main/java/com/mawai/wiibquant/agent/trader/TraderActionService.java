@@ -3,6 +3,7 @@ package com.mawai.wiibquant.agent.trader;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.mawai.wiibcommon.entity.AiTrader;
+import com.mawai.wiibcommon.i18n.MessageCatalog;
 import com.mawai.wiibcommon.entity.AiTraderDecision;
 import com.mawai.wiibquant.agent.learning.ReviewRunner;
 import com.mawai.wiibquant.mapper.AiTraderDecisionMapper;
@@ -12,6 +13,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
+import java.util.Map;
 import java.time.ZoneId;
 
 /**
@@ -38,6 +40,8 @@ public class TraderActionService {
     private final ReviewRunner reviewRunner;
     private final AiTraderMapper traderMapper;
     private final AiTraderDecisionMapper decisionMapper;
+    /** 三张动作卡的回执与拦因都是当场给用户看的话，跟界面语言 */
+    private final MessageCatalog messages;
 
     /** 动作结果：ok=这次请求被正常处理；message 一律直接给用户看 */
     public record ActionResult(boolean ok, String message) {
@@ -63,10 +67,10 @@ public class TraderActionService {
     public ActionResult saveNote(long userId, String note, Integer rounds) {
         AiTrader t = traderService.mine(userId);
         if (t == null) {
-            return new ActionResult(false, "尚未创建 AI Trader");
+            return new ActionResult(false, messages.get("trader.notCreated"));
         }
         if (note == null || note.isBlank()) {
-            return new ActionResult(false, "留言内容不能为空");
+            return new ActionResult(false, messages.get("trader.note.empty"));
         }
         String text = note.strip();
         boolean truncated = text.length() > MAX_NOTE_CHARS;
@@ -81,19 +85,19 @@ public class TraderActionService {
                 .set(AiTrader::getOwnerNoteRounds, n)
                 .set(AiTrader::getUpdatedAt, LocalDateTime.now()));
         log.info("[TraderAction] 留言已记下 traderId={} 长度={} 轮次={}", t.getId(), text.length(), n);
-        return new ActionResult(true, "留言已记下，接下来 " + n + " 次唤醒都会带上"
-                + (covered ? "；覆盖了上一条还没被读走的留言" : "")
-                + (truncated ? "；超出 " + MAX_NOTE_CHARS + " 字的部分已截掉" : ""));
+        return new ActionResult(true, messages.get("trader.note.saved", Map.of("n", n))
+                + (covered ? messages.get("trader.note.savedCovered") : "")
+                + (truncated ? messages.get("trader.note.savedTruncated", Map.of("max", MAX_NOTE_CHARS)) : ""));
     }
 
     /** 撤回未读留言 */
     public ActionResult clearNote(long userId) {
         AiTrader t = traderService.mine(userId);
         if (t == null) {
-            return new ActionResult(false, "尚未创建 AI Trader");
+            return new ActionResult(false, messages.get("trader.notCreated"));
         }
         if (t.getOwnerNote() == null) {
-            return new ActionResult(true, "当前没有待读留言");
+            return new ActionResult(true, messages.get("trader.note.none"));
         }
         traderMapper.update(null, new LambdaUpdateWrapper<AiTrader>()
                 .eq(AiTrader::getId, t.getId())
@@ -101,7 +105,7 @@ public class TraderActionService {
                 .set(AiTrader::getOwnerNoteRounds, 0)
                 .set(AiTrader::getUpdatedAt, LocalDateTime.now()));
         log.info("[TraderAction] 留言已撤回 traderId={}", t.getId());
-        return new ActionResult(true, "留言已撤回，trader 不会再看到它");
+        return new ActionResult(true, messages.get("trader.note.cleared"));
     }
 
     // ========== 手动唤醒 ==========
@@ -115,7 +119,7 @@ public class TraderActionService {
     public ActionResult wake(long userId) {
         AiTrader t = traderService.mine(userId);
         if (t == null) {
-            return new ActionResult(false, "尚未创建 AI Trader");
+            return new ActionResult(false, messages.get("trader.notCreated"));
         }
         String blocked = wakeBlockedReason(t);
         if (blocked != null) {
@@ -123,19 +127,19 @@ public class TraderActionService {
         }
         String why = scheduler.tryManualWake(t);
         return why == null
-                ? new ActionResult(true, "已触发一次唤醒，trader 正在后台做决策；结果稍后出现在竞技场的决策时间线上")
+                ? new ActionResult(true, messages.get("trader.wake.started"))
                 : new ActionResult(false, why);
     }
 
     /** 不能唤醒的原因，null=可以。面板与真执行共用，显示的拒因就是点下去会拿到的那一句 */
     public String wakeBlockedReason(AiTrader t) {
         if (AiTrader.STATUS_LIQUIDATED.equals(t.getStatus())) {
-            return "本局已爆仓终局，要先在配置页重置开新一局才能继续交易";
+            return messages.get("trader.wake.liquidated");
         }
         if (!AiTrader.STATUS_RUNNING.equals(t.getStatus())) {
-            return "trader 当前是暂停状态"
-                    + (t.getPausedReason() == null ? "" : "（" + t.getPausedReason() + "）")
-                    + "，手动唤醒不绕过暂停：请先去「我的 Trader」页启动它";
+            String why = t.getPausedReason() == null ? ""
+                    : messages.get("trader.wake.pausedWhy", Map.of("reason", t.getPausedReason()));
+            return messages.get("trader.wake.paused", Map.of("why", why));
         }
         return scheduler.manualWakeBlockedReason(t);
     }
@@ -152,7 +156,7 @@ public class TraderActionService {
     public ActionResult review(long userId) {
         AiTrader t = traderService.mine(userId);
         if (t == null) {
-            return new ActionResult(false, "尚未创建 AI Trader");
+            return new ActionResult(false, messages.get("trader.notCreated"));
         }
         String blocked = reviewBlockedReason(t);
         if (blocked != null) {
@@ -161,12 +165,12 @@ public class TraderActionService {
         long at = System.currentTimeMillis();
         if (!reviewRunner.hasMaterial(t, at)) {
             // 成功而不是失败：跳过是一次省下模型调用的正确决定，界面上不该是红的
-            return new ActionResult(true, "自上次复盘以来没有新的已了结交易，已跳过（没有消耗模型调用）");
+            return new ActionResult(true, messages.get("trader.review.noMaterial"));
         }
         // 占的是调度侧同一个位子：只挡点播与点播之间的话，日线交接阶段1 会对同一个 trader
         // 再排一篇复盘，两条都落 REVIEW 行、ai_trader.memory 被覆盖写两次，后完成的赢
         if (!scheduler.tryOccupy(t.getId())) {
-            return new ActionResult(false, REVIEW_BUSY_REASON);
+            return new ActionResult(false, messages.get("trader.review.busy"));
         }
         Thread.startVirtualThread(() -> {
             try {
@@ -179,20 +183,18 @@ public class TraderActionService {
                 scheduler.release(t.getId());
             }
         });
-        return new ActionResult(true, "已开始复盘，几分钟后会在竞技场的决策时间线上出现一篇 REVIEW；"
-                + "失败也会留一条 ERROR 记录，不会没有下文");
+        return new ActionResult(true, messages.get("trader.review.started"));
     }
 
-    private static final String REVIEW_BUSY_REASON = "这个 trader 手上还有活（唤醒或复盘在跑），等它跑完再点";
 
     /** 不能复盘的原因，null=可以。素材有无另看 {@link ReviewRunner#hasMaterial} */
     public String reviewBlockedReason(AiTrader t) {
         if (scheduler.isHandoverActive()) {
             // 三阶段交接期间旁路写复盘，会让 learner 读到"半天"的复盘并脏读进记忆
-            return "全体复盘与学习进行中（日线交接），几分钟后窗口关闭再试";
+            return messages.get("trader.review.handover");
         }
         if (scheduler.isBusy(t.getId())) {
-            return REVIEW_BUSY_REASON;
+            return messages.get("trader.review.busy");
         }
         return null;
     }

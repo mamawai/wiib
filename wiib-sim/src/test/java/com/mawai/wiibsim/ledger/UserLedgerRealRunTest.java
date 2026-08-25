@@ -594,22 +594,11 @@ class UserLedgerRealRunTest {
     }
 
     /**
-     * 【不变量的口径 —— 改断言、或者拿真库对账之前必读】
-     * <p>
-     * 账本只记<b>上线之后</b>的资金变动。收口时库里已有 7 个存量用户余额非 0 而 user_ledger 为 0 行，
-     * 项目所有者决定<b>不回填期初余额</b>。所以"某钱包流水累加 == user 表当前该列值"这个累加式对账：
-     * <ul>
-     *   <li>对<b>账本上线后建号</b>的用户成立——建号那一刻补的 INITIAL_GRANT 就是期初基准。
-     *       本类一律用 {@link #newUserWithGrant} 新建用户来断言，就是为了拿到这个基准；</li>
-     *   <li>对<b>存量用户不成立</b>，且没法修：期初基准既没记录也不回填，每个钱包各差"上线那一刻该列的值"
-     *       （BALANCE 差的就是期初余额；FROZEN/GAME/借款那几列多数是 0，所以那几个钱包是碰巧对得上，
-     *       不是因为口径成立）。所以<b>不许拿真库既有 userId 跑这个断言</b>；将来谁在真库上跑一句
-     *       {@code SELECT user_id, wallet, SUM(delta) FROM user_ledger GROUP BY 1,2} 去比余额，
-     *       发现那几个用户全对不上，那是<b>刻意的口径而不是漏账</b>，别当 bug 追。</li>
-     * </ul>
-     * POSITION_MARGIN 永远不参与：它只装"资金费吃仓位保证金"那两笔，保证金的其余变动
-     * （余额↔保证金搬家）已在 BALANCE 侧记过，再算一遍就是重复。理由见 LedgerWallet 注释，
-     * 现场反例见 {@link #混合业务跑一轮后五个钱包账实相符()} 末尾那两行断言。
+     * 不变量口径：账本只记上线之后的资金变动，期初余额不回填。
+     * "流水累加 == user 表当前值"只对账本上线后建号的用户成立（INITIAL_GRANT 是期初基准，
+     * 本类一律用 {@link #newUserWithGrant} 新建用户断言）；对存量用户不成立且是刻意口径，
+     * <b>不许拿真库既有 userId 跑这个断言</b>，真库对账对不上也别当漏账追。
+     * POSITION_MARGIN 永远不参与：余额↔保证金搬家已在 BALANCE 侧记过（见 LedgerWallet 注释）。
      */
     private void assertInvariant(Long uid, String stage) {
         User u = userMapper.selectById(uid);
@@ -633,11 +622,8 @@ class UserLedgerRealRunTest {
      * 求和对得上还不够：两笔并发变动若基于同一个旧值各算各的，求和照样对，但链上会出现跳变。
      * 这条才是"并发没把一致性打破"的硬证据。
      * <p>
-     * 【隐含前提：id 序 == 时间序】本断言按 id 升序还原真实变动顺序，靠的是 user_ledger_id_seq
-     * <b>不带 CACHE</b>（当前 seqcache = 1，逐个 nextval）。谁执行一句
-     * {@code ALTER SEQUENCE user_ledger_id_seq CACHE 32}，每个连接就会预取一段 id，
-     * 跨 session 的 id 序不再等于时间序，这条断言会<b>静默失效</b>——变成随机红/绿，
-     * 而不是干脆地红。改序列前先想清楚这里。
+     * 隐含前提：id 序 == 时间序，靠 user_ledger_id_seq 不带 CACHE（seqcache=1）。
+     * 给序列加 CACHE 会让本断言静默失效（随机红绿），改序列前先看这里。
      */
     private void assertBalanceChain(Long uid, LedgerWallet wallet) {
         // selectByCursor 是 id 倒序，reversed() 转成 id 升序 —— 同事务内 INSERT 的 id 顺序即真实变动顺序
@@ -705,12 +691,8 @@ class UserLedgerRealRunTest {
     }
 
     /**
-     * 【最要紧的一条】只能查自己的。
-     * <p>
-     * 两个用户各有流水，各自查各自的，谁都不许看见对方一行。
-     * SQL 里那句 {@code WHERE user_id = #{userId}} 一丢，两边的 doesNotContain 会<b>同时</b>红。
-     * 刻意双向都查一遍：只查一边的话，"把 userId 当死值筛"这种错（永远只返回第一个用户的行）
-     * 有一半概率蒙对。
+     * 最要紧的一条：只能查自己的。刻意双向都查一遍——只查一边的话，
+     * "把 userId 当死值筛"这种错有一半概率蒙对。
      */
     @Test
     void 账单只返回自己的流水() {

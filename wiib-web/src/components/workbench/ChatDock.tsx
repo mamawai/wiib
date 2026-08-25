@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { Bot, KeyRound, Loader2, X } from 'lucide-react';
 import { llmEndpointApi } from '../../api';
 import { useClickOutside } from '../../hooks/useClickOutside';
@@ -64,7 +65,7 @@ function ballBounds() {
   const size = rem * 3, edge = rem;
   // 移动端底部压着导航栏（Layout 里 fixed bottom-0 那条，高度随内容+安全区走），
   // 给一段宽裕的留白让开；PC 没有导航，只留视觉边距
-  const bottom = window.matchMedia('(min-width: 768px)').matches ? edge * 1.5 : rem * 5;
+  const bottom = window.matchMedia('(min-width: 1024px)').matches ? edge * 1.5 : rem * 5;
   return {
     size,
     minX: edge,
@@ -91,6 +92,7 @@ const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), M
  */
 export function ChatDock() {
   const navigate = useNavigate();
+  const { t } = useTranslation('ai');
   const { loading, items } = useSyncExternalStore(chatStore.subscribe, chatStore.getSnapshot);
   const [open, setOpen] = useState(false);
   const [unread, setUnread] = useState(false);
@@ -194,7 +196,7 @@ export function ChatDock() {
 
   const goConfig = useCallback(() => {
     setOpenBoth(false);
-    navigate('/ai?tab=config');
+    navigate('/ai');
   }, [setOpenBoth, navigate]);
 
   /* ===== 悬浮球拖拽：按住挪走 → 松手吸最近的左右边；位移没过阈值才算点击 ===== */
@@ -301,8 +303,8 @@ export function ChatDock() {
             : 'left .34s cubic-bezier(.22,1.4,.36,1), top .34s cubic-bezier(.22,1.4,.36,1),'
               + ' transform .16s ease, box-shadow .16s ease, background-color .16s ease',
         }}
-        title="研判对话"
-        aria-label="打开研判对话"
+        title={t('chat.title')}
+        aria-label={t('chat.openAria')}
         className={cn(
           'fixed z-[90] w-12 h-12 rounded-full pt-card touch-none',
           'items-center justify-center hover:bg-surface-hover',
@@ -365,7 +367,7 @@ export function ChatDock() {
               <div onPointerDown={resizeStart('xy')} onPointerMove={resizeMove} onPointerUp={resizeEnd} onPointerCancel={resizeEnd}
                    className={cn('hidden md:flex absolute top-0 w-4 h-4 z-20 items-start group',
                      ball.side === 'left' ? 'right-0 cursor-nesw-resize justify-end' : 'left-0 cursor-nwse-resize justify-start')}
-                   title="拖拽调整大小">
+                   title={t('chat.resize')}>
                 <span className={cn('mt-1 w-2 h-2 border-t-2 border-muted-foreground/40 group-hover:border-primary transition-colors',
                   ball.side === 'left' ? 'mr-1 border-r-2 rounded-tr' : 'ml-1 border-l-2 rounded-tl')} />
               </div>
@@ -375,7 +377,7 @@ export function ChatDock() {
           {hasConfig == null ? (
             <PanelShell onClose={() => setOpenBoth(false)}>
               <div className="flex-1 flex items-center justify-center gap-2 text-xs text-muted-foreground">
-                <Loader2 className="w-4 h-4 animate-spin" /> 加载配置...
+                <Loader2 className="w-4 h-4 animate-spin" /> {t('loadingConfig')}
               </div>
             </PanelShell>
           ) : hasConfig ? (
@@ -387,16 +389,16 @@ export function ChatDock() {
                 <div className="w-12 h-12 rounded-full border border-border bg-background flex items-center justify-center text-muted-foreground/70">
                   <KeyRound className="w-6 h-6" />
                 </div>
-                <div className="text-sm font-bold text-muted-foreground">用你自己的 API Key 开始对话</div>
+                <div className="text-sm font-bold text-muted-foreground">{t('chat.byokTitle')}</div>
                 <div className="text-[11px] text-muted-foreground/70 max-w-[16rem]">
-                  对话走你配置的模型端点，费用记在你自己的账上，平台不经手
+                  {t('chat.byokHint')}
                 </div>
                 <button
                   type="button"
                   onClick={goConfig}
                   className="mt-1 border border-border rounded-lg px-4 py-2 text-xs font-bold text-primary hover:bg-surface-hover"
                 >
-                  去配置
+                  {t('chat.goConfig')}
                 </button>
               </div>
             </PanelShell>
@@ -409,16 +411,17 @@ export function ChatDock() {
 
 /** 加载中/引导态的简壳：ChatPanel 自带头部，这两个状态没有，得补一个能关的头 */
 function PanelShell({ onClose, children }: { onClose: () => void; children: React.ReactNode }) {
+  const { t } = useTranslation(['ai', 'common']);
   return (
     <>
       <div className="flex items-center gap-2 px-4 py-3 border-b border-border">
         <Bot className="w-4.5 h-4.5 text-primary" />
-        <span className="text-sm font-black">研判对话</span>
+        <span className="text-sm font-black">{t('chat.title')}</span>
         <button
           onClick={onClose}
           className="ml-auto border border-border hover:bg-surface-hover w-7 h-7 rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground"
-          title="关闭"
-          aria-label="关闭对话面板"
+          title={t('common:close')}
+          aria-label={t('chat.closeAria')}
         >
           <X className="w-3.5 h-3.5" />
         </button>

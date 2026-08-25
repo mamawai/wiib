@@ -1,0 +1,58 @@
+# quant 侧其余界面文案：回测入口校验、工作台会话归属、管理员面板。
+# admin 段只有管理员看得见，但一样跟界面语言——管理员也会切英文。
+quant:
+  backtest:
+    symbolUnsupported: 仅支持 BTCUSDT/ETHUSDT
+    rangeInvalid: 时间范围无效
+    rangeTooLong: 时间范围过长，最多 3 年
+    rangeTooManyBars: 时间范围无效（上限 2 万根 5m）
+    balanceInvalid: 初始资金无效
+    leverageRange: 杠杆需在 1~100
+    unknownStrategy: "未知策略: {{id}}"
+    fiboSymbolUnsupported: fibo v1 仅支持 BTCUSDT/ETHUSDT
+    daysLeverageInvalid: days/leverage 必须为正数
+    noRecentKline: "本地 kline_history 没有最新 5m K线: {{symbol}}"
+    fiboFailed: "fibo 回测失败: {{reason}}"
+    userTaskActive: 你已有一个回测在排队/进行中，等它完成再提交
+    queueFull: 回测排队已满，稍后再试
+    taskNotFound: 回测任务不存在（可能因服务重启丢失），请重新提交
+    notFinished: 回测尚未完成
+    runFailed: "回测执行异常: {{reason}}"
+    noKlineInRange: "本地 kline_history 没有该区间的 5m K线: {{symbol}}"
+    klineGap: "本地 5m K线不连续，需先回填: {{symbol}} {{gap}}"
+    liqCoverageLow: "该窗口 liq side data 覆盖率仅 {{pct}}%（需≥60%），跑 LiqDataBackfillRun 回填后再试"
+
+  strategy:
+    positionIdRequired: positionId 不能为空
+    positionNotFound: 仓位不存在或已平仓
+    closeFailed: "平仓失败：{{reason}}"
+
+  chat:
+    sessionNotFound: 会话不存在或无权限
+    sessionRunning: 这个会话还在运行或有补答未落地，等它结束再删
+    approvalExpired: 该确认请求已失效，请重新发起
+
+  # 管理员：LLM 配置与功能位分配
+  admin:
+    adminOnly: 仅管理员可操作
+    apiKeyRequired: apiKey不能为空
+    baseUrlRequired: baseUrl不能为空
+    nameRequired: 名称不能为空
+    modelRequired: model不能为空
+    effortTooLong: 思考档位最长 {{max}} 字符，留空=不传
+    protocolUnsupported: 协议仅支持 openai / responses
+    configNotFound: 配置不存在
+    configInUse: 该LLM配置正被功能位引用，无法删除
+    savedButRefreshFailed: 配置已保存，但AI运行时刷新失败（详见服务日志），当前沿用变更前模型运行
+    deletedButRefreshFailed: 已删除，但AI运行时刷新失败（详见服务日志），当前沿用变更前模型运行
+    assignedButRefreshFailed: 分配已保存，但AI运行时刷新失败（详见服务日志），当前沿用变更前模型运行
+    paramsIncomplete: "参数不完整: {{what}}"
+    llmConfigNotFound: "LLM配置不存在(id={{id}})"
+    llmConfigNoModel: "LLM配置'{{name}}'缺模型名，请先在「配置LLM」里补全"
+
+  # 管理员：币安测试网手工下单（接口自检）
+  testnet:
+    fieldsRequired: symbol/side/type 必填
+    quantityPositive: quantity 必须 > 0
+    limitNeedsPrice: LIMIT 必须传 price
+    noPosition: "当前无持仓: {{symbol}}"

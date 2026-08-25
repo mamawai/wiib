@@ -8,14 +8,9 @@ import java.util.List;
 
 /**
  * 一条合约仓位的完整生命周期：从开到平。
- * <p>
- * 【为什么不直接下发 futures_position 的字段】那张表的 closed_pnl 只记最后一次全平那笔的盈亏，
- * quantity 全平后也只剩最后平掉的那一段——部分平仓过的仓位，这两个字段都是残值。
- * 一笔仓位真实的「已平仓量 / 平仓均价 / 已实现盈亏」只能把它名下所有成交单聚合出来，
+ * 字段来自订单聚合而非 futures_position（部分平仓后那张表的 closed_pnl/quantity 是残值），
  * 聚合 SQL 见 {@code FuturesPositionMapper#selectPositionHistory}。
- * <p>
- * 破产清零那批仓位（BankruptcyServiceImpl 只改 status、不落平仓单）没有任何平仓单，
- * 于是 closedQty=0、closeAvgPrice=null，前端按"—"显示，不要填 0 冒充成交过。
+ * 破产清零的仓位没有平仓单：closedQty=0、closeAvgPrice=null，前端按"—"显示，不要填 0。
  */
 @Data
 public class PositionHistoryDTO {

@@ -8,8 +8,10 @@ import com.mawai.wiibcommon.dto.FuturesPositionDTO;
 import com.mawai.wiibcommon.entity.AiTrader;
 import com.mawai.wiibcommon.entity.AiTraderDecision;
 import com.mawai.wiibcommon.entity.AiTraderPlan;
+import com.mawai.wiibcommon.enums.AgentLang;
 import com.mawai.wiibcommon.market.KlineBar;
 import com.mawai.wiibcommon.market.KlineHistoryStore;
+import com.mawai.wiibquant.agent.i18n.PromptCatalog;
 import com.mawai.wiibquant.external.sim.SimTradeClient;
 import com.mawai.wiibquant.mapper.AiTraderDecisionMapper;
 import com.mawai.wiibquant.mapper.AiTraderPlanMapper;
@@ -26,7 +28,9 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -34,6 +38,10 @@ import java.util.regex.Pattern;
  * 复盘素材组装（纯代码，可单测）：战绩表/配对表/时间线摘编/价格路径四块硬事实。
  * 事实裁定归代码、模型只解读——战绩数字只许复述，代码错一位就是复盘造假。
  * 素材窗口 = (上次成功REVIEW的wake_time, 本日线边界]；无REVIEW则本局开始（round过滤天然覆盖）。
+ * <p>
+ * 段标签全在 {@link PromptCatalog} 的 {@code reviewer.label.*}，按 reviewer 本轮的语言取。
+ * 但<b>读旧决策时两门语言的结论标记都认</b>：库里的决策是当时那门语言写的，用户切过语言后
+ * 只认当前这套，整条时间线会被判成"没给等待条件"，观望对账直接空转。
  */
 @Slf4j
 @Component
@@ -48,9 +56,8 @@ public class ReviewMaterialAssembler {
     static final int ACTION_MAX_CHARS = 300;
     /** 等待条件字数上限：观望对账的唯一原料，与动作行同档 */
     static final int WAIT_MAX_CHARS = 300;
-    /** "等待"段：吃到下一个小节标签或块尾。多行 + 行首锚定，分条写的条件才不会只捞到标签行 */
-    private static final Pattern WAIT_SECTION = Pattern.compile(
-            "(?ms)^\\s*等待(?:条件)?[：:]\\h*(.*?)(?=^\\s*(?:判断|动作|计划依据)[：:]|\\z)");
+    /** 「等待」段的正则按语言现编（标签跟着 trader 提示词走），编一次缓存住——一天几百行不必每行重编 */
+    private final Map<AgentLang, Pattern> waitPatterns = new ConcurrentHashMap<>();
     /** 价格路径回看上限(小时)：窗口通常一天，首篇复盘 fromMs=0 时靠它兜住 */
     private static final int MAX_PATH_HOURS = 48;
     /** 已平仓位拉取上限：窗口通常一天，远超一天可能的成交笔数 */
@@ -66,6 +73,7 @@ public class ReviewMaterialAssembler {
     private final AiTraderPlanMapper planMapper;
     private final SimTradeClient simTradeClient;
     private final KlineHistoryStore historyStore;
+    private final PromptCatalog prompts;
 
     /** 四块素材文本 + 已了结笔数（调用方日志用） */
     public record ReviewMaterial(String statsBlock, String tradesBlock,
@@ -104,23 +112,23 @@ public class ReviewMaterialAssembler {
         return n != null && n > 0;
     }
 
-    public ReviewMaterial assemble(AiTrader trader, long fromMs, long toMs) {
+    public ReviewMaterial assemble(AiTrader trader, long fromMs, long toMs, AgentLang lang) {
         // 已平仓位是"最近N条"，取满上限就说明可能被截断——战绩表得把这件事说出来，
         // 不能一边宣称"硬事实、禁止自行计算"一边给不完整的数字
         List<FuturesPositionDTO> fetched = simTradeClient.getClosedPositions(trader.getSimUserId(), CLOSED_FETCH_LIMIT);
         boolean maybeTruncated = fetched.size() >= CLOSED_FETCH_LIMIT;
         List<FuturesPositionDTO> closed = inWindow(fetched, fromMs, toMs);
-        String stats = statsBlock(trader, fromMs, toMs, closed, maybeTruncated);
-        String trades = tradesBlock(trader, closed, fromMs, toMs);
-        String timeline = timelineBlock(trader, fromMs, toMs);
-        String pricePath = pricePathBlock(trader, fromMs, toMs);
+        String stats = statsBlock(trader, fromMs, toMs, closed, maybeTruncated, lang);
+        String trades = tradesBlock(trader, closed, fromMs, toMs, lang);
+        String timeline = timelineBlock(trader, fromMs, toMs, lang);
+        String pricePath = pricePathBlock(trader, fromMs, toMs, lang);
         return new ReviewMaterial(stats, trades, timeline, pricePath, closed.size());
     }
 
     // ==================== 战绩表 ====================
 
     private String statsBlock(AiTrader t, long fromMs, long toMs, List<FuturesPositionDTO> closed,
-                              boolean maybeTruncated) {
+                              boolean maybeTruncated, AgentLang lang) {
         // 起始权益 = 窗口起点前最后一条带权益的决策行；开局首次复盘无前值 → 初始资金
         AiTraderDecision prior = decisionMapper.selectOne(new LambdaQueryWrapper<AiTraderDecision>()
                 .eq(AiTraderDecision::getTraderId, t.getId())
@@ -161,35 +169,36 @@ public class ReviewMaterialAssembler {
         BigDecimal pnlSum = closed.stream().map(FuturesPositionDTO::getClosedPnl)
                 .filter(java.util.Objects::nonNull).reduce(BigDecimal.ZERO, BigDecimal::add);
 
-        StringBuilder sb = new StringBuilder("【战绩表】（代码统计，只许原样复述，禁止自行计算）\n");
+        StringBuilder sb = new StringBuilder(prompts.get(lang, "reviewer.label.statsHeader")).append('\n');
         if (maybeTruncated) {
-            sb.append("注意：本期成交笔数可能超出统计上限 ").append(CLOSED_FETCH_LIMIT)
-                    .append(" 笔，以下已了结相关数字为不完全统计——可以据此谈倾向，别当成完整战绩下定论\n");
+            sb.append(prompts.get(lang, "reviewer.label.statsTruncated",
+                    Map.of("limit", CLOSED_FETCH_LIMIT))).append('\n');
         }
-        sb.append("起始权益 ").append(start.setScale(2, RoundingMode.HALF_UP))
-                .append(" → 期末权益 ").append(end.setScale(2, RoundingMode.HALF_UP))
-                .append("，期间收益率 ").append(signed(returnPct)).append("%\n");
-        sb.append("期间最大回撤 ").append(maxDd).append("%\n");
+        sb.append(prompts.get(lang, "reviewer.label.statsEquity", Map.of(
+                "start", start.setScale(2, RoundingMode.HALF_UP),
+                "end", end.setScale(2, RoundingMode.HALF_UP),
+                "pct", signed(returnPct)))).append('\n');
+        sb.append(prompts.get(lang, "reviewer.label.statsDrawdown", Map.of("dd", maxDd))).append('\n');
         if (closed.isEmpty()) {
-            sb.append("期间无已了结交易\n");
+            sb.append(prompts.get(lang, "reviewer.label.noClosed")).append('\n');
         } else {
-            sb.append("已了结 ").append(closed.size()).append(" 笔：")
-                    .append(wins).append(" 胜 ").append(closed.size() - wins).append(" 负（胜率 ")
-                    .append(wins * 100 / closed.size()).append("%），合计毛盈亏 ")
-                    .append(signed(pnlSum.setScale(2, RoundingMode.HALF_UP)))
-                    .append("（未计手续费与资金费）\n");
+            sb.append(prompts.get(lang, "reviewer.label.statsClosed", Map.of(
+                    "n", closed.size(), "wins", wins, "losses", closed.size() - wins,
+                    "winRate", wins * 100 / closed.size(),
+                    "pnl", signed(pnlSum.setScale(2, RoundingMode.HALF_UP))))).append('\n');
         }
         return sb.toString();
     }
 
     // ==================== 已了结交易配对表 ====================
 
-    private String tradesBlock(AiTrader t, List<FuturesPositionDTO> closed, long fromMs, long toMs) {
+    private String tradesBlock(AiTrader t, List<FuturesPositionDTO> closed, long fromMs, long toMs,
+                               AgentLang lang) {
         // 全量拉本局计划在内存配对：一局的计划量有限，省掉按笔查询
         List<AiTraderPlan> plans = planMapper.selectList(new LambdaQueryWrapper<AiTraderPlan>()
                 .eq(AiTraderPlan::getTraderId, t.getId())
                 .eq(AiTraderPlan::getRoundNo, t.getRoundNo()));
-        StringBuilder sb = new StringBuilder("【已了结交易配对表】（论点→结局，代码配对）\n");
+        StringBuilder sb = new StringBuilder(prompts.get(lang, "reviewer.label.tradesHeader")).append('\n');
         Set<AiTraderPlan> used = new HashSet<>();
         int i = 1;
         for (FuturesPositionDTO pos : closed) {
@@ -198,16 +207,12 @@ public class ReviewMaterialAssembler {
             if (plan != null && plan.getPlayType() != null) {
                 sb.append(" [").append(plan.getPlayType()).append(']');
             }
-            sb.append(" 入场 ").append(plain(pos.getEntryPrice()))
-                    .append(" → 出场 ").append(plain(pos.getClosedPrice()))
-                    .append("，毛盈亏 ").append(signed(pos.getClosedPnl()))
-                    .append("，持有 ").append(humanize(msOf(pos.getUpdatedAt()) - msOf(pos.getCreatedAt())))
-                    .append("，").append(closeManner(pos)).append('\n');
+            sb.append(' ').append(tradeRow(prompts, pos, lang)).append('\n');
             if (plan != null) {
-                sb.append("   论点: ").append(nullSafe(plan.getSignalsUsed()))
-                        .append(" ｜ 失效条件: ").append(nullSafe(plan.getInvalidationCondition())).append('\n');
+                sb.append("   ").append(planLine(prompts, plan.getSignalsUsed(),
+                        plan.getInvalidationCondition(), lang)).append('\n');
             } else {
-                sb.append("   （无计划记录）\n");
+                sb.append("   ").append(prompts.get(lang, "reviewer.label.noPlan")).append('\n');
             }
         }
         // 窗口内归档却没配对上仓位的计划（多为挂单未成交撤销）：论点没得到执行机会也要留痕
@@ -216,15 +221,37 @@ public class ReviewMaterialAssembler {
                     && plan.getClosedWakeTime() != null
                     && plan.getClosedWakeTime() > fromMs && plan.getClosedWakeTime() <= toMs) {
                 sb.append("· ").append(plan.getSymbol()).append(' ').append(plan.getSide())
-                        .append(" [").append(nullSafe(plan.getPlayType()))
-                        .append("] 计划归档但未配对到已平仓位（多为挂单未成交撤销）；论点: ")
-                        .append(nullSafe(plan.getSignalsUsed())).append('\n');
+                        .append(" [").append(nullSafe(plan.getPlayType())).append("] ")
+                        .append(prompts.get(lang, "reviewer.label.orphanPlan",
+                                Map.of("signals", nullSafe(plan.getSignalsUsed())))).append('\n');
             }
         }
         if (i == 1 && sb.indexOf("·") < 0) {
-            sb.append("期间无已了结交易\n");
+            sb.append(prompts.get(lang, "reviewer.label.noClosed")).append('\n');
         }
         return sb.toString();
+    }
+
+    /**
+     * 一笔已了结交易的行尾（入场→出场/盈亏/持有/了结方式）。
+     * 与 plain/signed/nullSafe 同样对同包 {@link PeerInsightService} 开放：同一批数字两处视角，
+     * 格式化各写一套迟早口径对不上。做成静态、词表当入参传——调用方不必为了借个格式化器去装配整个 bean。
+     */
+    static String tradeRow(PromptCatalog prompts, FuturesPositionDTO pos, AgentLang lang) {
+        return prompts.get(lang, "reviewer.label.tradeRow", Map.of(
+                "entry", plain(pos.getEntryPrice()),
+                "exit", plain(pos.getClosedPrice()),
+                "pnl", signed(pos.getClosedPnl()),
+                "held", humanize(prompts, msOf(pos.getUpdatedAt()) - msOf(pos.getCreatedAt()), lang),
+                "manner", closeManner(prompts, pos, lang)));
+    }
+
+    /** 论点/失效条件那一行，同样对同侪详情开放 */
+    static String planLine(PromptCatalog prompts, String signalsUsed, String invalidationCondition,
+                           AgentLang lang) {
+        return prompts.get(lang, "reviewer.label.planLine", Map.of(
+                "signals", nullSafe(signalsUsed),
+                "invalidation", nullSafe(invalidationCondition)));
     }
 
     /**
@@ -247,29 +274,43 @@ public class ReviewMaterialAssembler {
                 .orElse(null);
     }
 
+    /** 主动平仓的码：竞技场判"要不要挂平仓决策"靠它，别再拿文案字符串比 */
+    public static final String MANNER_MANUAL = "manual";
+    /** 判不出来时的码：它本身就是码不是文案，两门语言都原样透传 */
+    public static final String MANNER_UNKNOWN = "UNKNOWN";
+
     /**
-     * 了结方式推断：强平看状态；止损/止盈用方向性对照——触发价是探测时的 markPrice 会越过挂单价，
-     * 不能按相等判。保护单实时监控在先，带内成交只能是主动平仓（模型自平或审批执行）。
-     * 全平不清保护单列表（sim 只在部分平仓时改写），closed 行上的列表就是了结时在岗的那组。
+     * 了结方式推断（返回<b>语言无关的码</b>）：强平看状态；止损/止盈用方向性对照——触发价是探测时的
+     * markPrice 会越过挂单价，不能按相等判。保护单实时监控在先，带内成交只能是主动平仓
+     * （模型自平或审批执行）。全平不清保护单列表（sim 只在部分平仓时改写），closed 行上的列表
+     * 就是了结时在岗的那组。
+     * <p>码与文案分家：竞技场按码做判断（"主动平仓才挂平仓决策"），码不随语言变。
      */
-    public static String closeManner(FuturesPositionDTO p) {
+    public static String closeMannerKey(FuturesPositionDTO p) {
         if ("LIQUIDATED".equals(p.getStatus())) {
-            return "强平";
+            return "liquidated";
         }
         BigDecimal cp = p.getClosedPrice();
         if (cp == null) {
-            return "UNKNOWN";
+            return MANNER_UNKNOWN;
         }
         boolean isLong = "LONG".equals(p.getSide());
         if (p.getStopLosses() != null && p.getStopLosses().stream().anyMatch(sl ->
                 isLong ? cp.compareTo(sl.getPrice()) <= 0 : cp.compareTo(sl.getPrice()) >= 0)) {
-            return "止损带走";
+            return "stopLoss";
         }
         if (p.getTakeProfits() != null && p.getTakeProfits().stream().anyMatch(tp ->
                 isLong ? cp.compareTo(tp.getPrice()) >= 0 : cp.compareTo(tp.getPrice()) <= 0)) {
-            return "止盈带走";
+            return "takeProfit";
         }
-        return "主动平仓";
+        return MANNER_MANUAL;
+    }
+
+    /** 了结方式文案：码 → 词表；UNKNOWN 没有文案，原样给出去 */
+    public static String closeManner(PromptCatalog prompts, FuturesPositionDTO p, AgentLang lang) {
+        String key = closeMannerKey(p);
+        return MANNER_UNKNOWN.equals(key) ? key
+                : prompts.get(lang, "reviewer.label.closeManner." + key);
     }
 
     // ==================== 决策时间线摘编 ====================
@@ -277,7 +318,7 @@ public class ReviewMaterialAssembler {
     private record TimelineEntry(String line, boolean hasAction) {
     }
 
-    private String timelineBlock(AiTrader t, long fromMs, long toMs) {
+    private String timelineBlock(AiTrader t, long fromMs, long toMs, AgentLang lang) {
         // 白名单同 hasNewMaterial：时间线是交易行为的摘编，LEARN/REVIEW 进来会虚增"唤醒轮数"，
         // 保守度自检的对照物就失真了
         List<AiTraderDecision> rows = decisionMapper.selectList(new LambdaQueryWrapper<AiTraderDecision>()
@@ -309,28 +350,30 @@ public class ReviewMaterialAssembler {
                 skipped++;
                 continue;
             }
-            String acts = actionSummary(d.getActionsJson());
-            String tag = AiTraderDecision.KIND_ALERT.equals(d.getKind()) ? "[警报] " : "";
+            String acts = actionSummary(d.getActionsJson(), lang);
+            String tag = AiTraderDecision.KIND_ALERT.equals(d.getKind())
+                    ? prompts.get(lang, "reviewer.label.alertTag") + " " : "";
             if (!acts.isEmpty()) {
                 // 动作行逐条出、内容不动：它是复盘主菜，判断/依据/等待整块都是"为什么做这一手"的证据
-                flushHold(entries, holdKind, holdWait, holdFrom, holdTo, holdRounds);
+                flushHold(entries, holdKind, holdWait, holdFrom, holdTo, holdRounds, lang);
                 holdKey = null;
                 holdRounds = 0;
                 // 数开仓动作按摘要文本认工具名：actionSummary 已过滤成 tool(args) 形态，误中不了正文
                 opens += countOccurrences(acts, "open_position(");
                 entries.add(new TimelineEntry("- " + TIME_FMT.format(Instant.ofEpochMilli(d.getWakeTime()))
-                        + " " + tag + acts + " ｜ " + conclusion(d.getReasoning()), true));
+                        + " " + tag + prompts.get(lang, "reviewer.label.actionRow", Map.of(
+                                "actions", acts, "conclusion", conclusion(d.getReasoning(), lang))), true));
                 continue;
             }
             // 观望轮只留等待条件：它有对账物（价格路径能验证到没到），"判断"那段指标读数没有
-            String wait = waitSection(d.getReasoning());
+            String wait = waitSection(d.getReasoning(), lang);
             // 警报轮与例行观望不混段：同样条件下被警报叫醒仍按兵不动，这件事本身就是复盘证据
             String key = (tag.isEmpty() ? "N|" : "A|") + waitKey(wait);
             if (holdKey != null && holdKey.equals(key)) {
                 holdTo = d.getWakeTime();
                 holdRounds++;
             } else {
-                flushHold(entries, holdKind, holdWait, holdFrom, holdTo, holdRounds);
+                flushHold(entries, holdKind, holdWait, holdFrom, holdTo, holdRounds, lang);
                 holdKey = key;
                 holdWait = wait;
                 holdKind = d.getKind();
@@ -339,15 +382,15 @@ public class ReviewMaterialAssembler {
                 holdRounds = 1;
             }
         }
-        flushHold(entries, holdKind, holdWait, holdFrom, holdTo, holdRounds);
+        flushHold(entries, holdKind, holdWait, holdFrom, holdTo, holdRounds, lang);
 
-        StringBuilder sb = new StringBuilder(
-                "【决策时间线摘编】（时间升序；动作行含工具摘要，连续等待条件相同的观望轮已合并成段）\n");
+        StringBuilder sb = new StringBuilder(prompts.get(lang, "reviewer.label.timelineHeader")).append('\n');
         // 活动统计给保守度自检当对照物：唤醒多动作少是"没信号"还是"吓缩了"，得先有数才能问。
         // 轮数取自原始行而非合并后的段数——合并只是省字，"这期醒了多少次"不能跟着缩水
-        sb.append("本期活动：唤醒 ").append(rows.size()).append(" 轮，动作轮 ")
-                .append(entries.stream().filter(TimelineEntry::hasAction).count())
-                .append("，开仓动作 ").append(opens).append(" 次\n");
+        sb.append(prompts.get(lang, "reviewer.label.timelineActivity", Map.of(
+                "rounds", rows.size(),
+                "actionRounds", entries.stream().filter(TimelineEntry::hasAction).count(),
+                "opens", opens))).append('\n');
         if (entries.size() > MAX_TIMELINE_ENTRIES) {
             // 动作行全保、无动作 HOLD 从最新往回补足额度：复盘的主菜是动作，观望看最近的就够
             int budget = MAX_TIMELINE_ENTRIES - (int) entries.stream().filter(TimelineEntry::hasAction).count();
@@ -360,7 +403,8 @@ public class ReviewMaterialAssembler {
                     budget--;
                 }
             }
-            sb.append("（早段已省略 ").append(entries.size() - keep.size()).append(" 段观望）\n");
+            sb.append(prompts.get(lang, "reviewer.label.timelineOmitted",
+                    Map.of("n", entries.size() - keep.size()))).append('\n');
             List<TimelineEntry> kept = new ArrayList<>();
             for (int i = 0; i < entries.size(); i++) {
                 if (keep.contains(i)) {
@@ -370,24 +414,25 @@ public class ReviewMaterialAssembler {
             entries = kept;
         }
         if (entries.isEmpty() && errors == 0 && skipped == 0) {
-            sb.append("期间无决策记录\n");
+            sb.append(prompts.get(lang, "reviewer.label.timelineEmpty")).append('\n');
         }
         entries.forEach(e -> sb.append(e.line()).append('\n'));
         if (errors > 0 || skipped > 0) {
-            sb.append("期间另有 ");
+            List<String> parts = new ArrayList<>(2);
             if (errors > 0) {
-                sb.append(errors).append(" 轮 ERROR").append(skipped > 0 ? "、" : "");
+                parts.add(prompts.get(lang, "reviewer.label.timelineErrors", Map.of("n", errors)));
             }
             if (skipped > 0) {
-                sb.append(skipped).append(" 轮 SKIPPED");
+                parts.add(prompts.get(lang, "reviewer.label.timelineSkipped", Map.of("n", skipped)));
             }
-            sb.append('\n');
+            sb.append(prompts.get(lang, "reviewer.label.timelineOthers", Map.of("parts",
+                    String.join(prompts.get(lang, "reviewer.label.timelineOthersSep"), parts)))).append('\n');
         }
         return sb.toString();
     }
 
     /** 动作轨迹 JSON → 一行摘要；只取交易动作工具，拒/错标注结果。解析失败当无动作（摘编缺一行不挡复盘）。 */
-    private static String actionSummary(String actionsJson) {
+    private String actionSummary(String actionsJson, AgentLang lang) {
         if (actionsJson == null || actionsJson.isBlank()) {
             return "";
         }
@@ -411,55 +456,105 @@ public class ReviewMaterialAssembler {
                     }
                 }
                 // pending＝转成待主人确认的请求，本轮并没有成交，摘编里不标就成了"平了仓"的假事实
-                String outcome = a.containsKey("rejected") ? "→被拒"
-                        : "error".equals(a.getString("status")) ? "→失败"
-                        : "pending".equals(a.getString("status")) ? "→待确认" : "";
+                String outcome = a.containsKey("rejected")
+                        ? prompts.get(lang, "reviewer.label.outcomeRejected")
+                        : "error".equals(a.getString("status"))
+                        ? prompts.get(lang, "reviewer.label.outcomeFailed")
+                        : "pending".equals(a.getString("status"))
+                        ? prompts.get(lang, "reviewer.label.outcomePending") : "";
                 parts.add(tool + "(" + brief + ")" + outcome);
             }
-            return String.join("；", parts);
+            return String.join(prompts.get(lang, "reviewer.label.actionJoin"), parts);
         } catch (Exception e) {
             return "";
         }
     }
 
     /**
-     * 动作行的结论：【本轮结论】整块，截断保头（块内判断在前）。
+     * 动作行的结论：结论块整块，截断保头（块内判断在前）。
      * 没有结论块（旧数据/格式失守）退化为截尾片段——结论在末尾，保头会正好把它切掉。
      */
-    private static String conclusion(String reasoning) {
+    private String conclusion(String reasoning, AgentLang lang) {
         if (reasoning == null || reasoning.isBlank()) {
             return "";
         }
-        int idx = reasoning.lastIndexOf("【本轮结论】");
-        if (idx < 0) {
+        Conclusion c = locateConclusion(reasoning, lang);
+        if (c == null) {
             String tail = reasoning.strip();
             return (tail.length() > 120 ? "…" + tail.substring(tail.length() - 120) : tail).replace('\n', ' ');
         }
-        String flat = reasoning.substring(idx + "【本轮结论】".length()).strip().replace('\n', ' ');
+        String flat = c.body(reasoning).replace('\n', ' ');
         return flat.length() > ACTION_MAX_CHARS ? flat.substring(0, ACTION_MAX_CHARS) + "…" : flat;
     }
 
+    /** 命中的结论块：块正文 + 它是用哪门语言写的（小节标签得按同一门认） */
+    private record Conclusion(AgentLang lang, int index, int markLength) {
+        String body(String reasoning) {
+            return reasoning.substring(index + markLength).strip();
+        }
+    }
+
     /**
-     * 观望行的原料：【本轮结论】里的"等待"段，返回完整内容不截断
+     * 找结论块：先认当前语言的标记，认不到再试别的语言。
+     * 决策行按写入时的语言落库，中途切语言不能丢历史；两套标记字面不同，多认一套不误伤。
+     */
+    private Conclusion locateConclusion(String reasoning, AgentLang lang) {
+        Conclusion hit = matchConclusion(reasoning, lang);
+        if (hit != null) {
+            return hit;
+        }
+        for (AgentLang other : AgentLang.values()) {
+            if (other != lang) {
+                hit = matchConclusion(reasoning, other);
+                if (hit != null) {
+                    return hit;
+                }
+            }
+        }
+        return null;
+    }
+
+    private Conclusion matchConclusion(String reasoning, AgentLang lang) {
+        String mark = prompts.get(lang, "trader.mark.conclusion");
+        int idx = reasoning.lastIndexOf(mark);
+        return idx < 0 ? null : new Conclusion(lang, idx, mark.length());
+    }
+
+    /**
+     * 观望行的原料：结论块里的"等待"段，返回完整内容不截断
      * （截断留给输出——先截再算合并键，会把"前段相同、后段不同"的两条误并成一条）。
      * <p>
      * 按标签块切而不是按行取：模型有时把条件写在标签同一行、有时换行分条列，
      * 整段吃到下一个小节标签才两种都接得住；只认标签行的话，分条写的条件会整段丢掉，
      * 观望对账没了原料就是空转。行首锚定防正文里的"等待："被误认。
      */
-    static String waitSection(String reasoning) {
+    String waitSection(String reasoning, AgentLang lang) {
         if (reasoning == null || reasoning.isBlank()) {
             return "";
         }
-        int idx = reasoning.lastIndexOf("【本轮结论】");
-        if (idx < 0) {
+        Conclusion c = locateConclusion(reasoning, lang);
+        if (c == null) {
             // 没有结论块就没有等待条件。这里若退回正文尾巴，对账那步会拿一段行情叙述当条件去判
             // 命中/未命中，只能编出假结论——观望对账正是复盘的核心产出
             return "";
         }
-        Matcher m = WAIT_SECTION.matcher(reasoning.substring(idx + "【本轮结论】".length()).strip());
+        // 小节标签按结论块自己那门语言认：块是中文写的，段名就是"等待/判断/动作"
+        Matcher m = waitPattern(c.lang()).matcher(c.body(reasoning));
         // 没有等待段就是没有：不拿正文冒充条件，对账时它该被当成"这轮没给条件"
         return m.find() ? m.group(1).replaceAll("\\s+", " ").strip() : "";
+    }
+
+    /**
+     * 「等待」段正则：{@code 等待条件|等待} 起头，吃到下一个小节标签或块尾。
+     * 标签取自 trader 的固定收尾格式，两门语言各一套。
+     */
+    private Pattern waitPattern(AgentLang lang) {
+        return waitPatterns.computeIfAbsent(lang, l -> Pattern.compile(
+                "(?ms)^\\s*(?:" + Pattern.quote(prompts.get(l, "trader.mark.waitLong")) + "|"
+                        + Pattern.quote(prompts.get(l, "trader.mark.wait")) + ")[：:]\\h*(.*?)"
+                        + "(?=^\\s*(?:" + Pattern.quote(prompts.get(l, "trader.mark.judgement")) + "|"
+                        + Pattern.quote(prompts.get(l, "trader.mark.action")) + "|"
+                        + Pattern.quote(prompts.get(l, "trader.mark.planBasis")) + ")[：:]|\\z)"));
     }
 
     /**
@@ -476,19 +571,22 @@ public class ReviewMaterialAssembler {
      * 结算一个观望段。多轮的写成时间段+轮数——"这个条件挂了多久、耗了多少轮"本身就是
      * 保守度自检的证据（该行动没行动 vs 市场真没信号），比同一句话重复 N 遍有用。
      */
-    private static void flushHold(List<TimelineEntry> out, String kind, String wait,
-                                  long from, long to, int rounds) {
+    private void flushHold(List<TimelineEntry> out, String kind, String wait,
+                           long from, long to, int rounds, AgentLang lang) {
         if (rounds == 0) {
             return;
         }
-        String tag = AiTraderDecision.KIND_ALERT.equals(kind) ? "[警报] " : "";
+        String tag = AiTraderDecision.KIND_ALERT.equals(kind)
+                ? prompts.get(lang, "reviewer.label.alertTag") + " " : "";
         String head = rounds == 1
                 ? "- " + TIME_FMT.format(Instant.ofEpochMilli(from)) + " " + tag
                 : "- " + TIME_FMT.format(Instant.ofEpochMilli(from)) + "~"
-                  + TIME_FMT.format(Instant.ofEpochMilli(to)) + "（" + rounds + "轮）" + tag;
-        String w = wait.isEmpty() ? "（本轮未给等待条件）"
+                  + TIME_FMT.format(Instant.ofEpochMilli(to))
+                  + prompts.get(lang, "reviewer.label.holdRounds", Map.of("rounds", rounds)) + tag;
+        String w = wait.isEmpty() ? prompts.get(lang, "reviewer.label.noWait")
                 : wait.length() > WAIT_MAX_CHARS ? wait.substring(0, WAIT_MAX_CHARS) + "…" : wait;
-        out.add(new TimelineEntry(head + "等待：" + w, false));
+        out.add(new TimelineEntry(head + prompts.get(lang, "reviewer.label.waiting",
+                Map.of("wait", w)), false));
     }
 
     // ==================== 各币价格路径 ====================
@@ -499,13 +597,13 @@ public class ReviewMaterialAssembler {
      * 与哨兵阈值校准、策略回测同源。
      * 48h 上限兜住首篇复盘（fromMs=0）：真实覆盖范围写进块头，观望对账拿错对照物结论就是假的。
      */
-    private String pricePathBlock(AiTrader t, long fromMs, long toMs) {
+    private String pricePathBlock(AiTrader t, long fromMs, long toMs, AgentLang lang) {
         long effectiveFrom = Math.max(fromMs, toMs - MAX_PATH_HOURS * 3_600_000L);
-        StringBuilder sb = new StringBuilder("【各币1h价格路径】（观望对账的对照物；覆盖 "
-                + TIME_FMT.format(Instant.ofEpochMilli(effectiveFrom)) + " → "
-                + TIME_FMT.format(Instant.ofEpochMilli(toMs)) + "）\n");
+        StringBuilder sb = new StringBuilder(prompts.get(lang, "reviewer.label.pathHeader", Map.of(
+                "from", TIME_FMT.format(Instant.ofEpochMilli(effectiveFrom)),
+                "to", TIME_FMT.format(Instant.ofEpochMilli(toMs))))).append('\n');
         if (fromMs == 0) {
-            sb.append("注意：本局首篇复盘，这段路径可能早于开局时刻——开局前的价格只作背景，不作对账依据\n");
+            sb.append(prompts.get(lang, "reviewer.label.pathFirstNote")).append('\n');
         }
         for (String symbol : t.getSymbols().split(",")) {
             symbol = symbol.trim();
@@ -514,7 +612,8 @@ public class ReviewMaterialAssembler {
             }
             List<KlineBar> hourly = hourlyBars(symbol, effectiveFrom, toMs);
             if (hourly.isEmpty()) {
-                sb.append("- ").append(symbol).append(": 窗口内无K线数据\n");
+                sb.append("- ").append(symbol).append(": ")
+                        .append(prompts.get(lang, "reviewer.label.pathNoBars")).append('\n');
                 continue;
             }
             BigDecimal open = hourly.get(0).open();
@@ -543,12 +642,15 @@ public class ReviewMaterialAssembler {
             BigDecimal pct = open.signum() > 0
                     ? close.subtract(open).multiply(BigDecimal.valueOf(100)).divide(open, 2, RoundingMode.HALF_UP)
                     : BigDecimal.ZERO;
-            sb.append("- ").append(symbol).append(": 开 ").append(plain(open))
-                    .append(" → 收 ").append(plain(close)).append("（").append(signed(pct)).append("%）")
-                    .append("；最高 ").append(plain(high)).append("（").append(TIME_FMT.format(Instant.ofEpochMilli(highAt)))
-                    .append("）最低 ").append(plain(low)).append("（").append(TIME_FMT.format(Instant.ofEpochMilli(lowAt)))
-                    .append("）\n  1h收盘: ").append(closes)
-                    .append("\n  1h高/低: ").append(ranges).append('\n');
+            sb.append("- ").append(symbol).append(": ")
+                    .append(prompts.get(lang, "reviewer.label.pathRow", Map.of(
+                            "open", plain(open), "close", plain(close), "pct", signed(pct),
+                            "high", plain(high), "highAt", TIME_FMT.format(Instant.ofEpochMilli(highAt)),
+                            "low", plain(low), "lowAt", TIME_FMT.format(Instant.ofEpochMilli(lowAt)))))
+                    .append("\n  ").append(prompts.get(lang, "reviewer.label.pathCloses",
+                            Map.of("closes", closes)))
+                    .append("\n  ").append(prompts.get(lang, "reviewer.label.pathRanges",
+                            Map.of("ranges", ranges))).append('\n');
         }
         return sb.toString();
     }
@@ -631,12 +733,14 @@ public class ReviewMaterialAssembler {
         return count;
     }
 
-    static String humanize(long ms) {
+    static String humanize(PromptCatalog prompts, long ms, AgentLang lang) {
         long min = Math.max(0, ms / 60_000);
         if (min < 120) {
-            return min + "分钟";
+            return prompts.get(lang, "reviewer.label.duration.minutes", Map.of("n", min));
         }
         long hours = min / 60;
-        return hours < 48 ? hours + "小时" : (hours / 24) + "天";
+        return hours < 48
+                ? prompts.get(lang, "reviewer.label.duration.hours", Map.of("n", hours))
+                : prompts.get(lang, "reviewer.label.duration.days", Map.of("n", hours / 24));
     }
 }

@@ -6,7 +6,7 @@ import com.mawai.wiibquant.research.metrics.RiskAdjustedMetrics;
 import java.math.BigDecimal;
 
 /**
- * 多策略同框报告里的单策略一行（承接 Slice1 单策略 EvalReport 的策略侧字段）。
+ * 多策略同框报告里的单策略一行。
  * buy&hold 是市场基准、与策略无关，提到 {@link ComparisonReport} 顶层；这里只放该策略自身的指标与双基准判定。
  *
  * <p>双口径收益：

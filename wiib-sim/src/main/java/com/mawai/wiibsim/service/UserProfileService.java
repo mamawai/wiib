@@ -36,13 +36,8 @@ public class UserProfileService {
     private final AssetValuationService assetValuationService;
 
     /**
-     * 隐私门控：目标用户关了 profile_public 就不许看，本人除外。
-     * <p>
-     * 【为什么本人永远放行】否则自己关了开关就再也点不进自己的详情页，
-     * 只能先去设置里开回来才能看自己——那是个纯粹的自伤设计。
-     * <p>
-     * 【为什么用户不存在也走 FORBIDDEN 而不是 USER_NOT_FOUND】两种情况回不同的错，
-     * 等于把"这个 id 有没有人"当探针送出去。这里统一成一种回应。
+     * 隐私门控：目标用户关了 profile_public 就不许看，本人永远放行。
+     * 用户不存在也回 FORBIDDEN 不回 USER_NOT_FOUND，不给"这个 id 有没有人"当探针。
      */
     public void assertVisible(Long targetUserId, Long viewerUserId) {
         if (targetUserId.equals(viewerUserId)) return;

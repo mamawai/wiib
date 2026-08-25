@@ -1,5 +1,8 @@
 package com.mawai.wiibquant.agent.learning;
 
+import com.mawai.wiibquant.agent.i18n.UserLangResolver;
+import com.mawai.wiibquant.agent.i18n.PromptCatalog;
+import com.mawai.wiibcommon.enums.AgentLang;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
@@ -63,13 +66,21 @@ class ReviewLoopTest {
     private final TraderModelFactory modelFactory = mock(TraderModelFactory.class);
     private final AiTraderMapper traderMapper = mock(AiTraderMapper.class);
 
+    private final UserLangResolver langResolver = mock(UserLangResolver.class);
+
     private final ReviewRunner runner = new ReviewRunner(
-            new ReviewMaterialAssembler(decisionMapper, planMapper, simTradeClient, historyStore),
-            modelFactory, traderMapper, decisionMapper);
+            new ReviewMaterialAssembler(decisionMapper, planMapper, simTradeClient, historyStore,
+                    new PromptCatalog()),
+            modelFactory, traderMapper, decisionMapper, new PromptCatalog(), langResolver);
+
+    {
+        when(langResolver.of(anyLong())).thenReturn(AgentLang.ZH);
+    }
 
     private AiTrader trader() {
         AiTrader t = new AiTrader();
         t.setId(7L);
+        t.setUserId(1L);
         t.setRoundNo(1);
         t.setSimUserId(99L);
         t.setSymbols("BTCUSDT");

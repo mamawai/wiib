@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Bot, Check, ChevronLeft, GraduationCap, Loader2, Pause, Play, RotateCcw, Save, X } from 'lucide-react';
+import { Trans, useTranslation } from 'react-i18next';
+import { BookOpen, Bot, Check, ChevronDown, ChevronLeft, Database, GraduationCap, Loader2, Pause, Play, RotateCcw, Save, Wrench, X } from 'lucide-react';
 import { llmEndpointApi, traderApi } from '../api';
+import { DATA_TOOLS, TRADE_TOOLS, toolName } from '../components/arena/traderTools';
 import { GuidedTour, type TourStep } from '../components/GuidedTour';
 import { LlmEndpointSelect } from '../components/LlmEndpointSelect';
 import { useCryptoStream } from '../hooks/useCryptoStream';
@@ -11,91 +13,16 @@ import type { LlmEndpointView, TraderOwnerView, TraderRequestView, TraderSpec, T
 
 const TOUR_SEEN_KEY = 'wiib-trader-tour-seen';
 
-/** 配置引导：讲清楚"这是什么 + 配大配小会怎样 + 和别的字段怎么互相咬" */
-const TOUR_STEPS: TourStep[] = [
-  {
-    target: 'name',
-    title: '给它起个名字',
-    body: '这个名字会公开显示在竞技场排行榜上，别人看到的就是它。最多 32 个字。',
-  },
-  {
-    target: 'interval',
-    title: '多久醒一次',
-    body: '每根这个级别的 K 线收盘时，AI 被唤醒一次，看行情、做决定。\n'
-      + '两次唤醒之间它基本是睡着的（止损止盈单照常自动触发），只有极端波动才会被哨兵临时叫醒。\n\n'
-      + '选 15m 起步。5m 意味着一天叫醒它 288 次——你的 API key 在烧钱，双边手续费也在磨损本金。',
-  },
-  {
-    target: 'wake-window',
-    title: '什么时候醒',
-    body: '默认全天候：每根 K 线收盘都醒。设了时段就只在时段内醒（北京时间，可跨午夜，如 21:00–08:30 只盯夜盘）。\n'
-      + '时段外例行唤醒和波动警报都停，持仓只靠止损止盈单自动触发；你手动唤醒不受限。\n'
-      + '每日复盘与同侪学习不看时段，仍在每天 08:00 照常进行。',
-  },
-  {
-    target: 'symbols',
-    title: '让它交易哪些币',
-    body: '白名单。AI 只能在这几个币里做，开别的会被当场拒绝。\n\n'
-      + '给得越多它越容易分心，也越容易同时开一堆仓。刚开始建议只给 1~2 个。',
-  },
-  {
-    target: 'leverage',
-    title: '杠杆区间：必须从中选一个',
-    body: '这是区间不是上限——配 50~100，AI 想用 20 倍也会被拒，必须落在 50 以上。\n\n'
-      + '它无权觉得"太高了"而自作主张调低。你定多少就是多少。\n\n'
-      + '注意：交易所按仓位名义价值分档限制杠杆，仓开大了高杠杆会被拒。',
-  },
-  {
-    target: 'margin',
-    title: '每笔用多少钱开仓',
-    body: '按当前权益的百分比算。权益 10000U、配 10%，那每笔新仓的保证金就是 1000U。\n\n'
-      + '同样是区间，AI 必须落在里面。下面那行小字会实时算出名义价值，配之前先看一眼。\n\n'
-      + '只管开新仓——加仓多大是另一回事，看后面两步。',
-  },
-  {
-    target: 'position-rules',
-    title: '能开几个仓 / 能不能对锁',
-    body: '关掉「多仓位」＝全账户同时只能有一个仓，AI 自己挑哪个币。未成交的挂单也占坑，'
-      + '否则它先挂三个单就绕过去了。\n\n'
-      + '「多空双开」是同一个币能不能同时持多单和空单。关掉可以防它自己跟自己对冲、白交两遍手续费。'
-      + '单仓模式下这项自动失效——双开本身就需要两个仓位。',
-  },
-  {
-    target: 'self-manage',
-    title: '加仓减仓要不要问你',
-    body: '关掉某一项，AI 想做时不会直接成交，而是发一条请求给你，出现在本页顶部。\n\n'
-      + '关键是它不会卡住——请求发完这轮就继续跑，等你有空再点同意或叉掉。卡片上会同时给'
-      + '"它发起时的价格"和"现在的实时价格"，跑没跑掉你自己判断。\n\n'
-      + '默认加仓放开、减仓要问。止损止盈单不受影响，永远自动执行，所以风险始终有保护。',
-  },
-  {
-    target: 'byok',
-    title: '你的模型，你的账单',
-    body: '平台不提供模型。模型端点（协议 / Base URL / key / 模型名）统一在 AI 页「模型配置」里维护，这里只从里面选一条；'
-      + '不选就跟随你的默认端点。\n\n'
-      + '每次唤醒都在花你的 token，唤醒频率越高账单越厚。',
-  },
-  {
-    target: 'prompt',
-    title: '交易风格指令',
-    body: '平台系统提示词已经写好了角色、纪律和硬性规则，可以展开看全文——和真正喂给 AI 的一字不差。\n\n'
-      + '你写的自定义指令追加在它后面，用来定风格（"只做突破不抄底"这类）。'
-      + '风格与策略上与平台默认冲突时，以你写的为准；仓位规格和硬性规则除外，那由系统强制执行。\n\n'
-      + '存库即生效，下一根 K 线就按新的来，不用重启。',
-  },
-  {
-    target: 'save',
-    title: '保存，然后启动',
-    body: '首次保存会做连通性校验，通过后开一个独立模拟账户注资 10000U。\n\n'
-      + '保存只是存配置，还得回到上面点「启动」它才会开始被唤醒。爆仓或想重来时用「重置开新局」，'
-      + '历史战绩会留档。',
-  },
-];
-
 const SYMBOL_OPTIONS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'DOGEUSDT', 'XRPUSDT'];
 const INTERVAL_OPTIONS = ['5m', '15m', '1h', '4h'];
 /** 波动哨兵每币基准阈值%（平台下限，只能经系数调高）——与后端 VolatilitySentinel 同一份数字 */
 const ALERT_BASE: Record<string, number> = { BTCUSDT: 0.6, ETHUSDT: 0.8, XRPUSDT: 0.8, SOLUSDT: 0.9, DOGEUSDT: 1.0 };
+
+/** 相关 skills 卡的两组：交易动作会动账本，行情数据只读；名字与时间线共用 toolName，说明走 skills.desc.* 词表 */
+const SKILL_GROUPS = [
+  { key: 'trade', icon: Wrench, tools: TRADE_TOOLS },
+  { key: 'data', icon: Database, tools: DATA_TOOLS },
+] as const;
 
 const DEFAULT_SPEC: TraderSpec = {
   leverageMin: 3, leverageMax: 20, marginPctMin: 5, marginPctMax: 20,
@@ -116,6 +43,25 @@ const EMPTY_FORM: TraderUpsertRequest = {
  */
 export function MyTrader() {
   const { toast } = useToast();
+  const { t } = useTranslation(['ai', 'common']);
+  /**
+   * 配置引导：讲清楚"这是什么 + 配大配小会怎样 + 和别的字段怎么互相咬"。
+   * 必须 memo 住：GuidedTour 的定位 effect 认 step 对象身份，每次渲染新建数组会让它反复重算。
+   * 依赖 t——切语言时它换身份，引导文案跟着重建。
+   */
+  const tourSteps = useMemo<TourStep[]>(() => [
+    { target: 'name', title: t('tour.name.title'), body: t('tour.name.body') },
+    { target: 'interval', title: t('tour.interval.title'), body: t('tour.interval.body') },
+    { target: 'wake-window', title: t('tour.wakeWindow.title'), body: t('tour.wakeWindow.body') },
+    { target: 'symbols', title: t('tour.symbols.title'), body: t('tour.symbols.body') },
+    { target: 'leverage', title: t('tour.leverage.title'), body: t('tour.leverage.body') },
+    { target: 'margin', title: t('tour.margin.title'), body: t('tour.margin.body') },
+    { target: 'position-rules', title: t('tour.positionRules.title'), body: t('tour.positionRules.body') },
+    { target: 'self-manage', title: t('tour.selfManage.title'), body: t('tour.selfManage.body') },
+    { target: 'byok', title: t('tour.byok.title'), body: t('tour.byok.body') },
+    { target: 'prompt', title: t('tour.prompt.title'), body: t('tour.prompt.body') },
+    { target: 'save', title: t('tour.save.title'), body: t('tour.save.body') },
+  ], [t]);
   const [mine, setMine] = useState<TraderOwnerView | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [form, setForm] = useState<TraderUpsertRequest>(EMPTY_FORM);
@@ -175,11 +121,11 @@ export function MyTrader() {
       toast(okMsg, 'success');
       load();
     } catch (e) {
-      toast((e as Error).message || '操作失败', 'error');
+      toast((e as Error).message || t('toast.actionFailed'), 'error');
     } finally {
       setBusy(null);
     }
-  }, [toast, load]);
+  }, [toast, load, t]);
 
   const set = (patch: Partial<TraderUpsertRequest>) => setForm(f => ({ ...f, ...patch }));
   const setSpec = (patch: Partial<TraderSpec>) => setForm(f => {
@@ -195,10 +141,10 @@ export function MyTrader() {
     setBusy('req' + id);
     try {
       await (approve ? traderApi.approveRequest(id) : traderApi.rejectRequest(id));
-      toast(approve ? '已同意，按市价执行' : '已拒绝', 'success');
+      toast(approve ? t('toast.approved') : t('toast.rejected'), 'success');
       loadRequests();
     } catch (e) {
-      toast((e as Error).message || '操作失败', 'error');
+      toast((e as Error).message || t('toast.actionFailed'), 'error');
     } finally {
       setBusy(null);
     }
@@ -224,24 +170,24 @@ export function MyTrader() {
   return (
     <div className="page-shell p-4 md:p-6 space-y-4 max-w-3xl">
       <div className="flex items-center gap-2.5">
-        <Link to="/arena" className="border border-border hover:bg-surface-hover w-8 h-8 rounded-lg flex items-center justify-center text-muted-foreground hover:text-primary" aria-label="返回竞技场">
+        <Link to="/arena" className="border border-border hover:bg-surface-hover w-8 h-8 rounded-lg flex items-center justify-center text-muted-foreground hover:text-primary" aria-label={t('term.backToArena')}>
           <ChevronLeft className="w-4 h-4" />
         </Link>
         <Bot className="w-5 h-5 text-primary" />
-        <h1 className="text-lg font-black">我的 Trader</h1>
+        <h1 className="text-lg font-black">{t('arena.myTrader')}</h1>
         {exists && (
           <span className={cn('text-[10px] font-bold px-1.5 py-0.5 rounded',
             status === 'RUNNING' ? 'bg-gain/15 text-gain' : status === 'LIQUIDATED' ? 'bg-loss/15 text-loss' : 'bg-amber-500/15 text-amber-600')}>
-            {status === 'RUNNING' ? '运行中' : status === 'LIQUIDATED' ? '已爆仓' : '已暂停'}
+            {status === 'RUNNING' ? t('status.running') : status === 'LIQUIDATED' ? t('status.liquidated') : t('status.paused')}
           </span>
         )}
         <button onClick={() => setTour(true)}
                 className="ml-auto border border-border hover:bg-surface-hover rounded-lg px-2.5 py-1.5 text-[11px] font-bold text-muted-foreground hover:text-primary flex items-center gap-1.5">
-          <GraduationCap className="w-3.5 h-3.5" /> 配置引导
+          <GraduationCap className="w-3.5 h-3.5" /> {t('trader.tourBtn')}
         </button>
       </div>
 
-      <GuidedTour steps={TOUR_STEPS} open={tour} onClose={closeTour} />
+      <GuidedTour steps={tourSteps} open={tour} onClose={closeTour} />
 
       {mine?.pub.pausedReason && (
         <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-2.5 text-xs text-amber-600 font-bold">
@@ -252,28 +198,28 @@ export function MyTrader() {
       {/* 运行控制 */}
       {exists && (
         <div className="rounded-lg pt-card p-4 flex items-center gap-2 flex-wrap">
-          <span className="microlabel mr-2">运行控制</span>
+          <span className="microlabel mr-2">{t('trader.runControl')}</span>
           {status !== 'RUNNING' && status !== 'LIQUIDATED' && (
-            <button onClick={() => void run('start', traderApi.start, '已启动，下一根K线开始唤醒')} disabled={busy != null}
+            <button onClick={() => void run('start', traderApi.start, t('toast.started'))} disabled={busy != null}
                     className="border border-border hover:bg-surface-hover rounded-lg px-3 py-1.5 text-xs font-bold text-gain flex items-center gap-1.5 disabled:opacity-50">
-              {busy === 'start' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />} 启动
+              {busy === 'start' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />} {t('trader.start')}
             </button>
           )}
           {status === 'RUNNING' && (
-            <button onClick={() => void run('pause', traderApi.pause, '已暂停')} disabled={busy != null}
+            <button onClick={() => void run('pause', traderApi.pause, t('status.paused'))} disabled={busy != null}
                     className="border border-border hover:bg-surface-hover rounded-lg px-3 py-1.5 text-xs font-bold text-amber-600 flex items-center gap-1.5 disabled:opacity-50">
-              {busy === 'pause' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Pause className="w-3.5 h-3.5" />} 暂停
+              {busy === 'pause' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Pause className="w-3.5 h-3.5" />} {t('trader.pause')}
             </button>
           )}
           <button
-            onClick={() => { if (window.confirm(`重置将开新一局（R${(mine?.pub.roundNo ?? 1) + 1}）：新账户重新注资10000，历史战绩留档（最多保留最近10局，更早的整局记录会被清除）。确定？`)) void run('reset', traderApi.reset, '已重置开新一局'); }}
+            onClick={() => { if (window.confirm(t('trader.resetConfirm', { round: (mine?.pub.roundNo ?? 1) + 1 }))) void run('reset', traderApi.reset, t('toast.reset')); }}
             disabled={busy != null}
             className="border border-border hover:bg-surface-hover rounded-lg px-3 py-1.5 text-xs font-bold text-muted-foreground flex items-center gap-1.5 disabled:opacity-50">
-            {busy === 'reset' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />} 重置开新局
+            {busy === 'reset' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />} {t('trader.reset')}
           </button>
           {mine && (
             <Link to={`/arena/${mine.pub.id}`} className="ml-auto text-xs font-bold text-primary hover:underline">
-              看它的决策时间线 →
+              {t('trader.viewTimeline')}
             </Link>
           )}
         </div>
@@ -283,8 +229,8 @@ export function MyTrader() {
       {requests.length > 0 && (
         <div className="rounded-lg pt-card p-4 space-y-2.5 border-amber-500/40">
           <div className="flex items-baseline justify-between">
-            <span className="microlabel text-amber-600">AI 请求确认 · {requests.length}</span>
-            <span className="text-[10px] text-muted-foreground">同意后按当前市价立即执行</span>
+            <span className="microlabel text-amber-600">{t('req.title', { n: requests.length })}</span>
+            <span className="text-[10px] text-muted-foreground">{t('req.hint')}</span>
           </div>
           {requests.map(r => (
             <RequestCard key={r.id} r={r} busy={busy === 'req' + r.id} disabled={busy != null}
@@ -293,18 +239,51 @@ export function MyTrader() {
         </div>
       )}
 
+      {/* 相关 skills：它每次唤醒拿到的全部工具——配置前先知道它会什么；默认折叠 */}
+      <details className="rounded-lg pt-card group">
+        <summary className="list-none cursor-pointer px-4 py-3 flex items-center gap-2.5 flex-wrap">
+          <BookOpen className="w-3 h-3 text-primary" />
+          <span className="microlabel">{t('skills.title')}</span>
+          <span className="text-[11px] text-muted-foreground">{t('skills.summary', { trade: TRADE_TOOLS.length, data: DATA_TOOLS.length })}</span>
+          <ChevronDown className="ml-auto w-3.5 h-3.5 text-muted-foreground transition-transform group-open:rotate-180" />
+        </summary>
+        <div className="px-4 pb-4 space-y-3">
+          {SKILL_GROUPS.map(g => (
+            <div key={g.key} className="rounded-md border border-border overflow-hidden">
+              <div className="flex items-center gap-2 px-3 py-1.5 bg-card-2">
+                <g.icon className="w-3 h-3 text-primary" />
+                <b className="text-[11px] font-extrabold">{t(`skills.${g.key}`)}</b>
+                <span className="text-[10px] text-muted-foreground">{t(`skills.${g.key}Hint`)}</span>
+                <span className="ml-auto num text-[10px] text-muted-foreground">{g.tools.length}</span>
+              </div>
+              {/* 一行三列对齐：中文名 | 工具 id | 一句作用；手机竖排 */}
+              {g.tools.map(id => (
+                <div key={id} className="grid sm:grid-cols-[6rem_8.5rem_1fr] gap-x-3 gap-y-0.5 items-baseline px-3 py-1.5 border-t border-border/60 text-[11px] leading-relaxed">
+                  <b className="text-xs font-extrabold">{toolName(id)}</b>
+                  <code className="num text-[10px] text-muted-foreground">{id}</code>
+                  <p className="text-muted-foreground">
+                    <Trans ns="ai" i18nKey={`skills.desc.${id}`} components={[<span className="text-amber-600 font-bold" />]} />
+                  </p>
+                </div>
+              ))}
+            </div>
+          ))}
+          <p className="text-[10px] leading-relaxed text-muted-foreground border-l-2 border-border pl-2.5">{t('skills.foot')}</p>
+        </div>
+      </details>
+
       {/* 配置表单 */}
       <div className="rounded-lg pt-card p-4 space-y-4">
-        <span className="microlabel">{exists ? '配置（提示词改完下一根K线生效）' : '创建（连通性校验通过后开户注资 10000U）'}</span>
+        <span className="microlabel">{exists ? t('cfg.editTitle') : t('cfg.createTitle')}</span>
 
         <div className="grid sm:grid-cols-2 gap-3">
           <label className="space-y-1 text-xs" data-tour="name">
-            <span className="text-muted-foreground font-bold">名字</span>
-            <input value={form.name} onChange={e => set({ name: e.target.value })} maxLength={32} placeholder="给你的 AI 起个名"
+            <span className="text-muted-foreground font-bold">{t('cfg.name')}</span>
+            <input value={form.name} onChange={e => set({ name: e.target.value })} maxLength={32} placeholder={t('cfg.namePh')}
                    className="w-full h-9 rounded-lg border border-border bg-card-2 px-3 text-xs" />
           </label>
           <label className="space-y-1 text-xs" data-tour="interval">
-            <span className="text-muted-foreground font-bold">唤醒K线级别</span>
+            <span className="text-muted-foreground font-bold">{t('cfg.interval')}</span>
             <div className="flex gap-1.5">
               {INTERVAL_OPTIONS.map(iv => (
                 <button key={iv} type="button" onClick={() => set({ intervalCode: iv })}
@@ -316,7 +295,7 @@ export function MyTrader() {
             </div>
             {form.intervalCode === '5m' && (
               <p className="text-[10px] text-amber-600 leading-relaxed">
-                5m 适合短期测试观察；实跑建议 15m 起——高频唤醒的双边手续费磨损极大
+                {t('cfg.interval5mWarn')}
               </p>
             )}
           </label>
@@ -325,14 +304,14 @@ export function MyTrader() {
         {/* 唤醒时段：只管例行/警报唤醒；复盘学习不看它；末次唤醒时模型会被告知即将休眠 */}
         <div className="space-y-2 rounded-lg border border-border/60 bg-card-2/40 p-3" data-tour="wake-window">
           <div className="flex flex-wrap items-baseline justify-between gap-x-2">
-            <span className="microlabel">唤醒时段（北京时间）</span>
-            <span className="text-[10px] text-muted-foreground">时段外不例行唤醒也不警报；手动唤醒不受限；复盘/学习仍在 08:00</span>
+            <span className="microlabel">{t('cfg.wakeWindow')}</span>
+            <span className="text-[10px] text-muted-foreground">{t('cfg.wakeWindowHint')}</span>
           </div>
           <WakeWindowField value={form.wakeWindow} onChange={v => set({ wakeWindow: v })} />
         </div>
 
         <div className="space-y-1 text-xs" data-tour="symbols">
-          <span className="text-muted-foreground font-bold">交易币种</span>
+          <span className="text-muted-foreground font-bold">{t('cfg.symbols')}</span>
           <div className="flex gap-1.5 flex-wrap">
             {SYMBOL_OPTIONS.map(s => (
               <button key={s} type="button" onClick={() => toggleSymbol(s)}
@@ -347,13 +326,13 @@ export function MyTrader() {
         {/* 仓位规格：主人说了算的硬参数，模型无权评价，越界一律拒（不截断） */}
         <div className="space-y-2.5 rounded-lg border border-border/60 bg-card-2/40 p-3">
           <div className="flex items-baseline justify-between">
-            <span className="microlabel">仓位规格（强制执行，AI 不得篡改）</span>
-            <span className="text-[10px] text-muted-foreground">区间＝必须从中选，不是上限</span>
+            <span className="microlabel">{t('cfg.specTitle')}</span>
+            <span className="text-[10px] text-muted-foreground">{t('cfg.specHint')}</span>
           </div>
 
           <div className="grid sm:grid-cols-2 gap-3">
             <label className="space-y-1 text-xs" data-tour="leverage">
-              <span className="text-muted-foreground font-bold">杠杆区间（1~125 倍）</span>
+              <span className="text-muted-foreground font-bold">{t('cfg.leverage')}</span>
               <div className="flex items-center gap-1.5">
                 <input type="number" min={1} max={125} step={1} value={form.spec.leverageMin}
                        onChange={e => setSpec({ leverageMin: Number(e.target.value) })}
@@ -365,7 +344,7 @@ export function MyTrader() {
               </div>
             </label>
             <label className="space-y-1 text-xs" data-tour="margin">
-              <span className="text-muted-foreground font-bold">每笔保证金占权益 %（0.1~100）</span>
+              <span className="text-muted-foreground font-bold">{t('cfg.marginPct')}</span>
               <div className="flex items-center gap-1.5">
                 <input type="number" min={0.1} max={100} step={0.5} value={form.spec.marginPctMin}
                        onChange={e => setSpec({ marginPctMin: Number(e.target.value) })}
@@ -380,32 +359,39 @@ export function MyTrader() {
 
           {/* 配置的后果一眼可见：按 10000U 权益换算成名义价值区间 */}
           <p className="text-[10px] leading-relaxed text-muted-foreground">
-            以 10000U 权益计，每笔新仓保证金{' '}
-            <span className="num text-foreground">{fmtNum(form.spec.marginPctMin * 100, 0)}</span>~
-            <span className="num text-foreground">{fmtNum(form.spec.marginPctMax * 100, 0)}</span>U，
-            名义价值{' '}
-            <span className="num text-foreground">{fmtNum(form.spec.marginPctMin * 100 * form.spec.leverageMin, 0)}</span>~
-            <span className="num text-foreground">{fmtNum(form.spec.marginPctMax * 100 * form.spec.leverageMax, 0)}</span>U。
-            只约束开新仓，加仓量由 AI 自己斟酌。高杠杆下交易所按名义价值分档，超档会被拒。
+            <Trans
+              ns="ai"
+              i18nKey="cfg.notional"
+              values={{
+                minMargin: fmtNum(form.spec.marginPctMin * 100, 0),
+                maxMargin: fmtNum(form.spec.marginPctMax * 100, 0),
+                minNotional: fmtNum(form.spec.marginPctMin * 100 * form.spec.leverageMin, 0),
+                maxNotional: fmtNum(form.spec.marginPctMax * 100 * form.spec.leverageMax, 0),
+              }}
+              components={[
+                <span className="num text-foreground" />, <span className="num text-foreground" />,
+                <span className="num text-foreground" />, <span className="num text-foreground" />,
+              ]}
+            />
           </p>
 
           <div className="grid sm:grid-cols-2 gap-x-4 gap-y-2 pt-1">
             <div className="space-y-2" data-tour="position-rules">
               <SpecToggle checked={form.spec.allowMultiPosition} onChange={v => setSpec({ allowMultiPosition: v })}
-                          label="允许多仓位"
-                          hint="关＝全账户至多一仓，AI 自己挑哪个币；未成交挂单也占坑" />
+                          label={t('cfg.multiPos')}
+                          hint={t('cfg.multiPosHint')} />
               <SpecToggle checked={form.spec.allowHedge} onChange={v => setSpec({ allowHedge: v })}
                           disabled={!form.spec.allowMultiPosition}
-                          label="允许多空双开"
-                          hint={form.spec.allowMultiPosition ? '同一个币可同时持多空' : '需先开启多仓位（双开要占两个仓位）'} />
+                          label={t('cfg.hedge')}
+                          hint={form.spec.allowMultiPosition ? t('cfg.hedgeHint') : t('cfg.hedgeNeedMulti')} />
             </div>
             <div className="space-y-2" data-tour="self-manage">
               <SpecToggle checked={form.spec.allowSelfAdd} onChange={v => setSpec({ allowSelfAdd: v })}
-                          label="允许 AI 自主加仓"
-                          hint="关＝AI 想加仓时发请求给你，等你点同意" />
+                          label={t('cfg.selfAdd')}
+                          hint={t('cfg.selfAddHint')} />
               <SpecToggle checked={form.spec.allowSelfReduce} onChange={v => setSpec({ allowSelfReduce: v })}
-                          label="允许 AI 自主减仓"
-                          hint="关＝减仓/平仓需你确认；止损止盈仍自动触发，风险有保护" />
+                          label={t('cfg.selfReduce')}
+                          hint={t('cfg.selfReduceHint')} />
             </div>
           </div>
         </div>
@@ -413,15 +399,15 @@ export function MyTrader() {
         {/* 波动哨兵：极端行情临时唤醒（例行K线唤醒的补充）——只对 1h/4h 档生效 */}
         <div className="space-y-2 rounded-lg border border-border/60 bg-card-2/40 p-3">
           <div className="flex items-baseline justify-between">
-            <span className="microlabel">波动警报（仅 1h/4h 档生效）</span>
-            <span className="text-[10px] text-muted-foreground">5 分钟振幅超阈值且持有该币仓位/挂单时临时唤醒</span>
+            <span className="microlabel">{t('cfg.alertTitle')}</span>
+            <span className="text-[10px] text-muted-foreground">{t('cfg.alertHint')}</span>
           </div>
           <div className="grid sm:grid-cols-2 gap-3 items-start">
             <SpecToggle checked={form.alertEnabled} onChange={v => set({ alertEnabled: v })}
-                        label="启用波动警报"
-                        hint="唤醒后 5 分钟冷静期；例行唤醒将至时警报自动让路" />
+                        label={t('cfg.alertOn')}
+                        hint={t('cfg.alertOnHint')} />
             <label className="space-y-1 text-xs">
-              <span className="text-muted-foreground font-bold">灵敏度系数（≥1.0，越大警报越少）</span>
+              <span className="text-muted-foreground font-bold">{t('cfg.alertMult')}</span>
               <input type="number" min={1} step={0.1} value={form.alertThresholdMult}
                      onChange={e => set({ alertThresholdMult: Number(e.target.value) })}
                      disabled={!form.alertEnabled}
@@ -429,12 +415,13 @@ export function MyTrader() {
             </label>
           </div>
           <p className="text-[10px] leading-relaxed text-muted-foreground">
-            生效阈值 = 币基准 × 系数。平台基准（180 天历史校准，只能调高）：
-            {SYMBOL_OPTIONS.map(s => `${s.replace('USDT', '')} ${ALERT_BASE[s]}%`).join(' · ')}。
-            按当前系数 {form.alertThresholdMult >= 1 ? form.alertThresholdMult.toFixed(1) : '1.0'}：
-            {SYMBOL_OPTIONS.filter(s => selected.has(s))
-              .map(s => `${s.replace('USDT', '')} ${(ALERT_BASE[s] * Math.max(1, form.alertThresholdMult)).toFixed(2)}%`)
-              .join(' · ') || '未选币种'}
+            {t('cfg.alertBase', {
+              list: SYMBOL_OPTIONS.map(s => `${s.replace('USDT', '')} ${ALERT_BASE[s]}%`).join(' · '),
+              mult: form.alertThresholdMult >= 1 ? form.alertThresholdMult.toFixed(1) : '1.0',
+              cur: SYMBOL_OPTIONS.filter(s => selected.has(s))
+                .map(s => `${s.replace('USDT', '')} ${(ALERT_BASE[s] * Math.max(1, form.alertThresholdMult)).toFixed(2)}%`)
+                .join(' · ') || t('cfg.noSymbol'),
+            })}
           </p>
         </div>
 
@@ -443,36 +430,36 @@ export function MyTrader() {
           {/* 每日复盘：reviewer 在日线边界读全天交易痕迹，复盘上时间线、教训写进记忆笔记 */}
           <div className="space-y-2 rounded-lg border border-border/60 bg-card-2/40 p-3">
             <div className="flex flex-wrap items-baseline justify-between gap-x-2">
-              <span className="microlabel">每日复盘</span>
-              <span className="text-[10px] text-muted-foreground">复盘公开上时间线；记忆笔记之后每次唤醒自动注入</span>
+              <span className="microlabel">{t('term.dailyReview')}</span>
+              <span className="text-[10px] text-muted-foreground">{t('cfg.reviewHint')}</span>
             </div>
             <SpecToggle checked={form.reviewEnabled} onChange={v => set({ reviewEnabled: v })}
-                        label="启用每日复盘"
-                        hint="日线边界自动跑一次（烧你的 key，单次调用）；当天无交易自动跳过；关掉只停复盘，已有笔记照常注入" />
+                        label={t('cfg.reviewOn')}
+                        hint={t('cfg.reviewOnHint')} />
           </div>
 
           {/* 同侪学习：全体复盘跑完后 learning agent 读别人的成绩与复盘，学到的写进学习笔记 */}
           <div className="space-y-2 rounded-lg border border-border/60 bg-card-2/40 p-3">
             <div className="flex flex-wrap items-baseline justify-between gap-x-2">
-              <span className="microlabel">同侪学习</span>
-              <span className="text-[10px] text-muted-foreground">排行榜与同侪复盘都是它的素材</span>
+              <span className="microlabel">{t('term.peerLearn')}</span>
+              <span className="text-[10px] text-muted-foreground">{t('cfg.learnHint')}</span>
             </div>
             <SpecToggle checked={form.learningEnabled} onChange={v => set({ learningEnabled: v })}
-                        label="启用同侪学习"
-                        hint="全体复盘完成后自动跑一次（烧你的 key，多轮调用）；同意学习的 trader ≥3 人才会执行，不足自动跳过；不勾选则双向退出——自己不学习，你的数据也不会被其他 trader 学习；学习笔记之后每次唤醒自动注入；关掉只停学习，已有笔记照常注入" />
+                        label={t('cfg.learnOn')}
+                        hint={t('cfg.learnOnHint')} />
           </div>
         </div>
 
         {/* 模型：从端点库选一条（协议/URL/key/模型都在 AI 页配），不选=跟随默认端点 */}
         <div data-tour="byok" className="space-y-1.5 text-xs">
           <div className="flex items-baseline justify-between gap-2 flex-wrap">
-            <span className="text-muted-foreground font-bold">模型端点</span>
-            <Link to="/ai?tab=config" className="text-[10px] text-primary font-bold hover:underline">管理端点（AI 页 · 模型配置）</Link>
+            <span className="text-muted-foreground font-bold">{t('cfg.endpoint')}</span>
+            <Link to="/ai" className="text-[10px] text-primary font-bold hover:underline">{t('cfg.manageEndpoints')}</Link>
           </div>
           <LlmEndpointSelect endpoints={endpoints} value={form.llmEndpointId}
             onChange={id => set({ llmEndpointId: id })} className="w-full sm:w-auto sm:min-w-[320px]" />
           <span className="text-[10px] text-muted-foreground/70 block">
-            每次唤醒、每日复盘、同侪学习都烧这条端点的 key；保存时会先测一次连通性
+            {t('cfg.endpointHint')}
           </span>
         </div>
 
@@ -483,35 +470,39 @@ export function MyTrader() {
             <input type="checkbox" checked={form.useDefaultPrompt}
                    onChange={e => set({ useDefaultPrompt: e.target.checked })}
                    className="w-3.5 h-3.5 accent-[var(--primary,#6366f1)]" />
-            <span className="text-muted-foreground font-bold">使用平台系统提示词（推荐）</span>
+            <span className="text-muted-foreground font-bold">{t('cfg.useDefaultPrompt')}</span>
           </label>
           {form.useDefaultPrompt ? (
             <details className="rounded-lg border border-border bg-card-2/50">
               <summary className="px-3 py-2 text-[11px] font-bold text-muted-foreground cursor-pointer">
-                查看平台系统提示词（随级别/币种联动，自定义追加在它之后）
+                {t('cfg.viewPrompt')}
               </summary>
               <pre className="max-h-56 overflow-y-auto px-3 pb-3 text-[11px] leading-relaxed text-muted-foreground whitespace-pre-wrap font-sans">{template}</pre>
             </details>
           ) : (
             <p className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-600 font-bold">
-              已关闭平台提示词：下方自定义将成为唯一指令来源（必填）。上面的仓位规格仍由护栏强制执行——
-              杠杆 {form.spec.leverageMin}~{form.spec.leverageMax} 倍、每笔新仓保证金占权益{' '}
-              {form.spec.marginPctMin}%~{form.spec.marginPctMax}%
-              {!form.spec.allowMultiPosition && '、只许一个仓位'}
-              {form.spec.allowMultiPosition && !form.spec.allowHedge && '、同币不得多空双开'}
-              {!form.spec.allowSelfAdd && '、加仓需你确认'}
-              {!form.spec.allowSelfReduce && '、减仓需你确认'}
-              、开仓必须带止损/论点/失效条件、止损只许收紧、止盈只许远离入场，违规动作会被拒绝并告知原因。
+              {/* 可选那几条护栏按语言各自的顿号/逗号串起来：中英分隔符不同，拼接交给词表里的 listSep */}
+              {t('cfg.promptOff', {
+                levMin: form.spec.leverageMin, levMax: form.spec.leverageMax,
+                mgMin: form.spec.marginPctMin, mgMax: form.spec.marginPctMax,
+              })}
+              {[
+                !form.spec.allowMultiPosition && t('cfg.guardSinglePos'),
+                form.spec.allowMultiPosition && !form.spec.allowHedge && t('cfg.guardNoHedge'),
+                !form.spec.allowSelfAdd && t('cfg.guardAskAdd'),
+                !form.spec.allowSelfReduce && t('cfg.guardAskReduce'),
+              ].filter(Boolean).map(c => `${t('cfg.listSep')}${c}`).join('')}
+              {t('cfg.promptOffTail')}
             </p>
           )}
         </div>
 
         <label className="space-y-1 text-xs block">
           <span className="text-muted-foreground font-bold">
-            {form.useDefaultPrompt ? '自定义提示词（定风格与策略，与平台默认冲突时以你的为准）' : '自定义提示词（唯一指令来源，必填）'}
+            {form.useDefaultPrompt ? t('cfg.customPrompt') : t('cfg.customPromptOnly')}
           </span>
           <textarea value={form.customPrompt ?? ''} onChange={e => set({ customPrompt: e.target.value })} rows={6} maxLength={4000}
-                    placeholder="例：只做趋势突破，不抄底不摸顶；单笔风险不超过权益2%；连亏两笔后本日只观望。"
+                    placeholder={t('cfg.customPromptPh')}
                     className="w-full rounded-lg border border-border bg-card-2 px-3 py-2 text-xs leading-relaxed" />
         </label>
         </div>
@@ -520,18 +511,15 @@ export function MyTrader() {
           data-tour="save"
           onClick={() => void run('save',
             () => exists ? traderApi.updateConfig(form) : traderApi.create(form),
-            exists ? '配置已保存' : '创建成功！去启动它吧')}
+            exists ? t('toast.saved') : t('toast.created'))}
           disabled={busy != null}
           className="border border-border hover:bg-surface-hover rounded-lg px-4 py-2 text-xs font-black text-primary flex items-center gap-1.5 disabled:opacity-50">
           {busy === 'save' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
-          {exists ? '保存配置' : '创建 Trader'}
+          {exists ? t('cfg.save') : t('cfg.create')}
         </button>
 
         <p className="text-[10px] leading-relaxed text-muted-foreground border-l-2 border-border pl-2.5">
-          规则：每根 K 线唤醒一次（极端波动可能被临时叫醒，每日还有一次复盘），你的 key 你的 token 钱；仓位规格你说了算（杠杆/保证金区间、仓位数、双开、
-          能否自主加减仓），AI 只能遵守不得评价，越界的调用当场被拒；强制止损+失效条件、止损只许收紧。
-          开仓即立交易计划，每次唤醒原样喂回，退出只认止损/止盈/失效条件三条路。
-          模拟盘不涉真实资金，竞技场决策日志与计划修订历史公开可见。别指望它赚钱——看它怎么想才是重点。
+          {t('cfg.rules')}
         </p>
       </div>
     </div>
@@ -543,6 +531,7 @@ const MINUTES = Array.from({ length: 12 }, (_, i) => String(i * 5).padStart(2, '
 
 /** 唤醒时段：全天开关 + 起止时/分（分钟只给 0/5 的倍数——K 线按 5 分钟收盘）。值形如 "21:00-08:30"，null=全天 */
 function WakeWindowField({ value, onChange }: { value: string | null; onChange: (v: string | null) => void }) {
+  const { t } = useTranslation('ai');
   // 开着时起止就是 value 本身（表单是唯一真值）；关掉时 value 变 null，把关掉那一刻的起止记住，再打开还是刚才那组
   const [remembered, setRemembered] = useState<[string, string]>(['21:00', '08:30']);
   const enabled = value != null;
@@ -560,15 +549,15 @@ function WakeWindowField({ value, onChange }: { value: string | null; onChange: 
   return (
     <div className="space-y-2">
       <SpecToggle checked={enabled} onChange={toggle}
-                  label={enabled ? '仅在时段内唤醒' : '全天唤醒'}
-                  hint="两端含，可跨午夜（起点晚于终点即跨到次日）；分钟只能是 0/5 的倍数" />
+                  label={enabled ? t('cfg.windowOn') : t('cfg.windowOff')}
+                  hint={t('cfg.windowHint')} />
       {enabled && (
         <div className="flex flex-wrap items-center gap-2 text-xs">
           <TimeSelect hh={fh} mm={fm} onChange={(h, m) => setPart('from', h, m)} />
-          <span className="text-muted-foreground">至</span>
+          <span className="text-muted-foreground">{t('cfg.to')}</span>
           <TimeSelect hh={th} mm={tm} onChange={(h, m) => setPart('to', h, m)} />
-          {from > to && <span className="text-[10px] text-muted-foreground">（次日）</span>}
-          {from === to && <span className="text-[10px] text-loss">起止不能相同（全天请关闭时段）</span>}
+          {from > to && <span className="text-[10px] text-muted-foreground">{t('cfg.nextDay')}</span>}
+          {from === to && <span className="text-[10px] text-loss">{t('cfg.sameTime')}</span>}
         </div>
       )}
     </div>
@@ -613,6 +602,8 @@ function SpecToggle({ checked, onChange, label, hint, disabled }: {
 function RequestCard({ r, onDecide, busy, disabled }: {
   r: TraderRequestView; onDecide: (approve: boolean) => void; busy: boolean; disabled: boolean;
 }) {
+  // 订阅词表：这张卡里的 fmtRelative 是全站共用的相对时间，切语言得跟着刷新
+  const { t } = useTranslation('ai');
   const tick = useCryptoStream(r.symbol, 'futures');
   const live = tick?.price ?? null;
   const drift = live != null && r.requestPrice > 0 ? (live - r.requestPrice) / r.requestPrice * 100 : null;
@@ -623,10 +614,10 @@ function RequestCard({ r, onDecide, busy, disabled }: {
       <div className="flex items-center gap-2 flex-wrap text-xs">
         <span className={cn('px-1.5 py-0.5 rounded font-bold text-[10px]',
           isAdd ? 'bg-gain/15 text-gain' : 'bg-loss/15 text-loss')}>
-          {isAdd ? '加仓' : '减仓'}
+          {isAdd ? t('req.add') : t('req.reduce')}
         </span>
         <span className="font-bold">{r.symbol.replace('USDT', '')}</span>
-        <span className="text-muted-foreground">{r.side === 'LONG' ? '多' : '空'}</span>
+        <span className="text-muted-foreground">{r.side === 'LONG' ? t('term.long') : t('term.short')}</span>
         <span className="num">{r.quantity}</span>
         {r.leverage != null && <span className="text-muted-foreground num">{r.leverage}x</span>}
         <span className="ml-auto text-[10px] text-muted-foreground">{fmtRelative(r.createdAt)}</span>
@@ -634,10 +625,10 @@ function RequestCard({ r, onDecide, busy, disabled }: {
 
       <div className="flex items-center gap-4 text-[11px]">
         <span className="text-muted-foreground">
-          请求时 <span className="num text-foreground">{fmtNum(r.requestPrice, 2)}</span>
+          {t('req.atRequest')} <span className="num text-foreground">{fmtNum(r.requestPrice, 2)}</span>
         </span>
         <span className="text-muted-foreground">
-          现价 <span className="num text-foreground">{live == null ? '—' : fmtNum(live, 2)}</span>
+          {t('req.now')} <span className="num text-foreground">{live == null ? '—' : fmtNum(live, 2)}</span>
         </span>
         {drift != null && (
           <span className={cn('num font-bold', drift >= 0 ? 'text-gain' : 'text-loss')}>
@@ -651,11 +642,11 @@ function RequestCard({ r, onDecide, busy, disabled }: {
       <div className="flex gap-2">
         <button onClick={() => onDecide(true)} disabled={disabled}
                 className="border border-border hover:bg-surface-hover rounded-lg px-3 py-1.5 text-xs font-bold text-gain flex items-center gap-1.5 disabled:opacity-50">
-          {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />} 同意
+          {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />} {t('req.approve')}
         </button>
         <button onClick={() => onDecide(false)} disabled={disabled}
                 className="border border-border hover:bg-surface-hover rounded-lg px-2.5 py-1.5 text-xs font-bold text-muted-foreground disabled:opacity-50"
-                aria-label="拒绝">
+                aria-label={t('term.reject')}>
           <X className="w-3.5 h-3.5" />
         </button>
       </div>

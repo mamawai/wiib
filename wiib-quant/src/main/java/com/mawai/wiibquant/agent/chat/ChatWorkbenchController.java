@@ -2,9 +2,13 @@ package com.mawai.wiibquant.agent.chat;
 
 import com.alibaba.fastjson2.JSONObject;
 import com.mawai.wiibcommon.annotation.CurrentUserId;
+import com.mawai.wiibcommon.enums.AgentLang;
 import com.mawai.wiibcommon.enums.ErrorCode;
 import com.mawai.wiibcommon.exception.BizException;
+import com.mawai.wiibcommon.i18n.MessageCatalog;
 import com.mawai.wiibcommon.util.Result;
+import com.mawai.wiibquant.agent.i18n.PromptCatalog;
+import com.mawai.wiibquant.agent.i18n.UserLangResolver;
 import com.mawai.wiibquant.agent.llm.ChatEndpoints;
 import com.mawai.wiibquant.agent.llm.ConversationSummarizer;
 import com.mawai.wiibquant.agent.llm.LlmEndpointService;
@@ -16,6 +20,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.jspecify.annotations.NonNull;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.http.MediaType;
@@ -32,21 +37,15 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ScheduledFuture;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
+import java.util.concurrent.*;
 
 /**
  * 研判工作台对话入口（P4）：SSE 流式暴露多 agent 调度全过程。
  * 事件协议：session(会话号) / agent_start(调度切换) / token(LLM流，带 agent+role 区分专家过程/答案)
  * / progress(长工具阶段进度) / form_request(模型请求弹一张表单卡，执行权归用户点击)
- * / done(完整回答；deferred=true 是让位收尾，真答案由补答轮落库、前端轮询补显) / error。
+ * / done(完整回答；deferred=true 是让位收尾，pending=会话还欠着补答——前端在空闲时经 /deferred 发起补答轮接回) / error。
  * 续聊上下文按 sessionId 存在自建的 {@link ChatContextStore} 表里，带同一 sessionId 再发即续聊；
  * 断连不中止本轮：{@link ChatTurnRunner} 跑完照样落历史，前端靠 status 接口+历史回放补答案。
  */
@@ -65,7 +64,12 @@ public class ChatWorkbenchController {
     private final ChatTurnRunner turnRunner;
     private final WorkbenchRunRegistry runRegistry;
     private final ChatConcurrencyGate concurrencyGate;
+    /** 会话归属与确认失效的提示跟界面语言 */
+    private final MessageCatalog messages;
     private final ChatYieldCoordinator yieldCoordinator;
+    private final PromptCatalog prompts;
+    /** chat 是实时请求：语言走 @CurrentUserId → user.lang，与 trader 同一条路 */
+    private final UserLangResolver userLangResolver;
     /** 包私有：名额泄漏那条钉子（{@code ChatWorkbenchAdmissionTest}）要关掉它来制造 submit 失败 */
     final ExecutorService streamExecutor = Executors.newVirtualThreadPerTaskExecutor();
     /** 心跳专用：只发注释帧(微秒级)，单线程够所有会话用；虚拟线程不支持定时调度故用平台线程 */
@@ -78,6 +82,9 @@ public class ChatWorkbenchController {
 
     /** 深研判期间 SSE 通道会静默数分钟，nginx 默认 proxy_read_timeout 60s 会掐断——20s 一帧留 3 倍余量 */
     private static final long HEARTBEAT_SECONDS = 20;
+
+    /** 单条用户消息字符上限；文案见 error.chatMessageTooLong，改这里要一起改 */
+    static final int MAX_MESSAGE_CHARS = 10_000;
 
     /**
      * 上下文里每轮用户消息的起始标记。重新生成靠它从尾部找到"本轮提问"那条——
@@ -97,6 +104,8 @@ public class ChatWorkbenchController {
     public static class WorkbenchChatRequest {
         private String sessionId; // 空=新会话
         private String message;
+        /** 功能按钮直发时带上；用户自己打字为空，走正常派发 */
+        private ChatIntent intent;
     }
 
     @Data
@@ -107,6 +116,15 @@ public class ChatWorkbenchController {
     @Data
     public static class CancelRequest {
         private String sessionId;
+    }
+
+    @Data
+    public static class DeferredRequest {
+        private String sessionId;
+    }
+
+    /** 会话运行状态：running=有轮在跑；pending=欠着补答，前端在本地空闲、排队消息发完后发起 /deferred */
+    public record SessionStatus(boolean running, boolean pending) {
     }
 
     @Data
@@ -125,27 +143,16 @@ public class ChatWorkbenchController {
         if (request.getMessage() == null || request.getMessage().isBlank()) {
             throw new IllegalArgumentException("消息不能为空");
         }
+        if (request.getMessage().length() > MAX_MESSAGE_CHARS) {
+            throw new BizException(ErrorCode.CHAT_MESSAGE_TOO_LONG);
+        }
         // 三道准入都在把 emitter 交出去之前：一旦 return 给 MVC，响应就成了 event-stream，
         // 之后再出错只能推 error 事件，前端拿不到结构化错误码、没法自动引导用户去配置页
-        ChatEndpoints eps = endpointService.chatEndpoints(userId);
-        if (eps == null) {
-            throw new BizException(ErrorCode.LLM_CONFIG_MISSING);
-        }
-        ChatAgentFactory.Leaves leaves;
-        try {
-            // 建叶子放准入期：配置能过保存校验但仍可能建不出模型（协议对不上等），这类错误必须在建流前暴露。
-            // 建叶子不发网络请求，慢端点不会拖垮这里
-            leaves = chatAgentFactory.leavesFor(eps);
-        } catch (Exception e) {
-            log.warn("[Workbench] 建模失败 userId={}", userId, e);
-            throw new BizException(ErrorCode.LLM_CONFIG_INVALID);
-        }
-        // 拒因由闸门自己给，不去 runRegistry 二次推断：那边 finish 先摘、名额后还，
-        // 中间那个窗口会把"你还有一轮在跑"误报成"人满了"
+        ChatAgentFactory.Leaves leaves = leavesFor(userId);
+        // 并发闸门
         ChatConcurrencyGate.Acquire acquired = concurrencyGate.tryAcquire(userId);
         if (acquired == ChatConcurrencyGate.Acquire.USER_BUSY) {
-            // 自己的上一轮还在跑：正处专家等待期就要求让位（用户消息优先，专家结果转入补答队列），
-            // 等它退位后抢回名额；不可让位（路由/汇总中）维持占线拒绝，前端回落本地排队
+            // 自己的上一轮还在跑：正处专家等待期就要求让位（用户消息优先，专家结果转入补答队列），等它退位后抢回名额；路由/汇总中不可让位维持占线拒绝，前端回落本地排队
             acquired = awaitYield(userId);
         }
         if (acquired != ChatConcurrencyGate.Acquire.OK) {
@@ -158,7 +165,52 @@ public class ChatWorkbenchController {
                 ? request.getSessionId()
                 : "wb-" + userId + "-" + UUID.randomUUID();
 
-        return streamTurn(userId, sessionId, request.getMessage(), leaves, null);
+        return streamTurn(userId, sessionId, request.getMessage(), leaves, null, request.getIntent(), null);
+    }
+
+    /**
+     * 补答轮：接回让位时交出去的专家批次，把欠的答案补上。前端在本地没有轮在跑、排队消息也发完之后发起。
+     * 与普通轮的差别只有三处（见 {@link #run}）：不落 user 行、用户侧消息是补答指令、答案带【补答】标头。
+     */
+    @PostMapping(value = "/deferred", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    @Operation(summary = "补答轮：接回让位时交出去的专家批次，补上欠的答案（SSE，事件协议同 /chat）")
+    public SseEmitter deferred(@CurrentUserId long userId, @RequestBody DeferredRequest request,
+                               HttpServletResponse response) {
+        response.setHeader("X-Accel-Buffering", "no");
+        String sessionId = request.getSessionId();
+        if (sessionId == null || !sessionId.startsWith("wb-" + userId + "-")
+                || !yieldCoordinator.hasPending(sessionId)) {
+            throw new BizException(ErrorCode.CHAT_NOTHING_DEFERRED);
+        }
+        ChatAgentFactory.Leaves leaves = leavesFor(userId);
+        // 补答不做让位握手：用户消息永远优先，补答只能等空档，占线就拒、前端下次空闲再来。
+        // 反过来的话，另一个标签页看见欠账发起补答，会把这个标签页正在跑的用户轮挤掉
+        ChatConcurrencyGate.Acquire acquired = concurrencyGate.tryAcquire(userId);
+        if (acquired != ChatConcurrencyGate.Acquire.OK) {
+            throw new BizException(acquired == ChatConcurrencyGate.Acquire.USER_BUSY
+                    ? ErrorCode.CHAT_ALREADY_RUNNING : ErrorCode.CHAT_CAPACITY_FULL);
+        }
+        // 名额到手后才出队：两个标签页同时来，只有拿到名额的那个取得走这一单
+        ChatYieldCoordinator.DeferredWork work = yieldCoordinator.takeDeferred(sessionId).orElse(null);
+        if (work == null) {
+            concurrencyGate.release(userId);
+            throw new BizException(ErrorCode.CHAT_NOTHING_DEFERRED);
+        }
+        return streamTurn(userId, sessionId, work.question(), leaves, null, null, work.batch());
+    }
+
+    /** 建叶子。保存过了仍可能建不出模型（协议对不上等）；建叶子不发请求，慢端点拖不住。 */
+    private ChatAgentFactory.Leaves leavesFor(long userId) {
+        ChatEndpoints eps = endpointService.chatEndpoints(userId);
+        if (eps == null) {
+            throw new BizException(ErrorCode.LLM_CONFIG_MISSING);
+        }
+        try {
+            return chatAgentFactory.leavesFor(eps, userLangResolver.of(userId));
+        } catch (Exception e) {
+            log.warn("[Workbench] 建模失败 userId={}", userId, e);
+            throw new BizException(ErrorCode.LLM_CONFIG_INVALID);
+        }
     }
 
     @PostMapping(value = "/regenerate", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
@@ -170,17 +222,7 @@ public class ChatWorkbenchController {
         if (sessionId == null || !sessionId.startsWith("wb-" + userId + "-")) {
             throw new BizException(ErrorCode.CHAT_REGENERATE_UNAVAILABLE);
         }
-        ChatEndpoints eps = endpointService.chatEndpoints(userId);
-        if (eps == null) {
-            throw new BizException(ErrorCode.LLM_CONFIG_MISSING);
-        }
-        ChatAgentFactory.Leaves leaves;
-        try {
-            leaves = chatAgentFactory.leavesFor(eps);
-        } catch (Exception e) {
-            log.warn("[Workbench] 建模失败 userId={}", userId, e);
-            throw new BizException(ErrorCode.LLM_CONFIG_INVALID);
-        }
+        ChatAgentFactory.Leaves leaves = leavesFor(userId);
         // 重新生成不做让位握手：它不是等着要答案的新问题，占线就直接拒，用户等那轮跑完再点
         ChatConcurrencyGate.Acquire acquired = concurrencyGate.tryAcquire(userId);
         if (acquired != ChatConcurrencyGate.Acquire.OK) {
@@ -196,7 +238,9 @@ public class ChatWorkbenchController {
             concurrencyGate.release(userId);
             throw e;
         }
-        return streamTurn(userId, sessionId, rollback.question(), leaves, rollback.answerId());
+        // 重新生成不带意图：库里存的是提问原文，按钮意图是请求级的、没落库。
+        // 行为分析这类提问原文本身就够明确，路由与汇总的成文规则接得住
+        return streamTurn(userId, sessionId, rollback.question(), leaves, rollback.answerId(), null, null);
     }
 
     /** 回退的产物：要重问的原文，以及那条等着被顶替的旧答案行 */
@@ -218,7 +262,7 @@ public class ChatWorkbenchController {
     private Rollback rollbackLastTurn(String sessionId, long userId) {
         List<ChatHistoryService.ChatMessage> history = chatHistoryService.messages(sessionId);
         if (history.isEmpty() || !"assistant".equals(history.getLast().role())
-                || history.getLast().content().startsWith(ChatYieldCoordinator.DEFERRED_PREFIX)) {
+                || ChatRowKind.DEFERRED.equals(history.getLast().kind())) {
             throw new BizException(ErrorCode.CHAT_REGENERATE_UNAVAILABLE);
         }
         ChatHistoryService.ChatMessage answer = history.getLast();
@@ -249,7 +293,7 @@ public class ChatWorkbenchController {
         }
         // 切在队首且紧跟着摘要，说明命中的是压缩原样放回的首问，不是本轮提问——
         // 同一句常用问法在一个会话里问两遍就会这样，文本对得上但位置是假的，照切会把整段上下文连摘要清空
-        if (cut == 0 && context.size() > 1 && ConversationSummarizer.isSummary(context.get(1))) {
+        if (cut == 0 && context.size() > 1 && ConversationSummarizer.isSummary(context.get(1), prompts)) {
             throw new BizException(ErrorCode.CHAT_REGENERATE_UNAVAILABLE);
         }
         contextStore.save(sessionId, userId, List.copyOf(context.subList(0, cut)));
@@ -257,14 +301,16 @@ public class ChatWorkbenchController {
     }
 
     /**
-     * 建流并把这一轮丢给执行器。/chat 与 /regenerate 共用。
+     * 建流并把这一轮丢给执行器。/chat、/regenerate、/deferred 共用。
      *
      * @param replacedAnswerId null=普通轮；非空=重新生成轮，它在顶替这条旧答案——
      *                         提问已在库里不再落一遍，且这一轮不许被新消息挤走
      *                         （旧答案的位置已经腾出来了，被挤掉就没处放新答案）
+     * @param deferred         非空=补答轮，message 是被让位的原问题，这批是替它派的专家
      */
     private SseEmitter streamTurn(long userId, String sessionId, String message,
-                                  ChatAgentFactory.Leaves leaves, Long replacedAnswerId) {
+                                  ChatAgentFactory.Leaves leaves, Long replacedAnswerId, ChatIntent intent,
+                                  ChatTurnRunner.ExpertBatch deferred) {
         // 深研判轮次要跑 Bull∥Bear+Judge 共3次深模型调用，180s 会掐断回答流，给足 10 分钟
         SseEmitter emitter = new SseEmitter(600_000L);
         SseChannel channel = new SseChannel(emitter);
@@ -278,14 +324,18 @@ public class ChatWorkbenchController {
         ChatYieldCoordinator.TurnHandle turn = yieldCoordinator.openTurn(userId, replacedAnswerId == null);
         try {
             streamExecutor.submit(() -> {
-                // 名额收在这一层还，而不是 run() 的 finally：run() 开头那句
-                // heartbeatScheduler.scheduleWithFixedDelay 在它自己的 try 之外，
-                // scheduler 关闭时它抛出去，run() 的 finally 根本不执行，名额就永久漏了
+                // 名额在这一层try/catch/finally归还
                 try {
-                    run(channel, userId, sessionId, message, leaves, turn, replacedAnswerId);
+                    run(channel, userId, sessionId, message, leaves, turn, replacedAnswerId, intent, deferred);
                 } catch (Throwable e) {
                     // submit 返回的 Future 没人 get()，不自己记一笔的话异常被完全吞掉
                     log.error("[Workbench] 对话任务异常退出 sessionId={}", sessionId, e);
+                    // run() 只兜 Exception，Error 穿到这里时通道还开着：不收口前端要挂到 10 分钟超时
+                    if (!channel.isClosed()) {
+                        channel.send("error", new JSONObject()
+                                .fluentPut("message", prompts.get(leaves.lang(), "llm.error.fallback")));
+                        channel.complete();
+                    }
                 } finally {
                     concurrencyGate.release(userId);
                     // 必须在还名额之后：turnDone 是让位等待者抢名额的发令枪
@@ -316,9 +366,6 @@ public class ChatWorkbenchController {
             return ChatConcurrencyGate.Acquire.USER_BUSY;
         } catch (ExecutionException | TimeoutException e) {
             return ChatConcurrencyGate.Acquire.USER_BUSY;
-        } finally {
-            // 抢没抢到都要解除"等待者在场"的登记，否则补答被永久挡住
-            yieldCoordinator.yieldHandshakeDone(userId);
         }
     }
 
@@ -340,13 +387,12 @@ public class ChatWorkbenchController {
     }
 
     @GetMapping("/sessions/{sessionId}/status")
-    @Operation(summary = "会话运行状态（切页/刷新回来判断 AI 是否还在后台跑，结束后拉历史补答案）")
-    public Result<Boolean> sessionStatus(@CurrentUserId long userId, @PathVariable String sessionId) {
+    @Operation(summary = "会话运行状态（切页/刷新回来判断 AI 是否还在后台跑、是否欠着补答）")
+    public Result<SessionStatus> sessionStatus(@CurrentUserId long userId, @PathVariable String sessionId) {
         if (sessionId == null || !sessionId.startsWith("wb-" + userId + "-")) {
-            return Result.fail("会话不存在或无权限");
+            return Result.fail(messages.get("quant.chat.sessionNotFound"));
         }
-        // 有轮在跑或欠着补答都算"还在跑"：让位收尾后前端靠这个口径继续轮询等补答落库
-        return Result.ok(runRegistry.isRunning(sessionId) || yieldCoordinator.hasPending(sessionId));
+        return Result.ok(new SessionStatus(runRegistry.isRunning(sessionId), yieldCoordinator.hasPending(sessionId)));
     }
 
     @GetMapping("/sessions/{sessionId}/messages")
@@ -354,20 +400,25 @@ public class ChatWorkbenchController {
     public Result<List<ChatHistoryService.ChatMessage>> sessionMessages(@CurrentUserId long userId,
                                                                         @PathVariable String sessionId) {
         if (sessionId == null || !sessionId.startsWith("wb-" + userId + "-")) {
-            return Result.fail("会话不存在或无权限");
+            return Result.fail(messages.get("quant.chat.sessionNotFound"));
         }
         return Result.ok(chatHistoryService.messages(sessionId));
     }
 
     @DeleteMapping("/sessions/{sessionId}")
-    @Operation(summary = "删除历史会话（展示记录 + 后端续聊上下文）")
+    @Operation(summary = "删除历史会话（展示记录 + 后端续聊上下文）；在跑或欠补答的会话拒删")
     public Result<Void> deleteSession(@CurrentUserId long userId, @PathVariable String sessionId) {
         if (sessionId == null || !sessionId.startsWith("wb-" + userId + "-")) {
-            return Result.fail("会话不存在或无权限");
+            return Result.fail(messages.get("quant.chat.sessionNotFound"));
+        }
+        // 与 /status 同一口径：这轮收尾/补答落库还会往会话里写 assistant 行，先删掉它会以无标题空壳重新冒出来
+        if (runRegistry.isRunning(sessionId) || yieldCoordinator.hasPending(sessionId)) {
+            return Result.fail(messages.get("quant.chat.sessionRunning"));
         }
         chatHistoryService.deleteSession(sessionId);
-        // 展示记录与续聊上下文是两套存储，删会话得都清
+        // 展示记录与续聊上下文是两套存储，删会话得都清；挂着的确认卡/授权一并清
         contextStore.purge(sessionId);
+        approvalRegistry.purgeSession(sessionId);
         return Result.ok(null);
     }
 
@@ -377,7 +428,7 @@ public class ChatWorkbenchController {
     public Result<Void> approve(@CurrentUserId long userId, @RequestBody ApprovalRequest request) {
         String sessionId = request.getSessionId();
         if (sessionId == null || !sessionId.startsWith("wb-" + userId + "-")) {
-            return Result.fail("会话不存在或无权限");
+            return Result.fail(messages.get("quant.chat.sessionNotFound"));
         }
         // 标识对不上 = 用户点的是被新请求覆盖掉的旧卡片。
         // 此时若照批，用户看着"深研判 BTC"点的同意会授权给新请求里的别的标的。
@@ -385,7 +436,7 @@ public class ChatWorkbenchController {
         boolean ok = request.isApproved()
                 ? approvalRegistry.approve(sessionId, request.getRequestId())
                 : approvalRegistry.reject(sessionId, request.getRequestId());
-        return ok ? Result.ok(null) : Result.fail("该确认请求已失效，请重新发起");
+        return ok ? Result.ok(null) : Result.fail(messages.get("quant.chat.approvalExpired"));
     }
 
     /**
@@ -394,7 +445,8 @@ public class ChatWorkbenchController {
      * 而 {@link #chat} 自己 new emitter、事件出不来。
      */
     void run(SseChannel channel, long userId, String sessionId, String message,
-             ChatAgentFactory.Leaves leaves, ChatYieldCoordinator.TurnHandle turn, Long replacedAnswerId) {
+             ChatAgentFactory.Leaves leaves, ChatYieldCoordinator.TurnHandle turn, Long replacedAnswerId,
+             ChatIntent intent, ChatTurnRunner.ExpertBatch deferred) {
         // 本轮开跑的时刻：结尾只发"这一轮新登记"的确认卡（见下面 hitl_request 那段），
         // 同时也是落库耗时的起点。不含准入/建叶子/让位握手；比 [TurnMetrics] 日志早一点，
         // 那条是从 ChatTurnRunner 里起算的，这里还多了一帧 session 和 user 行落库
@@ -418,38 +470,48 @@ public class ChatWorkbenchController {
                 return true;
             });
             channel.send("session", new JSONObject().fluentPut("sessionId", sessionId));
-            // 重新生成用的是库里已有的那条提问，不能再落一遍 user 行
-            if (replacedAnswerId == null) {
+            // 重新生成用的是库里已有的那条提问、补答轮的提问早在让位那轮落过，都不能再落一遍 user 行
+            if (replacedAnswerId == null && deferred == null) {
                 chatHistoryService.append(sessionId, userId, "user", message);
             }
 
-            // 时间行锚定"最近/未来1h"这类语义；随每条用户消息注入，历史里各带各的时刻
+            // 时间行锚定"最近/未来1h"这类语义；随每条用户消息注入，历史里各带各的时刻。
+            // 补答轮的用户侧消息是补答指令而不是提问，不带提问标记（它不是重新生成要定位的那种轮）
             String enriched = TURN_MARKER + TIME_FMT.format(Instant.now()) + "】\n"
-                    + QUESTION_MARKER + message;
+                    + (deferred == null
+                    ? QUESTION_MARKER + message
+                    : prompts.get(leaves.lang(), "chat.deferred.instruction", Map.of("question", message)));
+
+            // 补答标头：答案离原问题隔着别的对话，得自己说明在答哪个。随首个答案 chunk 作为第一帧推出去，
+            // 落库时拼在模型输出前面——实时气泡与历史回放一个字不差，前端按它的前缀认出补答行。
+            // 不在这里提前推：专家等待期一个答案帧都不该有，否则让位时前端留着一个收不了尾的空气泡
+            String prefix = deferred == null ? "" : deferredHeader(leaves.lang(), message);
 
             // 账本清零划出本轮边界：装饰器跟着叶子跨轮缓存，不清就是上一轮的账接着涨。
-            // 同时记下开工时账本干不干净——让位交出去的专家批次没人取消，会跨轮继续往这份账本上记。
+            // 同时记下开工时账本干不干净——让位交出去的专家批次没人取消，会跨轮继续往这份账本上记；
+            // 补答轮接回的批次若还没跑完，它在清零前烧的那截也已经丢了。
             // 只在开工时查一次就够：新批次只由本用户自己的让位产生，而同一用户同时只有一轮在跑
-            boolean dirtyBook = yieldCoordinator.hasInFlightExperts(userId);
+            boolean dirtyBook = yieldCoordinator.hasInFlightExperts(userId)
+                    || (deferred != null && !deferred.isDone());
             leaves.resetUsage();
-            ChatTurnRunner.TurnResult result = turnRunner.run(leaves, userId, sessionId, enriched,
+            ChatTurnRunner.TurnResult result = turnRunner.run(leaves, userId, sessionId, enriched, intent,
                     chunk -> {
                         // 攒答案在断连判断之外：断连后这轮照跑完，答案仍要进历史，
                         // 只是不再往已经断掉的通道里写帧
+                        if (answer.isEmpty() && !prefix.isEmpty() && !channel.isClosed()) {
+                            channel.send("token", answerToken(prefix));
+                        }
                         answer.append(chunk);
                         if (!channel.isClosed()) {
-                            channel.send("token", new JSONObject()
-                                    .fluentPut("text", chunk)
-                                    .fluentPut("agent", "supervisor") // 前端事件契约不变
-                                    .fluentPut("role", "answer"));
+                            channel.send("token", answerToken(chunk));
                         }
                     },
-                    event -> onExpertProgress(channel, expertLog, event), turn);
+                    event -> onExpertProgress(channel, expertLog, event, leaves.lang()), turn, deferred);
 
             if (result.cancelled()) {
                 // 用户点了停止：半截答案照落库（token 已经烧掉了，屏幕上那段也该留得住）。
                 // 与让位不同，这一轮不欠补答，done 收尾即完结
-                String stopped = ChatTurnRunner.cancelledAnswer(answer.toString());
+                String stopped = ChatTurnRunner.cancelledAnswer(prompts, leaves.lang(), prefix + answer);
                 ChatHistoryService.TurnMeta meta = turnMeta(leaves, dirtyBook, turnStartedAt);
                 boolean saved = chatHistoryService.append(sessionId, userId, "assistant", stopped, meta);
                 // 重生成轮：出了半截才顶掉旧答案，半截也是这一次重生成的产物，留着旧的同一个提问下
@@ -463,6 +525,7 @@ public class ChatWorkbenchController {
                             .fluentPut("sessionId", sessionId)
                             .fluentPut("answer", stopped)
                             .fluentPut("cancelled", true)
+                            .fluentPut("pending", yieldCoordinator.hasPending(sessionId))
                             .fluentPut("meta", metaJson(meta)));
                     channel.complete();
                 }
@@ -470,16 +533,21 @@ public class ChatWorkbenchController {
             }
 
             if (result.yielded()) {
-                // 让位收尾：答案欠着（记账给协调器补答），本轮不落 assistant 历史——
-                // 补答轮会补齐。registerDeferred 必须在本轮结束（runRegistry.finish）之前：
-                // status 口径是 isRunning || hasPending，先摘运行标记再记账会闪出空窗，轮询端误判已结束。
-                // done 带 deferred 标记：前端据此转入轮询等补答，answer 只是过渡话术不进历史
-                yieldCoordinator.registerDeferred(userId, sessionId, leaves, message, result.deferredExperts());
+                // 让位收尾：答案欠着（记账给协调器排队），本轮不落 assistant 历史——补答轮会补齐。
+                // 补答轮自己再被让位时 message 仍是原问题，再排的还是原问题那一单。
+                // registerDeferred 必须在本轮结束（runRegistry.finish）之前：status 是 running/pending 两个口径，
+                // 先摘运行标记再记账会闪出两者皆假的空窗，轮询端误判"已结束且不欠账"。
+                // done 带 deferred 标记：前端据此记下欠账、空闲时发起补答轮，answer 只是过渡话术不进历史；
+                // question 是被让位的原问题，前端按它把"稍后补答"的说明行挂到正确的提问名下。
+                // 每种 done 都带 pending（此刻会话还欠不欠补答）：补答轮跑完后队列里可能还排着下一单
+                yieldCoordinator.registerDeferred(userId, sessionId, message, result.deferredExperts());
                 if (!channel.isClosed()) {
                     channel.send("done", new JSONObject()
                             .fluentPut("sessionId", sessionId)
                             .fluentPut("deferred", true)
-                            .fluentPut("answer", "收到新消息，先处理它——这个问题的专家还在取数，答案稍后自动补上"));
+                            .fluentPut("question", message)
+                            .fluentPut("pending", true)
+                            .fluentPut("answer", prompts.get(leaves.lang(), "chat.yieldDoneAnswer")));
                     channel.complete();
                 }
                 return;
@@ -497,10 +565,11 @@ public class ChatWorkbenchController {
                             .fluentPut("symbol", pendingRequest.symbol())
                             .fluentPut("reason", pendingRequest.reason())
                             .fluentPut("requestId", pendingRequest.requestId())
-                            .fluentPut("resumeMessage", "已确认，请继续执行深度研判")));
+                            .fluentPut("resumeMessage",
+                                    prompts.get(leaves.lang(), "chat.hitl.resumeMessage"))));
 
             // 极端场景（调用上限截停等）summarizer 没产出汇总，退专家结论，答案不至于丢
-            String finalAnswer = !answer.isEmpty() ? answer.toString() : expertLog.toString();
+            String finalAnswer = prefix + (!answer.isEmpty() ? answer : expertLog);
             ChatHistoryService.TurnMeta meta = turnMeta(leaves, dirtyBook, turnStartedAt);
             // 历史不看连接死活：切页断连后这一轮照跑完，答案必须落库（前端回来靠 status+历史补）。
             // 且必须在 finally 摘运行标记之前写完——轮询端不能出现"已结束但查不到答案"的空窗
@@ -515,6 +584,7 @@ public class ChatWorkbenchController {
                 channel.send("done", new JSONObject()
                         .fluentPut("sessionId", sessionId)
                         .fluentPut("answer", finalAnswer)
+                        .fluentPut("pending", yieldCoordinator.hasPending(sessionId))
                         .fluentPut("meta", metaJson(meta)));
                 channel.complete();
             }
@@ -522,7 +592,7 @@ public class ChatWorkbenchController {
             log.error("[Workbench] 对话失败 sessionId={}", sessionId, e);
             if (!channel.isClosed()) {
                 channel.send("error", new JSONObject()
-                        .fluentPut("message", LlmErrorMessages.classify(e)));
+                        .fluentPut("message", LlmErrorMessages.classify(e, prompts, leaves.lang())));
                 // 正常收尾而非 completeWithError：原因已随上面的 error 事件发出去了，
                 // 再把异常抛回 MVC 只会让 GlobalExceptionHandler 往 event-stream 里写 JSON，
                 // 撞 HttpMessageNotWritableException，反而把真实错误盖掉
@@ -562,13 +632,30 @@ public class ChatWorkbenchController {
                 .fluentPut("latencyMs", meta.latencyMs());
     }
 
+    /** 答案流的一帧。agent=supervisor / role=answer 是既有前端事件契约 */
+    private static JSONObject answerToken(String text) {
+        return new JSONObject()
+                .fluentPut("text", text)
+                .fluentPut("agent", "supervisor")
+                .fluentPut("role", "answer");
+    }
+
+    /** 补答标头：问题摘要截 40 字；与 chat.deferred.prefix 同源，前端按前缀认出补答行（不给重新生成） */
+    private String deferredHeader(AgentLang lang, String question) {
+        String q = question.strip().replaceAll("\\s+", " ");
+        if (q.length() > 40) {
+            q = q.substring(0, 40) + "…";
+        }
+        return prompts.get(lang, "chat.deferred.header", Map.of("question", q)) + "\n\n";
+    }
+
     /**
      * 专家进度 → 前端事件。开始时发 agent_start（前端渲染成"接管分析"chip），
      * 结论整段作为 role=process 的 token 发出（前端折叠成"工作过程"块）。
      * 内容真实，只是并行下拿不到逐字流，一次性给。
      */
     private void onExpertProgress(SseChannel channel, StringBuilder expertLog,
-                                  ChatTurnRunner.ExpertProgress event) {
+                                  ChatTurnRunner.ExpertProgress event, AgentLang lang) {
         switch (event.phase()) {
             case ChatTurnRunner.ExpertProgress.START -> channel.send("agent_start", new JSONObject()
                     .fluentPut("node", event.agent())
@@ -583,7 +670,8 @@ public class ChatWorkbenchController {
                 }
             }
             case ChatTurnRunner.ExpertProgress.ERROR -> channel.send("progress", new JSONObject()
-                    .fluentPut("text", event.agent() + " 执行失败：" + event.text()));
+                    .fluentPut("text", prompts.get(lang, "chat.progress.expertFailed",
+                            Map.of("agent", event.agent(), "reason", event.text()))));
             default -> log.warn("[Workbench] 未知专家进度阶段 {}", event.phase());
         }
     }

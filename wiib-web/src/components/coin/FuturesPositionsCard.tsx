@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeftRight, RefreshCw, Loader2, Plus, ChevronRight } from 'lucide-react';
 import { futuresApi } from '../../api';
@@ -53,6 +54,7 @@ export function FuturesPositionsCard({ symbol, refreshKey, onOrdersChanged, onPo
   onPositions?: (list: FuturesPosition[]) => void;
   showCloseAll?: boolean;
 }) {
+  const { t } = useTranslation('trade');
   const { toast } = useToast();
   const fetchUser = useUserStore(s => s.fetchUser);
 
@@ -102,13 +104,13 @@ export function FuturesPositionsCard({ symbol, refreshKey, onOrdersChanged, onPo
     try {
       const res = await futuresApi.closeAll();
       if (res.failures.length > 0) {
-        toast(`已平 ${res.closedCount} 个仓位，${res.failures.length} 个失败`, 'error', { description: res.failures.join('；') });
+        toast(t('toast.closedAllPartial', { closed: res.closedCount, failed: res.failures.length }), 'error', { description: res.failures.join(t('pos.failureSep')) });
       } else {
-        toast(`已全部平仓（${res.closedCount} 个）`, 'success');
+        toast(t('toast.closedAll', { n: res.closedCount }), 'success');
       }
       handleMutated(true);
     } catch (e: unknown) {
-      toast((e as Error).message || '一键全平失败', 'error');
+      toast((e as Error).message || t('toast.closeAllFailed'), 'error');
     } finally {
       setClosingAll(false);
     }
@@ -121,9 +123,9 @@ export function FuturesPositionsCard({ symbol, refreshKey, onOrdersChanged, onPo
       <CardHeader className="pb-4 pt-5 px-5">
         <div className="flex items-center justify-between gap-2">
           <CardTitle className="text-base font-black flex items-center gap-2">
-            {symbol ? '当前持仓' : '合约持仓'}
-            <span className="text-xs text-muted-foreground font-normal">{positions.length}个</span>
-            <HelpTip text={`${symbol ? '仅显示当前币种活跃仓位，盈亏基于标记价实时计算' : '全部币种活跃仓位，盈亏基于各币标记价实时计算'}\n已实现盈亏 = 开/加仓手续费 + 已平部分净盈亏（不含资金费）`} />
+            {symbol ? t('pos.titleSymbol') : t('pos.titleAll')}
+            <span className="text-xs text-muted-foreground font-normal">{t('pos.count', { n: positions.length })}</span>
+            <HelpTip text={`${t(symbol ? 'pos.helpSymbol' : 'pos.helpAll')}\n${t('pos.helpRealized')}`} />
           </CardTitle>
           <div className="flex items-center gap-2">
             {showCloseAll && (
@@ -135,7 +137,7 @@ export function FuturesPositionsCard({ symbol, refreshKey, onOrdersChanged, onPo
                 onClick={() => confirmCloseAll ? handleCloseAll() : setConfirmCloseAll(true)}
               >
                 {closingAll ? <Loader2 className="w-3 h-3 animate-spin" />
-                  : confirmCloseAll ? `确认全平 ${positions.length} 个仓位？` : '一键全平'}
+                  : confirmCloseAll ? t('pos.closeAllConfirm', { n: positions.length }) : t('pos.closeAll')}
               </Button>
             )}
             <button onClick={fetchPositions} disabled={loading} className="p-1 rounded-md hover:bg-muted transition-colors disabled:opacity-50">
@@ -178,6 +180,7 @@ function PositionItem({ pos, brackets, wide, onMutated }: {
   wide?: boolean;
   onMutated: (ordersChanged: boolean) => void;
 }) {
+  const { t } = useTranslation(['trade', 'common']);
   const cfg = getCoin(pos.symbol);
   // 平仓/SLTP 数量步长用合约过滤器（reduce-only 免最小名义额；全量平仓后端豁免步长，存量尘埃仓能平干净）
   const MIN_QTY = useTradeFilter('futures', pos.symbol).stepSize;
@@ -241,16 +244,16 @@ function PositionItem({ pos, brackets, wide, onMutated }: {
     setTpRows(pos.takeProfits?.length ? pos.takeProfits.map(t => ({ price: String(t.price), quantity: String(t.quantity) })) : [fullRow]);
   };
 
-  // 通用提交包装：成功关面板并向父上报
-  const submit = async (fn: () => Promise<unknown>, okMsg: string, ordersChanged: boolean) => {
+  // 通用提交包装：成功关面板并向父上报。成败两条文案分别传——原先靠裁"成功"两字拼失败句，换语言就拼不出来了
+  const submit = async (fn: () => Promise<unknown>, okKey: string, failKey: string, ordersChanged: boolean) => {
     setSubmitting(true);
     try {
       await fn();
-      toast(okMsg, 'success');
+      toast(t(okKey), 'success');
       setAction(null);
       onMutated(ordersChanged);
     } catch (e: unknown) {
-      toast((e as Error).message || `${okMsg.replace('成功', '')}失败`, 'error');
+      toast((e as Error).message || t(failKey), 'error');
     } finally {
       setSubmitting(false);
     }
@@ -258,15 +261,15 @@ function PositionItem({ pos, brackets, wide, onMutated }: {
 
   const handleClose = () => {
     const qty = parseFloat(closeQty);
-    if (!qty || qty <= 0) { toast('请输入平仓数量', 'error'); return; }
+    if (!qty || qty <= 0) { toast(t('toast.enterCloseQty'), 'error'); return; }
     if (closeOrderType === 'LIMIT') {
       const lp = parseFloat(closeLimitPrice);
-      if (!lp || lp <= 0) { toast('请输入有效限价', 'error'); return; }
+      if (!lp || lp <= 0) { toast(t('toast.invalidLimit'), 'error'); return; }
     }
     void submit(() => futuresApi.close({
       positionId: pos.id, quantity: qty, orderType: closeOrderType,
       ...(closeOrderType === 'LIMIT' ? { limitPrice: parseFloat(closeLimitPrice) } : {}),
-    }), '平仓成功', true);
+    }), 'toast.closeOk', 'toast.closeFailed', true);
   };
 
   /**
@@ -280,20 +283,29 @@ function PositionItem({ pos, brackets, wide, onMutated }: {
       const res = await futuresApi.reverse(pos.id);
       const pnl = res.closed.realizedPnl ?? 0;
       const pnlText = `${pnl >= 0 ? '+' : ''}${fmtNum(pnl)} USDT`;
-      const closedText = `${isLong ? '多' : '空'}单 ${res.closed.quantity} ${cfg.name}（已实现盈亏 ${pnlText}）`;
+      const closedText = t('toast.reverseClosed', {
+        dir: t(isLong ? 'sideShort.long' : 'sideShort.short'),
+        qty: res.closed.quantity, unit: cfg.name, pnl: pnlText,
+      });
       if (res.opened) {
-        toast(`已反手为${isLong ? '空' : '多'}单`, 'success', {
-          description: `平掉${closedText}，反向开 ${res.opened.quantity} ${cfg.name} ${pos.leverage}x。新仓没有止损止盈，需要的话重新设`,
+        toast(t(isLong ? 'toast.reversedToShort' : 'toast.reversedToLong'), 'success', {
+          description: t('toast.reverseOkDesc', {
+            closed: closedText, qty: res.opened.quantity, unit: cfg.name, lev: pos.leverage,
+          }),
         });
       } else {
-        toast('反手只完成了一半：仓位已平，反向开仓失败', 'error', {
+        toast(t('toast.reverseHalf'), 'error', {
           duration: 8000,
-          description: `已平掉${closedText}，反向${isLong ? '空' : '多'}单没开成：${res.openError ?? '未知原因'}。原仓已不在，要开反向仓请手动下单`,
+          description: t('toast.reverseFailDesc', {
+            closed: closedText,
+            dir: t(isLong ? 'sideShort.short' : 'sideShort.long'),
+            reason: res.openError ?? t('toast.unknownReason'),
+          }),
         });
       }
       onMutated(true);
     } catch (e: unknown) {
-      toast((e as Error).message || '反手失败', 'error');
+      toast((e as Error).message || t('toast.reverseFailed'), 'error');
     } finally {
       setReversing(false);
     }
@@ -301,41 +313,41 @@ function PositionItem({ pos, brackets, wide, onMutated }: {
 
   const handleAddMargin = () => {
     const amt = parseFloat(marginAmt);
-    if (!amt || amt <= 0) { toast('请输入有效金额', 'error'); return; }
-    void submit(() => futuresApi.addMargin({ positionId: pos.id, amount: amt }), '追加保证金成功', false);
+    if (!amt || amt <= 0) { toast(t('toast.enterAmount'), 'error'); return; }
+    void submit(() => futuresApi.addMargin({ positionId: pos.id, amount: amt }), 'toast.addMarginOk', 'toast.addMarginFailed', false);
   };
 
   const handleReduceMargin = () => {
     const amt = parseFloat(marginAmt);
-    if (!amt || amt <= 0) { toast('请输入有效金额', 'error'); return; }
-    void submit(() => futuresApi.reduceMargin({ positionId: pos.id, amount: amt }), '减少保证金成功', false);
+    if (!amt || amt <= 0) { toast(t('toast.enterAmount'), 'error'); return; }
+    void submit(() => futuresApi.reduceMargin({ positionId: pos.id, amount: amt }), 'toast.reduceMarginOk', 'toast.reduceMarginFailed', false);
   };
 
   // 币种级调杠杆：多空共用，同时作用于该币全部仓位；全仓双向可调（调低要可用够），逐仓只能调高；错误信息由后端 toast 透出
   const handleAdjustLeverage = () => {
-    if (!newLeverage) { toast('请选择目标杠杆', 'error'); return; }
-    void submit(() => futuresApi.adjustLeverage({ symbol: pos.symbol, leverage: newLeverage }), '杠杆调整成功', false);
+    if (!newLeverage) { toast(t('toast.selectLev'), 'error'); return; }
+    void submit(() => futuresApi.adjustLeverage({ symbol: pos.symbol, leverage: newLeverage }), 'toast.levOk', 'toast.levFailed', false);
   };
 
   const handleSetStopLoss = () => {
     const items = slRows.filter(r => parseFloat(r.price) > 0 && parseFloat(r.quantity) > 0)
       .map(r => ({ price: parseFloat(r.price), quantity: parseFloat(r.quantity) }));
-    void submit(() => futuresApi.setStopLoss({ positionId: pos.id, stopLosses: items }), '设置止损成功', false);
+    void submit(() => futuresApi.setStopLoss({ positionId: pos.id, stopLosses: items }), 'toast.slSaved', 'toast.slSaveFailed', false);
   };
 
   const handleSetTakeProfit = () => {
     const items = tpRows.filter(r => parseFloat(r.price) > 0 && parseFloat(r.quantity) > 0)
       .map(r => ({ price: parseFloat(r.price), quantity: parseFloat(r.quantity) }));
-    void submit(() => futuresApi.setTakeProfit({ positionId: pos.id, takeProfits: items }), '设置止盈成功', false);
+    void submit(() => futuresApi.setTakeProfit({ positionId: pos.id, takeProfits: items }), 'toast.tpSaved', 'toast.tpSaveFailed', false);
   };
 
   // 取消=提交空档位列表，后端清库并撤触发索引
   const handleCancelStopLoss = () => {
-    void submit(() => futuresApi.setStopLoss({ positionId: pos.id, stopLosses: [] }), '已取消止损', false);
+    void submit(() => futuresApi.setStopLoss({ positionId: pos.id, stopLosses: [] }), 'toast.slCleared', 'toast.slClearFailed', false);
   };
 
   const handleCancelTakeProfit = () => {
-    void submit(() => futuresApi.setTakeProfit({ positionId: pos.id, takeProfits: [] }), '已取消止盈', false);
+    void submit(() => futuresApi.setTakeProfit({ positionId: pos.id, takeProfits: [] }), 'toast.tpCleared', 'toast.tpClearFailed', false);
   };
 
   return (
@@ -353,15 +365,15 @@ function PositionItem({ pos, brackets, wide, onMutated }: {
           <button
             type="button"
             onClick={() => navigate(`/coin/${pos.symbol}`)}
-            title={`前往 ${cfg.name} 交易页`}
+            title={t('pos.gotoCoin', { name: cfg.name })}
             className="group inline-flex items-center gap-0.5 text-[13px] font-black hover:text-primary transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded"
           >
             {cfg.name}
             <ChevronRight className="w-3 h-3 text-muted-foreground/50 group-hover:text-primary transition-colors" />
           </button>
         )}
-        <Badge variant={isLong ? 'success' : 'destructive'} className="text-[10px] px-2 py-0.5">{isLong ? '做多' : '做空'}</Badge>
-        <Badge variant="outline" className="text-[10px] px-2 py-0.5">{isCrossPos ? '全仓' : '逐仓'} {pos.leverage}x</Badge>
+        <Badge variant={isLong ? 'success' : 'destructive'} className="text-[10px] px-2 py-0.5">{t(isLong ? 'side.long' : 'side.short')}</Badge>
+        <Badge variant="outline" className="text-[10px] px-2 py-0.5">{t(isCrossPos ? 'marginMode.cross' : 'marginMode.isolated')} {pos.leverage}x</Badge>
         {/* 反手挂在卡右上角：它跟这排徽标说的是同一件事——做多/做空、杠杆、保证金模式，正是反手要翻面的那些。
             平时只占一格图标，确认态才展成文字。确认态写"确认"两个字而不是"确认反手"：
             Portfolio 四格窄卡这一行只剩三十来像素余量，四个字必被 flex-wrap 甩到下一排 */}
@@ -371,13 +383,13 @@ function PositionItem({ pos, brackets, wide, onMutated }: {
             variant={confirmReverse ? 'destructive' : 'outline'}
             className={confirmReverse ? 'h-7 sm:h-6 px-2 text-[11px]' : 'h-7 w-7 sm:h-6 sm:w-6 p-0'}
             disabled={reversing}
-            title={confirmReverse ? '确认反手（再点一次执行）' : '反手'}
-            aria-label={confirmReverse ? '确认反手' : '反手'}
+            title={confirmReverse ? t('pos.reverseConfirmTitle') : t('pos.reverse')}
+            aria-label={confirmReverse ? t('pos.reverseConfirm') : t('pos.reverse')}
             onClick={() => confirmReverse ? void handleReverse() : setConfirmReverse(true)}
           >
-            {reversing ? <Loader2 className="w-3 h-3 animate-spin" /> : confirmReverse ? '确认' : <ArrowLeftRight className="w-3 h-3" />}
+            {reversing ? <Loader2 className="w-3 h-3 animate-spin" /> : confirmReverse ? t('common:confirm') : <ArrowLeftRight className="w-3 h-3" />}
           </Button>
-          <HelpTip text={'反手 = 市价全平当前仓位，立刻反向开等量新仓，同杠杆、同保证金模式。\n做多一步变做空，不用自己先平再开。\n原仓的止损止盈不会带到新仓，要的话重新设。\n余额不够开反向仓时只完成平仓（亏着反手多半会这样：亏掉的那部分正是新仓保证金的缺口）。'} />
+          <HelpTip text={t('pos.reverseHelp')} />
         </div>
       </div>
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -392,15 +404,15 @@ function PositionItem({ pos, brackets, wide, onMutated }: {
       {/* 手机全宽单列卡塞得下3列指标（压卡高）；四格窄卡 ≥sm 退2列，Coin页两格宽卡恒3列 */}
       <div className={`grid grid-cols-3 ${wide ? '' : 'sm:grid-cols-2'} gap-x-3 gap-y-1.5`}>
         {[
-          { label: '数量', value: `${pos.quantity} ${cfg.name}` },
-          { label: '开仓价', value: `$${fmtPrice(pos.entryPrice)}` },
-          { label: '标记价', value: `$${fmtPrice(mp)}` },
-          { label: '强平价', value: pos.liquidationPrice > 0 ? `$${fmtPrice(pos.liquidationPrice)}` : '—', cls: 'text-yellow-500' },
-          { label: isCrossPos ? '占用保证金' : '保证金', value: `$${fmtNum(pos.margin)}` },
-          { label: '资金费', value: `$${fmtNum(pos.fundingFeeTotal)}` },
-          { label: 'MMR', value: currentBracket ? `档${currentBracket.tier} · ${formatRate(currentBracket.mmr)}` : '—' },
+          { label: t('metric.qty'), value: `${pos.quantity} ${cfg.name}` },
+          { label: t('metric.entry'), value: `$${fmtPrice(pos.entryPrice)}` },
+          { label: t('metric.mark'), value: `$${fmtPrice(mp)}` },
+          { label: t('metric.liq'), value: pos.liquidationPrice > 0 ? `$${fmtPrice(pos.liquidationPrice)}` : '—', cls: 'text-yellow-500' },
+          { label: t(isCrossPos ? 'metric.marginUsed' : 'metric.margin'), value: `$${fmtNum(pos.margin)}` },
+          { label: t('metric.funding'), value: `$${fmtNum(pos.fundingFeeTotal)}` },
+          { label: t('metric.mmr'), value: currentBracket ? t('metric.tier', { tier: currentBracket.tier, rate: formatRate(currentBracket.mmr) }) : '—' },
           {
-            label: '已实现盈亏',
+            label: t('metric.realizedPnl'),
             value: `${(pos.realizedPnl ?? 0) >= 0 ? '+' : ''}${fmtNum(pos.realizedPnl ?? 0)}`,
             cls: (pos.realizedPnl ?? 0) >= 0 ? 'text-green-500' : 'text-red-500',
           },
@@ -423,12 +435,12 @@ function PositionItem({ pos, brackets, wide, onMutated }: {
       )}
       <div className="flex flex-wrap gap-1.5 pt-1">
         {/* 加仓无独立入口（对齐Binance）：同方向再下一单即自动并入仓位，走开仓面板 */}
-        <Button size="sm" variant={action === 'close' ? 'default' : 'outline'} className="h-9 sm:h-7 text-[11px] flex-1 min-w-15" onClick={() => toggleAction('close')}>平仓</Button>
+        <Button size="sm" variant={action === 'close' ? 'default' : 'outline'} className="h-9 sm:h-7 text-[11px] flex-1 min-w-20" onClick={() => toggleAction('close')}>{t('pos.close')}</Button>
         {/* 全仓保证金按账户统一算，单仓加减保证金没意义，后端也会拒（1761），直接不给入口 */}
-        {!isCrossPos && <Button size="sm" variant={action === 'margin' ? 'default' : 'outline'} className="h-9 sm:h-7 text-[11px] flex-1 min-w-15" onClick={() => toggleAction('margin')}>+保证金</Button>}
-        {!isCrossPos && <Button size="sm" variant={action === 'reduceMargin' ? 'default' : 'outline'} className="h-9 sm:h-7 text-[11px] flex-1 min-w-15" onClick={() => toggleAction('reduceMargin')}>-保证金</Button>}
-        <Button size="sm" variant={action === 'leverage' ? 'default' : 'outline'} className="h-9 sm:h-7 text-[11px] flex-1 min-w-15" onClick={() => toggleAction('leverage')}>调杠杆</Button>
-        <Button size="sm" variant={action === 'stoploss' ? 'default' : 'outline'} className="h-9 sm:h-7 text-[11px] flex-1 min-w-15" onClick={() => toggleAction('stoploss')}>止损/盈</Button>
+        {!isCrossPos && <Button size="sm" variant={action === 'margin' ? 'default' : 'outline'} className="h-9 sm:h-7 text-[11px] flex-1 min-w-20" onClick={() => toggleAction('margin')}>{t('pos.addMargin')}</Button>}
+        {!isCrossPos && <Button size="sm" variant={action === 'reduceMargin' ? 'default' : 'outline'} className="h-9 sm:h-7 text-[11px] flex-1 min-w-20" onClick={() => toggleAction('reduceMargin')}>{t('pos.reduceMargin')}</Button>}
+        <Button size="sm" variant={action === 'leverage' ? 'default' : 'outline'} className="h-9 sm:h-7 text-[11px] flex-1 min-w-20" onClick={() => toggleAction('leverage')}>{t('pos.leverage')}</Button>
+        <Button size="sm" variant={action === 'stoploss' ? 'default' : 'outline'} className="h-9 sm:h-7 text-[11px] flex-1 min-w-20" onClick={() => toggleAction('stoploss')}>{t('pos.sltp')}</Button>
       </div>
       {/* 内联操作面板 */}
       {action && (
@@ -437,23 +449,23 @@ function PositionItem({ pos, brackets, wide, onMutated }: {
           {action === 'close' && (
             <>
               <div className="flex items-center gap-2">
-                <span className="text-xs text-muted-foreground shrink-0">执行</span>
+                <span className="text-xs text-muted-foreground shrink-0">{t('pos.execLabel')}</span>
                 <NeuToggle
                   size="sm"
-                  label="平仓执行方式"
+                  label={t('pos.closeExecLabel')}
                   value={closeOrderType}
                   onChange={setCloseOrderType}
-                  options={[{ value: 'MARKET', label: '市价' }, { value: 'LIMIT', label: '限价' }]}
+                  options={[{ value: 'MARKET', label: t('orderType.market') }, { value: 'LIMIT', label: t('orderType.limit') }]}
                 />
               </div>
               {closeOrderType === 'LIMIT' && (
                 <>
-                  <Input type="number" placeholder="限价 (USDT)" value={closeLimitPrice} onChange={e => setCloseLimitPrice(e.target.value)} step={PRICE_STEP_TEXT} className="h-9 sm:h-8 text-xs" />
+                  <Input type="number" placeholder={t('open.limitLabel')} value={closeLimitPrice} onChange={e => setCloseLimitPrice(e.target.value)} step={PRICE_STEP_TEXT} className="h-9 sm:h-8 text-xs" />
                   {parseFloat(closeLimitPrice) > 0 && livePrice > 0 && (
                     (isLong && parseFloat(closeLimitPrice) <= livePrice) ||
                     (!isLong && parseFloat(closeLimitPrice) >= livePrice)
                   ) && (
-                    <div className="text-[10px] text-yellow-500">限价{isLong ? '≤' : '≥'}当前价，将立即以市价成交</div>
+                    <div className="text-[10px] text-yellow-500">{t(isLong ? 'open.limitFillsLte' : 'open.limitFillsGte')}</div>
                   )}
                 </>
               )}
@@ -462,7 +474,7 @@ function PositionItem({ pos, brackets, wide, onMutated }: {
                 return (
                   <>
                     <div className="flex items-center gap-2">
-                      <Input type="number" placeholder="平仓数量" value={closeQty} onChange={e => setCloseQty(e.target.value)} step={String(MIN_QTY)} min={MIN_QTY} max={pos.quantity} className="flex-1 h-9 sm:h-8 text-xs" />
+                      <Input type="number" placeholder={t('pos.closeQty')} value={closeQty} onChange={e => setCloseQty(e.target.value)} step={String(MIN_QTY)} min={MIN_QTY} max={pos.quantity} className="flex-1 h-9 sm:h-8 text-xs" />
                       <span className="text-[11px] text-muted-foreground tabular-nums shrink-0">/ {pos.quantity} · {closePct}%</span>
                     </div>
                     <PctSlider
@@ -473,27 +485,27 @@ function PositionItem({ pos, brackets, wide, onMutated }: {
                 );
               })()}
               <Button size="sm" className="w-full h-9 sm:h-8 text-xs" onClick={handleClose} disabled={submitting}>
-                {submitting ? <Loader2 className="w-3 h-3 animate-spin" /> : '确认平仓'}
+                {submitting ? <Loader2 className="w-3 h-3 animate-spin" /> : t('pos.confirmClose')}
               </Button>
             </>
           )}
           {/* +保证金 */}
           {action === 'margin' && (
             <>
-              <Input type="number" placeholder="追加金额 (USDT)" value={marginAmt} onChange={e => setMarginAmt(e.target.value)} step="0.01" min="0" className="h-9 sm:h-8 text-xs" />
-              {user && <div className="text-[11px] text-muted-foreground">可用余额 {fmtNum(user.balance)} USDT</div>}
+              <Input type="number" placeholder={t('pos.addAmount')} value={marginAmt} onChange={e => setMarginAmt(e.target.value)} step="0.01" min="0" className="h-9 sm:h-8 text-xs" />
+              {user && <div className="text-[11px] text-muted-foreground">{t('pos.availableBalance', { amount: fmtNum(user.balance) })}</div>}
               <Button size="sm" className="w-full h-9 sm:h-8 text-xs" onClick={handleAddMargin} disabled={submitting}>
-                {submitting ? <Loader2 className="w-3 h-3 animate-spin" /> : '确认追加'}
+                {submitting ? <Loader2 className="w-3 h-3 animate-spin" /> : t('pos.confirmAdd')}
               </Button>
             </>
           )}
           {/* -保证金 */}
           {action === 'reduceMargin' && (
             <>
-              <Input type="number" placeholder="减少金额 (USDT)" value={marginAmt} onChange={e => setMarginAmt(e.target.value)} step="0.01" min="0" max={pos.margin} className="h-9 sm:h-8 text-xs" />
-              <div className="text-[11px] text-muted-foreground">当前保证金 {fmtNum(pos.margin)} USDT</div>
+              <Input type="number" placeholder={t('pos.reduceAmount')} value={marginAmt} onChange={e => setMarginAmt(e.target.value)} step="0.01" min="0" max={pos.margin} className="h-9 sm:h-8 text-xs" />
+              <div className="text-[11px] text-muted-foreground">{t('pos.currentMargin', { amount: fmtNum(pos.margin) })}</div>
               <Button size="sm" className="w-full h-9 sm:h-8 text-xs" onClick={handleReduceMargin} disabled={submitting}>
-                {submitting ? <Loader2 className="w-3 h-3 animate-spin" /> : '确认减少'}
+                {submitting ? <Loader2 className="w-3 h-3 animate-spin" /> : t('pos.confirmReduce')}
               </Button>
             </>
           )}
@@ -509,13 +521,13 @@ function PositionItem({ pos, brackets, wide, onMutated }: {
               <>
                 <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-0.5">
                   <span className="text-[11px] text-muted-foreground">
-                    当前 {pos.leverage}x · 多空共用同时调整 · {isCrossPos ? '全仓可调高调低，调低需可用余额足够' : '逐仓只能调高'}
+                    {t(isCrossPos ? 'lev.currentCross' : 'lev.currentIsolated', { lev: pos.leverage })}
                   </span>
                   <span className={`text-sm font-black tabular-nums ${changed ? 'text-primary' : 'text-muted-foreground'}`}>{selLev}x</span>
                 </div>
                 <LeverageSlider value={selLev} min={minLev} max={maxLev} ticks={levTicks} onChange={setNewLeverage} />
                 <Button size="sm" className="w-full h-9 sm:h-8 text-xs" onClick={handleAdjustLeverage} disabled={submitting || !changed}>
-                  {submitting ? <Loader2 className="w-3 h-3 animate-spin" /> : changed ? `调整为 ${selLev}x` : '拖动滑杆选择杠杆'}
+                  {submitting ? <Loader2 className="w-3 h-3 animate-spin" /> : changed ? t('lev.setTo', { lev: selLev }) : t('lev.dragToSelect')}
                 </Button>
               </>
             );
@@ -526,36 +538,36 @@ function PositionItem({ pos, brackets, wide, onMutated }: {
             <div className="grid grid-cols-1 gap-3">
               <div className="space-y-2">
                 <div className="text-xs text-muted-foreground flex items-center gap-1">
-                  止损 <HelpTip text="触发价达到时自动市价平仓，可分多档，总量不超过持仓" />
+                  {t('sltp.sl')} <HelpTip text={t('sltp.posHelp')} />
                 </div>
-                <SLTPEditor rows={slRows} onChange={setSlRows} label="止损" posQty={pos.quantity} minQty={MIN_QTY}
+                <SLTPEditor rows={slRows} onChange={setSlRows} kind="SL" posQty={pos.quantity} minQty={MIN_QTY}
                   entryPrice={pos.entryPrice} margin={pos.margin} side={pos.side}
                   minPriceStep={PRICE_STEP} priceFormatter={fmtPrice} />
                 <div className="flex gap-1.5">
                   <Button size="sm" className="flex-1 h-9 sm:h-8 text-xs" onClick={handleSetStopLoss} disabled={submitting}>
-                    {submitting ? <Loader2 className="w-3 h-3 animate-spin" /> : '保存止损'}
+                    {submitting ? <Loader2 className="w-3 h-3 animate-spin" /> : t('sltp.saveSl')}
                   </Button>
                   {(pos.stopLosses?.length ?? 0) > 0 && (
                     <Button size="sm" variant="destructive" className="h-9 sm:h-8 text-xs" onClick={handleCancelStopLoss} disabled={submitting}>
-                      取消止损
+                      {t('sltp.clearSl')}
                     </Button>
                   )}
                 </div>
               </div>
               <div className="space-y-2">
                 <div className="text-xs text-muted-foreground flex items-center gap-1">
-                  止盈 <HelpTip text="触发价达到时自动市价平仓，可分多档，总量不超过持仓" />
+                  {t('sltp.tp')} <HelpTip text={t('sltp.posHelp')} />
                 </div>
-                <SLTPEditor rows={tpRows} onChange={setTpRows} label="止盈" posQty={pos.quantity} minQty={MIN_QTY}
+                <SLTPEditor rows={tpRows} onChange={setTpRows} kind="TP" posQty={pos.quantity} minQty={MIN_QTY}
                   entryPrice={pos.entryPrice} margin={pos.margin} side={pos.side}
                   minPriceStep={PRICE_STEP} priceFormatter={fmtPrice} />
                 <div className="flex gap-1.5">
                   <Button size="sm" className="flex-1 h-9 sm:h-8 text-xs" onClick={handleSetTakeProfit} disabled={submitting}>
-                    {submitting ? <Loader2 className="w-3 h-3 animate-spin" /> : '保存止盈'}
+                    {submitting ? <Loader2 className="w-3 h-3 animate-spin" /> : t('sltp.saveTp')}
                   </Button>
                   {(pos.takeProfits?.length ?? 0) > 0 && (
                     <Button size="sm" variant="destructive" className="h-9 sm:h-8 text-xs" onClick={handleCancelTakeProfit} disabled={submitting}>
-                      取消止盈
+                      {t('sltp.clearTp')}
                     </Button>
                   )}
                 </div>

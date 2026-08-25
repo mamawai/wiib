@@ -1,0 +1,408 @@
+{
+  "side": {
+    "long": "Long",
+    "short": "Short"
+  },
+  "pager": {
+    "prev": "Previous page",
+    "next": "Next page"
+  },
+  "player": {
+    "play": "Play",
+    "pause": "Pause",
+    "reset": "Reset to full range",
+    "progress": "Replay progress"
+  },
+  "strategies": {
+    "title": "Strategy accounts",
+    "subtitle": "Four strategies, four accounts · Run on the platform paper account · Decision and fill price from one source",
+    "testnetLink": "Testnet monitor",
+    "loading": "Loading strategy accounts...",
+    "offline": "Offline",
+    "name": {
+      "fibo": "Fibo Retracement",
+      "turtle": "Turtle Breakout",
+      "sqzmom": "Sqz Momentum",
+      "liqfade": "Liq Fade"
+    },
+    "desc": {
+      "fibo": "Limit orders at Fibonacci retracements",
+      "liqfade": "Fading liquidation cascades",
+      "sqzmom": "Squeeze momentum breakout",
+      "turtle": "4H 90/15 channel breakout"
+    },
+    "unavailable": {
+      "title": "Account unavailable",
+      "hint": "sim is off or has never opened a position — recovers automatically once started"
+    },
+    "stats": {
+      "equity": "Equity · Avail. ${{available}}",
+      "realized_one": "Cum. realized · {{count}} trade",
+      "realized_other": "Cum. realized · {{count}} trades",
+      "winRate": "Win rate · {{wins}}/{{total}}",
+      "unrealized_one": "Unrealized · {{count}} position",
+      "unrealized_other": "Unrealized · {{count}} positions"
+    },
+    "signals": {
+      "title": "Live signal state",
+      "empty": "Signal snapshot unavailable",
+      "emptyHint": "The quant runtime is off, or this strategy is not active"
+    },
+    "equity": {
+      "empty": "No equity curve yet",
+      "emptyHint": "It appears after the first closed trade"
+    },
+    "positions": {
+      "title": "Open positions",
+      "empty": "Flat · waiting for a signal"
+    },
+    "trades": {
+      "title": "Trades",
+      "empty": "No trades yet",
+      "pageInfo": "{{page}} / {{pages}} · {{total}} trades",
+      "liquidated": "Liquidated"
+    },
+    "pos": {
+      "qty": "Qty",
+      "entry": "Entry",
+      "mark": "Mark",
+      "margin": "Margin",
+      "unrealized": "Unrealized PnL",
+      "close": "Close"
+    },
+    "toast": {
+      "loadFailed": "Failed to load strategy accounts",
+      "closed": "Close order executed",
+      "closeFailed": "Failed to close position"
+    }
+  },
+  "backtest": {
+    "title": "Backtest",
+    "subtitleStrategy": "Local 5m candles · Same matching as live · The log on the right replays every step",
+    "subtitleReplay": "Reveal candles one by one · Long or short at the close, add or reduce · Train your own read",
+    "modeStrategy": "Strategy backtest",
+    "modeReplay": "Manual review",
+    "strategy": {
+      "fibo": "15m impulse legs, a limit order parked in the 0.66 golden pocket for the pullback; SL at the leg origin, TP at the prior high/low, gated by the 1h SMA200 trend",
+      "turtle": "4h channel breakout entered on touch, ATR stop, exit on the opposite channel — classic trend following",
+      "sqzmom": "4h BB/KC squeeze builds up, market entry with the momentum once it releases; signals are sparse",
+      "liqfade": "5m liquidation cascade with three signatures (drop / premium / taker sell pressure) — fade it long on a hit, timed exit after 1h",
+      "note": {
+        "liqfade": "Needs the local taker/premium side data; a window without enough coverage fails outright"
+      }
+    },
+    "speed": {
+      "slow": "Slow",
+      "normal": "Normal",
+      "fast": "Fast",
+      "turbo": "Turbo"
+    },
+    "reject": {
+      "directional": "Direction invalidated",
+      "gappedBeyondStop": "Gapped beyond stop",
+      "rrTooLow": "Risk/reward too low",
+      "qtyZero": "Quantity is zero",
+      "balanceRejected": "Insufficient balance",
+      "priceInvalid": "Invalid price"
+    },
+    "exit": {
+      "sl": "SL",
+      "tp": "TP",
+      "signalClose": "Signal close",
+      "timeExit": "Time exit",
+      "timeout": "Timeout",
+      "trailingStop": "Trailing stop",
+      "forceClose": "Force close",
+      "liquidation": "Liquidation"
+    },
+    "form": {
+      "symbol": "Symbol",
+      "from": "Start date",
+      "to": "End date",
+      "balance": "Starting capital",
+      "leverage": "Leverage"
+    },
+    "run": {
+      "queued": "Queued…",
+      "running": "Running…",
+      "start": "Run backtest"
+    },
+    "queueHint": "Queued · position <0>{{pos}}</0> — identical parameters reuse the existing result, no waiting",
+    "progress": "{{done}} / {{total}} bars · {{pct}}%",
+    "failed": "Backtest failed",
+    "replayAt": "Replay @ {{time}}",
+    "barsLoaded": "{{bars}} bars loaded",
+    "waitingBars": "Waiting for candles…",
+    "equityTitle": "Equity curve (vs starting capital)",
+    "timeline": {
+      "title": "Strategy activity log",
+      "count_one": "{{count}} entry",
+      "count_other": "{{count}} entries",
+      "waiting": "Waiting for events…"
+    },
+    "ev": {
+      "taskStart": "Task started",
+      "taskStartDetail": "<0>{{bars}}</0> bars · <1>{{warmup}}</1> warm-up · leverage <2>{{leverage}}x</2>",
+      "signal": "Signal",
+      "cancelled": "Order cancelled",
+      "entry": "Entry",
+      "qty": "Qty",
+      "rejected": "Rejected",
+      "exitDetail": "<0>{{entry}}</0> → <1>{{exit}}</1> · held <2>{{bars}}</2> bars",
+      "done_one": "Backtest complete · {{count}} trade",
+      "done_other": "Backtest complete · {{count}} trades"
+    },
+    "stat": {
+      "netProfit": "Net profit",
+      "winRate": "Win rate",
+      "pf": "PF",
+      "maxDd": "Max DD",
+      "avgR": "Avg R",
+      "fees": "Fees",
+      "trades": "Trades",
+      "finalEquity": "Equity",
+      "winLoss": "{{wins}}W / {{losses}}L",
+      "hold": "Hold {{hours}}h"
+    },
+    "trades": {
+      "title": "Trades",
+      "count_one": "{{count}} trade",
+      "count_other": "{{count}} trades",
+      "jumpTip": "Click to locate on the chart"
+    },
+    "toast": {
+      "badRange": "Invalid date range",
+      "submitFailed": "Failed to submit",
+      "pollFailed": "Failed to query the backtest task",
+      "ivSwitched": "Switched to {{iv}} — replay now shows {{iv}} candles"
+    }
+  },
+  "replay": {
+    "days_one": "{{count}} day",
+    "days_other": "{{count}} days",
+    "reason": {
+      "manual": "Close",
+      "liquidation": "Liquidated",
+      "end": "Settled",
+      "reduce": "Reduce"
+    },
+    "fill": {
+      "add": "Add",
+      "close": "Close",
+      "reduce": "Reduce",
+      "liquidation": "Liq",
+      "end": "End"
+    },
+    "form": {
+      "symbol": "Symbol",
+      "mode": "Start mode",
+      "blind": "Random blind",
+      "custom": "Pick a start",
+      "startDate": "Start date",
+      "duration": "Session length",
+      "balance": "Starting capital",
+      "coach": "AI coach"
+    },
+    "start": "Start review",
+    "coverage": "Local data {{from}} ~ {{to}} · Blind hides the real dates until settlement",
+    "coverageLoading": "Reading local candle coverage…",
+    "hintLine": "One candle at a time on the chosen interval (Space = next; switch 5m/15m/1h/4h/1d mid-session). Trade at the close only; long and short can run together, add or reduce, change leverage any time · Progress is not saved and is lost on refresh",
+    "blind": "Blind",
+    "review": "Review",
+    "barsProgress": "{{played}} / {{total}} bars",
+    "next": "Next bar",
+    "speed": "{{n}} bars/s",
+    "spaceHint": "Space = next bar · No going back",
+    "aiHint": "AI hint",
+    "aiHintTip": "Ask AI ({{model}}) to read the chart: structure / key levels / volume / position risk",
+    "endGame": "End session",
+    "levTip": "Applies to the next open or add; adding at a different setting shows the position's effective leverage",
+    "openPctTip": "Open / add: share of available cash",
+    "closePctTip": "Close / reduce: share of that side's size",
+    "openLong": "Open long",
+    "addLong": "Add long",
+    "openShort": "Open short",
+    "addShort": "Add short",
+    "avgEntry": "Avg entry {{price}} · {{qty}}",
+    "closeAction": "Close {{side}} {{pct}}% @ {{price}}",
+    "reduceAction": "Reduce {{side}} {{pct}}% @ {{price}}",
+    "aiPanelTitle": "AI chart read",
+    "aiThinking": "Model is thinking…",
+    "goConfig": "Configure",
+    "noEndpoint": "No endpoint configured",
+    "emptyAnswer": "The model returned nothing",
+    "liquidatedOut": "Liquidated — out",
+    "settled": "Session settled",
+    "stat": {
+      "netProfit": "Net profit · {{pct}}%",
+      "winRate": "Win rate · {{wins}}W / {{losses}}L",
+      "maxDd": "Max DD",
+      "finalEquity": "Equity · fees {{fees}}"
+    },
+    "aiReview": "AI review this session",
+    "aiReviewHint": "Grades every entry and exit, your patterns and your sizing against the whole session · {{model}}",
+    "playAgain": "Play again",
+    "equity": "Equity",
+    "cash": "Available cash",
+    "tradesTitle": "Session trades",
+    "tradesCount_one": "{{count}} trade",
+    "tradesCount_other": "{{count}} trades",
+    "noTrades": "No trades yet",
+    "toast": {
+      "noCoverage": "No local candles for this symbol",
+      "notEnoughDepth": "Local candle history is too short for one session",
+      "badDate": "Invalid date",
+      "rangeTooShort": "Not enough candles in this range — pick another start",
+      "klineFailed": "Failed to load candles",
+      "ivSwitched": "Switched to {{iv}} — replay now advances on {{iv}} candles"
+    }
+  },
+  "chart": {
+    "magnetOn": "Magnet on: endpoints snap to the nearest open/high/low/close",
+    "magnetOff": "Magnet off: free placement",
+    "showDrawings": "Drawings hidden — click to show them again",
+    "hideDrawings": "Hide all drawings (not deleted)",
+    "deleteSelected": "Delete selected (Del)",
+    "clearAll": "Clear every drawing for this symbol",
+    "textPlaceholder": "Label text, Enter to confirm"
+  },
+  "testnet": {
+    "title": "Testnet monitor",
+    "subtitle": "Binance Testnet · Live validation track for strategies · Real order book matching",
+    "refreshed": "Refreshed",
+    "banner": {
+      "title": "Testnet track disabled:",
+      "body": "Strategy execution now targets the platform paper account (sim). This page shows the Binance Testnet history from before the switch; no new records appear, so gaps against the Strategy accounts page are expected. Latest strategy trades:",
+      "link": "Strategy accounts"
+    },
+    "empty": {
+      "title": "No testnet data",
+      "hint": "Set the binance-testnet api-key/secret-key in application.yml and enable strategy.execution.enabled; data appears once orders fill"
+    },
+    "stat": {
+      "equity": "Equity",
+      "available": "Available ${{value}}",
+      "cumPnl": "Cum. PnL",
+      "cumPnlSub": "Incl. fees · Live",
+      "fillRate": "Entry fill rate",
+      "fillRateSub": "{{filled}}/{{placed}} · {{expired}} expired",
+      "fillRateHint": "Fill is make-or-break",
+      "winRate": "Win rate",
+      "winRateSub": "{{wins}}/{{total}} profitable"
+    },
+    "equity": {
+      "title": "Equity curve",
+      "hint": "Cumulative realized PnL (from 0)"
+    },
+    "grid": {
+      "title": "Daily trade grid",
+      "hint": "Tap a cell for that day's fills",
+      "dayTrades": "{{date}} fills ({{n}})",
+      "empty": "No fills that day"
+    },
+    "positions": {
+      "title": "Open positions"
+    },
+    "orders": {
+      "title": "Open orders"
+    },
+    "pos": {
+      "mark": "Mark price",
+      "liq": "Liq. price",
+      "entry": "Entry price"
+    },
+    "order": {
+      "entry": "Entry",
+      "stopLoss": "SL",
+      "takeProfit": "TP"
+    },
+    "fill": {
+      "title": "fill reconciliation",
+      "hint": "Reality check on the backtest's touch=fill assumption",
+      "rate": "Fill rate",
+      "expired": "Expired orders",
+      "expiredSub": "Queued but never filled",
+      "avgTime": "Avg fill time",
+      "avgTimeSub": "Placed → filled",
+      "maker": "Zero-slippage confirmed",
+      "makerSub": "Fill price = order price",
+      "note": "Fill rate = the share of entry orders resting at the retracement level that actually fill on a pullback. The backtest assumes \"touch = fill (100%)\"; a live GTX maker order still has to wait in the queue. The closer this rate is to that assumption, the more trustworthy the backtest; the wider the gap, the more optimistic it is."
+    },
+    "trades": {
+      "title": "Trades",
+      "hint": "Real fills, last 30 days",
+      "empty": "No fills yet"
+    },
+    "manual": {
+      "title": "API self-check · Manual trading",
+      "subtitle": "Admin only · Direct to testnet",
+      "buy": "Buy / Long",
+      "sell": "Sell / Short",
+      "market": "Market",
+      "limit": "Limit",
+      "qty": "Qty (contracts)",
+      "price": "Limit price",
+      "pricePh": "Order price",
+      "leverage": "Leverage",
+      "submit": "Place order",
+      "submitting": "Submitting…",
+      "closeMarket": "Close at market",
+      "closing": "Closing…",
+      "cancelAll": "Cancel orders",
+      "cancelling": "Cancelling…",
+      "qtyPositive": "Quantity must be > 0",
+      "priceRequired": "LIMIT needs a price",
+      "opFailed": "Operation failed",
+      "orderResult": "#{{id}} {{status}}{{at}} ({{side}} {{type}} {{qty}})",
+      "closeResult": "Close #{{id}} {{status}}{{at}}",
+      "cancelResult": "Cancelled all {{symbol}} open orders",
+      "note": "Quantity is in coin-denominated contracts (e.g. BTC 0.002). Set the binance-testnet api-key/secret-key in application.yml first; for manual testing turn automatic execution off (strategy.execution.enabled=false) so the two state machines do not clash."
+    }
+  },
+  "monitor": {
+    "live": "Live",
+    "heap": "Heap",
+    "nonHeap": "Non-heap",
+    "committed": "Committed {{value}}",
+    "threads": "Threads",
+    "threadSub": "Peak {{peak}} · Daemon {{daemon}}",
+    "uptime": "Uptime",
+    "gcTimes": "runs",
+    "gcSub": "{{total}}ms · avg {{avg}}ms",
+    "proc": {
+      "sim": "Paper trading",
+      "feed": "Market data feed",
+      "quant": "Quant engine"
+    }
+  },
+  "feed": {
+    "title": "feed stream health",
+    "desc": "Binance market-data WebSockets — should stay connected; disconnected = fault, Retry forces a reconnect. Status is pushed live.",
+    "allOk": "All OK",
+    "someDown": "Stream issue",
+    "loadError": "Cannot reach feed — use Refresh at the top right",
+    "noStreams": "No registered streams",
+    "downFor": "Down {{age}}",
+    "reconnects": "Retries ×{{n}}",
+    "status": {
+      "connected": "Connected",
+      "connecting": "Connecting",
+      "reconnecting": "Reconnecting",
+      "disconnected": "Disconnected"
+    },
+    "toast": {
+      "loadFailed": "Failed to fetch feed stream status",
+      "retryTriggered": "Reconnect triggered for {{name}}",
+      "notFound": "Stream {{name}} not found",
+      "retryFailed": "Retry failed"
+    }
+  },
+  "radar": {
+    "crypto": "Crypto",
+    "commodity": "Commodities",
+    "bstock": "bStock",
+    "prediction": "Prediction",
+    "game": "Games",
+    "betterThan": "Better than {{pct}}% of users"
+  }
+}

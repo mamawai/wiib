@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { createPortal } from 'react-dom';
 import { HelpCircle } from 'lucide-react';
 import { cn } from '../lib/utils';
@@ -23,6 +24,8 @@ export function HelpTip({ text, side = 'bottom', iconClassName }: {
   const [anchor, setAnchor] = useState<HTMLButtonElement | null>(null);
   const [bubble, setBubble] = useState<HTMLSpanElement | null>(null);
   const pos = useAnchoredPosition(anchor, bubble, open, side);
+  // 只翻壳子上的图标可读名，气泡正文 text 由调用方翻好了传进来
+  const { t } = useTranslation('layout');
 
   // 点击外部 / Esc 关闭。气泡在 body 上，不能靠祖先节点判断"外部"，改用两个 ref 各判一次
   useEffect(() => {
@@ -30,8 +33,8 @@ export function HelpTip({ text, side = 'bottom', iconClassName }: {
       return;
     }
     const onDown = (e: MouseEvent | TouchEvent) => {
-      const t = e.target as Node;
-      if (!anchor?.contains(t) && !bubble?.contains(t)) {
+      const node = e.target as Node;
+      if (!anchor?.contains(node) && !bubble?.contains(node)) {
         setOpen(false);
       }
     };
@@ -55,7 +58,7 @@ export function HelpTip({ text, side = 'bottom', iconClassName }: {
       <button
         ref={setAnchor}
         type="button"
-        aria-label="说明"
+        aria-label={t('helpTip')}
         onClick={e => { e.stopPropagation(); setOpen(v => !v); }}
         className="inline-flex text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
       >

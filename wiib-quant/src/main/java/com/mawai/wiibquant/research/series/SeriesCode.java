@@ -2,7 +2,7 @@ package com.mawai.wiibquant.research.series;
 
 /**
  * research 层链下/链上时点序列类型 → factor_history.factor_name 的映射。
- * FUNDING/FEAR_GREED 由 {@link MarketSeriesStore} 回填；ETF_FLOW/STABLECOIN_DELTA 复用 live 采集器全历史回填（Slice3 T1）。
+ * FUNDING/FEAR_GREED 由 {@link MarketSeriesStore} 回填；ETF_FLOW/STABLECOIN_DELTA 复用 live 采集器全历史回填。
  * 四者历史都够深（年级），能对齐 180 天+ 样本外。
  * OI / taker / 大户的 {@code /futures/data/*} 接口只给最近 ~30 天，撑不起历史回测，留作将来前向/live eval（届时新增枚举即可）。
  */
@@ -22,7 +22,7 @@ public enum SeriesCode {
         this.factorName = factorName;
     }
 
-    /** 落到 factor_history.factor_name 的名字（Slice3 融合后统一存 factor_history；与 live 现有因子名不冲突）。 */
+    /** 落到 factor_history.factor_name 的名字（与 live 现有因子名不冲突）。 */
     public String factorName() {
         return factorName;
     }

@@ -75,13 +75,8 @@ class PublicTradeControllerTest {
     }
 
     /**
-     * 【匿名的第一道】handler 形参只准是这四个。
-     * <p>
-     * 守的是"哪天有人加个 userId 参数方便调试"——那等于把 userId 从 1 枚举到 N 各拉一页，
-     * 假名跟真人的对应关系当场就出来了，整个匿名白做。
-     * <p>
-     * 收"全部形参"而不是"挂了 @RequestParam 的形参"：Spring 的兜底解析器会把不带任何注解的
-     * 简单类型形参也当查询参数绑定，按注解收一个都收不到（同 LedgerControllerTest 里那条的道理）。
+     * 匿名的第一道：handler 形参只准是这四个——加个 userId 参数就能枚举反查假名。
+     * 收"全部形参"不收"挂了 @RequestParam 的"：Spring 兜底解析器把无注解的简单类型形参也当查询参数绑定。
      */
     @Test
     void 请求参数里不许出现userId入口() {
@@ -110,10 +105,7 @@ class PublicTradeControllerTest {
     }
 
     /**
-     * 【匿名的第二道】对外 DTO 上不许出现身份字段。
-     * <p>
-     * 带身份的是 PublicTradeRow，只在 service 内部流转；谁图省事把 Row 直接当返回值，
-     * 或者往 DTO 上补个 userId「前端画头像要用」，这条就红。
+     * 匿名的第二道：对外 DTO 上不许出现身份字段（带身份的 PublicTradeRow 只在 service 内部流转）。
      */
     @Test
     void 对外DTO上没有任何身份字段() {

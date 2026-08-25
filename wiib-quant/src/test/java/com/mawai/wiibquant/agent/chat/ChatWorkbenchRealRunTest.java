@@ -1,5 +1,6 @@
 package com.mawai.wiibquant.agent.chat;
 
+import com.mawai.wiibcommon.enums.AgentLang;
 import com.alibaba.fastjson2.JSON;
 import com.mawai.wiibquant.agent.llm.ChatEndpoints;
 import com.mawai.wiibquant.agent.llm.LlmEndpointService;
@@ -43,7 +44,7 @@ class ChatWorkbenchRealRunTest {
 
     private static final Logger log = LoggerFactory.getLogger(ChatWorkbenchRealRunTest.class);
 
-    /** 挑 1 号不再是因为门只对管理员开（已对全体登录用户开放），纯粹因为真跑要烧的那份 BYOK 配在它名下 */
+    /** 挑 1 号：真跑要烧的那份 BYOK 配在它名下 */
     private static final long ADMIN_USER_ID = 1L;
 
     @Autowired
@@ -65,15 +66,15 @@ class ChatWorkbenchRealRunTest {
         ChatEndpoints llmConfig = endpointService.chatEndpoints(ADMIN_USER_ID);
         assertThat(llmConfig).as("先用管理员账号在 AI 页「模型配置」加一条 BYOK 端点再跑").isNotNull();
 
-        ChatAgentFactory.Leaves leaves = chatAgentFactory.leavesFor(llmConfig);
+        ChatAgentFactory.Leaves leaves = chatAgentFactory.leavesFor(llmConfig, AgentLang.ZH);
         String sessionId = "wb-1-realrun-" + UUID.randomUUID();
         List<ChatTurnRunner.ExpertProgress> events = new CopyOnWriteArrayList<>();
         StringBuilder answer = new StringBuilder();
 
         // 纯新闻问题复刻实测暴露过的病：summarizer 拿到专家清单后用自己的搜索重写一遍
         chatTurnRunner.run(leaves, ADMIN_USER_ID, sessionId,
-                "最近有什么重要的加密货币新闻？", answer::append, events::add,
-                ChatTurnRunner.TurnYield.NONE);
+                "最近有什么重要的加密货币新闻？", null, answer::append, events::add,
+                ChatTurnRunner.TurnYield.NONE, null);
 
         for (ChatTurnRunner.ExpertProgress e : events) {
             log.info("[RealRun] 专家事件 agent={} phase={} text={}", e.agent(), e.phase(),
@@ -111,14 +112,14 @@ class ChatWorkbenchRealRunTest {
         assertThat(overview).as("这一跑要有一个真 trader 才有意义").contains("\"hasTrader\":true");
         String equityBefore = equityDigits(overview);
 
-        ChatAgentFactory.Leaves leaves = chatAgentFactory.leavesFor(llmConfig);
+        ChatAgentFactory.Leaves leaves = chatAgentFactory.leavesFor(llmConfig, AgentLang.ZH);
         String sessionId = "wb-1-realrun-" + UUID.randomUUID();
         List<ChatTurnRunner.ExpertProgress> events = new CopyOnWriteArrayList<>();
         StringBuilder answer = new StringBuilder();
 
         chatTurnRunner.run(leaves, ADMIN_USER_ID, sessionId,
-                "我的 AI 交易员最近表现如何？", answer::append, events::add,
-                ChatTurnRunner.TurnYield.NONE);
+                "我的 AI 交易员最近表现如何？", null, answer::append, events::add,
+                ChatTurnRunner.TurnYield.NONE, null);
 
         for (ChatTurnRunner.ExpertProgress e : events) {
             log.info("[RealRun] 专家事件 agent={} phase={} text={}", e.agent(), e.phase(),

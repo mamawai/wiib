@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { subscribe } from '../hooks/stompClient';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Skeleton } from './ui/skeleton';
@@ -199,6 +200,7 @@ function MonitorSkeleton({ label, desc, actions }: { label: string; desc?: strin
 }
 
 export function MonitorCard({ topic, label, desc, actions }: { topic: string; label: string; desc?: string; actions?: React.ReactNode }) {
+  const { t } = useTranslation('strategy');
   const [data, setData] = useState<MonitorData | null>(null);
 
   // 共享 STOMP 连接订阅该进程的 JVM topic；进程挂了不再来帧，卡片停在最后一帧（用户已认可"断了看得出来"，不做离线判定）
@@ -222,7 +224,7 @@ export function MonitorCard({ topic, label, desc, actions }: { topic: string; la
           {desc && <span className="text-xs text-muted-foreground font-normal">{desc}</span>}
           <span className="ml-auto flex items-center gap-2">
             {actions}
-            <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-gain animate-pulse" title="实时" />
+            <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-gain animate-pulse" title={t('monitor.live')} />
           </span>
         </CardTitle>
       </CardHeader>
@@ -236,7 +238,7 @@ export function MonitorCard({ topic, label, desc, actions }: { topic: string; la
           />
           <Gauge
             pct={heapPct}
-            label="堆内存"
+            label={t('monitor.heap')}
             sub={`${fmtMem(data.heap.used)}/${fmtMem(data.heap.max)}`}
           />
         </div>
@@ -245,19 +247,19 @@ export function MonitorCard({ topic, label, desc, actions }: { topic: string; la
         <div className="grid grid-cols-3 gap-1.5">
           <MetricTile
             icon={Layers}
-            label="堆外"
+            label={t('monitor.nonHeap')}
             value={fmtMem(data.nonHeap.used)}
-            sub={`已提交${fmtMem(data.nonHeap.committed)}`}
+            sub={t('monitor.committed', { value: fmtMem(data.nonHeap.committed) })}
           />
           <MetricTile
             icon={Cpu}
-            label="线程"
+            label={t('monitor.threads')}
             value={data.thread.current}
-            sub={`峰${data.thread.peak} · 守护${data.thread.daemon}`}
+            sub={t('monitor.threadSub', { peak: data.thread.peak, daemon: data.thread.daemon })}
           />
           <MetricTile
             icon={Clock}
-            label="运行"
+            label={t('monitor.uptime')}
             value={fmtUptime(data.uptimeSec ?? 0)}
           />
         </div>
@@ -272,8 +274,8 @@ export function MonitorCard({ topic, label, desc, actions }: { topic: string; la
                   key={g.name}
                   icon={Recycle}
                   label={g.name}
-                  value={<>{g.count}<span className="text-muted-foreground font-normal text-[9px]">次</span></>}
-                  sub={`${g.timeMs}ms · 均${avg}ms`}
+                  value={<>{g.count}<span className="text-muted-foreground font-normal text-[9px]">{t('monitor.gcTimes')}</span></>}
+                  sub={t('monitor.gcSub', { total: g.timeMs, avg })}
                 />
               );
             })}

@@ -1,0 +1,49 @@
+{
+  "confirm": "Confirm",
+  "cancel": "Cancel",
+  "save": "Save",
+  "delete": "Delete",
+  "edit": "Edit",
+  "submit": "Submit",
+  "reset": "Reset",
+  "close": "Close",
+  "back": "Back",
+  "refresh": "Refresh",
+  "retry": "Retry",
+  "copy": "Copy",
+  "copied": "Copied",
+  "search": "Search",
+  "all": "All",
+  "more": "More",
+  "expand": "Expand",
+  "collapse": "Collapse",
+  "settings": "Settings",
+  "loading": "Loading",
+  "loadFailed": "Failed to load",
+  "noData": "No data",
+  "success": "Success",
+  "failed": "Failed",
+  "unknown": "Unknown",
+  "language": {
+    "label": "Language",
+    "switch": "Switch language"
+  },
+  "time": {
+    "justNow": "Just now",
+    "minutesAgo_one": "{{count}} minute ago",
+    "minutesAgo_other": "{{count}} minutes ago",
+    "hoursAgo_one": "{{count}} hour ago",
+    "hoursAgo_other": "{{count}} hours ago",
+    "daysAgo_one": "{{count}} day ago",
+    "daysAgo_other": "{{count}} days ago"
+  },
+  "duration": {
+    "dh": "{{d}}d {{h}}h",
+    "d": "{{d}}d",
+    "hm": "{{h}}h {{m}}m",
+    "h": "{{h}}h",
+    "ms": "{{m}}m {{s}}s",
+    "m": "{{m}}m",
+    "s": "{{s}}s"
+  }
+}

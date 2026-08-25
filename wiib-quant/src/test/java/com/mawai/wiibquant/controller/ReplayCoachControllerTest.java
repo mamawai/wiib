@@ -1,5 +1,9 @@
 package com.mawai.wiibquant.controller;
 
+import com.mawai.wiibquant.agent.i18n.UserLangResolver;
+import com.mawai.wiibquant.agent.i18n.PromptCatalog;
+import com.mawai.wiibquant.agent.analysis.ReplayCoachPrompts;
+import com.mawai.wiibcommon.enums.AgentLang;
 import com.mawai.wiibquant.agent.analysis.ReplayCoachRequest;
 import com.mawai.wiibquant.agent.chat.ChatModelFactory;
 import com.mawai.wiibquant.agent.llm.LlmEndpointService;
@@ -50,7 +54,9 @@ class ReplayCoachControllerTest {
     }
 
     private static ReplayCoachController controller() {
-        return new ReplayCoachController(mock(LlmEndpointService.class), mock(ChatModelFactory.class));
+        PromptCatalog prompts = new PromptCatalog();
+        return new ReplayCoachController(mock(LlmEndpointService.class), mock(ChatModelFactory.class),
+                new ReplayCoachPrompts(prompts), prompts, mock(UserLangResolver.class));
     }
 
     @Test
@@ -59,7 +65,7 @@ class ReplayCoachControllerTest {
         when(model.stream(any(Prompt.class))).thenReturn(Flux.just(frame("结构："), frame("震荡")));
         RecordingEmitter emitter = new RecordingEmitter();
 
-        controller().run(new SseChannel(emitter), model, hintReq());
+        controller().run(new SseChannel(emitter), model, hintReq(), AgentLang.ZH);
 
         assertThat(emitter.raw).containsExactly(
                 "{\"text\":\"结构：\"}", "{\"text\":\"震荡\"}", "{\"answer\":\"结构：震荡\"}");
@@ -71,7 +77,7 @@ class ReplayCoachControllerTest {
         when(model.stream(any(Prompt.class))).thenReturn(Flux.error(new RuntimeException("401 Unauthorized sk-secret")));
         RecordingEmitter emitter = new RecordingEmitter();
 
-        controller().run(new SseChannel(emitter), model, hintReq());
+        controller().run(new SseChannel(emitter), model, hintReq(), AgentLang.ZH);
 
         assertThat(emitter.raw).hasSize(1);
         assertThat(emitter.raw.get(0)).contains("API key 无效").doesNotContain("sk-secret");
@@ -87,7 +93,7 @@ class ReplayCoachControllerTest {
         SseChannel channel = new SseChannel(emitter);
         channel.markClosed();
 
-        controller().run(channel, model, hintReq());
+        controller().run(channel, model, hintReq(), AgentLang.ZH);
 
         assertThat(emitter.raw).isEmpty();
         // takeWhile 在第一帧就停了；预取几帧是 Reactor 的正常行为，但绝不该把 1000 帧全拉完

@@ -7,7 +7,7 @@ import com.mawai.wiibcommon.market.DepthStreamCache;
 import com.mawai.wiibcommon.market.ForceOrderService;
 import com.mawai.wiibcommon.market.OrderFlowAggregator;
 import com.mawai.wiibquant.market.domain.FeatureSnapshot;
-import com.mawai.wiibquant.market.collect.BuildFeaturesNode;
+import com.mawai.wiibquant.market.collect.BuildFeaturesBuilder;
 import com.mawai.wiibquant.market.collect.CollectDataNode;
 import com.mawai.wiibquant.external.deribit.DeribitClient;
 import lombok.extern.slf4j.Slf4j;
@@ -27,7 +27,7 @@ import java.util.function.Supplier;
 
 /**
  * 市场数据组装服务：采集 → 特征快照 一条链，带 TTL 缓存。
- * 工具层（对话 agent / MCP / AI Trader）共用这条链，避免各处重复采集。
+ * 工具层（对话 agent / AI Trader）共用这条链，避免各处重复采集。
  * 规则信号面板与脆弱度合成层已随预测管线下线（2026-08：生产验证无前瞻信息，原料字段仍在快照里原样提供）。
  */
 @Slf4j
@@ -55,7 +55,7 @@ public class MarketDataService {
     private final BinanceRestClient binanceRestClient;
     private final DepthStreamCache depthStreamCache;
     private final CollectDataNode collectNode;
-    private final BuildFeaturesNode featuresNode;
+    private final BuildFeaturesBuilder featuresBuilder;
     private final long ttlMillis;
 
     /** LRU：满了淘汰最久没被碰过的那条。accessOrder=true 让 get 也算一次访问 */
@@ -97,7 +97,7 @@ public class MarketDataService {
         this.binanceRestClient = binanceRestClient;
         this.depthStreamCache = depthStreamCache;
         this.collectNode = new CollectDataNode(binanceRestClient, forceOrderService, depthStreamCache, deribitClient);
-        this.featuresNode = new BuildFeaturesNode(orderFlowAggregator, decisionInterval);
+        this.featuresBuilder = new BuildFeaturesBuilder(orderFlowAggregator, decisionInterval);
         this.ttlMillis = ttlMillis;
     }
 
@@ -239,7 +239,7 @@ public class MarketDataService {
             log.warn("[Toolkit] 采集不可用 symbol={}", symbol);
             return MarketAssembly.unavailable(symbol, raw);
         }
-        Map<String, Object> featureOut = featuresNode.buildFeatures(symbol, raw);
+        Map<String, Object> featureOut = featuresBuilder.buildFeatures(symbol, raw);
         FeatureSnapshot snapshot = (FeatureSnapshot) featureOut.get("feature_snapshot");
         if (snapshot == null) {
             return MarketAssembly.unavailable(symbol, raw);

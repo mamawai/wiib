@@ -98,7 +98,7 @@ export function loadDrawings(symbol: string): Drawing[] {
     const arr = raw ? JSON.parse(raw) : null;
     return Array.isArray(arr) ? arr : [];
   } catch {
-    return [];   // 隐私模式禁写 / 旧版脏数据：当没画过，不让看盘因为存档挂掉
+    return [];   // 隐私模式禁写 / 旧版脏数据：当没画过，存档挂掉不影响看盘
   }
 }
 
@@ -136,8 +136,7 @@ export interface ChartCtx {
  * 三种情形：
  *  1. 正好是当前周期的某根 → 查表，整数；
  *  2. 落在已加载区间内但不对齐（切周期最常见：1h 上画的点在 4h 上多半卡在两根之间）
- *     → 二分找夹住它的两根，按**实际间隔**插值。不硬套 bucketSec 是因为真实行情
- *     可能缺根，硬推会一路歪下去；
+ *     → 二分找夹住它的两根，按**实际间隔**插值（真实行情可能缺根，硬套 bucketSec 会一路歪）；
  *  3. 超出两头（趋势线延伸到还没产生的未来）→ 按 bucketSec 外推。
  */
 export function timeToLogical(t: number, ctx: ChartCtx): number | null {

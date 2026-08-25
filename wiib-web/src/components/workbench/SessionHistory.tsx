@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import { ChevronLeft, History, Loader2, MessageSquareText, Trash2 } from 'lucide-react';
 import { cn, fmtDateTime } from '../../lib/utils';
 import type { WorkbenchSessionSummary } from '../../types';
@@ -22,6 +23,7 @@ export function SessionHistory({ sidebar = false, open, loading, sessions, curre
   onRemove: (s: WorkbenchSessionSummary) => void;
   onNew: () => void;
 }) {
+  const { t } = useTranslation('ai');
   return (
     <div className={cn(
       'flex flex-col',
@@ -39,22 +41,22 @@ export function SessionHistory({ sidebar = false, open, loading, sessions, curre
           <button
             onClick={onBack}
             className="border border-border hover:bg-surface-hover w-7 h-7 rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground"
-            aria-label="返回对话"
+            aria-label={t('history.back')}
           >
             <ChevronLeft className="w-3.5 h-3.5" />
           </button>
         )}
-        <span className="text-xs font-black">历史对话</span>
+        <span className="text-xs font-black">{t('history.title')}</span>
       </div>
       <div className="flex-1 overflow-y-auto px-3.5 pb-2 space-y-2">
         {loading ? (
           <div className="flex items-center justify-center gap-2 py-10 text-xs text-muted-foreground">
-            <Loader2 className="w-4 h-4 animate-spin" /> 加载历史会话...
+            <Loader2 className="w-4 h-4 animate-spin" /> {t('history.loading')}
           </div>
         ) : sessions.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-2 py-10 text-center">
             <MessageSquareText className="w-8 h-8 text-muted-foreground/40" />
-            <p className="text-xs text-muted-foreground">还没有历史对话</p>
+            <p className="text-xs text-muted-foreground">{t('history.empty')}</p>
           </div>
         ) : (
           sessions.map(s => (
@@ -72,20 +74,20 @@ export function SessionHistory({ sidebar = false, open, loading, sessions, curre
               <div className="flex items-center gap-2">
                 <div className="text-xs font-bold truncate flex-1">{s.title}</div>
                 {s.sessionId === currentId && (
-                  <span className="text-[9px] font-black tracking-wider text-primary shrink-0">当前</span>
+                  <span className="text-[9px] font-black tracking-wider text-primary shrink-0">{t('history.current')}</span>
                 )}
                 <button
                   onClick={e => { e.stopPropagation(); onRemove(s); }}
                   className="shrink-0 w-6 h-6 rounded-md flex items-center justify-center text-muted-foreground/50 hover:text-loss hover:bg-loss/10 transition-colors"
-                  title="删除会话"
-                  aria-label="删除会话"
+                  title={t('history.delete')}
+                  aria-label={t('history.delete')}
                 >
                   <Trash2 className="w-3.5 h-3.5" />
                 </button>
               </div>
               <div className="text-[10px] text-muted-foreground flex items-center gap-2">
                 <span>{fmtDateTime(s.lastAt)}</span>
-                <span>· {s.messageCount} 条</span>
+                <span>· {t('history.msgCount', { count: s.messageCount })}</span>
               </div>
             </div>
           ))
@@ -95,7 +97,7 @@ export function SessionHistory({ sidebar = false, open, loading, sessions, curre
         onClick={onNew}
         className="mx-3.5 mb-3 shrink-0 border border-dashed border-border rounded-xl py-2 text-xs font-bold text-primary hover:bg-primary/6 transition-colors"
       >
-        + 开新对话
+        + {t('history.new')}
       </button>
     </div>
   );

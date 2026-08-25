@@ -1,5 +1,7 @@
 package com.mawai.wiibquant.agent.chat;
 
+import com.mawai.wiibcommon.enums.AgentLang;
+import com.mawai.wiibcommon.i18n.MessageCatalog;
 import com.mawai.wiibcommon.enums.ErrorCode;
 import com.mawai.wiibcommon.exception.BizException;
 import com.mawai.wiibquant.agent.llm.LlmEndpointService;
@@ -50,8 +52,10 @@ class ChatRegenerateTest {
 
     private static final String SESSION = "wb-1-regen";
 
+    /** kind 按正文现认，与 ChatHistoryService.messages() 同一条路径 */
     private static ChatHistoryService.ChatMessage msg(long id, String role, String content) {
-        return new ChatHistoryService.ChatMessage(id, role, content, 1_700_000_000_000L, null);
+        return new ChatHistoryService.ChatMessage(id, role, content, 1_700_000_000_000L, null,
+                ChatRowKind.of(role, content, ChatTestEndpoints.PROMPTS));
     }
 
     /** 上下文里一条轮起始提问，形状与 run() 拼的 enriched 一致 */
@@ -75,10 +79,10 @@ class ChatRegenerateTest {
 
         ChatTurnRunner turnRunner = mock(ChatTurnRunner.class);
         doAnswer((Answer<ChatTurnRunner.TurnResult>) inv -> {
-            Consumer<String> sink = inv.getArgument(4);
+            Consumer<String> sink = inv.getArgument(5);   // leaves/userId/session/message/intent 之后才是答案 sink
             sink.accept("新答案");
             return ChatTurnRunner.TurnResult.COMPLETED;
-        }).when(turnRunner).run(any(), anyLong(), any(), any(), any(), any(), any());
+        }).when(turnRunner).run(any(), anyLong(), any(), any(), any(), any(), any(), any(), any());
 
         LlmEndpointService endpointService = mock(LlmEndpointService.class);
         when(endpointService.chatEndpoints(1L)).thenReturn(ChatTestEndpoints.eps(1L, "gpt-5"));
@@ -86,15 +90,15 @@ class ChatRegenerateTest {
         // 叶子只需要账本是真的：turnRunner 被替身顶了，图用不上
         UsageTrackingChatModel model = new UsageTrackingChatModel(mock(ChatModel.class));
         ChatAgentFactory agentFactory = mock(ChatAgentFactory.class);
-        when(agentFactory.leavesFor(any()))
-                .thenReturn(new ChatAgentFactory.Leaves("端点 · gpt-5", model, model, Map.of(), null));
+        when(agentFactory.leavesFor(any(), any()))
+                .thenReturn(new ChatAgentFactory.Leaves("端点 · gpt-5", model, model, Map.of(), null, AgentLang.ZH));
 
         ChatConcurrencyGate gate = new ChatConcurrencyGate(10);
         WorkbenchRunRegistry runRegistry = mock(WorkbenchRunRegistry.class);
         ChatYieldCoordinator coordinator =
-                new ChatYieldCoordinator(gate, runRegistry, turnRunner, history);
+                new ChatYieldCoordinator();
         ChatWorkbenchController controller = new ChatWorkbenchController(agentFactory, endpointService,
-                new ApprovalRegistry(), history, contextStore, turnRunner, runRegistry, gate, coordinator);
+                new ApprovalRegistry(), history, contextStore, turnRunner, runRegistry, gate, new MessageCatalog(), coordinator, ChatTestEndpoints.PROMPTS, ChatTestEndpoints.zhLang());
         return new Harness(controller, history, contextStore, turnRunner, gate, coordinator);
     }
 
@@ -135,7 +139,7 @@ class ChatRegenerateTest {
         // 重跑喂给 runner 的是库里那条原提问
         ArgumentCaptor<String> enriched = ArgumentCaptor.captor();
         verify(h.turnRunner(), timeout(5_000))
-                .run(any(), anyLong(), eq(SESSION), enriched.capture(), any(), any(), any());
+                .run(any(), anyLong(), eq(SESSION), enriched.capture(), any(), any(), any(), any(), any());
         assertThat(enriched.getValue()).endsWith(ChatWorkbenchController.QUESTION_MARKER + "BTC 怎么样");
         // 提问行已经在库里，再落一遍历史里就成了连问两遍
         verify(h.history(), never()).append(any(), anyLong(), eq("user"), any());
@@ -172,7 +176,7 @@ class ChatRegenerateTest {
                 List.of(msg(1, "user", "BTC 怎么样"), msg(2, "assistant", "旧答案")),
                 List.of(turnStart("BTC 怎么样"), new AssistantMessage("旧答案")));
         doReturn(ChatTurnRunner.TurnResult.CANCELLED)
-                .when(h.turnRunner()).run(any(), anyLong(), any(), any(), any(), any(), any());
+                .when(h.turnRunner()).run(any(), anyLong(), any(), any(), any(), any(), any(), any(), any());
 
         regenerate(h);
 
@@ -186,7 +190,7 @@ class ChatRegenerateTest {
                 List.of(msg(1, "user", "BTC 怎么样"), msg(2, "assistant", "旧答案")),
                 List.of(turnStart("BTC 怎么样"), new AssistantMessage("旧答案")));
         doThrow(new RuntimeException("上游挂了"))
-                .when(h.turnRunner()).run(any(), anyLong(), any(), any(), any(), any(), any());
+                .when(h.turnRunner()).run(any(), anyLong(), any(), any(), any(), any(), any(), any(), any());
 
         regenerate(h);
 
@@ -238,8 +242,21 @@ class ChatRegenerateTest {
         // 补答行对应的提问不在会话末尾，中间夹着别的问答，回退会误伤那些轮次
         Harness h = harness(
                 List.of(msg(1, "user", "BTC 怎么样"), msg(2, "user", "ETH 呢"), msg(3, "assistant", "ETH 的答案"),
-                        msg(4, "assistant", ChatYieldCoordinator.DEFERRED_PREFIX + "BTC 怎么样」】\n\n补上的答案")),
+                        msg(4, "assistant", ChatTestEndpoints.PROMPTS.get(AgentLang.ZH, "chat.deferred.prefix")
+                                + "BTC 怎么样」】\n\n补上的答案")),
                 List.of(turnStart("ETH 呢"), new AssistantMessage("ETH 的答案")));
+
+        assertRejected(h);
+    }
+
+    @Test
+    void 英文补答行同样不给重新生成() {
+        // 补答标头跟着用户语言走。只认中文那一份的话，英文用户的补答行会冒出重新生成按钮
+        Harness h = harness(
+                List.of(msg(1, "user", "how is BTC"), msg(2, "user", "and ETH"), msg(3, "assistant", "ETH answer"),
+                        msg(4, "assistant", ChatTestEndpoints.PROMPTS.get(AgentLang.EN, "chat.deferred.prefix")
+                                + "how is BTC\"]\n\nthe deferred answer")),
+                List.of(turnStart("and ETH"), new AssistantMessage("ETH answer")));
 
         assertRejected(h);
     }

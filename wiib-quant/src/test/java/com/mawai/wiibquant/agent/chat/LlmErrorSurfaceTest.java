@@ -1,15 +1,16 @@
 package com.mawai.wiibquant.agent.chat;
 
+import com.mawai.wiibcommon.enums.AgentLang;
+import com.mawai.wiibcommon.i18n.MessageCatalog;
 import com.mawai.wiibquant.agent.llm.SseChannel;
 import com.mawai.wiibquant.agent.llm.ChatEndpoints;
 import com.mawai.wiibquant.agent.llm.LlmEndpointService;
 import com.mawai.wiibquant.agent.llm.UsageTrackingChatModel;
 import com.mawai.wiibquant.agent.analysis.DeepAnalysisService;
+import com.mawai.wiibquant.agent.behavior.BehaviorAnalysisService;
 import com.mawai.wiibquant.agent.toolkit.MarketToolkit;
 import com.mawai.wiibquant.agent.toolkit.NewsToolkit;
 import com.mawai.wiibquant.agent.trader.TraderChatService;
-import org.bsc.langgraph4j.prebuilt.MessagesState;
-import org.bsc.langgraph4j.spring.ai.serializer.jackson.SpringAIJacksonStateSerializer;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.ai.chat.messages.AssistantMessage;
@@ -83,17 +84,18 @@ class LlmErrorSurfaceTest {
         ChatEndpoints llmConfig = ChatTestEndpoints.eps(1L, "gpt-5");   // 叶子指纹含 userId（trader 工具按它认人）
         ChatAgentFactory.Leaves leaves = new ChatAgentFactory(chatModelFactory,
                 mock(MarketToolkit.class), mock(NewsToolkit.class),
-                mock(DeepAnalysisService.class), mock(TraderChatService.class),
+                mock(DeepAnalysisService.class), mock(BehaviorAnalysisService.class),
+                mock(TraderChatService.class),
                 mock(WorkbenchRunRegistry.class),
-                new ApprovalRegistry(),
-                new SpringAIJacksonStateSerializer<>(MessagesState::new), 8, 999_999, 6, "X")
-                .leavesFor(llmConfig);
+                new ApprovalRegistry(), ChatTestEndpoints.PROMPTS, ChatTestEndpoints.TOOLS,
+                8, 999_999, 6, "X")
+                .leavesFor(llmConfig, AgentLang.ZH);
 
         ChatContextStore contextStore = mock(ChatContextStore.class);
         List<ChatTurnRunner.ExpertProgress> progress = new CopyOnWriteArrayList<>();
-        new ChatTurnRunner(contextStore, new ApprovalRegistry())
-                .run(leaves, 1L, "wb-1-expert-fail", "看看行情", chunk -> { }, progress::add,
-                        ChatTurnRunner.TurnYield.NONE);
+        new ChatTurnRunner(contextStore, new ApprovalRegistry(), ChatTestEndpoints.PROMPTS, ChatTestEndpoints.TOOLS)
+                .run(leaves, 1L, "wb-1-expert-fail", "看看行情", null, chunk -> { }, progress::add,
+                        ChatTurnRunner.TurnYield.NONE, null);
 
         String pushedToUser = progress.stream()
                 .filter(e -> ChatTurnRunner.ExpertProgress.ERROR.equals(e.phase()))
@@ -125,24 +127,24 @@ class LlmErrorSurfaceTest {
         };
         ChatTurnRunner turnRunner = mock(ChatTurnRunner.class);
         doThrow(new RuntimeException(RAW)).when(turnRunner)
-                .run(any(), anyLong(), any(), any(), any(), any(), any());
+                .run(any(), anyLong(), any(), any(), any(), any(), any(), any(), any());
         ChatConcurrencyGate gate = new ChatConcurrencyGate(10);
         WorkbenchRunRegistry runRegistry = mock(WorkbenchRunRegistry.class);
         ChatHistoryService history = mock(ChatHistoryService.class);
         ChatYieldCoordinator coordinator =
-                new ChatYieldCoordinator(gate, runRegistry, turnRunner, history);
+                new ChatYieldCoordinator();
         ChatWorkbenchController controller = new ChatWorkbenchController(mock(ChatAgentFactory.class),
                 mock(LlmEndpointService.class), new ApprovalRegistry(),
                 history, mock(ChatContextStore.class), turnRunner,
-                runRegistry, gate, coordinator);
+                runRegistry, gate, new MessageCatalog(), coordinator, ChatTestEndpoints.PROMPTS, ChatTestEndpoints.zhLang());
 
         // run() 要拿叶子清账本，给不了 null；否则 NPE 会先于 runner 抛的那条上游异常，测的就不是这件事了
         UsageTrackingChatModel model = new UsageTrackingChatModel(mock(ChatModel.class));
         ChatAgentFactory.Leaves leaves =
-                new ChatAgentFactory.Leaves("test", model, model, Map.of(), null);
+                new ChatAgentFactory.Leaves("test", model, model, Map.of(), null, AgentLang.ZH);
 
         controller.run(new SseChannel(emitter), 1L, "wb-1-boom", "看看行情", leaves,
-                coordinator.openTurn(1L), null);
+                coordinator.openTurn(1L), null, null, null);
 
         String errorEvent = sent.stream().filter(text -> text.startsWith("{") && text.contains("message"))
                 .reduce((first, second) -> second).orElseThrow();

@@ -1,5 +1,6 @@
 package com.mawai.wiibquant.agent.chat;
 
+import com.mawai.wiibquant.agent.llm.AgentGraphs;
 import com.mawai.wiibquant.mapper.WorkbenchChatContextMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -17,8 +18,9 @@ import java.util.Map;
  * 存的是每轮结束时 summarizer 叶子的最终 messages——含专家结论、工具调用配对、
  * 压缩后的摘要状态。压缩结果必须落下来：不落的话下一轮超阈值又重压一遍，白烧轻模型的钱。
  * <p>
- * 序列化复用叶子 agent 同一个 {@link StateSerializer}（Jackson 版）：Spring AI Message
- * 全族的多态往返它已经打通，tool_call/tool_response 配对不丢——自己另写一套只会踩一遍老坑。
+ * 序列化复用叶子 agent 同一个 {@link StateSerializer}（{@link AgentGraphs#STATE_SERIALIZER}，
+ * Jackson 版）：Spring AI Message 全族的多态往返它已经打通，tool_call/tool_response 配对不丢——
+ * 自己另写一套只会踩一遍老坑。同一常量保证"存进去读出来同一套格式"是结构事实，不靠装配。
  */
 @Slf4j
 @Component
@@ -26,7 +28,7 @@ import java.util.Map;
 public class ChatContextStore {
 
     private final WorkbenchChatContextMapper contextMapper;
-    private final StateSerializer<MessagesState<Message>> stateSerializer;
+    private final StateSerializer<MessagesState<Message>> stateSerializer = AgentGraphs.STATE_SERIALIZER;
 
     /**
      * 取会话历史。无行（新会话）返回空；读失败也返回空——降级成"这轮没有上下文"，

@@ -1,9 +1,17 @@
 import { clsx, type ClassValue } from "clsx"
 import { twMerge } from "tailwind-merge"
+import i18n from "../i18n"
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
+
+/**
+ * 当前是否走中文口径。语言码可能带地区（zh-CN/zh-TW），只认前缀。
+ * <p>只给"两套数字分档不一样"的地方用（{@link fmtMoney} 的万/亿 vs K/M/B）；
+ * 纯文案一律走词表，别在这里分叉。
+ */
+const isZhLocale = () => (i18n.resolvedLanguage ?? i18n.language ?? 'zh').startsWith('zh');
 
 // ---- 全站统一格式化口径：数字千分位；时间固定新加坡时区（UTC+8） ----
 
@@ -16,9 +24,7 @@ export function fmtNum(n: number | string | null | undefined, decimals = 2): str
 
 /**
  * 新加坡时间 yyyy-MM-dd（不传参就是"今天"）。日历/网格切日、按日查接口走这里。
- * <p>
- * 用 en-CA 是因为它的短日期格式恰好就是 ISO 的 yyyy-MM-dd，省一轮手工补零；
- * 不能图省事用 toISOString().slice(0,10)——那是 UTC，东八区早上 8 点前整体退到前一天。
+ * en-CA 的短日期格式就是 yyyy-MM-dd；不能用 toISOString().slice(0,10)——那是 UTC，东八区早 8 点前退到前一天。
  */
 export function fmtDate(ts: number | string | Date = Date.now()): string {
   return new Date(ts).toLocaleDateString('en-CA', { timeZone: 'Asia/Singapore' });
@@ -53,11 +59,12 @@ export function fmtRelative(ts: number | string | Date): string {
   const then = new Date(ts).getTime();
   if (!Number.isFinite(then)) return '-';
   const diff = Date.now() - then;
+  // 词表必须在函数体里现查：存成模块级常量的话切语言后不会变
   // 时钟漂移/服务端时间超前时 diff 为负，按"刚刚"处理，不显示"-1分钟前"
-  if (diff < 60_000) return '刚刚';
-  if (diff < 3600_000) return Math.floor(diff / 60_000) + '分钟前';
-  if (diff < 86400_000) return Math.floor(diff / 3600_000) + '小时前';
-  if (diff < 7 * 86400_000) return Math.floor(diff / 86400_000) + '天前';
+  if (diff < 60_000) return i18n.t('time.justNow');
+  if (diff < 3600_000) return i18n.t('time.minutesAgo', { count: Math.floor(diff / 60_000) });
+  if (diff < 86400_000) return i18n.t('time.hoursAgo', { count: Math.floor(diff / 3600_000) });
+  if (diff < 7 * 86400_000) return i18n.t('time.daysAgo', { count: Math.floor(diff / 86400_000) });
   return fmtDateTime(ts);
 }
 
@@ -73,10 +80,12 @@ export function fmtDuration(from: number | string | Date, to: number | string | 
   const d = Math.floor(s / 86400);
   const h = Math.floor(s / 3600) % 24;
   const m = Math.floor(s / 60) % 60;
-  if (d > 0) return h > 0 ? `${d}天${h}时` : `${d}天`;
-  if (h > 0) return m > 0 ? `${h}时${m}分` : `${h}时`;
-  if (m > 0) return s % 60 > 0 ? `${m}分${s % 60}秒` : `${m}分`;
-  return `${s}秒`;
+  const sec = s % 60;
+  // 每种组合一条完整词条，不用"数字+单位"拼接：英文两级之间要空格、中文不要，拼起来必错一头
+  if (d > 0) return h > 0 ? i18n.t('duration.dh', { d, h }) : i18n.t('duration.d', { d });
+  if (h > 0) return m > 0 ? i18n.t('duration.hm', { h, m }) : i18n.t('duration.h', { h });
+  if (m > 0) return sec > 0 ? i18n.t('duration.ms', { m, s: sec }) : i18n.t('duration.m', { m });
+  return i18n.t('duration.s', { s: sec });
 }
 
 /** token 数缩写：12480 → 12.5k。一行小字里放得下，不带尾随空格，拼接由调用方管。 */
@@ -84,11 +93,23 @@ export function fmtTokens(n: number): string {
   return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
 }
 
-/** 大额缩写：≥1亿 → X.XX亿，≥1万 → X.XX万，其余两位小数；null/NaN 返回 '-'。 */
+/**
+ * 大额缩写；null/NaN 返回 '-'。分档随语言走，因为这是**数字记法**不是文案：
+ * 中文四位一进（≥1万 → X.XX万，≥1亿 → X.XX亿），英文三位一进（K/M/B）。
+ * 拿中文的万/亿直译成英文没人看得懂，硬套英文的 K/M/B 到中文又丢了中文的进位习惯，
+ * 所以这里只能按语言分两套，不能靠一份词表抹平。两套都保留两位小数，宽度接近。
+ */
 export function fmtMoney(n: number | null | undefined): string {
   if (n == null || !Number.isFinite(n)) return '-';
-  if (Math.abs(n) >= 1e8) return (n / 1e8).toFixed(2) + '亿';
-  if (Math.abs(n) >= 1e4) return (n / 1e4).toFixed(2) + '万';
+  const abs = Math.abs(n);
+  if (isZhLocale()) {
+    if (abs >= 1e8) return (n / 1e8).toFixed(2) + '亿';
+    if (abs >= 1e4) return (n / 1e4).toFixed(2) + '万';
+    return n.toFixed(2);
+  }
+  if (abs >= 1e9) return (n / 1e9).toFixed(2) + 'B';
+  if (abs >= 1e6) return (n / 1e6).toFixed(2) + 'M';
+  if (abs >= 1e3) return (n / 1e3).toFixed(2) + 'K';
   return n.toFixed(2);
 }
 

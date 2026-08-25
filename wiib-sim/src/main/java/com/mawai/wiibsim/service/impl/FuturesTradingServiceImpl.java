@@ -11,6 +11,7 @@ import com.mawai.wiibcommon.entity.FuturesTakeProfit;
 import com.mawai.wiibcommon.entity.User;
 import com.mawai.wiibcommon.enums.ErrorCode;
 import com.mawai.wiibcommon.exception.BizException;
+import com.mawai.wiibcommon.i18n.MessageCatalog;
 import com.mawai.wiibcommon.util.SpringUtils;
 import com.mawai.wiibsim.config.FuturesLeverageBracketRegistry;
 import com.mawai.wiibsim.config.TradeFilterRegistry;
@@ -60,6 +61,8 @@ public class FuturesTradingServiceImpl implements FuturesTradingService {
     private final FuturesLeverageBracketRegistry bracketRegistry;
     private final CrossMarginService crossMarginService;
     private final TradeFilterRegistry tradeFilterRegistry;
+    /** 反手的半成功要把开仓失败的原因成文带回前端，绕开了全局处理器，只能自己查词表 */
+    private final MessageCatalog messages;
 
     // ==================== 开仓 ====================
 
@@ -91,11 +94,8 @@ public class FuturesTradingServiceImpl implements FuturesTradingService {
     }
 
     /**
-     * 【账本标注为什么落在这一层】三条开仓分支（市价并入 / 市价新开 / 限价挂单）的执行方法
-     * executeMarketMerge / executeMarketOpen / createLimitOpenOrder 全是私有 + 同类自调用，
-     * @Ledger 标它们是完全的空操作。本方法是 protected 且经 getAopProxy 真走代理调进来的，
-     * AOP 拦得到，所以方法级语义（兜底 + 挂 symbol）只能落在这儿；每笔的精确类型由三个执行方法内
-     * 动钱之前的 LedgerCtx.mark 覆盖。
+     * @Ledger 只能标在这层：三条开仓执行方法是私有自调用、AOP 拦不到，
+     * 本方法经 getAopProxy 真走代理；每笔精确类型由执行方法内的 LedgerCtx.mark 覆盖。
      */
     @Transactional(rollbackFor = Exception.class)
     @Ledger(FUTURES_OPEN_MARGIN)
@@ -475,7 +475,9 @@ public class FuturesTradingServiceImpl implements FuturesTradingService {
             // 抛出去前端只看到一句失败，用户不知道自己其实已经空仓——带着已平信息返回让前端说清楚
             log.warn("反手的反向开仓失败 userId={} posId={} symbol={} qty={}",
                     userId, positionId, closed.getSymbol(), closed.getQuantity(), e);
-            return new ReverseResult(closed, null, e.getMessage());
+            // 业务异常的 getMessage() 是词表 key，直接带回前端就是一行 error.xxx
+            String why = e instanceof BizException biz ? biz.render(messages) : e.getMessage();
+            return new ReverseResult(closed, null, why);
         }
     }
 

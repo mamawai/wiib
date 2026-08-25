@@ -2,10 +2,8 @@ package com.mawai.wiibquant.agent.chat;
 
 /**
  * 工具执行期的会话号传递。
- * <p>
- * 为什么要 ThreadLocal 而不是参数或 ToolContext：框架的 {@code ChatService.execute}
- * 签名里没有 RunnableConfig，工具方法体拿不到 sessionId；而 ToolContext 是建图时
- * 算死的静态值（见 ResilientChatService），塞不进请求级数据。
+ * 用 ThreadLocal，这么写为了工具方法体拿到请求级 sessionId
+ * （ChatService.execute 签名没有 RunnableConfig，ToolContext 是建图时算死的静态值）。
  * <p>
  * 安全性依据：langgraph4j 的工具执行链全程同线程无线程池
  * （SpringAIToolService 里是普通 for 循环 + 同步 call + completedFuture），

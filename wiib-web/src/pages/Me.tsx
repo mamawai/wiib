@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Trans, useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { useUserStore } from '../stores/userStore';
 import { useTheme } from '../hooks/useTheme';
@@ -9,12 +10,14 @@ import { Dialog, DialogHeader, DialogContent, DialogFooter } from '../components
 import { useToast } from '../components/ui/use-toast';
 import { NotificationList } from '../components/NotificationList';
 import { ProfilePublicToggle } from '../components/ProfilePublicToggle';
+import { LanguageSettingRow } from '../components/LanguageSwitcher';
 import { useNotificationPanel } from '../hooks/useNotificationPanel';
 import { userApi } from '../api';
-import { Trophy, Gamepad2, Sun, Moon, LogOut, ChevronRight, User, LineChart, Monitor, RotateCcw, MessageSquare, Bell, Receipt, FlaskConical } from 'lucide-react';
+import { Trophy, Gamepad2, Sun, Moon, LogOut, ChevronRight, User, LineChart, RotateCcw, MessageSquare, Bell, Receipt, FlaskConical, Swords } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 export function Me() {
+  const { t } = useTranslation(['account', 'common']);
   const navigate = useNavigate();
   const { user, logout, fetchUser } = useUserStore();
   const { toggleTheme, isDark } = useTheme();
@@ -24,7 +27,7 @@ export function Me() {
   const [confirmName, setConfirmName] = useState('');
   const [resetting, setResetting] = useState(false);
 
-  // 通知：手机端顶栏信封是 hidden md:flex 看不到，这里是手机用户唯一的通知入口。
+  // 通知：手机端顶栏信封是 hidden lg:flex 看不到，这里是手机用户唯一的通知入口。
   // 订阅与开合逻辑跟顶栏信封共用一份 hook，未读数也是同一份（各存各的会导致
   // 在这儿标了已读、顶栏红点还挂着旧数字）
   // 只盯 id：fetchUser 每次返回新 user 对象，盯整个对象会反复退订重订，
@@ -50,24 +53,25 @@ export function Me() {
       await userApi.resetAccount(confirmName);
       closeReset();
       await fetchUser();          // 立刻刷新余额显示
-      toast('账户已重置为初始状态', 'success');
+      toast(t('me.reset.done'), 'success');
     } catch (e) {
-      toast((e as Error).message || '重置失败', 'error');
+      toast((e as Error).message || t('me.reset.failed'), 'error');
     } finally {
       setResetting(false);
     }
   };
 
   const items = [
-    // 账单没进顶栏/底栏（导航已经满了），手机端只有这一个入口，放第一位
-    { icon: Receipt, label: '资金账单', to: '/ledger', color: 'text-primary' },
-    // 移动端底栏只有5槽，策略/模拟盘与排行/游戏一样从这里进（桌面走头部导航）
-    { icon: LineChart, label: '策略', to: '/strategies', color: 'text-violet-400' },
-    { icon: FlaskConical, label: '回测', to: '/backtest', color: 'text-orange-400' },
-    { icon: Monitor, label: '模拟盘', to: '/testnet', color: 'text-sky-400' },
-    { icon: Trophy, label: '排行榜', to: '/ranking', color: 'text-amber-400' },
-    { icon: Gamepad2, label: '游戏中心', to: '/games', color: 'text-pink-400' },
-    { icon: MessageSquare, label: '留言板', to: '/comments', color: 'text-teal-400' },
+    // 账单没进顶栏/底栏（导航已经满了），另一个入口在持仓页仓位历史旁边
+    { icon: Receipt, label: t('me.nav.ledger'), to: '/ledger', color: 'text-primary' },
+    // 竞技场原先只有桌面顶栏那一个入口，手机端零入口只能手敲 URL，排第三位补上
+    { icon: Swords, label: t('me.nav.arena'), to: '/arena', color: 'text-cyan-400' },
+    // 移动端底栏只有5槽，策略与排行/游戏一样从这里进（桌面走头部导航）
+    { icon: LineChart, label: t('me.nav.strategies'), to: '/strategies', color: 'text-violet-400' },
+    { icon: FlaskConical, label: t('me.nav.backtest'), to: '/backtest', color: 'text-orange-400' },
+    { icon: Trophy, label: t('me.nav.ranking'), to: '/ranking', color: 'text-amber-400' },
+    { icon: Gamepad2, label: t('me.nav.games'), to: '/games', color: 'text-pink-400' },
+    { icon: MessageSquare, label: t('me.nav.comments'), to: '/comments', color: 'text-teal-400' },
   ];
 
   // 整页都是本人数据，user 没到之前没什么可显示的（路由已挡住未登录，null 只可能是还在拉）
@@ -105,7 +109,7 @@ export function Me() {
                 </span>
               )}
             </div>
-            <span className="flex-1 text-sm font-medium">通知</span>
+            <span className="flex-1 text-sm font-medium">{t('notif.title')}</span>
             <ChevronRight className={cn(
               "w-4 h-4 text-muted-foreground transition-transform group-hover:text-primary",
               notifOpen && "rotate-90",
@@ -147,6 +151,9 @@ export function Me() {
       {/* 隐私：详情页公开开关。关掉只挡详情页，仍照常上排行榜 */}
       <ProfilePublicToggle />
 
+      {/* 语言切换：手机端唯一的正式入口（顶栏那个图标按钮小屏也在，但设置项才找得着） */}
+      <LanguageSettingRow />
+
       {/* 主题切换 */}
       <Card>
         <CardContent className="pt-5">
@@ -158,7 +165,7 @@ export function Me() {
               {isDark ? <Moon className="w-4 h-4 text-violet-400" /> : <Sun className="w-4 h-4 text-amber-400" />}
             </div>
             <span className="flex-1 text-sm font-medium">
-              {isDark ? '深色模式' : '浅色模式'}
+              {isDark ? t('me.themeDark') : t('me.themeLight')}
             </span>
             <div className={cn(
               "w-11 h-6 rounded-full relative transition-colors",
@@ -179,11 +186,10 @@ export function Me() {
           <CardContent className="pt-5 space-y-3">
             <div className="flex items-center gap-2">
               <RotateCcw className="w-4 h-4 text-destructive" />
-              <h2 className="text-sm font-bold text-destructive">重置账户</h2>
+              <h2 className="text-sm font-bold text-destructive">{t('me.reset.title')}</h2>
             </div>
             <p className="text-xs text-muted-foreground leading-relaxed">
-              清空全部持仓、订单、游戏记录与资产历史，余额恢复为初始资金。
-              留言和禁言状态不受影响。每周只能重置一次。
+              {t('me.reset.desc')}
             </p>
             <Button
               variant="ghost"
@@ -191,7 +197,7 @@ export function Me() {
               className="text-destructive hover:text-destructive hover:bg-destructive/8"
               onClick={() => setResetOpen(true)}
             >
-              重置我的账户
+              {t('me.reset.action')}
             </Button>
           </CardContent>
         </Card>
@@ -205,7 +211,7 @@ export function Me() {
           onClick={handleLogout}
         >
           <LogOut className="w-4 h-4" />
-          退出登录
+          {t('me.logout')}
         </Button>
       )}
 
@@ -213,34 +219,42 @@ export function Me() {
       {user && (
         <Dialog open={resetOpen} onClose={closeReset}>
           <DialogHeader>
-            <h2 className="text-lg font-bold text-destructive">确认重置账户</h2>
+            <h2 className="text-lg font-bold text-destructive">{t('me.reset.dialogTitle')}</h2>
           </DialogHeader>
           <DialogContent>
             <div className="space-y-3">
               <p className="text-xs text-muted-foreground leading-relaxed">
-                此操作不可撤销，将清空：现货与合约的全部持仓和订单、预测下注、
-                21点/Mines/视频扑克记录、资产历史、每日 Buff、钱包划转流水。
+                {t('me.reset.warnClears')}
+              </p>
+              <p className="text-xs leading-relaxed text-warning">
+                {t('me.reset.warnCost')}
               </p>
               <p className="text-xs">
-                请输入你的用户名 <strong className="text-foreground">{user.username}</strong> 以确认：
+                {/* 用户名夹在句子中间，中英语序不同，整句交给 Trans 摆位 */}
+                <Trans
+                  ns="account"
+                  i18nKey="me.reset.confirmName"
+                  values={{ name: user.username }}
+                  components={[<strong key="name" className="text-foreground" />]}
+                />
               </p>
               <Input
                 value={confirmName}
                 onChange={e => setConfirmName(e.target.value)}
-                placeholder="输入用户名"
+                placeholder={t('me.reset.namePlaceholder')}
                 autoComplete="off"
               />
             </div>
           </DialogContent>
           <DialogFooter>
-            <Button variant="ghost" size="sm" onClick={closeReset}>取消</Button>
+            <Button variant="ghost" size="sm" onClick={closeReset}>{t('common:cancel')}</Button>
             <Button
               size="sm"
               className="bg-destructive text-white hover:bg-destructive/90"
               disabled={confirmName !== user.username || resetting}
               onClick={handleReset}
             >
-              {resetting ? '重置中…' : '确认重置'}
+              {resetting ? t('me.reset.submitting') : t('me.reset.submit')}
             </Button>
           </DialogFooter>
         </Dialog>

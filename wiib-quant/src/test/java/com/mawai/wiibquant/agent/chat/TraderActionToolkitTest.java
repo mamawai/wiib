@@ -1,5 +1,6 @@
 package com.mawai.wiibquant.agent.chat;
 
+import com.mawai.wiibcommon.enums.AgentLang;
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONObject;
 import org.junit.jupiter.api.AfterEach;
@@ -29,7 +30,7 @@ class TraderActionToolkitTest {
     /** 推出去的每一张卡的 data（form + prefill） */
     private final List<JSONObject> pushed = new ArrayList<>();
     private final WorkbenchRunRegistry runRegistry = spy(new WorkbenchRunRegistry());
-    private final TraderActionToolkit toolkit = new TraderActionToolkit(runRegistry, 42L);
+    private final TraderActionToolkit toolkit = new TraderActionToolkit(runRegistry, 42L, ChatTestEndpoints.PROMPTS, AgentLang.ZH);
 
     /** 常态：这一轮有 SSE 通道，会话号已由闸门设进 ToolRunContext */
     @BeforeEach
@@ -92,18 +93,6 @@ class TraderActionToolkitTest {
 
         assertThat(out.getBooleanValue("ok")).isFalse();
         assertThat(out.getString("message")).contains("没能打开").contains("面板");
-        assertThat(pushed).isEmpty();
-    }
-
-    /** 补答轮更阴：会话还挂着"运行中"，但出口是 NO_EMITTER 占位，一样推不出去 */
-    @Test
-    void 补答轮同样如实说没打开() {
-        runRegistry.start(SESSION, WorkbenchRunRegistry.NO_EMITTER);
-
-        JSONObject out = parse(toolkit.reviewTraderNow());
-
-        assertThat(out.getBooleanValue("ok")).isFalse();
-        assertThat(out.getString("message")).contains("没能打开");
         assertThat(pushed).isEmpty();
     }
 

@@ -1,5 +1,8 @@
 package com.mawai.wiibquant.strategy.backtest.task;
 
+import com.mawai.wiibcommon.enums.AgentLang;
+import com.mawai.wiibcommon.i18n.MessageCatalog;
+import com.mawai.wiibcommon.i18n.RequestLang;
 import com.mawai.wiibcommon.market.KlineBar;
 import com.mawai.wiibquant.strategy.core.StrategyMarketView;
 import com.mawai.wiibquant.strategy.core.StrategyRiskPolicy;
@@ -48,7 +51,7 @@ class BacktestTaskServiceTest {
                 }
             }
             if (fail) {
-                throw new BacktestSetupException("桩失败");
+                throw new BacktestSetupException("quant.backtest.rangeInvalid");
             }
             return new Prepared(neverTrades(), flatBars(20), 0);
         }
@@ -57,7 +60,7 @@ class BacktestTaskServiceTest {
     @Test
     void runsToDoneAndServesEventsKlinesResult() throws Exception {
         FakeOrchestrator orch = new FakeOrchestrator();
-        BacktestTaskService svc = new BacktestTaskService(orch);
+        BacktestTaskService svc = new BacktestTaskService(orch, new MessageCatalog());
 
         String id = svc.submit(1L, "FIBO", "BTCUSDT", 0, TO_MS, BAL, 5);
         awaitState(svc, id, "DONE");
@@ -87,7 +90,7 @@ class BacktestTaskServiceTest {
     @Test
     void sameFingerprintReusesTaskAndFailedDoesNot() throws Exception {
         FakeOrchestrator orch = new FakeOrchestrator();
-        BacktestTaskService svc = new BacktestTaskService(orch);
+        BacktestTaskService svc = new BacktestTaskService(orch, new MessageCatalog());
 
         String id = svc.submit(1L, "FIBO", "BTCUSDT", 0, TO_MS, BAL, 5);
         awaitState(svc, id, "DONE");
@@ -97,7 +100,14 @@ class BacktestTaskServiceTest {
         orch.fail = true;
         String failed = svc.submit(3L, "TURTLE", "BTCUSDT", 0, TO_MS, BAL, 5);
         awaitState(svc, failed, "FAILED");
-        assertThat(svc.status(failed).error()).contains("桩失败");
+        assertThat(svc.status(failed).error()).isEqualTo("时间范围无效");
+        // 同一个 FAILED 任务换门语言读就是另一门语言：失败原因存的是词表 key，成文在读的那一侧
+        RequestLang.set(AgentLang.EN);
+        try {
+            assertThat(svc.status(failed).error()).isEqualTo("Invalid time range");
+        } finally {
+            RequestLang.clear();
+        }
         orch.fail = false;
         // FAILED 不复用：同参数重提是新任务
         assertThat(svc.submit(3L, "TURTLE", "BTCUSDT", 0, TO_MS, BAL, 5)).isNotEqualTo(failed);
@@ -107,7 +117,7 @@ class BacktestTaskServiceTest {
     void queueCapAndPerUserLimit() throws Exception {
         FakeOrchestrator orch = new FakeOrchestrator();
         orch.gate = new CountDownLatch(1);
-        BacktestTaskService svc = new BacktestTaskService(orch);
+        BacktestTaskService svc = new BacktestTaskService(orch, new MessageCatalog());
 
         // 2 个占住 worker（等它们真进 RUNNING，否则短暂 QUEUED 会提前把队列计满），再排 4 个（QUEUED 满）
         List<String> ids = new ArrayList<>();
@@ -121,14 +131,14 @@ class BacktestTaskServiceTest {
         }
         assertThatThrownBy(() -> svc.submit(99L, "FIBO", "BTCUSDT", 999 * M5, TO_MS, BAL, 5))
                 .isInstanceOf(BacktestTaskService.TaskRejectedException.class)
-                .hasMessageContaining("排队已满");
+                .hasMessageContaining("quant.backtest.queueFull");
         // 排队位次：最后提交的排第 4
         assertThat(svc.status(ids.getLast()).state()).isEqualTo("QUEUED");
         assertThat(svc.status(ids.getLast()).queuePos()).isEqualTo(4);
         // 单用户限额：用户 0 已有活动任务，换参数也拒
         assertThatThrownBy(() -> svc.submit(0L, "TURTLE", "ETHUSDT", 0, TO_MS, BAL, 5))
                 .isInstanceOf(BacktestTaskService.TaskRejectedException.class)
-                .hasMessageContaining("已有一个回测");
+                .hasMessageContaining("quant.backtest.userTaskActive");
         // 指纹命中不受限额影响：用户 0 撞用户 1 的参数 → 复用
         assertThat(svc.submit(0L, "FIBO", "BTCUSDT", M5, TO_MS, BAL, 5)).isEqualTo(ids.get(1));
 
@@ -141,7 +151,7 @@ class BacktestTaskServiceTest {
     @Test
     void lruEvictsOnlyTerminalTasks() throws Exception {
         FakeOrchestrator orch = new FakeOrchestrator();
-        BacktestTaskService svc = new BacktestTaskService(orch);
+        BacktestTaskService svc = new BacktestTaskService(orch, new MessageCatalog());
 
         List<String> ids = new ArrayList<>();
         for (int i = 0; i < BacktestTaskService.MAX_TASKS + 1; i++) {

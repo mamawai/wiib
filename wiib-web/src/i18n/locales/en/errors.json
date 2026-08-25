@@ -1,0 +1,6 @@
+{
+  "unauthorized": "Not logged in",
+  "requestFailed": "Request failed",
+  "requestFailedStatus": "Request failed: {{status}}",
+  "streamUnavailable": "Response stream unavailable"
+}

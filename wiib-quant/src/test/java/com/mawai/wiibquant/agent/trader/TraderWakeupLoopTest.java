@@ -9,6 +9,8 @@ import com.mawai.wiibcommon.entity.AiTraderRequest;
 import com.mawai.wiibcommon.entity.FuturesPosition;
 import com.mawai.wiibquant.mapper.AiTraderPlanMapper;
 import com.mawai.wiibcommon.entity.AiTraderDecision;
+import com.mawai.wiibcommon.enums.AgentLang;
+import com.mawai.wiibcommon.i18n.MessageCatalog;
 import com.mawai.wiibcommon.market.BinanceRestClient;
 import com.mawai.wiibquant.external.sim.SimTradeClient;
 import com.mawai.wiibquant.agent.toolkit.IndicatorToolkit;
@@ -16,14 +18,16 @@ import com.mawai.wiibquant.market.service.KlineFetcher;
 import com.mawai.wiibquant.market.service.MarketDataService;
 import com.mawai.wiibquant.agent.toolkit.MarketToolkit;
 import com.mawai.wiibquant.market.service.NewsCache;
+import com.mawai.wiibquant.market.service.NewsFlashLocalizer;
 import com.mawai.wiibquant.agent.toolkit.NewsToolkit;
 import com.mawai.wiibquant.mapper.AiTraderDecisionMapper;
+import com.mawai.wiibquant.agent.i18n.LocalizedToolCallbacks;
+import com.mawai.wiibquant.agent.i18n.PromptCatalog;
+import com.mawai.wiibquant.agent.i18n.UserLangResolver;
 import com.mawai.wiibquant.mapper.AiTraderMapper;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
-import org.bsc.langgraph4j.prebuilt.MessagesState;
-import org.bsc.langgraph4j.spring.ai.serializer.jackson.SpringAIJacksonStateSerializer;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -74,17 +78,24 @@ class TraderWakeupLoopTest {
     private final AiTraderPlanMapper planMapper = mock(AiTraderPlanMapper.class);
     private final TraderRequestService requestService = mock(TraderRequestService.class);
 
+    /** 语言解析走真实词表的中文侧：本类钉的是唤醒回路行为，不是文案 */
+    private final UserLangResolver langResolver = mock(UserLangResolver.class);
+
+    private final PromptCatalog prompts = new PromptCatalog();
+
     private final TraderWakeupRunner runner = new TraderWakeupRunner(
-            modelFactory, new TraderPromptAssembler(traderMapper), simTradeClient, binanceRestClient,
+            modelFactory, new TraderPromptAssembler(traderMapper, prompts),
+            simTradeClient, binanceRestClient,
             new IndicatorToolkit(new KlineFetcher(binanceRestClient, 60_000)),
             new MarketToolkit(mock(MarketDataService.class)),
-            new NewsToolkit(mock(NewsCache.class)),
-            traderMapper, decisionMapper, new TraderPlanStore(planMapper), requestService,
-            new SpringAIJacksonStateSerializer<>(MessagesState::new));
+            new NewsToolkit(mock(NewsCache.class), mock(NewsFlashLocalizer.class)),
+            traderMapper, decisionMapper, new TraderPlanStore(planMapper), requestService, langResolver,
+            prompts, new MessageCatalog(), new LocalizedToolCallbacks(prompts));
 
     {
         // 测试边界是固定历史时刻，墙钟钉在边界后 1s——预算充足，各用例不受真实时间影响
         runner.nowMs = () -> 1785171600000L + 1_000L;
+        when(langResolver.of(anyLong())).thenReturn(AgentLang.ZH);
     }
 
     private AiTrader trader() {
@@ -277,7 +288,7 @@ class TraderWakeupLoopTest {
     void reduceTurnsIntoRequestWithoutBlockingTheRound() {
         stubHealthyAccount();
         when(simTradeClient.getAllPositions(99L)).thenReturn(List.of(crossPosition("2000", "0")));
-        when(requestService.submit(any())).thenReturn("减仓请求已提交给主人确认，本轮不会成交");
+        when(requestService.submit(any(), any())).thenReturn("减仓请求已提交给主人确认，本轮不会成交");
         // 先建好再 stub：嵌套在 when() 里建 mock 会触发 UnfinishedStubbingException
         ChatModel model = modelCallingThenSummary("close_position",
                 "{\"positionId\":349,\"quantity\":0.1,\"reason\":\"失效条件触发\"}");
@@ -289,7 +300,7 @@ class TraderWakeupLoopTest {
 
         verify(simTradeClient, never()).closePosition(anyLong(), any());
         ArgumentCaptor<AiTraderRequest> ask = ArgumentCaptor.forClass(AiTraderRequest.class);
-        verify(requestService).submit(ask.capture());
+        verify(requestService).submit(ask.capture(), any());
         assertThat(ask.getValue().getType()).isEqualTo(AiTraderRequest.TYPE_REDUCE);
         assertThat(ask.getValue().getPositionId()).isEqualTo(349L);
         assertThat(ask.getValue().getRequestPrice()).isEqualByComparingTo("100000");
@@ -315,7 +326,7 @@ class TraderWakeupLoopTest {
         runner.wake(t, 1785171600000L);
 
         verify(simTradeClient).closePosition(eq(99L), any());
-        verify(requestService, never()).submit(any());
+        verify(requestService, never()).submit(any(), any());
     }
 
     @Test
@@ -337,6 +348,22 @@ class TraderWakeupLoopTest {
         assertThat(dec.getValue().getActionsJson()).contains("rejected").contains("杠杆");
     }
 
+    /** key 失效（401）第一败就暂停，不等攒满 5 败：判的是异常本身，不是成文后的话 */
+    @Test
+    void keyInvalidPausesOnFirstFailure() {
+        stubHealthyAccount();
+        when(modelFactory.modelFor(any())).thenThrow(new IllegalStateException("Responses API HTTP 401: invalid key"));
+
+        runner.wake(trader(), 1785171600000L);
+
+        @SuppressWarnings({"unchecked", "rawtypes"})
+        ArgumentCaptor<com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<AiTrader>> u =
+                ArgumentCaptor.forClass((Class) com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper.class);
+        verify(traderMapper).update(any(), u.capture());
+        assertThat(u.getValue().getParamNameValuePairs().values())
+                .contains(AiTrader.STATUS_PAUSED, prompts.get(AgentLang.ZH, "trader.error.keyInvalid"));
+    }
+
     @Test
     void modelFailureRecordsErrorAndPausesAfterFifthConsecutive() {
         stubHealthyAccount();
@@ -349,7 +376,8 @@ class TraderWakeupLoopTest {
         ArgumentCaptor<AiTraderDecision> dec = ArgumentCaptor.forClass(AiTraderDecision.class);
         verify(decisionMapper).insert(dec.capture());
         assertThat(dec.getValue().getStatus()).isEqualTo(AiTraderDecision.STATUS_ERROR);
-        assertThat(dec.getValue().getError()).contains("401");
+        // 公开行只存归类文案，上游原文不落库
+        assertThat(dec.getValue().getError()).contains("API key").doesNotContain("上游401");
         verify(traderMapper).update(any(), any()); // 连败暂停走列级更新
     }
 
@@ -660,7 +688,7 @@ class TraderWakeupLoopTest {
         runner.nowMs = () -> triggeredAt;
 
         runner.wakeAlert(trader(), new AlertTrigger("BTCUSDT", new BigDecimal("1.2"),
-                new BigDecimal("63120"), "下跌", triggeredAt));
+                new BigDecimal("63120"), AlertTrigger.DOWN, triggeredAt));
 
         ArgumentCaptor<AiTraderDecision> dec = ArgumentCaptor.forClass(AiTraderDecision.class);
         verify(decisionMapper).insert(dec.capture());

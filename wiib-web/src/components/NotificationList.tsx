@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import { AlertTriangle, Loader2, MessageCircle, ShieldAlert, Target, ThumbsUp, Zap, type LucideIcon } from 'lucide-react';
 import { cn, fmtNum, fmtRelative } from '../lib/utils';
 import { formatCoinPrice } from '../lib/coinConfig';
@@ -85,6 +86,8 @@ function CommentRow({ g, onSelect }: { g: CommentNotification; onSelect: (commen
 /**
  * 通知列表的呈现层。PC 顶栏信封的下拉面板和「我的」页的通知卡共用同一份，
  * 免得两处各写一遍、日后各自跑偏。容器高度由调用方给（下拉面板要限高，卡片可放开）。
+ * <p>这里订的这份 t 也是整棵子树切语言的开关：下面两种行的文案（describeTrade /
+ * describeComment / fmtRelative）都走 i18n 实例现查，靠本组件重渲染带着它们一起更新。
  */
 export function NotificationList({ items, loading, onSelect, className }: {
   items: MergedNotification[];
@@ -92,16 +95,18 @@ export function NotificationList({ items, loading, onSelect, className }: {
   onSelect: (commentId: number) => void;
   className?: string;
 }) {
+  const { t } = useTranslation('account');
+
   if (loading) {
     return (
       <div className="flex items-center justify-center gap-2 py-10 text-xs text-muted-foreground">
-        <Loader2 className="w-3.5 h-3.5 animate-spin" /> 加载中…
+        <Loader2 className="w-3.5 h-3.5 animate-spin" /> {t('notif.loading')}
       </div>
     );
   }
 
   if (items.length === 0) {
-    return <div className="py-10 text-center text-xs text-muted-foreground">还没有通知</div>;
+    return <div className="py-10 text-center text-xs text-muted-foreground">{t('notif.empty')}</div>;
   }
 
   return (

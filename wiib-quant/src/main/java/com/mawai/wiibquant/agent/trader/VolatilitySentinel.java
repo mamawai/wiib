@@ -207,12 +207,13 @@ public class VolatilitySentinel implements MessageListener {
                     .divide(min, 4, RoundingMode.HALF_UP);
         }
 
+        /** 语言无关的方向码：文案在 AlertTrigger 的注释里说明，由开场白按语言取 */
         synchronized String direction() {
             if (ticks.size() < 2) {
-                return "波动";
+                return AlertTrigger.FLAT;
             }
             int cmp = ticks.peekLast().price().compareTo(ticks.peekFirst().price());
-            return cmp > 0 ? "上涨" : cmp < 0 ? "下跌" : "波动";
+            return cmp > 0 ? AlertTrigger.UP : cmp < 0 ? AlertTrigger.DOWN : AlertTrigger.FLAT;
         }
     }
 }

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import type { ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useTranslation, Trans } from 'react-i18next';
 import NumberFlow from '@number-flow/react';
 import { buffApi, cryptoOrderApi, futuresApi, userApi } from '../api';
 import { HomeMarketSection } from '../components/HomeMarketSection';
@@ -21,12 +22,11 @@ import { DailyGrid } from '../components/DailyGrid';
 import { DayDetailModal } from '../components/DayDetailModal';
 import { HelpTip } from '../components/HelpTip';
 import {
-  RefreshCcw, Bell, Gamepad2, List, DollarSign, ArrowRight, Target, Brain, Gift,
+  RefreshCcw, Bell, Gamepad2, List, DollarSign, ArrowRight, Target, Settings2, Gift, Swords,
 } from 'lucide-react';
 import type { BuffStatus, AssetSnapshot } from '../types';
 import { useUserStore } from '../stores/userStore';
 import { cn, fmtDate, fmtMoney } from '../lib/utils';
-import { orderSideView } from '../lib/orderSide';
 
 const HIDE_NOTICE_KEY = 'wiib-notice-hide-date';
 const NOTICE_SEEN_KEY = 'wiib-notice-seen';
@@ -39,11 +39,13 @@ function shouldShowNotice() {
 
 /** 快捷入口定义。登录后收在总资产看板底部，游客态在页面上单独一行，共用这一份 */
 const QUICK_ENTRIES = [
-  { icon: List, label: '股票', to: '/bstock', ic: 'text-blue-600 dark:text-blue-400' },
-  { icon: DollarSign, label: 'Crypto', to: '/coin', ic: 'text-amber-600 dark:text-amber-400' },
-  { icon: Target, label: '预测', to: '/prediction', ic: 'text-primary' },
-  { icon: Brain, label: 'AI', to: '/ai', ic: 'text-cyan-600 dark:text-cyan-400' },
-  { icon: Gamepad2, label: '游戏', to: '/games', ic: 'text-pink-600 dark:text-pink-400' },
+  { icon: List, labelKey: 'quick.stocks', to: '/bstock', ic: 'text-blue-600 dark:text-blue-400' },
+  { icon: DollarSign, labelKey: 'quick.crypto', to: '/coin', ic: 'text-amber-600 dark:text-amber-400' },
+  { icon: Target, labelKey: 'quick.prediction', to: '/prediction', ic: 'text-primary' },
+  { icon: Settings2, labelKey: 'quick.ai', to: '/ai', ic: 'text-cyan-600 dark:text-cyan-400' },
+  // 竞技场此前全站只有桌面顶栏一个入口，手机用户压根进不去，靠这颗 chip 补上
+  { icon: Swords, labelKey: 'quick.arena', to: '/arena', ic: 'text-violet-600 dark:text-violet-400' },
+  { icon: Gamepad2, labelKey: 'quick.games', to: '/games', ic: 'text-pink-600 dark:text-pink-400' },
 ];
 
 function EntryChip({ onClick, children }: { onClick: () => void; children: ReactNode }) {
@@ -57,17 +59,19 @@ function EntryChip({ onClick, children }: { onClick: () => void; children: React
   );
 }
 
-function greeting(): string {
+/** 按时段挑问候语，返回的是词表 key：这里直接查词表会把文案定死在模块加载那一刻 */
+function greetingKey(): string {
   const h = new Date().getHours();
-  if (h < 5) return '夜深了';
-  if (h < 11) return '早上好';
-  if (h < 13) return '中午好';
-  if (h < 18) return '下午好';
-  return '晚上好';
+  if (h < 5) return 'greeting.lateNight';
+  if (h < 11) return 'greeting.morning';
+  if (h < 13) return 'greeting.noon';
+  if (h < 18) return 'greeting.afternoon';
+  return 'greeting.evening';
 }
 
 export function Home() {
   const navigate = useNavigate();
+  const { t, i18n } = useTranslation('home');
   const { toast } = useToast();
   const { user } = useUserStore();
   // 路由已挡住未登录，user 为 null 只可能是 fetchUser 还没回来。
@@ -111,11 +115,13 @@ export function Home() {
     return () => { cancelled = true; };
   }, [ready, gridMonth, refreshNonce]);
 
+  // 这里只装后端原始值（方向枚举、去 USDT 的符号），方向标签和展示名交给 LatestTradesCard 渲染期算：
+  // 在拉数这一刻就把字烤进 state 的话，切语言后这批卡片还是老语言
   useEffect(() => {
     Promise.all([cryptoOrderApi.live().catch(() => []), futuresApi.live().catch(() => [])])
       .then(([co, fo]) => {
-        const ci: TradeItem[] = co.map(o => ({ id: `c-${o.orderId}`, orderSide: o.orderSide, sideTone: o.orderSide === 'BUY' ? 'buy' as const : 'sell' as const, name: o.symbol.replace('USDT', ''), quantity: o.quantity, unit: o.symbol.replace('USDT', ''), filledAmount: o.filledAmount, createdAt: o.createdAt }));
-        const fi: TradeItem[] = fo.map(o => { const s = orderSideView(o.orderSide); const b = o.symbol.replace('USDT', ''); return { id: `f-${o.orderId}`, orderSide: o.orderSide, sideLabel: s.label, sideTone: s.tone, name: `${b} 合约`, quantity: o.quantity, unit: b, filledAmount: o.filledAmount, createdAt: o.createdAt, isAi: o.isAiTrader === true }; });
+        const ci: TradeItem[] = co.map(o => ({ id: `c-${o.orderId}`, orderSide: o.orderSide, base: o.symbol.replace('USDT', ''), quantity: o.quantity, filledAmount: o.filledAmount, createdAt: o.createdAt }));
+        const fi: TradeItem[] = fo.map(o => ({ id: `f-${o.orderId}`, orderSide: o.orderSide, base: o.symbol.replace('USDT', ''), isFutures: true, quantity: o.quantity, filledAmount: o.filledAmount, createdAt: o.createdAt, isAi: o.isAiTrader === true }));
         setLatestTrades([...ci, ...fi].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()).slice(0, 20));
       }).finally(() => setTradesLoadedNonce(refreshNonce));
   }, [refreshNonce]);
@@ -132,7 +138,9 @@ export function Home() {
   const gridCells = monthRows.map(s => ({ date: s.date, pnl: s.dailyProfit }));
   const monthTotal = monthRows.reduce((sum, s) => sum + s.dailyProfit, 0);
   const selectedSnapshot = monthRows.find(s => s.date === selectedDate) ?? null;
-  const dateStr = new Date().toLocaleDateString('zh-CN', { month: 'long', day: 'numeric', weekday: 'long' });
+  // 月份名/星期名跟着界面语言走，不能钉死 zh-CN——英文界面下会漏出"8月20日星期三"。
+  // 取 resolvedLanguage：language 可能是没落在支持列表里的原始值（与 lib/utils.ts 同口径）
+  const dateStr = new Date().toLocaleDateString(i18n.resolvedLanguage ?? i18n.language, { month: 'long', day: 'numeric', weekday: 'long' });
 
   return (
     <div className="page-shell px-4 md:px-6 py-4 space-y-4">
@@ -142,13 +150,13 @@ export function Home() {
           {/* ====== 问候行 ====== */}
           <div className="flex items-center gap-3 flex-wrap">
             <DecryptedText
-              text={`${greeting()}，${user!.username}`}
+              text={t('greeting.withName', { greeting: t(greetingKey()), name: user!.username })}
               className="text-lg font-extrabold tracking-tight"
             />
             <span className="text-xs text-muted-foreground">{dateStr}</span>
             <div className="ml-auto flex items-center gap-1.5">
               <Button variant="ghost" size="icon" className="w-7 h-7" onClick={() => navigate('/intro')}><Bell className="w-3.5 h-3.5 text-primary" /></Button>
-              <Button variant="ghost" size="icon" className="w-7 h-7" onClick={() => { setRefreshNonce(n => n + 1); toast('已刷新', 'info'); }}><RefreshCcw className="w-3.5 h-3.5" /></Button>
+              <Button variant="ghost" size="icon" className="w-7 h-7" onClick={() => { setRefreshNonce(n => n + 1); toast(t('dashboard.refreshed'), 'info'); }}><RefreshCcw className="w-3.5 h-3.5" /></Button>
             </div>
           </div>
 
@@ -156,7 +164,7 @@ export function Home() {
           <div className="grid lg:grid-cols-[1.7fr_1fr] gap-4 items-stretch">
             <SpotlightCard className="p-5 flex flex-col">
               <div className="flex items-center gap-2">
-                <span className="microlabel font-semibold text-xs">总资产 · USD</span>
+                <span className="microlabel font-semibold">{t('dashboard.totalAssets')}</span>
                 <span className={cn(
                   'ml-auto num text-xs font-bold px-2.5 py-1 rounded-full',
                   isProfit ? 'bg-gain/10 text-gain' : 'bg-loss/10 text-loss',
@@ -175,14 +183,14 @@ export function Home() {
               {/* 两个次级指标拆成独立数据块：一行挤三段文字读起来费劲，也撑不住卡的高度 */}
               <div className="mt-5 pt-4 grid grid-cols-2 gap-4 border-t border-border/50">
                 <div>
-                  <div className="microlabel font-semibold">可用余额</div>
+                  <div className="microlabel font-semibold">{t('dashboard.availableBalance')}</div>
                   {/* 走 fmtNum 千分位不走 fmtMoney 的"万"缩写：滚动数字得逐位可比才有看头 */}
                   <div className="num text-xl font-bold mt-1">
                     <AnimNum value={user!.balance} prefix="$" fromZero />
                   </div>
                 </div>
                 <div>
-                  <div className="microlabel font-semibold">总盈亏</div>
+                  <div className="microlabel font-semibold">{t('dashboard.totalPnl')}</div>
                   {/* 负号写在 $ 前面：拿 '$'+fmtNum 拼会得到 $-1750 那种货币符号在负号后面的怪东西 */}
                   <div className={cn('num text-xl font-bold mt-1', isProfit ? 'text-gain' : 'text-loss')}>
                     <AnimNum value={Math.abs(user!.profit)} prefix={isProfit ? '+$' : '-$'} fromZero />
@@ -204,15 +212,15 @@ export function Home() {
               {/* 快捷入口收进看板底部：右列（月度网格）更高，items-stretch 把本卡拉高后
                   曲线封顶（max-h）剩下的就是一段死空白，拿它放入口正合适。mt-auto 钉在卡底 */}
               <div className="mt-auto pt-4 border-t border-border/50 flex flex-wrap gap-2">
-                {QUICK_ENTRIES.map(({ icon: Icon, label, to, ic }) => (
+                {QUICK_ENTRIES.map(({ icon: Icon, labelKey, to, ic }) => (
                   <EntryChip key={to} onClick={() => navigate(to)}>
                     <Icon className={cn('w-3.5 h-3.5', ic)} />
-                    {label}
+                    {t(labelKey)}
                   </EntryChip>
                 ))}
                 <EntryChip onClick={() => setBuffOpen(true)}>
                   <Gift className="w-3.5 h-3.5 text-primary" />
-                  福利
+                  {t('quick.buff')}
                   {/* 今日未抽 → 亮灯提醒 */}
                   {buffStatus?.canDraw && <span className="led" />}
                 </EntryChip>
@@ -222,7 +230,7 @@ export function Home() {
             <div className="flex flex-col gap-4">
               <Card>
                 <CardContent className="pt-4 pb-4">
-                  <div className="microlabel font-semibold mb-1.5">今日盈亏</div>
+                  <div className="microlabel font-semibold mb-1.5">{t('dashboard.todayPnl')}</div>
                   {todayProfit != null ? (
                     <div className={cn('num text-xl font-bold', todayUp ? 'text-gain' : 'text-loss')}>
                       {todayUp ? '+' : ''}{fmtMoney(todayProfit)}
@@ -243,10 +251,10 @@ export function Home() {
                 <CardContent className="pt-4 pb-4">
                   <div className="flex items-baseline justify-between mb-2">
                     <span className="microlabel font-semibold inline-flex items-center gap-1">
-                      月度盈亏
+                      {t('dashboard.monthPnl')}
                       <HelpTip
                         iconClassName="w-3 h-3"
-                        text={'格子里的数来自每天 0 点的资产快照，含股票/币/合约/预测/游戏全部品类的浮盈浮亏。\n\n服务没运行的日子不会留下快照。日盈亏是拿当天快照减前一天快照算的，所以缺一天会让那天和它后一天都算不出来，格子一并空着。\n\n仅供参考，可能不全。当天的实时盈亏看上面的今日盈亏。'}
+                        text={t('dashboard.monthPnlHelp')}
                       />
                     </span>
                     {/* 整月一格都没有时给"—"不给 +0.00——0 会被读成"这个月不赚不亏" */}
@@ -278,27 +286,31 @@ export function Home() {
               <div className="flex-1 space-y-3">
                 <div className="inline-flex items-center gap-2 border border-primary/30 bg-primary/10 rounded-full px-3.5 py-1 text-xs font-bold text-primary">
                   <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
-                  模拟交易平台
+                  {t('guest.badge')}
                 </div>
+                {/* 换行位置和高亮哪一半交给词表：中英断句不在同一个词上，写死在 JSX 里必有一门语言难看 */}
                 <h2 className="text-2xl sm:text-3xl font-extrabold tracking-tight leading-tight">
-                  模拟交易,<br />
-                  <span className="text-primary">随时随地!</span>
+                  <Trans
+                    ns="home"
+                    i18nKey="guest.headline"
+                    components={[<br key="br" />, <span key="hl" className="text-primary" />]}
+                  />
                 </h2>
-                <p className="text-sm text-muted-foreground">体验"如果当初买了会怎样"。股票、BTC、合约全覆盖。</p>
+                <p className="text-sm text-muted-foreground">{t('guest.tagline')}</p>
                 <div className="flex flex-wrap gap-2 pt-1">
                   <Button size="sm" onClick={() => navigate('/bstock')}>
-                    开始交易 <ArrowRight className="w-3.5 h-3.5" />
+                    {t('guest.start')} <ArrowRight className="w-3.5 h-3.5" />
                   </Button>
-                  <Button variant="outline" size="sm" onClick={() => navigate('/intro')}>玩法说明</Button>
+                  <Button variant="outline" size="sm" onClick={() => navigate('/intro')}>{t('guest.howToPlay')}</Button>
                 </div>
               </div>
               <div className="flex gap-6 md:gap-8 shrink-0">
                 {[
-                  { num: '10+', label: '股票' },
-                  { num: '6', label: '币种' },
-                  { num: '24/7', label: 'BTC行情' },
+                  { num: '10+', label: t('guest.statStocks') },
+                  { num: '6', label: t('guest.statCoins') },
+                  { num: '24/7', label: t('guest.statMarket') },
                 ].map(s => (
-                  <div key={s.label} className="text-center">
+                  <div key={s.num} className="text-center">
                     <div className="text-2xl font-extrabold num">{s.num}</div>
                     <div className="text-xs text-muted-foreground">{s.label}</div>
                   </div>
@@ -312,10 +324,10 @@ export function Home() {
       {/* ====== 快捷入口（游客态）：登录后这排收进上面的总资产看板里，不再单独占一行 ====== */}
       {!ready && (
         <div className="flex flex-wrap gap-2">
-          {QUICK_ENTRIES.map(({ icon: Icon, label, to, ic }) => (
+          {QUICK_ENTRIES.map(({ icon: Icon, labelKey, to, ic }) => (
             <EntryChip key={to} onClick={() => navigate(to)}>
               <Icon className={cn('w-3.5 h-3.5', ic)} />
-              {label}
+              {t(labelKey)}
             </EntryChip>
           ))}
         </div>

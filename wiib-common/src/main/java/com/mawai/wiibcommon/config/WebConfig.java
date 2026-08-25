@@ -1,6 +1,7 @@
 package com.mawai.wiibcommon.config;
 
 import com.mawai.wiibcommon.resolver.CurrentUserIdArgumentResolver;
+import com.mawai.wiibcommon.i18n.MessageCatalog;
 import com.mawai.wiibcommon.resolver.SymbolArgumentResolver;
 
 import org.springframework.context.annotation.Configuration;
@@ -16,9 +17,15 @@ import java.util.List;
 @Configuration
 public class WebConfig implements WebMvcConfigurer {
 
+    private final MessageCatalog messages;
+
+    public WebConfig(MessageCatalog messages) {
+        this.messages = messages;
+    }
+
     @Override
     public void addArgumentResolvers(List<HandlerMethodArgumentResolver> resolvers) {
         resolvers.add(new CurrentUserIdArgumentResolver());
-        resolvers.add(new SymbolArgumentResolver());
+        resolvers.add(new SymbolArgumentResolver(messages));
     }
 }

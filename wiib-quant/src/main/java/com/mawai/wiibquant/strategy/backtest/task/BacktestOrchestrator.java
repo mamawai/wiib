@@ -17,6 +17,8 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 /**
  * 回测编排：策略注册表（工厂 + warmup 公式，数值照抄各 DbRun 现值）+ 数据装载 + fail-fast 校验。
@@ -26,44 +28,49 @@ import java.util.List;
 @RequiredArgsConstructor
 public class BacktestOrchestrator {
 
-    /** 策略元信息（前端配置台展示用）。 */
-    public record StrategyMeta(String id, String name, String desc, List<String> symbols, String note) {
-    }
+    /**
+     * 可回测的策略 id，与 {@link #warmupMs} / {@link #prepare} 两个 switch 同一批。
+     * 展示用的名字与说明全在前端词表里（见 wiib-web 的 lib/strategyCatalog），这一层只认 id。
+     */
+    private static final Set<String> STRATEGY_IDS = Set.of("FIBO", "TURTLE", "SQZMOM", "LIQFADE");
 
     /** 引擎开跑所需的全部输入。bars 含预热段，任务服务直接持有同一份供 K 线接口切片。 */
     public record Prepared(TradingStrategySpi strategy, List<KlineBar> bars, int warmupBars) {
     }
 
-    /** 明确给用户看的失败（参数/数据问题），与代码 bug 区分。 */
+    /**
+     * 明确给用户看的失败（参数/数据问题），与代码 bug 区分。
+     * <p>
+     * 带的是词表 key 不是文案：这异常可能抛在 worker 线程上（{@code BacktestTaskService.runTask}），
+     * 那里没有请求语言可查；而且一个任务会被指纹去重共享给不同语言的用户，抛的时候成文只能对一个人是对的。
+     * {@code getMessage()} 拿到的就是 key，给日志与堆栈用，成文在读的那一侧。
+     */
     public static class BacktestSetupException extends RuntimeException {
-        public BacktestSetupException(String message) {
-            super(message);
+        private final Map<String, Object> vars;
+
+        public BacktestSetupException(String msgKey) {
+            this(msgKey, Map.of());
+        }
+
+        public BacktestSetupException(String msgKey, Map<String, Object> vars) {
+            super(msgKey);
+            this.vars = vars;
+        }
+
+        public String msgKey() {
+            return getMessage();
+        }
+
+        public Map<String, Object> vars() {
+            return vars;
         }
     }
-
-    private static final List<StrategyMeta> METAS = List.of(
-            new StrategyMeta("FIBO", "斐波回踩",
-                    "15m 找推动腿，0.66 黄金口袋挂限价等回踩；SL=腿回撤位，TP=前高/前低，1h SMA200 趋势同向过滤",
-                    QuantConstants.WATCH_SYMBOLS, null),
-            new StrategyMeta("TURTLE", "海龟突破",
-                    "4h 通道突破触价追入，ATR 止损，反向通道出场，经典趋势跟随",
-                    QuantConstants.WATCH_SYMBOLS, null),
-            new StrategyMeta("SQZMOM", "挤压动量",
-                    "4h BB/KC 压缩蓄能，释放后顺动量方向市价进场，信号稀疏",
-                    QuantConstants.WATCH_SYMBOLS, null),
-            new StrategyMeta("LIQFADE", "清算逆袭",
-                    "5m 清算瀑布三签名（跌幅/premium/taker 卖压）命中即逆势接多，1h 时间出场",
-                    QuantConstants.WATCH_SYMBOLS, "依赖本地 taker/premium 侧数据；所选窗口覆盖不足会直接失败"));
 
     private final KlineHistoryStore klineHistoryStore;
     private final DbLiqSideData dbLiqSideData;
 
-    public List<StrategyMeta> strategies() {
-        return METAS;
-    }
-
     public boolean knownStrategy(String strategyId) {
-        return METAS.stream().anyMatch(m -> m.id().equals(strategyId));
+        return STRATEGY_IDS.contains(strategyId);
     }
 
     /** 预热毫秒（照抄各 DbRun 现值；FIBO 含 SMA200 趋势闸预热，比老 /fibo 端点的取值更足）。 */
@@ -84,7 +91,8 @@ public class BacktestOrchestrator {
                 yield (2L * p.length() + p.squeezeMinBars() + 40) * p.decisionTfMillis();
             }
             case "LIQFADE" -> 6 * 3_600_000L;   // 策略仅需4根bar，6h 富余
-            default -> throw new BacktestSetupException("未知策略: " + strategyId);
+            default -> throw new BacktestSetupException("quant.backtest.unknownStrategy",
+                    Map.of("id", String.valueOf(strategyId)));
         };
     }
 
@@ -96,10 +104,10 @@ public class BacktestOrchestrator {
         List<KlineBar> bars = klineHistoryStore.load(
                 symbol, KlineHistoryStore.DEFAULT_INTERVAL, tradingStartMs - warmupMs(strategyId), tradingEndMs);
         if (bars.isEmpty()) {
-            throw new BacktestSetupException("本地 kline_history 没有该区间的 5m K线: " + symbol);
+            throw new BacktestSetupException("quant.backtest.noKlineInRange", Map.of("symbol", symbol));
         }
         WindowedMarketView.firstBaseGapDescription(bars).ifPresent(gap -> {
-            throw new BacktestSetupException("本地 5m K线不连续，需先回填: " + symbol + " " + gap);
+            throw new BacktestSetupException("quant.backtest.klineGap", Map.of("symbol", symbol, "gap", gap));
         });
         int warmupBars = (int) bars.stream().filter(b -> b.closeTime() < tradingStartMs).count();
 
@@ -111,12 +119,13 @@ public class BacktestOrchestrator {
                 DbLiqSideData.Loaded side = dbLiqSideData.load(symbol);
                 double coverage = side.takerCoverage(tradingStartMs, tradingEndMs);
                 if (coverage < 0.6) {
-                    throw new BacktestSetupException(String.format(
-                            "该窗口 liq side data 覆盖率仅 %.0f%%（需≥60%%），跑 LiqDataBackfillRun 回填后再试", coverage * 100));
+                    throw new BacktestSetupException("quant.backtest.liqCoverageLow",
+                            Map.of("pct", String.format("%.0f", coverage * 100)));
                 }
                 yield new LiqFadeStrategy(LiqFadeParams.defaults(), List.of(symbol), side);
             }
-            default -> throw new BacktestSetupException("未知策略: " + strategyId);
+            default -> throw new BacktestSetupException("quant.backtest.unknownStrategy",
+                    Map.of("id", String.valueOf(strategyId)));
         };
         return new Prepared(strategy, bars, warmupBars);
     }

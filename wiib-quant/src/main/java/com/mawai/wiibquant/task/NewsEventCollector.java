@@ -20,8 +20,12 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * 快讯采集轨：定时拉 BlockBeats 重要快讯 → 增量去重 → 轻模型批量打标 → 落 news_event。
- * 给 K 线新闻图标供数，顺带为将来的事件研究攒数据。
+ * 快讯采集轨：定时拉 BlockBeats 重要快讯 → 增量去重 → 轻模型批量打标（同批产出英文译文）
+ * → 落 news_event。给 K 线新闻图标供数，顺带为将来的事件研究攒数据。
+ * <p>
+ * 译文在这里一次性存好，取用侧（首页快讯卡/对话/深研判/trader 唤醒）按语言直接换字：
+ * 不拉第二个数据源，中英用户读的是同一份新闻——拉两个源会让中英用户的 trader 拿到不同的
+ * 新闻世界，竞技场净值曲线就没有可比性了。
  * <p>
  * 走 {@link NewsCache} 而不是直连客户端：BlockBeats 免费额度一次性不回血，
  * 缓存 10 分钟窗口内与对话/深研判共享同一次拉取，采集不额外多烧一份额度。
@@ -76,24 +80,34 @@ public class NewsEventCollector {
             log.warn("[NewsCollect] news-tagging 功能位未配置，本轮跳过（新快讯 {} 条待收）", fresh.size());
             return;
         }
-        Map<Long, String> tags;
+        Map<Long, NewsTagger.Tagged> tagged;
         try {
-            tags = tagger.tag(runtime.newsTaggingChatModel(), fresh, vocabulary);
+            tagged = tagger.tag(runtime.newsTaggingChatModel(), fresh, vocabulary);
         } catch (Exception e) {
             log.warn("[NewsCollect] 打标失败跳过本轮，下轮重试（新快讯 {} 条）: {}", fresh.size(), e.toString());
             return;
         }
         int inserted = 0;
-        int tagged = 0;
+        int withTag = 0;
+        int translated = 0;
         for (NewsFlash f : fresh) {
-            String tag = tags.getOrDefault(f.id(), "");
-            inserted += newsEventMapper.insertIgnore(f.id(), f.title(), f.plainContent(), f.url(),
-                    publishedAtMs(f), tag, runtime.newsTaggingModelName());
-            if (!tag.isEmpty()) {
-                tagged++;
+            // 打标产出里没有这条＝它那一批挂了，本轮别落库：落了就再没有打标机会（去重键挡住重入）
+            NewsTagger.Tagged t = tagged.get(f.id());
+            if (t == null) {
+                continue;
+            }
+            inserted += newsEventMapper.insertIgnore(f.id(), f.title(), f.plainContent(),
+                    t.titleEn(), t.contentEn(), f.url(), publishedAtMs(f), t.tags(),
+                    runtime.newsTaggingModelName());
+            if (!t.tags().isEmpty()) {
+                withTag++;
+            }
+            if (t.titleEn() != null) {
+                translated++;
             }
         }
-        log.info("[NewsCollect] 收 {} 条（有标 {} 条）", inserted, tagged);
+        log.info("[NewsCollect] 收 {} 条（有标 {} 条，有译文 {} 条，本轮跳过 {} 条）",
+                inserted, withTag, translated, fresh.size() - tagged.size());
     }
 
     private List<NewsFlash> onlyNew(List<NewsFlash> flashes) {

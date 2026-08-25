@@ -1,9 +1,10 @@
 import { useCallback, useState } from 'react';
+import { Trans, useTranslation } from 'react-i18next';
 import { Check, ChevronRight, Copy, Loader2, RefreshCw, ShieldQuestion, X } from 'lucide-react';
 import { Markdown } from '../Markdown';
 import { cn, fmtTime, fmtTokens } from '../../lib/utils';
-import { DEFERRED_PREFIX, type ChatItem } from './chatStore';
-import { AGENT_CN, HUB_NAME, type RailStep } from './chatView';
+import { type ChatItem } from './chatStore';
+import { AGENT_LABEL_KEY, HUB_NAME, type RailStep } from './chatView';
 
 /** 用户提问：右侧气泡，下面挂时刻 */
 export function UserBubble({ item, onCancelQueued }: {
@@ -11,6 +12,7 @@ export function UserBubble({ item, onCancelQueued }: {
   /** 只有排队中的能撤：已经发出去的那条正在烧钱，撤不回来 */
   onCancelQueued?: () => void;
 }) {
+  const { t } = useTranslation('ai');
   return (
     <div className="flex flex-col items-end gap-0.5">
       <div className={cn(
@@ -23,20 +25,20 @@ export function UserBubble({ item, onCancelQueued }: {
       {/* 时刻才挂 .num（等宽数字）；中文套上它会掉到 mono 的回退字体 */}
       {item.queued ? (
         <span className="flex items-center gap-1.5">
-          <span className="microlabel">排队中 · 本轮结束后发出</span>
+          <span className="microlabel">{t('chat.queued')}</span>
           {onCancelQueued && (
             <button
               onClick={onCancelQueued}
               className="text-muted-foreground/60 hover:text-loss transition-colors"
-              title="不发了"
-              aria-label="取消这条排队消息"
+              title={t('chat.cancelQueued')}
+              aria-label={t('chat.cancelQueuedAria')}
             >
               <X className="w-3 h-3" />
             </button>
           )}
         </span>
       ) : (
-        <span className="microlabel num">{fmtTime(item.at)}</span>
+        <span className="microlabel font-mono tabular-nums">{fmtTime(item.at)}</span>
       )}
     </div>
   );
@@ -54,6 +56,7 @@ export function AssistantAnswer({ item, canRegenerate, onRegenerate }: {
   canRegenerate: boolean;
   onRegenerate: () => void;
 }) {
+  const { t } = useTranslation(['ai', 'common']);
   const [copied, setCopied] = useState(false);
   const copy = useCallback(() => {
     void navigator.clipboard.writeText(item.content).then(() => {
@@ -63,7 +66,7 @@ export function AssistantAnswer({ item, canRegenerate, onRegenerate }: {
   }, [item.content]);
 
   // 补答行对应的提问不在会话末尾，后端回退会误伤中间轮次，所以它没有重新生成
-  const deferred = item.content.startsWith(DEFERRED_PREFIX);
+  const deferred = item.deferred === true;
   const meta = item.meta;
   // 取不到值＝上游没报用量或这一轮的账不可信，不是 0：整段不显示，不要拿 0 冒充
   const readout = [
@@ -76,14 +79,13 @@ export function AssistantAnswer({ item, canRegenerate, onRegenerate }: {
     <div className="min-w-0">
       <div className="flex items-center gap-2 mb-1.5">
         <span className="w-[2px] h-3 rounded-full bg-primary shrink-0" />
-        {/* 署名要压得住，不走 .microlabel：那条规则在 index.css 里是无层普通 CSS，
-            Tailwind v4 的 utility 都在 layer 里，颜色改不动它 */}
-        <span className="text-[10px] tracking-[0.1em] font-bold uppercase shrink-0">{HUB_NAME}</span>
-        {meta?.modelLabel && <span className="microlabel num truncate min-w-0">{meta.modelLabel}</span>}
+        {/* 署名要压得住，不用微标签那档灰 */}
+        <span className="microlabel text-foreground font-bold uppercase shrink-0">{HUB_NAME}</span>
+        {meta?.modelLabel && <span className="microlabel font-mono tabular-nums truncate min-w-0">{meta.modelLabel}</span>}
         {item.streaming && (
           <span className="ml-auto flex items-center gap-1.5 shrink-0">
             <span className="led" />
-            <span className="microlabel">生成中</span>
+            <span className="microlabel">{t('chat.generating')}</span>
           </span>
         )}
       </div>
@@ -103,16 +105,16 @@ export function AssistantAnswer({ item, canRegenerate, onRegenerate }: {
               <button
                 onClick={onRegenerate}
                 className="flex items-center gap-1 hover:text-primary transition-colors"
-                title="重新生成这条回答"
+                title={t('chat.regenTitle')}
               >
-                <RefreshCw className="w-3 h-3" /> 重新生成
+                <RefreshCw className="w-3 h-3" /> {t('chat.regen')}
               </button>
             )}
             <button
               onClick={copy}
               className="hover:text-primary transition-colors"
-              title={copied ? '已复制' : '复制回答'}
-              aria-label="复制回答"
+              title={copied ? t('common:copied') : t('chat.copyAnswer')}
+              aria-label={t('chat.copyAnswer')}
             >
               {copied ? <Check className="w-3 h-3 text-success" /> : <Copy className="w-3 h-3" />}
             </button>
@@ -127,6 +129,10 @@ export function AssistantAnswer({ item, canRegenerate, onRegenerate }: {
 export function ProcessRail({ steps, active, open, onToggle }: {
   steps: RailStep[]; active: boolean; open: boolean; onToggle: () => void;
 }) {
+  const { t } = useTranslation('ai');
+  // 认得出的 agent 翻成展示名，认不出的（后端加了新 agent）原样显示 id
+  const agentName = (id: string) =>
+    (id === 'supervisor' ? HUB_NAME : AGENT_LABEL_KEY[id] ? t(AGENT_LABEL_KEY[id]) : null);
   return (
     <div className="max-w-[95%]">
       <button
@@ -134,7 +140,7 @@ export function ProcessRail({ steps, active, open, onToggle }: {
         className="flex items-center gap-1.5 text-[11px] font-bold text-muted-foreground hover:text-foreground py-0.5"
       >
         <ChevronRight className={cn('w-3 h-3 transition-transform duration-200', open && 'rotate-90')} />
-        工作过程 · {steps.length} 步
+        {t('rail.title', { count: steps.length })}
         {active && <Loader2 className="w-3 h-3 animate-spin text-primary" />}
       </button>
       <div className={cn(
@@ -153,22 +159,39 @@ export function ProcessRail({ steps, active, open, onToggle }: {
                   )} />
                   {item.kind === 'agent' && (
                     <span>
-                      <span className="font-bold text-foreground">{HUB_NAME}</span>
-                      {' → '}
-                      <span className="font-bold text-primary">{AGENT_CN[item.agent] || AGENT_CN[item.node] || item.agent || item.node}</span>
-                      {' 接管分析'}
+                      {/* 整句进词表：中英语序不同，拆成"前半 + 名字 + 后半"必拼出病句 */}
+                      <Trans
+                        ns="ai"
+                        i18nKey="rail.handoff"
+                        values={{
+                          hub: HUB_NAME,
+                          agent: agentName(item.agent) || agentName(item.node) || item.agent || item.node,
+                        }}
+                        components={[
+                          <span className="font-bold text-foreground" />,
+                          <span className="font-bold text-primary" />,
+                        ]}
+                      />
                     </span>
                   )}
                   {item.kind === 'expert' && (
                     <>
-                      <span className="font-bold text-foreground">{AGENT_CN[item.agent] || item.agent}</span> 取数分析
+                      <Trans
+                        ns="ai"
+                        i18nKey="rail.expertWorking"
+                        values={{ agent: agentName(item.agent) || item.agent }}
+                        components={[<span className="font-bold text-foreground" />]}
+                      />
                       <div className="mt-1 rounded-lg border border-border bg-card-2 px-2.5 py-2 text-[11px] max-h-44 overflow-y-auto">
                         <Markdown content={item.content} />
                       </div>
                     </>
                   )}
+                  {/* keyed=前端自己立的说明行，存的是 key，这里现翻；其余是后端下发的阶段文案，原样显示 */}
                   {item.kind === 'progress' && (
-                    <span className={cn(hot && 'text-foreground font-bold')}>{item.text}</span>
+                    <span className={cn(hot && 'text-foreground font-bold')}>
+                      {item.keyed ? t(item.text) : item.text}
+                    </span>
                   )}
                 </div>
               );
@@ -189,6 +212,7 @@ export function HitlCard({ item, onDecide, submitting }: {
   onDecide: (approved: boolean) => void;
   submitting: 'approve' | 'reject' | null;
 }) {
+  const { t } = useTranslation('ai');
   const busy = submitting !== null;
   return (
     <div className={cn(
@@ -197,7 +221,7 @@ export function HitlCard({ item, onDecide, submitting }: {
     )}>
       <div className="flex items-center gap-2">
         <ShieldQuestion className="w-4 h-4 text-primary shrink-0" />
-        <span className="text-xs font-black">深度研判确认</span>
+        <span className="text-xs font-black">{t('hitl.title')}</span>
         <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-primary/10 text-primary">{item.symbol}</span>
       </div>
       <p className="text-xs text-muted-foreground leading-relaxed">{item.reason}</p>
@@ -209,7 +233,7 @@ export function HitlCard({ item, onDecide, submitting }: {
             className="border border-border hover:bg-primary/8 flex-1 py-1.5 rounded-lg text-xs font-bold text-primary disabled:opacity-50 transition-colors inline-flex items-center justify-center gap-1.5"
           >
             {submitting === 'approve' && <Loader2 className="w-3 h-3 animate-spin" />}
-            批准执行
+            {t('hitl.approve')}
           </button>
           <button
             disabled={busy}
@@ -217,12 +241,12 @@ export function HitlCard({ item, onDecide, submitting }: {
             className="border border-border hover:bg-surface-hover flex-1 py-1.5 rounded-lg text-xs font-bold text-muted-foreground disabled:opacity-50 transition-colors inline-flex items-center justify-center gap-1.5"
           >
             {submitting === 'reject' && <Loader2 className="w-3 h-3 animate-spin" />}
-            拒绝
+            {t('term.reject')}
           </button>
         </div>
       ) : (
         <p className="text-[10px] font-bold text-muted-foreground">
-          {item.status === 'approved' ? '已批准 · 深研判继续执行' : '已拒绝 · 本次跳过深研判'}
+          {item.status === 'approved' ? t('hitl.approved') : t('hitl.rejected')}
         </p>
       )}
     </div>

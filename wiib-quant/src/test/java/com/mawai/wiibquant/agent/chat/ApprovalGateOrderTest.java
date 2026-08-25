@@ -1,7 +1,9 @@
 package com.mawai.wiibquant.agent.chat;
 
+import com.mawai.wiibcommon.enums.AgentLang;
 import com.mawai.wiibquant.agent.llm.ChatEndpoints;
 import com.mawai.wiibquant.agent.analysis.DeepAnalysisService;
+import com.mawai.wiibquant.agent.behavior.BehaviorAnalysisService;
 import com.mawai.wiibquant.agent.llm.ModelCallLimiter;
 import com.mawai.wiibquant.agent.llm.ResilientChatService;
 import com.mawai.wiibquant.agent.toolkit.MarketToolkit;
@@ -91,7 +93,7 @@ class ApprovalGateOrderTest {
     @Test
     void 生产清单里保险丝排在最外层() {
         List<EdgeHook.WrapCall<MessagesState<Message>>> hooks =
-                ChatAgentFactory.summarizerToolHooks(new ApprovalRegistry(), 12);
+                ChatAgentFactory.summarizerToolHooks(new ApprovalRegistry(), ChatTestEndpoints.PROMPTS, AgentLang.ZH, 12);
 
         assertThat(hooks).hasSize(2);
         assertThat(hooks.getFirst()).isInstanceOf(ApprovalGate.class);          // 内层
@@ -121,7 +123,7 @@ class ApprovalGateOrderTest {
                         new Generation(new AssistantMessage("已请你确认"))))));
 
         CompiledGraph<MessagesState<Message>> summarizer =
-                factory(deep, light, registry).leavesFor(llmConfig()).summarizer();
+                factory(deep, light, registry).leavesFor(llmConfig(), AgentLang.ZH).summarizer();
         // 闸门只从 config.threadId() 取会话号，没有它整条 HITL 直接哑掉
         for (var ignored : summarizer.stream(Map.of("messages", List.of(new UserMessage("深度研判 BTC"))),
                 RunnableConfig.builder().threadId(SESSION).build())) {
@@ -145,10 +147,11 @@ class ApprovalGateOrderTest {
         when(chatModelFactory.modelsFor(any())).thenReturn(new ChatModelFactory.Models(deep, light));
         return new ChatAgentFactory(chatModelFactory,
                 mock(MarketToolkit.class), mock(NewsToolkit.class),
-                mock(DeepAnalysisService.class), mock(TraderChatService.class),
+                mock(DeepAnalysisService.class), mock(BehaviorAnalysisService.class), mock(TraderChatService.class),
                 mock(WorkbenchRunRegistry.class), registry,
+                ChatTestEndpoints.PROMPTS, ChatTestEndpoints.TOOLS,
                 // summarizeThresholdTokens 给足，别让历史压缩掺进来干扰
-                new SpringAIJacksonStateSerializer<>(MessagesState::new), 12, 999_999, 6, "X");
+                12, 999_999, 6, "X");
     }
 
     /** 叶子指纹含 userId（trader 工具按它认人），配置里不能缺 */

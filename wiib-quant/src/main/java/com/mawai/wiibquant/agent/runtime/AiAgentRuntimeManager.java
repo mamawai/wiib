@@ -6,7 +6,6 @@ import com.mawai.wiibcommon.entity.AiModelAssignment;
 import com.mawai.wiibcommon.entity.AiRuntimeConfig;
 import com.mawai.wiibcommon.mapper.AiModelAssignmentMapper;
 import com.mawai.wiibcommon.mapper.AiRuntimeConfigMapper;
-import com.mawai.wiibquant.agent.behavior.BehaviorAnalysisWorkflow;
 import com.mawai.wiibquant.agent.llm.OpenAiBaseUrl;
 import com.mawai.wiibquant.agent.llm.ResponsesChatModel;
 import io.micrometer.observation.ObservationRegistry;
@@ -27,7 +26,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 /**
@@ -40,12 +38,11 @@ import java.util.stream.Collectors;
 public class AiAgentRuntimeManager {
 
     // 管理口径（种子/Admin白名单/配置删除保护）：只列本进程要建模型的功能位，refresh()按名建。
-    // quant/quant-light/chat 随对话轨 BYOK 化删除，sim 是 wiib-sim 自读 DB 的位；
-    // 这些名字在 ai_model_assignment 里的残行是孤儿，无害——种子、白名单、删除保护都只认这个常量
-    private static final List<String> MANAGED_FUNCTIONS =
-            List.of(AiFunctions.BEHAVIOR, AiFunctions.NEWS_TAGGING);
+    // quant/quant-light/chat 随对话轨 BYOK 化删除、behavior 随行为分析进对话轨删除，
+    // sim 是 wiib-sim 自读 DB 的位；这些名字在 ai_model_assignment 里的残行是孤儿，无害——
+    // 种子、白名单、删除保护都只认这个常量
+    private static final List<String> MANAGED_FUNCTIONS = List.of(AiFunctions.NEWS_TAGGING);
 
-    private final BehaviorAnalysisWorkflow behaviorAnalysisWorkflow;
     private final AiRuntimeConfigMapper configMapper;
     private final AiModelAssignmentMapper assignmentMapper;
     private final ToolCallingManager toolCallingManager;
@@ -53,12 +50,10 @@ public class AiAgentRuntimeManager {
     private final AtomicReference<AiAgentRuntime> runtimeRef = new AtomicReference<>();
     private final Object graphLock = new Object();
 
-    public AiAgentRuntimeManager(BehaviorAnalysisWorkflow behaviorAnalysisWorkflow,
-                                 AiRuntimeConfigMapper configMapper,
+    public AiAgentRuntimeManager(AiRuntimeConfigMapper configMapper,
                                  AiModelAssignmentMapper assignmentMapper,
                                  ToolCallingManager toolCallingManager,
                                  ObjectProvider<ObservationRegistry> observationRegistry) {
-        this.behaviorAnalysisWorkflow = behaviorAnalysisWorkflow;
         this.configMapper = configMapper;
         this.assignmentMapper = assignmentMapper;
         // 现在只有 ResponsesChatModel 用它：把 toolCallbacks 翻成发给 API 的工具声明
@@ -84,7 +79,7 @@ public class AiAgentRuntimeManager {
     }
 
     /**
-     * 从DB读取所有配置和分配关系，重建 behavior 功能位的 ChatModel（其余功能位已随对话轨 BYOK 化删除）；
+     * 从DB读取所有配置和分配关系，重建 news-tagging 功能位的 ChatModel（面向用户的功能位已全量 BYOK 化）；
      * 返回是否刷新成功（Admin据此报错）。
      * 空库→runtime置空（合法的"未配置"态）；构建失败→保留上一份可用runtime——坏切换/瞬时DB错误不打死在跑的AI。
      */
@@ -103,10 +98,7 @@ public class AiAgentRuntimeManager {
                     List<AiModelAssignment> assignments = assignmentMapper.selectAll();
                     // 打标模型名随行落库（news_event.tagged_model 坏标追责用），所以这一位要留住配置行
                     AiRuntimeConfig newsTagging = configFor(assignments, AiFunctions.NEWS_TAGGING, configMap);
-                    runtimeRef.set(new AiAgentRuntime(
-                            buildChatModel(configFor(assignments, AiFunctions.BEHAVIOR, configMap)),
-                            buildChatModel(newsTagging),
-                            newsTagging.getModel()));
+                    runtimeRef.set(new AiAgentRuntime(buildChatModel(newsTagging), newsTagging.getModel()));
                     log.info("AI运行时已刷新，共{}个LLM配置，{}个功能位分配", configMap.size(), assignments.size());
                 }
                 ok = true;
@@ -116,11 +108,6 @@ public class AiAgentRuntimeManager {
             }
             return ok;
         }
-    }
-
-    /** 跑一次行为分析（阻塞出报告，不需要流式），返回模型原文；模型取当前 runtime 的 behavior 功能位。 */
-    public String runBehaviorAnalysis(long userId, Consumer<String> onProgress) {
-        return behaviorAnalysisWorkflow.run(current().behaviorChatModel(), userId, onProgress);
     }
 
     // 旧 quant graph 构建/fallback 整套已随旧管线删除（P2a）：
@@ -216,9 +203,7 @@ public class AiAgentRuntimeManager {
             options.reasoningEffort(config.getReasoningEffort());
         }
 
-        // 不传 toolCallingManager：该 setter 2.0 起废弃。删了不丢东西——模型层已经不跑工具循环
-        // （循环在 langgraph4j 图里），它在 OpenAiChatModel 内部只剩一件事：把 toolCallbacks
-        // 翻成发给 API 的工具声明。builder 不传就 new 一个默认的，做的事一模一样
+        // 不传 toolCallingManager：模型层不跑工具循环（循环在 langgraph4j 图里），builder 默认的够用
         return OpenAiChatModel.builder()
                 .openAiClient(openAiClient)
                 .openAiClientAsync(openAiClientAsync)

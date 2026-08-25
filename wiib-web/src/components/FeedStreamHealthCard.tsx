@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { subscribe } from '../hooks/stompClient';
@@ -8,12 +9,12 @@ import { useToast } from './ui/use-toast';
 import { cn } from '../lib/utils';
 import { Radio, RefreshCw } from 'lucide-react';
 
-// 状态 → 颜色点/文案：绿=已连；琥珀=建连/重连中；红=断开
-const STATUS_META: Record<FeedStreamHealth['status'], { dot: string; text: string; label: string }> = {
-  CONNECTED:    { dot: 'bg-gain',     text: 'text-gain',       label: '已连接' },
-  CONNECTING:   { dot: 'bg-amber-500', text: 'text-amber-500', label: '连接中' },
-  RECONNECTING: { dot: 'bg-amber-500', text: 'text-amber-500', label: '重连中' },
-  DISCONNECTED: { dot: 'bg-loss',     text: 'text-loss',       label: '已断开' },
+// 状态 → 颜色点/文案：绿=已连；琥珀=建连/重连中；红=断开。表里存词表 key，渲染时现查
+const STATUS_META: Record<FeedStreamHealth['status'], { dot: string; text: string; labelKey: string }> = {
+  CONNECTED:    { dot: 'bg-gain',     text: 'text-gain',       labelKey: 'feed.status.connected' },
+  CONNECTING:   { dot: 'bg-amber-500', text: 'text-amber-500', labelKey: 'feed.status.connecting' },
+  RECONNECTING: { dot: 'bg-amber-500', text: 'text-amber-500', labelKey: 'feed.status.reconnecting' },
+  DISCONNECTED: { dot: 'bg-loss',     text: 'text-loss',       labelKey: 'feed.status.disconnected' },
 };
 
 // 距上次数据 age：纯本地计算，不请求服务端
@@ -32,6 +33,7 @@ function fmtAge(ms: number, now: number): string {
  * 每行一条 Binance 行情 WS，断开点「重试」强制重连。
  */
 export function FeedStreamHealthCard() {
+  const { t } = useTranslation(['strategy', 'common']);
   const { toast } = useToast();
   const [streams, setStreams] = useState<FeedStreamHealth[] | null>(null);
   const [loadError, setLoadError] = useState(false);
@@ -44,9 +46,9 @@ export function FeedStreamHealthCard() {
       setLoadError(false);
     } catch (e) {
       setLoadError(true);
-      toast((e as Error).message || 'feed 流状态获取失败', 'error');
+      toast((e as Error).message || t('feed.toast.loadFailed'), 'error');
     }
-  }, [toast]);
+  }, [toast, t]);
 
   useEffect(() => { void fetchSnapshot(); }, [fetchSnapshot]);
 
@@ -65,9 +67,9 @@ export function FeedStreamHealthCard() {
     setRetrying(name);
     try {
       const r = await adminApi.retryFeedStream(name);
-      toast(r.ok ? `已触发重连 ${name}` : `未找到流 ${name}`, r.ok ? 'success' : 'error');
+      toast(r.ok ? t('feed.toast.retryTriggered', { name }) : t('feed.toast.notFound', { name }), r.ok ? 'success' : 'error');
     } catch (e) {
-      toast((e as Error).message || '重试失败', 'error');
+      toast((e as Error).message || t('feed.toast.retryFailed'), 'error');
     } finally {
       setRetrying(null);
     }
@@ -81,12 +83,12 @@ export function FeedStreamHealthCard() {
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between">
           <CardTitle className="text-lg flex items-center gap-2">
-            <Radio className="w-5 h-5" /> feed 数据流健康
+            <Radio className="w-5 h-5" /> {t('feed.title')}
           </CardTitle>
           <div className="flex items-center gap-2">
             {streams && (
               <span className={cn('text-xs font-medium', anyDown ? 'text-loss' : 'text-muted-foreground')}>
-                {anyDown ? '有流异常' : '全部正常'}
+                {anyDown ? t('feed.someDown') : t('feed.allOk')}
               </span>
             )}
             <Button variant="outline" size="sm" onClick={() => void fetchSnapshot()}>
@@ -96,21 +98,21 @@ export function FeedStreamHealthCard() {
         </div>
       </CardHeader>
       <CardContent className="space-y-1.5">
-        <div className="text-xs text-muted-foreground">Binance 行情 WS（应当常连；断开=故障，点重试强制立即重连）。状态实时推送。</div>
-        {!streams && !loadError && <div className="text-sm text-muted-foreground text-center py-4">加载中…</div>}
-        {!streams && loadError && <div className="text-sm text-loss text-center py-4">无法连接 feed（是否在线？）—点右上角刷新重试</div>}
-        {streams?.length === 0 && <div className="text-sm text-muted-foreground text-center py-4">无登记的流</div>}
+        <div className="text-xs text-muted-foreground">{t('feed.desc')}</div>
+        {!streams && !loadError && <div className="text-sm text-muted-foreground text-center py-4">{t('common:loading')}</div>}
+        {!streams && loadError && <div className="text-sm text-loss text-center py-4">{t('feed.loadError')}</div>}
+        {streams?.length === 0 && <div className="text-sm text-muted-foreground text-center py-4">{t('feed.noStreams')}</div>}
         {streams?.map(s => {
           const meta = STATUS_META[s.status];
           return (
             <div key={s.name} className="flex items-center gap-3 p-2.5 rounded-lg border border-border bg-card-2">
               <span className={cn('w-2 h-2 rounded-full shrink-0', meta.dot, s.status === 'CONNECTED' && 'animate-pulse')} />
               <span className="text-sm font-bold min-w-[7rem]">{s.name}</span>
-              <span className={cn('text-xs font-medium', meta.text)}>{meta.label}</span>
+              <span className={cn('text-xs font-medium', meta.text)}>{t(meta.labelKey)}</span>
               {/* age 只对非连接态显示：连着的流数据在流但事件不刷 lastMessageAt，显示会假性增长；断了才关心"多久没数据" */}
               <span className="text-[11px] text-muted-foreground ml-auto tabular-nums">
-                {s.status !== 'CONNECTED' && <>断开 {fmtAge(s.lastMessageAt, now)}</>}
-                {s.reconnectAttempt > 0 && <span className="text-loss ml-2">重连×{s.reconnectAttempt}</span>}
+                {s.status !== 'CONNECTED' && t('feed.downFor', { age: fmtAge(s.lastMessageAt, now) })}
+                {s.reconnectAttempt > 0 && <span className="text-loss ml-2">{t('feed.reconnects', { n: s.reconnectAttempt })}</span>}
               </span>
               <Button
                 variant="ghost"
@@ -120,7 +122,7 @@ export function FeedStreamHealthCard() {
                 disabled={retrying === s.name}
               >
                 <RefreshCw className={cn('w-3.5 h-3.5', retrying === s.name && 'animate-spin')} />
-                <span className="ml-1">重试</span>
+                <span className="ml-1">{t('common:retry')}</span>
               </Button>
             </div>
           );

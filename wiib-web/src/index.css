@@ -188,6 +188,9 @@ html.pwa nav a {
   margin-inline: auto;
 }
 
+/* 宽版壳：卡片密集的看板页（竞技场详情）用，大屏比标准壳多给 240px */
+.page-shell-wide { max-width: 105rem; } /* 1680px */
+
 /* ===== 精密终端工具类 ===== */
 /* 卡片基线：1px 边框分层，亮色极轻投影，暗色纯靠边框 */
 .pt-card {
@@ -207,8 +210,11 @@ html.dark .pt-card { box-shadow: none; }
           mask-image: linear-gradient(to right, transparent 0, #000 var(--fade-l, 0px), #000 calc(100% - var(--fade-r, 0px)), transparent 100%);
 }
 
-/* 微标签：小号宽字距灰字，卡片标题/表头用 */
-.microlabel { font-size: 0.625rem; letter-spacing: 0.1em; color: var(--color-muted-foreground); }
+/* 微标签：小号宽字距灰字，卡片标题/表头用。
+   落在 components 层：调用方叠 text-primary / text-foreground 这类工具类能盖掉这里的 color 和 font-size */
+@layer components {
+  .microlabel { font-size: 0.625rem; letter-spacing: 0.1em; color: var(--color-muted-foreground); }
+}
 
 /* LED 状态灯（仪器细节）：绿=正常 黄=降级 灭=断连/未知 */
 .led { width: 6px; height: 6px; border-radius: 9999px; background: var(--color-gain); box-shadow: 0 0 5px var(--color-gain); }
@@ -233,14 +239,6 @@ html.dark .machined { box-shadow: inset 0 1px 0 rgba(255, 255, 255, .07); }
 
 /* 行情副条 marquee：两份等宽内容首尾相接，走完一份宽度即无缝循环 */
 @keyframes wiib-ticker { to { transform: translateX(-50%); } }
-
-/* 边框巡游光（BeamCard）：一束橙光沿卡片边框环形巡游，标注"进行中" */
-.wiib-beam {
-  background: conic-gradient(from 0deg, transparent 0 78%, var(--color-primary) 88%, var(--color-accent) 93%, transparent 100%);
-  animation: wiib-beam-spin 4s linear infinite;
-}
-@keyframes wiib-beam-spin { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) { .wiib-beam { animation: none; opacity: .5; } }
 
 /* sparkline 入场：整幅从左往右揭示，线和面积一起长出来。
    不用 stroke-dasharray 描线是因为组件挂了 non-scaling-stroke（不挂线宽会被

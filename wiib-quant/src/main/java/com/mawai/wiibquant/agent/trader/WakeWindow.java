@@ -23,18 +23,23 @@ public record WakeWindow(int fromMin, int toMin) {
     private static final long DAY_MS = 86_400_000L;
 
     /** 严格解析：null/空白 → null(全天)；格式/粒度/起止相同不合法抛 IAE，消息原样回给用户 */
+    /**
+     * 解析失败时抛出的 {@code IllegalArgumentException}，其 message 是<b>界面文案词表的 key</b>
+     * 而不是成文的话——这是个纯值对象，不该为了报错去持有词表；渲染归唯一会把它显示出来的
+     * 调用方（{@code TraderService.validate}）。
+     */
     public static WakeWindow parse(String text) {
         if (text == null || text.isBlank()) {
             return null;
         }
         Matcher m = FORMAT.matcher(text.trim());
         if (!m.matches()) {
-            throw new IllegalArgumentException("唤醒时段格式须为 HH:mm-HH:mm，如 21:00-08:30");
+            throw new IllegalArgumentException("trader.config.window.format");
         }
         int from = minuteOfDay(m.group(1), m.group(2));
         int to = minuteOfDay(m.group(3), m.group(4));
         if (from == to) {
-            throw new IllegalArgumentException("唤醒时段起止不能相同（全天请直接关闭时段）");
+            throw new IllegalArgumentException("trader.config.window.sameEnds");
         }
         return new WakeWindow(from, to);
     }
@@ -43,10 +48,10 @@ public record WakeWindow(int fromMin, int toMin) {
         int h = Integer.parseInt(hh);
         int min = Integer.parseInt(mm);
         if (h > 23 || min > 59) {
-            throw new IllegalArgumentException("唤醒时段时刻不合法：" + hh + ":" + mm);
+            throw new IllegalArgumentException("trader.config.window.badTime");
         }
         if (min % 5 != 0) {
-            throw new IllegalArgumentException("唤醒时段的分钟只能是 0/5 的倍数（K线按 5 分钟收盘）");
+            throw new IllegalArgumentException("trader.config.window.minuteStep");
         }
         return h * 60 + min;
     }

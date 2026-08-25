@@ -63,9 +63,8 @@ public class MarginAccountServiceImpl implements MarginAccountService {
         userMapper.ensureMarginInterestLastDate(userId, LocalDate.now());
     }
 
-    // 刻意不标 @Ledger：这是"任何现金流入先还贷再入余额"的公共出口，语义得由调用方给
-    // （现货延迟到账=SPOT_SETTLE、B股瞬时到账=BSTOCK_SETTLE）。标在这里会盖掉调用方的方法级语义，
-    // 因为一次性/方法级都是"内层压栈的赢"，账单上就看不出这笔钱是卖什么进来的了。
+    // 刻意不标 @Ledger：这是"现金流入先还贷再入余额"的公共出口，语义由调用方给
+    // （SPOT_SETTLE/BSTOCK_SETTLE），标在这里会盖掉调用方的方法级语义
     @Override
     @Transactional(rollbackFor = Exception.class)
     public MarginRepayResult applyCashInflow(Long userId, BigDecimal amount, String reason) {

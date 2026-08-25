@@ -1,5 +1,7 @@
 package com.mawai.wiibquant.agent.chat;
 
+import com.mawai.wiibcommon.enums.AgentLang;
+import com.mawai.wiibcommon.i18n.MessageCatalog;
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONObject;
 import com.mawai.wiibquant.agent.llm.LlmEndpointService;
@@ -9,6 +11,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.stubbing.Answer;
 import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.metadata.ChatResponseMetadata;
 import org.springframework.ai.chat.metadata.DefaultUsage;
 import org.springframework.ai.chat.model.ChatModel;
@@ -87,7 +90,7 @@ class ChatTurnMetaTest {
 
     /** 只有账本是真的：图用不上（runner 被替身顶了），所以 experts/summarizer 给空 */
     private static ChatAgentFactory.Leaves leaves(UsageTrackingChatModel deep, UsageTrackingChatModel light) {
-        return new ChatAgentFactory.Leaves(LABEL, deep, light, Map.of(), null);
+        return new ChatAgentFactory.Leaves(LABEL, deep, light, Map.of(), null, AgentLang.ZH);
     }
 
     /** 一套能真跑 {@code controller.run} 的最小装配 */
@@ -103,18 +106,18 @@ class ChatTurnMetaTest {
         ChatTurnRunner turnRunner = mock(ChatTurnRunner.class);
         doAnswer((Answer<ChatTurnRunner.TurnResult>) inv -> {
             burn.run();
-            Consumer<String> sink = inv.getArgument(4);
+            Consumer<String> sink = inv.getArgument(5);   // leaves/userId/session/message/intent 之后才是答案 sink
             sink.accept("答案正文");
             return ChatTurnRunner.TurnResult.COMPLETED;
-        }).when(turnRunner).run(any(), anyLong(), any(), any(), any(), any(), any());
+        }).when(turnRunner).run(any(), anyLong(), any(), any(), any(), any(), any(), any(), any());
 
         ChatConcurrencyGate gate = new ChatConcurrencyGate(10);
         WorkbenchRunRegistry runRegistry = mock(WorkbenchRunRegistry.class);
-        ChatYieldCoordinator coordinator = new ChatYieldCoordinator(gate, runRegistry, turnRunner, history);
+        ChatYieldCoordinator coordinator = new ChatYieldCoordinator();
         ChatWorkbenchController controller = new ChatWorkbenchController(mock(ChatAgentFactory.class),
                 mock(LlmEndpointService.class), new ApprovalRegistry(),
                 history, mock(ChatContextStore.class), turnRunner,
-                runRegistry, gate, coordinator);
+                runRegistry, gate, new MessageCatalog(), coordinator, ChatTestEndpoints.PROMPTS, ChatTestEndpoints.zhLang());
         return new Harness(controller, history, coordinator);
     }
 
@@ -139,7 +142,7 @@ class ChatTurnMetaTest {
 
         RecordingEmitter emitter = new RecordingEmitter();
         h.controller().run(new SseChannel(emitter), 1L, SESSION, "看看行情",
-                leaves(deep, light), h.coordinator().openTurn(1L), null);
+                leaves(deep, light), h.coordinator().openTurn(1L), null, null, null);
 
         ChatHistoryService.TurnMeta meta = capturedMeta(h.history());
         assertThat(meta.modelLabel()).isEqualTo(LABEL);
@@ -162,7 +165,7 @@ class ChatTurnMetaTest {
         Harness h = harness(() -> shared.call(new Prompt("one")));
 
         h.controller().run(new SseChannel(new RecordingEmitter()), 1L, SESSION, "看看行情",
-                leaves(shared, shared), h.coordinator().openTurn(1L), null);
+                leaves(shared, shared), h.coordinator().openTurn(1L), null, null, null);
 
         ChatHistoryService.TurnMeta meta = capturedMeta(h.history());
         assertThat(meta.modelCalls()).isEqualTo(1);
@@ -180,9 +183,9 @@ class ChatTurnMetaTest {
         ChatAgentFactory.Leaves leaves = leaves(deep, light);
 
         h.controller().run(new SseChannel(new RecordingEmitter()), 1L, SESSION, "第一问",
-                leaves, h.coordinator().openTurn(1L), null);
+                leaves, h.coordinator().openTurn(1L), null, null, null);
         h.controller().run(new SseChannel(new RecordingEmitter()), 1L, SESSION, "第二问",
-                leaves, h.coordinator().openTurn(1L), null);
+                leaves, h.coordinator().openTurn(1L), null, null, null);
 
         ArgumentCaptor<ChatHistoryService.TurnMeta> captor =
                 ArgumentCaptor.forClass(ChatHistoryService.TurnMeta.class);
@@ -207,10 +210,11 @@ class ChatTurnMetaTest {
         });
         ChatAgentFactory.Leaves leaves = leaves(deep, light);
         // 上一轮让位时交出去的批次还没跑完：那些专家仍在往这同一份账本上记账
-        h.coordinator().registerDeferred(1L, SESSION, leaves, "上一个问题", new CompletableFuture<>());
+        h.coordinator().registerDeferred(1L, SESSION, "上一个问题",
+                new ChatTurnRunner.ExpertBatch(List.of("market_agent"), List.of(new CompletableFuture<Message>())));
 
         h.controller().run(new SseChannel(new RecordingEmitter()), 1L, SESSION, "插话",
-                leaves, h.coordinator().openTurn(1L), null);
+                leaves, h.coordinator().openTurn(1L), null, null, null);
 
         ChatHistoryService.TurnMeta meta = capturedMeta(h.history());
         // 端点名与耗时是这一轮自己的，照报；用量混着别轮的账，一律不报

@@ -78,9 +78,7 @@ function bindTopic(topic: string) {
 }
 
 /**
- * 登录态变化后重连，让新 token 生效。
- * 漏调的表现很隐蔽：行情照跑、评论能发，只有通知角标永远是 0 且不报任何错——
- * 因为连接还挂着登录前的匿名身份，点对点消息投不到它。
+ * 登录态变化后重连，让新 token 生效——否则连接挂着匿名身份，点对点通知投不到。
  * subs 不动，onConnect 会按 subs.keys() 全量补订。
  */
 export function reconnectWithIdentity() {

@@ -2,7 +2,9 @@ package com.mawai.wiibcommon.exception;
 
 import cn.dev33.satoken.exception.NotLoginException;
 import com.mawai.wiibcommon.enums.ErrorCode;
+import com.mawai.wiibcommon.i18n.MessageCatalog;
 import com.mawai.wiibcommon.util.Result;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -11,41 +13,54 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
+import java.util.Map;
+
 /**
  * 全局异常处理器（三模块共享）
  * 放 wiib-common，quant/feed/sim 均 scanBasePackages 到 com.mawai.wiibcommon，自动生效。
+ * <p>
+ * <b>错误文案在这里成文</b>：业务代码一路只传 {@link ErrorCode}，语言按当次请求的 X-Lang 头
+ * （见 {@code RequestLangFilter}）现查词表。所以加一个错误码只要加一条枚举 + 两门语言各一条词条，
+ * 沿途的 service/controller 一个字都不用改。
  */
 @Slf4j
 @RestControllerAdvice
+@RequiredArgsConstructor
 public class GlobalExceptionHandler {
+
+    private final MessageCatalog messages;
 
     @ExceptionHandler(BizException.class)
     public Result<?> handleBizException(BizException e) {
-        log.warn("业务异常: {}", e.getMsg());
-        return Result.fail(e.getCode(), e.getMsg());
+        // 带码的现查词表，带话的（调用方自己查过词表或拼了上游原文）原样下发
+        String msg = e.getErrorCode() != null ? messages.get(e.getErrorCode().getMsgKey()) : e.getMsg();
+        log.warn("业务异常: {}", msg);
+        return Result.fail(e.getCode(), msg);
     }
 
     @ExceptionHandler(NotLoginException.class)
     public Result<?> handleNotLoginException(NotLoginException e) {
-        String message = switch (e.getType()) {
-            case NotLoginException.NOT_TOKEN -> "未提供token";
-            case NotLoginException.INVALID_TOKEN -> "token无效";
-            case NotLoginException.TOKEN_TIMEOUT -> "token已过期，请重新登录";
-            case NotLoginException.BE_REPLACED -> "token已被顶下线";
-            case NotLoginException.KICK_OUT -> "token已被踢下线";
-            case NotLoginException.TOKEN_FREEZE -> "token已被冻结";
-            case NotLoginException.NO_PREFIX_MESSAGE -> "未按照指定前缀提交token";
-            default -> "当前会话未登录";
+        String key = switch (e.getType()) {
+            case NotLoginException.NOT_TOKEN -> "error.token.missing";
+            case NotLoginException.INVALID_TOKEN -> "error.token.invalid";
+            case NotLoginException.TOKEN_TIMEOUT -> "error.token.timeout";
+            case NotLoginException.BE_REPLACED -> "error.token.replaced";
+            case NotLoginException.KICK_OUT -> "error.token.kickedOut";
+            case NotLoginException.TOKEN_FREEZE -> "error.token.frozen";
+            case NotLoginException.NO_PREFIX_MESSAGE -> "error.token.noPrefix";
+            default -> "error.token.notLoggedIn";
         };
-        log.warn("登录异常: type={}, message={}", e.getType(), message);
-        return Result.fail(ErrorCode.UNAUTHORIZED.getCode(), message);
+        log.warn("登录异常: type={}, key={}", e.getType(), key);
+        return Result.fail(ErrorCode.UNAUTHORIZED.getCode(), messages.get(key));
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public Result<?> handleValidation(MethodArgumentNotValidException e) {
+        // 字段名 + 校验注解自带的说明，成不了词表条目；一条都拼不出来才回落到那句通用的
         String field = e.getBindingResult().getFieldErrors().stream()
                 .map(fe -> fe.getField() + ": " + fe.getDefaultMessage())
-                .reduce((a, b) -> a + "; " + b).orElse("参数校验失败");
+                .reduce((a, b) -> a + "; " + b)
+                .orElseGet(() -> messages.get("error.request.validationFailed"));
         log.warn("参数校验异常: {}", field);
         return Result.fail(ErrorCode.PARAM_ERROR.getCode(), field);
     }
@@ -53,24 +68,26 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(HttpMessageNotReadableException.class)
     public Result<?> handleNotReadable(HttpMessageNotReadableException e) {
         log.warn("请求体解析失败: {}", e.getMessage());
-        return Result.fail(ErrorCode.PARAM_ERROR.getCode(), "请求体格式错误");
+        return Result.fail(ErrorCode.PARAM_ERROR.getCode(), messages.get("error.request.bodyMalformed"));
     }
 
     @ExceptionHandler(MissingServletRequestParameterException.class)
     public Result<?> handleMissingParam(MissingServletRequestParameterException e) {
         log.warn("缺少请求参数: {}", e.getParameterName());
-        return Result.fail(ErrorCode.PARAM_ERROR.getCode(), "缺少参数: " + e.getParameterName());
+        return Result.fail(ErrorCode.PARAM_ERROR.getCode(),
+                messages.get("error.request.missingParam", Map.of("name", e.getParameterName())));
     }
 
     @ExceptionHandler(MethodArgumentTypeMismatchException.class)
     public Result<?> handleTypeMismatch(MethodArgumentTypeMismatchException e) {
         log.warn("参数类型错误: {}={}", e.getName(), e.getValue());
-        return Result.fail(ErrorCode.PARAM_ERROR.getCode(), "参数类型错误: " + e.getName());
+        return Result.fail(ErrorCode.PARAM_ERROR.getCode(),
+                messages.get("error.request.typeMismatch", Map.of("name", e.getName())));
     }
 
     @ExceptionHandler(Exception.class)
     public Result<?> handleException(Exception e) {
         log.error("系统异常: ", e);
-        return Result.fail(ErrorCode.SYSTEM_ERROR);
+        return Result.fail(ErrorCode.SYSTEM_ERROR.getCode(), messages.get(ErrorCode.SYSTEM_ERROR.getMsgKey()));
     }
 }

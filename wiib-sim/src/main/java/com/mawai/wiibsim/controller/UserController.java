@@ -5,6 +5,7 @@ import com.mawai.wiibcommon.dto.AssetSnapshotDTO;
 import com.mawai.wiibcommon.dto.CategoryAveragesDTO;
 import com.mawai.wiibcommon.dto.UserDTO;
 import com.mawai.wiibcommon.entity.User;
+import com.mawai.wiibcommon.enums.AgentLang;
 import com.mawai.wiibcommon.enums.ErrorCode;
 import com.mawai.wiibcommon.exception.BizException;
 import com.mawai.wiibcommon.util.Result;
@@ -109,6 +110,29 @@ public class UserController {
         userService.lambdaUpdate()
                 .eq(User::getId, userId)
                 .set(User::getProfilePublic, request.getProfilePublic())
+                .update();
+        return Result.ok(null);
+    }
+
+    @Data
+    public static class LangRequest {
+        /** AgentLang 的码：zh / en，别的值一律拒 */
+        private String lang;
+    }
+
+    /**
+     * 只写不读：界面语言在前端 localStorage，服务端这份只决定 AI 产出语言，不做反向同步。
+     * 前端切换语言与登录成功各推一次。
+     */
+    @PutMapping("/lang")
+    @Operation(summary = "设置 AI 产出语言（zh/en，只影响后端 AI 的提示词与回答）")
+    public Result<Void> setLang(@CurrentUserId Long userId, @RequestBody LangRequest request) {
+        AgentLang lang = AgentLang.find(request.getLang())
+                .orElseThrow(() -> new BizException(ErrorCode.PARAM_ERROR));
+        // 同 setProfilePublic：不能 updateById 整行写回，只更这一列
+        userService.lambdaUpdate()
+                .eq(User::getId, userId)
+                .set(User::getLang, lang.code())
                 .update();
         return Result.ok(null);
     }

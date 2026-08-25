@@ -6,6 +6,7 @@ import com.mawai.wiibcommon.entity.FuturesPosition;
 import com.mawai.wiibcommon.entity.User;
 import com.mawai.wiibcommon.enums.ErrorCode;
 import com.mawai.wiibcommon.exception.BizException;
+import com.mawai.wiibcommon.i18n.MessageCatalog;
 import com.mawai.wiibsim.mapper.CryptoOrderMapper;
 import com.mawai.wiibsim.mapper.FuturesPositionMapper;
 import com.mawai.wiibsim.mapper.UserMapper;
@@ -14,9 +15,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
-import java.time.Duration;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 账户重置：清空全部交易与游戏数据，账户回到初始状态；另承接量化子账户销户（清完直接删行）。
@@ -32,7 +33,6 @@ public class AccountResetService {
 
     private static final String LIMIT_BUY_PREFIX = "crypto:limit:buy:";
     private static final String LIMIT_SELL_PREFIX = "crypto:limit:sell:";
-    private static final String RESET_LOCK_PREFIX = "user:reset:";
     private static final String RANKING_KEY = "ranking:top";
     private static final String BUFF_STATUS_PREFIX = "buff:status:";
 
@@ -41,7 +41,10 @@ public class AccountResetService {
     private final FuturesPositionIndexService indexService;
     private final AccountPurgeTx purgeTx;
     private final StringRedisTemplate redis;
+    private final ResetQuotaService resetQuota;
     private final UserMapper userMapper;
+    /** 管理页的拦阻提示也跟界面语言 */
+    private final MessageCatalog messages;
 
     /** 策略账户（quant-FIBO 这类）是 user 表里的真实行，永不可重置；用户名须逐字匹配，防误点 */
     public static void assertResettable(String actualUsername, String confirmUsername) {
@@ -53,19 +56,25 @@ public class AccountResetService {
         }
     }
 
-    /** 每周一次。抢不到键说明 7 天内重置过 */
+    /**
+     * 手动重置的额度闸。自然周（周一~周日）计数，破产自动恢复共用同一计数
+     * （{@link ResetQuotaService}，那边永不被拦、只计数）。
+     * <p>
+     * 每周限 1 次，超了直接拒。被拒或失败的尝试都退回额度。
+     */
     public void resetWithGuard(long userId, String actualUsername, String confirmUsername) {
         assertResettable(actualUsername, confirmUsername);
-        Boolean first = redis.opsForValue()
-                .setIfAbsent(RESET_LOCK_PREFIX + userId, "1", Duration.ofDays(7));
-        if (!Boolean.TRUE.equals(first)) {
+
+        long used = resetQuota.recordUse(userId);
+        if (used > 1) {
+            resetQuota.refund(userId);
             throw new BizException(ErrorCode.RESET_TOO_FREQUENT);
         }
         try {
             reset(userId);
         } catch (RuntimeException e) {
-            // 没重置成功就不该占着一周的额度
-            redis.delete(RESET_LOCK_PREFIX + userId);
+            // 没重置成功就不占本周额度
+            resetQuota.refund(userId);
             throw e;
         }
     }
@@ -88,7 +97,7 @@ public class AccountResetService {
         }
         if (!username.startsWith("ai_trader_")
                 || user.getLinuxDoId() == null || !user.getLinuxDoId().startsWith("internal:")) {
-            throw new BizException("仅允许删除 ai_trader 量化子账户: " + username);
+            throw new BizException(messages.get("sim.reset.onlyQuantSubAccount", Map.of("name", username)));
         }
         wipe(user.getId(), () -> purgeTx.deleteAccount(user.getId()));
         log.info("[AccountReset] 量化子账户已删除 username={} userId={}", username, user.getId());

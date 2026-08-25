@@ -3,137 +3,162 @@ package com.mawai.wiibcommon.enums;
 import lombok.Getter;
 import lombok.AllArgsConstructor;
 
+import java.util.Arrays;
+import java.util.Map;
+import java.util.stream.Collectors;
+
+/**
+ * 业务错误码。<b>码在这里，话在 {@code messages/<语言>/error.yml}</b>——枚举名下划线转小驼峰
+ * 就是词表 key（BALANCE_NOT_ENOUGH → error.balanceNotEnough）。
+ * <p>
+ * 渲染只在 {@code GlobalExceptionHandler} 一处发生（按当次请求的界面语言），所以业务代码
+ * 一路只传码不传话；日志里出现的也是码，比中文更好 grep。
+ */
 @Getter
 @AllArgsConstructor
 public enum ErrorCode {
 
-    SUCCESS(0, "成功"),
-    PARAM_ERROR(400, "参数错误"),
-    UNAUTHORIZED(401, "未登录"),
-    FORBIDDEN(403, "无权限"),
-    NOT_FOUND(404, "资源不存在"),
-    SYSTEM_ERROR(500, "系统错误"),
+    SUCCESS(0, "error.success"),
+    PARAM_ERROR(400, "error.paramError"),
+    UNAUTHORIZED(401, "error.unauthorized"),
+    FORBIDDEN(403, "error.forbidden"),
+    NOT_FOUND(404, "error.notFound"),
+    SYSTEM_ERROR(500, "error.systemError"),
 
     // 业务错误码 1000+
-    USER_NOT_FOUND(1001, "用户不存在"),
-    STOCK_NOT_FOUND(1002, "股票不存在"),
-    BALANCE_NOT_ENOUGH(1003, "余额不足"),
-    POSITION_NOT_ENOUGH(1004, "持仓不足"),
-    TRADE_QUANTITY_INVALID(1005, "交易数量无效"),
-    MARKET_CLOSED(1006, "市场已休市"),
-    ORDER_NOT_FOUND(1007, "订单不存在"),
-    ORDER_CANNOT_CANCEL(1008, "订单无法取消"),
-    DUPLICATE_REQUEST(1009, "重复请求"),
-    LIMIT_PRICE_INVALID(1011, "限价无效"),
+    USER_NOT_FOUND(1001, "error.userNotFound"),
+    STOCK_NOT_FOUND(1002, "error.stockNotFound"),
+    BALANCE_NOT_ENOUGH(1003, "error.balanceNotEnough"),
+    POSITION_NOT_ENOUGH(1004, "error.positionNotEnough"),
+    TRADE_QUANTITY_INVALID(1005, "error.tradeQuantityInvalid"),
+    MARKET_CLOSED(1006, "error.marketClosed"),
+    ORDER_NOT_FOUND(1007, "error.orderNotFound"),
+    ORDER_CANNOT_CANCEL(1008, "error.orderCannotCancel"),
+    DUPLICATE_REQUEST(1009, "error.duplicateRequest"),
+    LIMIT_PRICE_INVALID(1011, "error.limitPriceInvalid"),
 
     // 并发控制错误码 1100+
-    CONCURRENT_UPDATE_FAILED(1101, "并发更新失败，请重试"),
-    FROZEN_BALANCE_NOT_ENOUGH(1102, "冻结余额不足"),
-    FROZEN_POSITION_NOT_ENOUGH(1103, "冻结持仓不足"),
-    ACQUIRE_LOCK_FAILED(1104, "获取锁失败，请稍后重试"),
-    ORDER_PROCESSING(1105, "订单正在处理中，请稍后再试"),
+    CONCURRENT_UPDATE_FAILED(1101, "error.concurrentUpdateFailed"),
+    FROZEN_BALANCE_NOT_ENOUGH(1102, "error.frozenBalanceNotEnough"),
+    FROZEN_POSITION_NOT_ENOUGH(1103, "error.frozenPositionNotEnough"),
+    ACQUIRE_LOCK_FAILED(1104, "error.acquireLockFailed"),
+    ORDER_PROCESSING(1105, "error.orderProcessing"),
     // 1106 专给幂等占位：这笔单确实在跑，结果未知；1105 是抢锁失败，那是确定没成交
-    ORDER_IN_FLIGHT(1106, "同一请求正在处理中，请用同一 clientRequestId 重试"),
+    ORDER_IN_FLIGHT(1106, "error.orderInFlight"),
 
     // 交易限制错误码 1200+
-    SLIPPAGE_EXCEEDED(1202, "价格波动过大，请重新下单"),
-    RATE_LIMIT_EXCEEDED(1203, "请求过于频繁，请稍后再试"),
-    USER_BANKRUPT(1204, "已爆仓，交易已禁用"),
-    LEVERAGE_ONLY_FOR_MARKET_BUY(1205, "杠杆仅支持市价买入"),
-    LEVERAGE_MULTIPLE_INVALID(1206, "杠杆倍率无效"),
+    SLIPPAGE_EXCEEDED(1202, "error.slippageExceeded"),
+    RATE_LIMIT_EXCEEDED(1203, "error.rateLimitExceeded"),
+    USER_BANKRUPT(1204, "error.userBankrupt"),
+    LEVERAGE_ONLY_FOR_MARKET_BUY(1205, "error.leverageOnlyForMarketBuy"),
+    LEVERAGE_MULTIPLE_INVALID(1206, "error.leverageMultipleInvalid"),
 
     // WebSocket错误码 1300+
-    WEBSOCKET_CONNECTION_LIMIT(1301, "连接数已达上限"),
-    WEBSOCKET_AUTH_REQUIRED(1302, "需要登录后连接"),
+    WEBSOCKET_CONNECTION_LIMIT(1301, "error.websocketConnectionLimit"),
+    WEBSOCKET_AUTH_REQUIRED(1302, "error.websocketAuthRequired"),
 
     // Buff错误码 1400+
-    BUFF_ALREADY_DRAWN(1401, "今日已抽奖"),
-    BUFF_NOT_FOUND(1402, "Buff不存在"),
-    BUFF_EXPIRED(1403, "Buff已过期"),
-    BUFF_ALREADY_USED(1404, "Buff已使用"),
-    DISCOUNT_NO_LEVERAGE(1405, "使用折扣时不支持杠杆"),
+    BUFF_ALREADY_DRAWN(1401, "error.buffAlreadyDrawn"),
+    BUFF_NOT_FOUND(1402, "error.buffNotFound"),
+    BUFF_EXPIRED(1403, "error.buffExpired"),
+    BUFF_ALREADY_USED(1404, "error.buffAlreadyUsed"),
+    DISCOUNT_NO_LEVERAGE(1405, "error.discountNoLeverage"),
 
     // Blackjack错误码 1500+
-    BJ_GAME_IN_PROGRESS(1501, "有未完成的牌局"),
-    BJ_NO_ACTIVE_GAME(1502, "没有进行中的牌局"),
-    BJ_CHIPS_NOT_ENOUGH(1503, "积分不足"),
-    BJ_INVALID_BET(1504, "下注金额无效"),
-    BJ_ACTION_NOT_ALLOWED(1505, "当前不可执行此操作"),
-    BJ_CONVERT_LIMIT(1506, "超出每日转出上限"),
-    BJ_CONVERT_INSUFFICIENT(1507, "可转出积分不足"),
-    BJ_POOL_EXHAUSTED(1508, "今日积分池已耗尽"),
+    BJ_GAME_IN_PROGRESS(1501, "error.bjGameInProgress"),
+    BJ_NO_ACTIVE_GAME(1502, "error.bjNoActiveGame"),
+    BJ_CHIPS_NOT_ENOUGH(1503, "error.bjChipsNotEnough"),
+    BJ_INVALID_BET(1504, "error.bjInvalidBet"),
+    BJ_ACTION_NOT_ALLOWED(1505, "error.bjActionNotAllowed"),
+    BJ_CONVERT_LIMIT(1506, "error.bjConvertLimit"),
+    BJ_CONVERT_INSUFFICIENT(1507, "error.bjConvertInsufficient"),
+    BJ_POOL_EXHAUSTED(1508, "error.bjPoolExhausted"),
 
     // Crypto错误码 1600+
-    CRYPTO_PRICE_UNAVAILABLE(1601, "无法获取实时价格"),
-    CRYPTO_SYMBOL_INVALID(1602, "交易对无效"),
-    TRADE_STEP_INVALID(1603, "数量不符合最小交易步长"),
-    TRADE_MIN_NOTIONAL(1604, "下单金额低于最小名义额"),
+    CRYPTO_PRICE_UNAVAILABLE(1601, "error.cryptoPriceUnavailable"),
+    CRYPTO_SYMBOL_INVALID(1602, "error.cryptoSymbolInvalid"),
+    TRADE_STEP_INVALID(1603, "error.tradeStepInvalid"),
+    TRADE_MIN_NOTIONAL(1604, "error.tradeMinNotional"),
 
     // Mines错误码 1700+
-    MINES_GAME_IN_PROGRESS(1701, "有未完成的矿工游戏"),
-    MINES_NO_ACTIVE_GAME(1702, "没有进行中的矿工游戏"),
-    MINES_BALANCE_NOT_ENOUGH(1703, "余额不足"),
-    MINES_INVALID_BET(1704, "下注金额无效"),
-    MINES_INVALID_CELL(1705, "格子编号无效"),
-    MINES_CELL_ALREADY_REVEALED(1706, "该格子已翻开"),
-    MINES_MUST_REVEAL_FIRST(1707, "至少翻开一个格子才能提现"),
+    MINES_GAME_IN_PROGRESS(1701, "error.minesGameInProgress"),
+    MINES_NO_ACTIVE_GAME(1702, "error.minesNoActiveGame"),
+    MINES_BALANCE_NOT_ENOUGH(1703, "error.minesBalanceNotEnough"),
+    MINES_INVALID_BET(1704, "error.minesInvalidBet"),
+    MINES_INVALID_CELL(1705, "error.minesInvalidCell"),
+    MINES_CELL_ALREADY_REVEALED(1706, "error.minesCellAlreadyRevealed"),
+    MINES_MUST_REVEAL_FIRST(1707, "error.minesMustRevealFirst"),
 
     // Futures错误码 1750+
-    FUTURES_POSITION_NOT_FOUND(1750, "仓位不存在"),
-    FUTURES_INSUFFICIENT_BALANCE(1751, "余额不足"),
-    FUTURES_INVALID_LEVERAGE(1752, "杠杆倍数无效"),
-    FUTURES_INVALID_QUANTITY(1753, "数量无效"),
-    FUTURES_INVALID_STOP_LOSS(1754, "止损价无效"),
-    FUTURES_INVALID_TAKE_PROFIT(1757, "止盈价无效"),
-    FUTURES_SPLIT_LIMIT(1758, "分拆目标最多4个"),
-    FUTURES_POSITION_CLOSED(1755, "仓位已关闭"),
-    FUTURES_LIQUIDATED(1756, "仓位已强平"),
-    FUTURES_SYMBOL_NOT_CONFIGURED(1759, "永续合约该币种未配置档位"),
-    FUTURES_MARGIN_TOO_LOW(1760, "减少后保证金不足"),
-    FUTURES_CROSS_MARGIN_ADJUST(1761, "全仓仓位不支持调整保证金"),
+    FUTURES_POSITION_NOT_FOUND(1750, "error.futuresPositionNotFound"),
+    FUTURES_INSUFFICIENT_BALANCE(1751, "error.futuresInsufficientBalance"),
+    FUTURES_INVALID_LEVERAGE(1752, "error.futuresInvalidLeverage"),
+    FUTURES_INVALID_QUANTITY(1753, "error.futuresInvalidQuantity"),
+    FUTURES_INVALID_STOP_LOSS(1754, "error.futuresInvalidStopLoss"),
+    FUTURES_INVALID_TAKE_PROFIT(1757, "error.futuresInvalidTakeProfit"),
+    FUTURES_SPLIT_LIMIT(1758, "error.futuresSplitLimit"),
+    FUTURES_POSITION_CLOSED(1755, "error.futuresPositionClosed"),
+    FUTURES_LIQUIDATED(1756, "error.futuresLiquidated"),
+    FUTURES_SYMBOL_NOT_CONFIGURED(1759, "error.futuresSymbolNotConfigured"),
+    FUTURES_MARGIN_TOO_LOW(1760, "error.futuresMarginTooLow"),
+    FUTURES_CROSS_MARGIN_ADJUST(1761, "error.futuresCrossMarginAdjust"),
     // 逐仓开仓/现货买入/钱包划转不够也抛它——全仓占用的钱谁都不能动，文案别只说"全仓"
-    FUTURES_CROSS_AVAILABLE_NOT_ENOUGH(1762, "可用余额不足，全仓仓位占用中"),
-    FUTURES_LEVERAGE_ONLY_UP(1763, "逐仓持仓杠杆只能调高，补保证金请用追加保证金"),
-    FUTURES_LEVERAGE_MISMATCH(1764, "杠杆与该币现有仓位不一致，请先调整杠杆"),
-    FUTURES_MARGIN_MODE_CONFLICT(1765, "保证金模式与该币现有仓位不一致"),
+    FUTURES_CROSS_AVAILABLE_NOT_ENOUGH(1762, "error.futuresCrossAvailableNotEnough"),
+    FUTURES_LEVERAGE_ONLY_UP(1763, "error.futuresLeverageOnlyUp"),
+    FUTURES_LEVERAGE_MISMATCH(1764, "error.futuresLeverageMismatch"),
+    FUTURES_MARGIN_MODE_CONFLICT(1765, "error.futuresMarginModeConflict"),
 
     // VideoPoker错误码 1851+
-    VP_GAME_IN_PROGRESS(1851, "有未完成的视频扑克"),
-    VP_NO_ACTIVE_GAME(1852, "没有进行中的视频扑克"),
-    VP_BALANCE_NOT_ENOUGH(1853, "余额不足"),
-    VP_INVALID_BET(1854, "下注金额无效"),
-    VP_INVALID_HOLD(1855, "HOLD位置无效"),
+    VP_GAME_IN_PROGRESS(1851, "error.vpGameInProgress"),
+    VP_NO_ACTIVE_GAME(1852, "error.vpNoActiveGame"),
+    VP_BALANCE_NOT_ENOUGH(1853, "error.vpBalanceNotEnough"),
+    VP_INVALID_BET(1854, "error.vpInvalidBet"),
+    VP_INVALID_HOLD(1855, "error.vpInvalidHold"),
 
     // Prediction错误码 1900+
-    PREDICTION_ROUND_LOCKED(1900, "回合已锁定"),
-    PREDICTION_ROUND_NOT_FOUND(1901, "回合不存在"),
-    PREDICTION_BET_NOT_FOUND(1902, "下注不存在"),
-    PREDICTION_PRICE_UNAVAILABLE(1903, "无法获取BTC价格"),
-    PREDICTION_AMOUNT_INVALID(1904, "金额无效"),
+    PREDICTION_ROUND_LOCKED(1900, "error.predictionRoundLocked"),
+    PREDICTION_ROUND_NOT_FOUND(1901, "error.predictionRoundNotFound"),
+    PREDICTION_BET_NOT_FOUND(1902, "error.predictionBetNotFound"),
+    PREDICTION_PRICE_UNAVAILABLE(1903, "error.predictionPriceUnavailable"),
+    PREDICTION_AMOUNT_INVALID(1904, "error.predictionAmountInvalid"),
 
     // 钱包错误码 1950+
-    GAME_BALANCE_NOT_ENOUGH(1950, "游戏钱包余额不足"),
-    WALLET_TRANSFER_INVALID(1951, "划转金额无效"),
+    GAME_BALANCE_NOT_ENOUGH(1950, "error.gameBalanceNotEnough"),
+    WALLET_TRANSFER_INVALID(1951, "error.walletTransferInvalid"),
 
     // 账户重置错误码 2000+（1200/1600 段已被杠杆与 Crypto 占用）
-    RESET_TOO_FREQUENT(2001, "每周只能重置一次账户"),
-    RESET_NOT_ALLOWED(2002, "该账户不可重置"),
+    RESET_TOO_FREQUENT(2001, "error.resetTooFrequent"),
+    RESET_NOT_ALLOWED(2002, "error.resetNotAllowed"),
 
     // 留言板错误码 2100+
-    COMMENT_MUTED(2101, "你已被禁言"),
-    COMMENT_CONTENT_INVALID(2102, "评论内容为空或超过500字"),
-    COMMENT_TOO_FREQUENT(2103, "评论过于频繁，请稍后再试"),
-    COMMENT_NOT_FOUND(2104, "评论不存在或已删除"),
-    COMMENT_ALREADY_VOTED(2105, "你已经表过态了"),
+    COMMENT_MUTED(2101, "error.commentMuted"),
+    COMMENT_CONTENT_INVALID(2102, "error.commentContentInvalid"),
+    COMMENT_TOO_FREQUENT(2103, "error.commentTooFrequent"),
+    COMMENT_NOT_FOUND(2104, "error.commentNotFound"),
+    COMMENT_ALREADY_VOTED(2105, "error.commentAlreadyVoted"),
 
     // 研判工作台错误码 2200+（1600 段已被 Crypto 占用，别再往那儿塞）
-    LLM_CONFIG_MISSING(2201, "尚未配置 LLM 端点"),
-    LLM_CONFIG_INVALID(2202, "LLM 配置无法建立连接"),
-    CHAT_ALREADY_RUNNING(2203, "你已有一轮对话进行中"),
-    CHAT_CAPACITY_FULL(2204, "当前对话人数已满，请稍后再试"),
-    REPLAY_AI_BUSY(2205, "上一次 AI 分析还在进行中"),
-    CHAT_REGENERATE_UNAVAILABLE(2206, "这条回答无法重新生成");
+    LLM_CONFIG_MISSING(2201, "error.llmConfigMissing"),
+    LLM_CONFIG_INVALID(2202, "error.llmConfigInvalid"),
+    CHAT_ALREADY_RUNNING(2203, "error.chatAlreadyRunning"),
+    CHAT_CAPACITY_FULL(2204, "error.chatCapacityFull"),
+    REPLAY_AI_BUSY(2205, "error.replayAiBusy"),
+    CHAT_REGENERATE_UNAVAILABLE(2206, "error.chatRegenerateUnavailable"),
+    CHAT_MESSAGE_TOO_LONG(2207, "error.chatMessageTooLong"),
+    CHAT_NOTHING_DEFERRED(2208, "error.chatNothingDeferred");
 
     private final int code;
-    private final String msg;
+    /** 界面文案词表的 key，不是文案本身。渲染见 {@code GlobalExceptionHandler} */
+    private final String msgKey;
+
+    private static final Map<Integer, ErrorCode> BY_CODE =
+            Arrays.stream(values()).collect(Collectors.toUnmodifiableMap(ErrorCode::getCode, e -> e));
+
+    /**
+     * 按码反查。跨服务调用（quant 打 sim internal API）收到的只有码，要成文得先找回枚举。
+     * 认不出返回 null——对方比自己新时不该炸，由调用方决定怎么退。
+     */
+    public static ErrorCode of(int code) {
+        return BY_CODE.get(code);
+    }
 }

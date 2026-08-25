@@ -1,9 +1,13 @@
 package com.mawai.wiibquant.agent.chat;
 
 import com.alibaba.fastjson2.JSONObject;
+import com.mawai.wiibcommon.enums.AgentLang;
+import com.mawai.wiibquant.agent.i18n.PromptCatalog;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
+
+import java.util.Map;
 
 /**
  * 对 trader 动手的三个入口，挂在 summarizer 叶子上（与 {@link DeepAnalysisToolkit} 并列）。
@@ -12,8 +16,7 @@ import org.springframework.ai.tool.annotation.ToolParam;
  * 执行走 REST 打到 TraderActionService。所以模型没有能力唤醒、复盘或落库留言——
  * 这正是这层存在的意义，误触最多是多弹一张卡。
  * <p>
- * <b>为什么挂汇总者而不是挂 trader 专家</b>：这三件事是替用户完成请求的收尾动作，
- * 本就该由写最终回答的那个人去做。查询归专家，动手归汇总者。
+ * 挂在汇总者不挂 trader 专家：查询归专家，动手归汇总者——收尾动作由写最终回答的那个人做。
  * <p>
  * 会话号从 {@link ToolRunContext} 取（工具方法体拿不到 RunnableConfig），
  * 而它由 {@link ApprovalGate#passThrough} 在工具边上设进去——闸门虽然只管深研判了，但不能摘。
@@ -25,10 +28,16 @@ public class TraderActionToolkit {
 
     private final WorkbenchRunRegistry runRegistry;
     private final long userId;
+    private final PromptCatalog prompts;
+    /** 回执那句话会被模型原样转述给用户，所以跟语言走；工具是建叶子时造的，语言跟着叶子走 */
+    private final AgentLang lang;
 
-    public TraderActionToolkit(WorkbenchRunRegistry runRegistry, long userId) {
+    public TraderActionToolkit(WorkbenchRunRegistry runRegistry, long userId,
+                               PromptCatalog prompts, AgentLang lang) {
         this.runRegistry = runRegistry;
         this.userId = userId;
+        this.prompts = prompts;
+        this.lang = lang;
     }
 
     @Tool(name = "wake_trader", description = """
@@ -38,7 +47,7 @@ public class TraderActionToolkit {
             why the trigger belongs to the user, not to you.
             Never say the trader has been woken; say the form is open and waiting for them to confirm.""")
     public String wakeTrader() {
-        return openForm("wake", null, "手动唤醒");
+        return openForm("wake", null, "chat.form.wake");
     }
 
     @Tool(name = "review_trader_now", description = """
@@ -47,7 +56,7 @@ public class TraderActionToolkit {
             the user presses themselves. Running it costs one deep-model call.
             Never say the retrospective has run or claim to know what it says; say the form is open.""")
     public String reviewTraderNow() {
-        return openForm("review", null, "复盘");
+        return openForm("review", null, "chat.form.review");
     }
 
     @Tool(name = "leave_note_to_trader", description = """
@@ -59,7 +68,7 @@ public class TraderActionToolkit {
             Never say the note has been saved; say the form is open with your draft in it.""")
     public String leaveNoteToTrader(
             @ToolParam(description =
-                    "The note drafted in the user's own words, <=500 chars, e.g. 今晚有 CPI 数据，仓位放轻一点")
+                    "The note drafted in the user's own words, <=500 chars, e.g. 'CPI print tonight, keep size light'")
             String note,
             @ToolParam(required = false, description =
                     "How many upcoming wake-ups should carry this note, 1-24. Omit for 1 (a one-off remark).")
@@ -68,21 +77,21 @@ public class TraderActionToolkit {
         if (rounds != null) {
             prefill.put("rounds", rounds);
         }
-        return openForm("note", prefill, "留言");
+        return openForm("note", prefill, "chat.form.note");
     }
 
     /**
      * 推一张待填的卡。推不出去要如实回报——补答轮与断连后都没有 SSE 通道，
      * 这时候答"表单已打开"就是一句用户永远兑现不了的话，而它还会落进对话历史。
      */
-    private String openForm(String formType, JSONObject prefill, String label) {
+    private String openForm(String formType, JSONObject prefill, String labelKey) {
         String sessionId = ToolRunContext.sessionId();
         boolean sent = sessionId != null && runRegistry.publishForm(sessionId, formType, prefill);
-        log.info("[TraderAction] 打开{}表单 userId={} session={} sent={}", label, userId, sessionId, sent);
+        log.info("[TraderAction] 打开{}表单 userId={} session={} sent={}", formType, userId, sessionId, sent);
+        Map<String, Object> vars = Map.of("label", prompts.get(lang, labelKey));
         return sent
-                ? outcome(true, label + "表单已在对话里打开，等用户填好按下按钮才会执行")
-                : outcome(false, label + "表单没能打开（这一轮没有可推送的通道）。"
-                        + "请让用户点对话面板顶部的 trader 图标自己打开");
+                ? outcome(true, prompts.get(lang, "chat.form.opened", vars))
+                : outcome(false, prompts.get(lang, "chat.form.failed", vars));
     }
 
     private static String outcome(boolean ok, String message) {

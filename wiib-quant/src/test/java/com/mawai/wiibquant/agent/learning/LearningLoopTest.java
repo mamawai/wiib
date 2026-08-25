@@ -1,5 +1,9 @@
 package com.mawai.wiibquant.agent.learning;
 
+import com.mawai.wiibquant.agent.i18n.LocalizedToolCallbacks;
+import com.mawai.wiibquant.agent.i18n.UserLangResolver;
+import com.mawai.wiibquant.agent.i18n.PromptCatalog;
+import com.mawai.wiibcommon.enums.AgentLang;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
@@ -13,8 +17,6 @@ import com.mawai.wiibquant.mapper.AiTraderDecisionMapper;
 import com.mawai.wiibquant.mapper.AiTraderMapper;
 import com.mawai.wiibquant.mapper.AiTraderPlanMapper;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
-import org.bsc.langgraph4j.prebuilt.MessagesState;
-import org.bsc.langgraph4j.spring.ai.serializer.jackson.SpringAIJacksonStateSerializer;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -36,6 +38,7 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.mock;
@@ -67,14 +70,23 @@ class LearningLoopTest {
     private final ReviewMaterialAssembler assembler = mock(ReviewMaterialAssembler.class);
     private final TraderModelFactory modelFactory = mock(TraderModelFactory.class);
 
+    private final UserLangResolver langResolver = mock(UserLangResolver.class);
+    private final PromptCatalog prompts = new PromptCatalog();
+
     private final LearningRunner runner = new LearningRunner(
-            new PeerInsightService(traderMapper, decisionMapper, planMapper, simTradeClient, assembler),
-            modelFactory, traderMapper, decisionMapper,
-            new SpringAIJacksonStateSerializer<>(MessagesState::new));
+            new PeerInsightService(traderMapper, decisionMapper, planMapper, simTradeClient,
+                    assembler, prompts),
+            modelFactory, traderMapper, decisionMapper, prompts,
+            new LocalizedToolCallbacks(prompts), langResolver);
+
+    {
+        when(langResolver.of(anyLong())).thenReturn(AgentLang.ZH);
+    }
 
     private static AiTrader trader(long id, String name) {
         AiTrader t = new AiTrader();
         t.setId(id);
+        t.setUserId(id);
         t.setName(name);
         t.setStatus(AiTrader.STATUS_RUNNING);
         t.setRoundNo(1);

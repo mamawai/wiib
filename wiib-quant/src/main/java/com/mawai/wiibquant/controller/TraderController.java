@@ -9,7 +9,10 @@ import com.mawai.wiibcommon.entity.AiTraderDecision;
 import com.mawai.wiibcommon.entity.AiTraderPlan;
 import com.mawai.wiibcommon.entity.UserLlmBinding;
 import com.mawai.wiibcommon.entity.UserLlmEndpoint;
+import com.mawai.wiibcommon.enums.ErrorCode;
+import com.mawai.wiibcommon.i18n.MessageCatalog;
 import com.mawai.wiibcommon.util.Result;
+import com.mawai.wiibquant.agent.i18n.UserLangResolver;
 import com.mawai.wiibquant.agent.llm.LlmEndpointService;
 import com.mawai.wiibquant.external.sim.SimTradeClient;
 import com.mawai.wiibquant.agent.trader.TradeRecordService;
@@ -48,6 +51,8 @@ public class TraderController {
     private final LlmEndpointService endpointService;
     private final TraderActionService actionService;
     private final TradeRecordService tradeRecordService;
+    private final UserLangResolver userLangResolver;
+    private final MessageCatalog messages;
 
     // ========== 我的 trader ==========
 
@@ -109,7 +114,7 @@ public class TraderController {
 
     @PostMapping("/prompt-template")
     @Operation(summary = "平台系统提示词预览（与唤醒组装同一份文本）")
-    public Result<String> promptTemplate(@RequestBody PromptPreviewRequest req) {
+    public Result<String> promptTemplate(@CurrentUserId long userId, @RequestBody PromptPreviewRequest req) {
         StpUtil.checkLogin();
         String interval = req.intervalCode() == null || req.intervalCode().isBlank() ? "15m" : req.intervalCode();
         String symbols = req.symbols() == null || req.symbols().isBlank() ? "BTCUSDT" : req.symbols();
@@ -122,7 +127,9 @@ public class TraderController {
         } catch (IllegalArgumentException e) {
             windowText = null; // 预览只是看文本，时段还没填对就按全天预览，保存时才真校验
         }
-        return Result.ok(promptAssembler.platformTemplate(interval, symbols, cfg, windowText));
+        // 预览也按当前用户语言出：MyTrader 页展示的就是这份文本，英文用户不该看到中文模板
+        return Result.ok(promptAssembler.platformTemplate(
+                userLangResolver.of(userId), interval, symbols, cfg, windowText));
     }
 
     /** llmEndpointId：端点库里的一条，空=跟随用户默认端点 */
@@ -266,19 +273,27 @@ public class TraderController {
                 .toList());
     }
 
+    /**
+     * 详情视图：公开视图 + 实时持仓/挂单 + 本局存活计划 + 两份笔记。
+     * memory=reviewer 复盘沉淀的记忆笔记，learningNotes=learning agent 向同侪学的笔记，
+     * 都是 trader 每次唤醒真正读到的东西；lastReviewAt / lastLearnAt 是最近一次成功写笔记的时刻（ms），没有=null。
+     * 两份笔记公开与时间线口径一致：REVIEW 行本就带 memoryAfter 快照，LEARN 行的 reasoning 就是学习笔记全文。
+     */
     public record TraderDetailView(TraderPublicView trader,
                                    List<FuturesPositionDTO> positions,
                                    List<FuturesOrderResponse> pendingOrders,
-                                   List<AiTraderPlan> plans) {
+                                   List<AiTraderPlan> plans,
+                                   String memory, String learningNotes,
+                                   Long lastReviewAt, Long lastLearnAt) {
     }
 
     @GetMapping("/{id}")
-    @Operation(summary = "trader详情（当前持仓/挂单实时现查 + 各持仓的交易计划）")
+    @Operation(summary = "trader详情（当前持仓/挂单实时现查 + 各持仓的交易计划 + 复盘/学习笔记）")
     public Result<TraderDetailView> detail(@PathVariable long id) {
         long viewer = StpUtil.getLoginIdAsLong();
         AiTrader t = traderService.byId(id);
         if (t == null) {
-            return Result.fail("trader不存在");
+            return Result.fail(ErrorCode.SYSTEM_ERROR.getCode(), messages.get("trader.notFound"));
         }
         List<FuturesPositionDTO> positions = List.of();
         List<FuturesOrderResponse> pending = List.of();
@@ -289,17 +304,21 @@ public class TraderController {
             log.warn("[Trader] 详情持仓查询失败 traderId={} msg={}", id, e.getMessage());
         }
         return Result.ok(new TraderDetailView(publicView(t, viewer, modelName(t)), positions, pending,
-                traderService.plans(t)));
+                traderService.plans(t), t.getMemory(), t.getLearningNotes(),
+                traderService.latestNoteTime(id, AiTraderDecision.KIND_REVIEW),
+                traderService.latestNoteTime(id, AiTraderDecision.KIND_LEARN)));
     }
 
     @GetMapping("/{id}/decisions")
-    @Operation(summary = "决策时间线（倒序分页，before传上一页最旧wakeTime）")
+    @Operation(summary = "决策时间线（倒序分页，before传上一页最旧wakeTime；from/to 为 wakeTime 区间 [from,to)）")
     public Result<List<AiTraderDecision>> decisions(@PathVariable long id,
                                                     @RequestParam(defaultValue = "50") int limit,
                                                     @RequestParam(required = false) Long before,
-                                                    @RequestParam(required = false) Integer round) {
+                                                    @RequestParam(required = false) Integer round,
+                                                    @RequestParam(required = false) Long from,
+                                                    @RequestParam(required = false) Long to) {
         StpUtil.checkLogin();
-        return Result.ok(traderService.decisions(id, limit, before, round));
+        return Result.ok(traderService.decisions(id, limit, before, round, from, to));
     }
 
     @GetMapping("/{id}/trades")
@@ -308,7 +327,7 @@ public class TraderController {
         StpUtil.checkLogin();
         AiTrader t = traderService.byId(id);
         if (t == null) {
-            return Result.fail("trader不存在");
+            return Result.fail(ErrorCode.SYSTEM_ERROR.getCode(), messages.get("trader.notFound"));
         }
         try {
             return Result.ok(tradeRecordService.closedTrades(t));
@@ -329,7 +348,7 @@ public class TraderController {
         StpUtil.checkLogin();
         AiTrader t = traderService.byId(id);
         if (t == null) {
-            return Result.fail("trader不存在");
+            return Result.fail(ErrorCode.SYSTEM_ERROR.getCode(), messages.get("trader.notFound"));
         }
         return Result.ok(traderService.equityCurve(t, round).stream()
                 .map(d -> new EquityPoint(d.getWakeTime(), d.getEquity()))

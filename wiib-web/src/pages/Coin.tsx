@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { TrendingUp, TrendingDown, ChevronRight, ChevronLeft } from 'lucide-react';
 import { cryptoApi, cryptoOrderApi, futuresApi } from '../api';
 import { useUserStore } from '../stores/userStore';
@@ -44,6 +45,7 @@ export function CoinRoute() {
 }
 
 export function Coin({ symbol = DEFAULT_SYMBOL }: { symbol?: string }) {
+  const { t } = useTranslation('market');
   const cfg = getCoin(symbol);
   const Icon = cfg.icon;
   // 返回目标写死对应列表页而不是 navigate(-1)：后者在直接打开深链时会一路退出 App
@@ -63,8 +65,8 @@ export function Coin({ symbol = DEFAULT_SYMBOL }: { symbol?: string }) {
   useEffect(() => {
     futuresApi.brackets()
       .then(setFuturesBracketsMap)
-      .catch(() => toast('合约档位数据加载失败，请刷新页面重试', 'error'));
-  }, [toast]);
+      .catch(() => toast(t('coin.bracketsFailed'), 'error'));
+  }, [toast, t]);
 
   // 实物换算币种: USD/CNY 汇率
   const [usdCny, setUsdCny] = useState(0);
@@ -132,13 +134,13 @@ export function Coin({ symbol = DEFAULT_SYMBOL }: { symbol?: string }) {
     return futPositions.map(p => ({
       id: p.id,
       side: p.side,
-      label: `${p.side === 'LONG' ? '多' : '空'} ${p.leverage}x`,
+      label: `${p.side === 'LONG' ? t('coin.long') : t('coin.short')} ${p.leverage}x`,
       entry: p.entryPrice,
       tps: (p.takeProfits ?? []).map(t => t.price),
       sls: (p.stopLosses ?? []).map(s => s.price),
       liq: p.liquidationPrice > 0 ? p.liquidationPrice : null,
     }));
-  }, [futPositions, isFuturesMode]);
+  }, [futPositions, isFuturesMode, t]);
 
   // 实时价：合约用标记/成交价，现货用现货价；流未到前用 REST 最新收盘兜底（面板可用不至于全 0）
   const livePrice = isFuturesMode ? (tick?.fp ?? tick?.price) : tick?.price;
@@ -189,7 +191,7 @@ export function Coin({ symbol = DEFAULT_SYMBOL }: { symbol?: string }) {
           <button
             type="button"
             onClick={() => navigate(backTo)}
-            aria-label="返回列表"
+            aria-label={t('coin.backToList')}
             className="shrink-0 h-9 w-9 -ml-1.5 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-surface-hover transition-colors"
           >
             <ChevronLeft className="w-5 h-5" />
@@ -199,14 +201,14 @@ export function Coin({ symbol = DEFAULT_SYMBOL }: { symbol?: string }) {
             <div className="flex items-center gap-2 flex-wrap">
               <span className="text-lg sm:text-xl font-extrabold tracking-tight">{cfg.pair}</span>
               <div className="flex items-center gap-2 px-2.5 py-0.5 rounded-full border border-border bg-card text-[10px]">
-                <span className="flex items-center gap-1.5" title="现货行情">
+                <span className="flex items-center gap-1.5" title={t('coin.spotFeed')}>
                   <span className={`inline-block w-1.5 h-1.5 rounded-full ${isFuturesMode ? 'bg-muted-foreground/35' : (tick?.ws ? 'led' : 'bg-destructive animate-pulse')}`} />
-                  <span className={`font-semibold ${isFuturesMode ? 'text-muted-foreground' : 'text-foreground'}`}>现货</span>
+                  <span className={`font-semibold ${isFuturesMode ? 'text-muted-foreground' : 'text-foreground'}`}>{t('coin.spot')}</span>
                 </span>
                 <span className="w-px h-2.5 bg-border" />
-                <span className="flex items-center gap-1.5" title="合约行情">
+                <span className="flex items-center gap-1.5" title={t('coin.futuresFeed')}>
                   <span className={`inline-block w-1.5 h-1.5 rounded-full ${isFuturesMode ? (tick?.fws ? 'led' : 'bg-destructive animate-pulse') : 'bg-muted-foreground/35'}`} />
-                  <span className={`font-semibold ${isFuturesMode ? 'text-foreground' : 'text-muted-foreground'}`}>合约</span>
+                  <span className={`font-semibold ${isFuturesMode ? 'text-foreground' : 'text-muted-foreground'}`}>{t('coin.futures')}</span>
                 </span>
               </div>
             </div>
@@ -215,7 +217,7 @@ export function Coin({ symbol = DEFAULT_SYMBOL }: { symbol?: string }) {
               {/* TradFi 标的：合约 7×24，但流动性跟着标的股票市场走，给个当前时段入口 */}
               {cfg.market && <MarketSessionBadge market={cfg.market} />}
               {cfg.unitLabel && (
-                <span className="text-[11px] text-warning font-semibold">1枚 = 1盎司黄金（{cfg.unitFactor}{cfg.unitLabel}）</span>
+                <span className="text-[11px] text-warning font-semibold">{t('coin.goldUnit', { factor: cfg.unitFactor, unit: cfg.unitLabel })}</span>
               )}
             </div>
           </div>
@@ -229,7 +231,10 @@ export function Coin({ symbol = DEFAULT_SYMBOL }: { symbol?: string }) {
               <div className="flex items-center gap-2 flex-wrap">
                 <span className={`num inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-md ${isUp ? 'bg-gain/10 text-gain' : 'bg-loss/10 text-loss'}`}>
                   {isUp ? <TrendingUp className="w-3.5 h-3.5" /> : <TrendingDown className="w-3.5 h-3.5" />}
-                  {isUp ? '+' : ''}{fmtPrice(change)}（{isUp ? '+' : ''}{changePct.toFixed(2)}% · 24h）
+                  {t('coin.changeBadge', {
+                    change: `${isUp ? '+' : ''}${fmtPrice(change)}`,
+                    pct: `${isUp ? '+' : ''}${changePct.toFixed(2)}`,
+                  })}
                 </span>
                 {cfg.unitLabel && usdCny > 0 && (
                   <span className="num text-xs text-warning font-semibold">
@@ -255,7 +260,7 @@ export function Coin({ symbol = DEFAULT_SYMBOL }: { symbol?: string }) {
           <Card className="flex-1 flex flex-col -mx-2 md:mx-0 rounded-md md:rounded-lg">
             <CardHeader className="pb-2 pt-4 px-4">
               <div className="flex items-center justify-between">
-                <CardTitle>走势</CardTitle>
+                <CardTitle>{t('coin.chartTitle')}</CardTitle>
                 {/* 6 个档位并排（5 周期 + 高级）：手机端收窄 padding/字号硬塞进一行，不换行；sm 以上恢复原尺寸。
                     py-2 不动，触摸高度保持 32px */}
                 <div className="flex rounded-md border border-border overflow-hidden divide-x divide-border">
@@ -265,7 +270,7 @@ export function Coin({ symbol = DEFAULT_SYMBOL }: { symbol?: string }) {
                     </button>
                   ))}
                   <button onClick={() => setActiveTab(TV_TAB)} className={tabCls(activeTab === TV_TAB)}>
-                    高级
+                    {t('coin.advanced')}
                   </button>
                 </div>
               </div>
@@ -305,8 +310,8 @@ export function Coin({ symbol = DEFAULT_SYMBOL }: { symbol?: string }) {
               <div className="flex items-center gap-3">
                 <span className="text-lg">🔮</span>
                 <div className="text-left">
-                  <div className="text-sm font-semibold">BTC 5分钟涨跌预测 <span className="text-[10px] font-bold text-primary ml-1">NEW</span></div>
-                  <div className="text-[11px] text-muted-foreground">基于 Polymarket 实时概率，预测BTC短期走势</div>
+                  <div className="text-sm font-semibold">{t('coin.predictTitle')} <span className="text-[10px] font-bold text-primary ml-1">NEW</span></div>
+                  <div className="text-[11px] text-muted-foreground">{t('coin.predictDesc')}</div>
                 </div>
               </div>
               <ChevronRight className="w-4 h-4 text-muted-foreground group-hover:text-foreground transition-colors" />
@@ -331,9 +336,9 @@ export function Coin({ symbol = DEFAULT_SYMBOL }: { symbol?: string }) {
                       <Icon className={`w-6 h-6 ${cfg.colorClass}`} />
                       <div>
                         <span className="text-base font-bold">{cfg.name}</span>
-                        <span className="num text-sm font-semibold text-muted-foreground ml-2">{position.quantity} 个</span>
+                        <span className="num text-sm font-semibold text-muted-foreground ml-2">{t('coin.units', { qty: position.quantity })}</span>
                         {cfg.unitLabel && (
-                          <span className="text-xs font-semibold text-warning ml-1.5">约合 {(position.quantity * cfg.unitFactor!).toFixed(1)} {cfg.unitLabel}</span>
+                          <span className="text-xs font-semibold text-warning ml-1.5">{t('coin.approxUnit', { value: (position.quantity * cfg.unitFactor!).toFixed(1), unit: cfg.unitLabel })}</span>
                         )}
                       </div>
                     </div>
@@ -347,11 +352,11 @@ export function Coin({ symbol = DEFAULT_SYMBOL }: { symbol?: string }) {
                     </div>
                   </div>
                   <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-xs font-semibold text-muted-foreground pt-1">
-                    <span>均价 <span className="num text-foreground">${fmtPrice(position.avgCost)}</span></span>
-                    <span>现价 <span className="num text-foreground">${fmtPrice(currentPrice)}</span></span>
-                    <span>市值 <span className="num text-foreground">${fmtNum(currentPrice * position.quantity)}</span></span>
-                    {position.frozenQuantity > 0 && <span>冻结 <span className="num text-warning">{position.frozenQuantity}</span></span>}
-                    {position.totalDiscount > 0 && <span>已省 <span className="num text-warning">${fmtNum(position.totalDiscount)}</span></span>}
+                    <span>{t('coin.avgCost')} <span className="num text-foreground">${fmtPrice(position.avgCost)}</span></span>
+                    <span>{t('coin.lastPrice')} <span className="num text-foreground">${fmtPrice(currentPrice)}</span></span>
+                    <span>{t('coin.marketValue')} <span className="num text-foreground">${fmtNum(currentPrice * position.quantity)}</span></span>
+                    {position.frozenQuantity > 0 && <span>{t('coin.frozen')} <span className="num text-warning">{position.frozenQuantity}</span></span>}
+                    {position.totalDiscount > 0 && <span>{t('coin.saved')} <span className="num text-warning">${fmtNum(position.totalDiscount)}</span></span>}
                   </div>
                 </div>
               </div>

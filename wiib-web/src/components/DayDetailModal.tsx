@@ -1,14 +1,15 @@
+import { useTranslation } from 'react-i18next';
 import { Dialog, DialogContent, DialogHeader } from './ui/dialog';
 import { cn, fmtMoney } from '../lib/utils';
 import type { AssetSnapshot } from '../types';
 
-/** 五分类日差，字段直接来自快照 DTO，不用再算 */
+/** 五分类日差，字段直接来自快照 DTO，不用再算。数组在组件外，标签存词表 key 渲染时再查 */
 const BUCKETS = [
-  { key: 'dailyBstockProfit', label: '股票' },
-  { key: 'dailyCryptoProfit', label: '币' },
-  { key: 'dailyCommodityProfit', label: '大宗' },
-  { key: 'dailyPredictionProfit', label: '预测' },
-  { key: 'dailyGameProfit', label: '游戏' },
+  { key: 'dailyBstockProfit', labelKey: 'dayDetail.stocks' },
+  { key: 'dailyCryptoProfit', labelKey: 'dayDetail.crypto' },
+  { key: 'dailyCommodityProfit', labelKey: 'dayDetail.commodity' },
+  { key: 'dailyPredictionProfit', labelKey: 'dayDetail.prediction' },
+  { key: 'dailyGameProfit', labelKey: 'dayDetail.games' },
 ] as const;
 
 interface Props {
@@ -24,11 +25,16 @@ interface Props {
  * 数据全部来自父组件已有的当月快照，弹窗自己不发请求。
  */
 export function DayDetailModal({ date, snapshot, onClose }: Props) {
+  // hook 得在提前 return 之前调，否则 date 由 null 变成有值时 hook 调用顺序就变了
+  const { t, i18n } = useTranslation('home');
+
   if (!date) return null;
 
   const pnl = snapshot?.dailyProfit ?? 0;
   const up = pnl >= 0;
-  const title = new Date(`${date}T00:00:00`).toLocaleDateString('zh-CN', {
+  // 月份名/星期名跟着界面语言走，钉死 zh-CN 会在英文界面漏出"8月20日星期三"。
+  // 取 resolvedLanguage：language 可能是没落在支持列表里的原始值（与 lib/utils.ts 同口径）
+  const title = new Date(`${date}T00:00:00`).toLocaleDateString(i18n.resolvedLanguage ?? i18n.language, {
     year: 'numeric', month: 'long', day: 'numeric', weekday: 'long',
   });
 
@@ -46,16 +52,16 @@ export function DayDetailModal({ date, snapshot, onClose }: Props) {
             </span>
           )}
         </div>
-        <div className="text-[11px] text-muted-foreground mt-0.5">当日盈亏 · 全账户 · 快照口径仅供参考</div>
+        <div className="text-[11px] text-muted-foreground mt-0.5">{t('dayDetail.note')}</div>
       </DialogHeader>
 
       <DialogContent className="pt-3">
         <div className="space-y-2">
-          {BUCKETS.map(({ key, label }) => {
+          {BUCKETS.map(({ key, labelKey }) => {
             const v = snapshot?.[key] ?? 0;
             return (
               <div key={key} className="flex items-baseline justify-between">
-                <span className="text-xs text-muted-foreground">{label}</span>
+                <span className="text-xs text-muted-foreground">{t(labelKey)}</span>
                 {v === 0 ? (
                   <span className="num text-sm text-muted-foreground/40">—</span>
                 ) : (

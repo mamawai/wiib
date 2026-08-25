@@ -623,12 +623,22 @@ export type WorkbenchEvent =
   // 模型请求给用户弹一张待填的表单卡；执行权在用户点击，模型只能开卡不能动手。
   // prefill 是模型草拟的初值（留言正文与轮次），可能整个缺席
   | { type: 'form_request'; form: TraderFormKind; prefill?: Record<string, unknown> }
+  // 行为分析报告：整份结构化数据只走这条通道给前端渲染成卡片，模型手里是裁剪版
+  //（少了 overview.trend 那 30 天逐日快照——对模型是噪音，对卡片是那条资产曲线）
+  | { type: 'behavior_report'; report: BehaviorAnalysisReport }
   // deferred=true：让位收尾（专家还在取数就来了新消息），answer 只是过渡话术；
   // 真答案由后端补答轮落历史，前端靠 status 轮询等它落库后整体回放补显
   // meta 是本轮读数，让位收尾那条 done 不带（答案还没出，无账可报）。
   // cancelled=用户中断，answer 是"半截 + （已中断）"的定稿，前端要整段用它覆盖屏上那半截
-  | { type: 'done'; sessionId: string; answer: string; deferred?: boolean; cancelled?: boolean; meta?: TurnMeta }
+  // deferred=让位收尾（answer 只是过渡话术，question=被让位的原问题）；pending=此刻会话还欠着补答，前端空闲时发起补答轮
+  | { type: 'done'; sessionId: string; answer: string; deferred?: boolean; question?: string; cancelled?: boolean; pending?: boolean; meta?: TurnMeta }
   | { type: 'error'; message: string };
+
+/**
+ * 功能按钮直发的一轮带的意图（与后端 ChatIntent 同名同值）。
+ * 带它的一轮后端不派专家，直接让汇总者调对应工具——按钮已经说明了要什么，不必再让路由猜。
+ */
+export type ChatIntent = 'BEHAVIOR';
 
 /** trader 动作面板的三张卡 */
 export type TraderFormKind = 'note' | 'wake' | 'review';
@@ -684,6 +694,12 @@ export interface StrategyAccountView {
   closedPositions: StrategyClosedPosition[];
 }
 
+/** 会话运行状态（/ai/workbench/sessions/{id}/status）：running=有轮在跑；pending=欠着补答 */
+export interface WorkbenchSessionStatus {
+  running: boolean;
+  pending: boolean;
+}
+
 /** 工作台历史会话摘要（/ai/workbench/sessions） */
 export interface WorkbenchSessionSummary {
   sessionId: string;
@@ -717,6 +733,12 @@ export interface WorkbenchChatMessage {
   createdAt: number;
   /** 只有 assistant 行有；user 行与加列之前的老数据是 null */
   meta?: TurnMeta | null;
+  /**
+   * 后端自己写进历史的特殊行的码（服务端 ChatRowKind），普通行为 null：
+   * deferred=补答行（不给重新生成）、hitlResume=批准后自动补发的续跑指令（还原成过程轨）。
+   * 这两种行的正文是词表文案、跟着语言变，所以判定归后端，前端只认码。
+   */
+  kind?: 'deferred' | 'hitlResume' | null;
 }
 
 /** 我的对话端点配置（BYOK）。key 只回尾 4 位，明文不出服务端 */
@@ -882,20 +904,30 @@ export interface TradeRecordView {
   closedPnl: number | null;
   openedAt: number;
   closedAt: number;
-  /** 止盈带走 / 止损带走 / 主动平仓 / 强平 / UNKNOWN（与复盘素材同一套推断） */
-  closeManner: string;
+  /**
+   * 了结方式的语言无关码：takeProfit / stopLoss / manual / liquidated / UNKNOWN
+   * （与复盘素材同一套推断）。文案查 ai:trade.closeManner.*，配色也认这个码
+   */
+  closeMannerKey: string;
   plan: AiTraderPlanView | null;
   openDecision: TradeDecisionRef | null;
   /** 只有主动平仓才有：止损/止盈带走的依据就是计划里的原始止损/目标 */
   closeDecision: TradeDecisionRef | null;
 }
 
-/** trader 详情：公开视图 + 实时持仓/挂单 + 各持仓交易计划 */
+/** trader 详情：公开视图 + 实时持仓/挂单 + 本局生效中的交易计划 + 两份笔记 */
 export interface TraderDetailView {
   trader: TraderPublicView;
   positions: FuturesPosition[];
   pendingOrders: FuturesOrder[];
   plans: AiTraderPlanView[];
+  /** 记忆笔记：reviewer 每日复盘沉淀的，跨局累积；trader 每次唤醒都读 */
+  memory: string | null;
+  /** 学习笔记：learning agent 向同侪学的，跨局累积；trader 每次唤醒都读 */
+  learningNotes: string | null;
+  /** 最近一次成功复盘 / 学习的 wakeTime(ms)，没有=null */
+  lastReviewAt: number | null;
+  lastLearnAt: number | null;
 }
 
 /** 每次唤醒一条决策（竞技场时间线） */
@@ -958,6 +990,8 @@ export interface NewsFlashItem {
   url: string;
   /** 形如 "2026-07-09 00:30:12" */
   createTime: string;
+  /** true=标题/正文是机器译文（源是中文快讯）；取哪份由后端按用户语言定，前端只负责打标 */
+  translated: boolean;
 }
 
 // ========== 留言板与通知 ==========
@@ -1099,15 +1133,6 @@ export interface PublicTrade {
 
 // ==================== 可视化回测页 ====================
 
-export interface BacktestStrategyMeta {
-  id: string;
-  name: string;
-  desc: string;
-  symbols: string[];
-  /** 附加提示（如 LIQFADE 依赖研究性回填数据）；无则 null */
-  note: string | null;
-}
-
 export interface BacktestTaskStatus {
   taskId: string;
   state: 'QUEUED' | 'RUNNING' | 'DONE' | 'FAILED';
@@ -1234,3 +1259,4 @@ export interface BacktestResultPayload {
   /** 降采样权益曲线：[closeTimeMs, equity] */
   equity: [number, number][];
 }
+

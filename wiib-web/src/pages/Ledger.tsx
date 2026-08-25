@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import i18n from '../i18n';
 import { ledgerApi } from '../api';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
@@ -14,17 +16,30 @@ import type { LedgerEntry, LedgerBizTypeOption, LedgerWallet } from '../types';
 const PAGE_SIZE = 30;
 
 /**
- * 钱包中文名。这份映射刻意留在前端——后端只下发枚举名，
+ * 钱包名的词表 key。这份映射刻意留在前端——后端只下发枚举名，
  * 不像 bizType 那样平铺 label（见 LedgerControllerTest：wallet 没有 label 也不需要一份）。
  */
 const WALLET_LABEL: Record<LedgerWallet, string> = {
-  BALANCE: '余额',
-  FROZEN: '冻结',
-  GAME: '游戏',
-  LOAN_PRINCIPAL: '借款本金',
-  LOAN_INTEREST: '应计利息',
-  POSITION_MARGIN: '仓位保证金',
+  BALANCE: 'wallet.balance',
+  FROZEN: 'wallet.frozen',
+  GAME: 'wallet.game',
+  LOAN_PRINCIPAL: 'wallet.loanPrincipal',
+  LOAN_INTEREST: 'wallet.loanInterest',
+  POSITION_MARGIN: 'wallet.positionMargin',
 };
+
+/**
+ * 账单业务类型的下拉分组名。后端下发的 group 是中文串，这里按枚举名前缀反推一个 key 去查词表——
+ * 跟 LedgerBizType.getGroup() 是同一套前缀规则，那边加了新分组这边也要跟着补一行。
+ */
+function bizGroupKey(bizName: string): string {
+  if (/^(FUTURES_|FUNDING_|CROSS_)/.test(bizName)) return 'futures';
+  if (/^(SPOT_|BSTOCK_)/.test(bizName)) return 'spot';
+  if (/^(MINES_|POKER_|PREDICTION_|BLACKJACK_)/.test(bizName)) return 'games';
+  if (/^WALLET_TRANSFER_/.test(bizName)) return 'transfer';
+  if (/^(MARGIN_|CASH_)/.test(bizName)) return 'margin';
+  return 'other';
+}
 
 /**
  * 借款本金/应计利息这两个钱包，数字变大 = 欠得更多。
@@ -48,8 +63,9 @@ function dayKey(ts: string): string {
 function dayLabel(key: string): string {
   const today = dayKey(new Date().toISOString());
   const yesterday = dayKey(new Date(Date.now() - 86400_000).toISOString());
-  if (key === today) return '今天';
-  if (key === yesterday) return '昨天';
+  // 词表必须在函数体里现查：存成模块级常量的话切语言后不会变
+  if (key === today) return i18n.t('portfolio:ledger.today');
+  if (key === yesterday) return i18n.t('portfolio:ledger.yesterday');
   return key;
 }
 
@@ -66,6 +82,7 @@ function groupByDay(entries: LedgerEntry[]): { key: string; rows: LedgerEntry[] 
 }
 
 function EntryRow({ entry }: { entry: LedgerEntry }) {
+  const { t } = useTranslation('portfolio');
   const up = entry.delta > 0;
   return (
     <div className="flex items-center gap-3 px-4 py-3 border-b border-border/25 last:border-b-0 hover:bg-accent/25 transition-colors">
@@ -75,9 +92,12 @@ function EntryRow({ entry }: { entry: LedgerEntry }) {
 
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
-          <span className="text-[13px] font-semibold truncate">{entry.bizTypeLabel}</span>
+          {/* 类型文案走前端词表，认不出的新枚举兜底显示后端下发的 label */}
+          <span className="text-[13px] font-semibold truncate">
+            {t('biz.' + entry.bizType, { defaultValue: entry.bizTypeLabel })}
+          </span>
           <span className="text-[10px] px-1.5 py-0.5 rounded bg-secondary text-muted-foreground shrink-0">
-            {WALLET_LABEL[entry.wallet]}
+            {t(WALLET_LABEL[entry.wallet])}
           </span>
           {entry.symbol && (
             <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary font-medium shrink-0">
@@ -88,7 +108,7 @@ function EntryRow({ entry }: { entry: LedgerEntry }) {
         {(entry.remark || entry.fee != null) && (
           <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[10px] text-muted-foreground">
             {entry.remark && <span className="truncate">{entry.remark}</span>}
-            {entry.fee != null && <span className="num shrink-0">含手续费 {fmtNum(entry.fee)}</span>}
+            {entry.fee != null && <span className="num shrink-0">{t('ledger.fee', { value: fmtNum(entry.fee) })}</span>}
           </div>
         )}
       </div>
@@ -98,7 +118,7 @@ function EntryRow({ entry }: { entry: LedgerEntry }) {
           {up ? '+' : ''}{fmtNum(entry.delta)}
         </div>
         <div className="num text-[10px] text-muted-foreground tabular-nums">
-          余 {fmtNum(entry.balanceAfter)}
+          {t('ledger.balanceAfter', { value: fmtNum(entry.balanceAfter) })}
         </div>
       </div>
     </div>
@@ -106,6 +126,7 @@ function EntryRow({ entry }: { entry: LedgerEntry }) {
 }
 
 export function Ledger() {
+  const { t } = useTranslation(['portfolio', 'common']);
   const { toast } = useToast();
 
   const [bizType, setBizType] = useState('');
@@ -161,7 +182,7 @@ export function Ledger() {
         setEntries(prev => [...prev, ...rows]);
         if (rows.length === 0) setDone(true);
       })
-      .catch(() => toast('加载更多失败', 'error'))
+      .catch(() => toast(t('toast.loadMoreFailed'), 'error'))
       .finally(() => setLoadingMore(false));
   };
 
@@ -188,11 +209,10 @@ export function Ledger() {
                 <span className="p-1.5 rounded-xl bg-primary/10 text-primary">
                   <Receipt className="w-4 h-4" />
                 </span>
-                资金账单
+                {t('ledger.title')}
               </CardTitle>
               <p className="text-xs text-muted-foreground leading-relaxed">
-                账户每一笔资金变动的原始流水，按时间倒序。一笔操作动了几个钱包就有几条记录，
-                所以合约开仓这类会同时出现「保证金」和「手续费」两行。
+                {t('ledger.desc')}
               </p>
             </div>
             <div className="flex items-center gap-2 shrink-0">
@@ -200,13 +220,13 @@ export function Ledger() {
                 className="h-9 w-44 text-xs"
                 value={bizType}
                 onChange={e => setBizType(e.target.value)}
-                aria-label="按业务类型筛选"
+                aria-label={t('ledger.filterLabel')}
               >
-                <option value="">全部类型</option>
+                <option value="">{t('ledger.allTypes')}</option>
                 {optionGroups.map(g => (
-                  <optgroup key={g.name} label={g.name}>
+                  <optgroup key={g.name} label={t('bizGroup.' + bizGroupKey(g.options[0].name))}>
                     {g.options.map(o => (
-                      <option key={o.name} value={o.name}>{o.label}</option>
+                      <option key={o.name} value={o.name}>{t('biz.' + o.name, { defaultValue: o.label })}</option>
                     ))}
                   </optgroup>
                 ))}
@@ -218,7 +238,7 @@ export function Ledger() {
                 onClick={() => setRefreshNonce(n => n + 1)}
               >
                 <RefreshCw className={cn('w-4 h-4', loading && 'animate-spin')} />
-                刷新
+                {t('common:refresh')}
               </Button>
             </div>
           </div>
@@ -232,11 +252,11 @@ export function Ledger() {
               {[...Array(8)].map((_, i) => <Skeleton key={i} className="h-12 w-full rounded-lg" />)}
             </div>
           ) : failed ? (
-            <EmptyState icon={<TriangleAlert />} text="账单加载失败，点右上角刷新重试" />
+            <EmptyState icon={<TriangleAlert />} text={t('ledger.loadFailed')} />
           ) : entries.length === 0 ? (
             <EmptyState
               icon={<Receipt />}
-              text={bizType ? '该类型下暂无流水' : '暂无资金流水'}
+              text={bizType ? t('ledger.emptyFiltered') : t('ledger.empty')}
             />
           ) : (
             <>
@@ -247,7 +267,7 @@ export function Ledger() {
                       写多写少都会穿帮。为一个装饰性吸顶去引全局高度变量不划算 */}
                   <div className="px-4 py-1.5 bg-card-2 border-y border-border/30">
                     <span className="microlabel font-bold">{dayLabel(g.key)}</span>
-                    <span className="ml-2 text-[10px] text-muted-foreground">{g.rows.length} 笔</span>
+                    <span className="ml-2 text-[10px] text-muted-foreground">{t('ledger.dayCount', { count: g.rows.length })}</span>
                   </div>
                   {g.rows.map(e => <EntryRow key={e.id} entry={e} />)}
                 </div>
@@ -255,10 +275,10 @@ export function Ledger() {
 
               <div className="p-4 flex justify-center border-t border-border/30">
                 {done ? (
-                  <span className="text-xs text-muted-foreground">没有更多了</span>
+                  <span className="text-xs text-muted-foreground">{t('ledger.noMore')}</span>
                 ) : (
                   <Button variant="outline" size="sm" onClick={loadMore} disabled={loadingMore}>
-                    {loadingMore ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : '加载更多'}
+                    {loadingMore ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : t('ledger.loadMore')}
                   </Button>
                 )}
               </div>

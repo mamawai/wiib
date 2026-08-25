@@ -52,7 +52,7 @@ public class TradeRecordService {
 
     public record TradeRecord(long positionId, String symbol, String side, Integer leverage,
                               BigDecimal entryPrice, BigDecimal closedPrice, BigDecimal closedPnl,
-                              long openedAt, long closedAt, String closeManner,
+                              long openedAt, long closedAt, String closeMannerKey,
                               AiTraderPlan plan, DecisionRef openDecision, DecisionRef closeDecision) {
     }
 
@@ -80,15 +80,18 @@ public class TradeRecordService {
         for (FuturesPositionDTO pos : closed) {
             AiTraderPlan plan = planByPos.get(pos.getId());
             AiTraderDecision open = plan == null ? null : openByWake.get(plan.getOpenedWakeTime());
-            String manner = ReviewMaterialAssembler.closeManner(pos);
+            // 下发语言无关的码，文案由前端查自己的词表：这张卡是给人看的界面元素，
+            // 该跟界面语言走；服务端渲染成某一门语言存下来，切了语言就翻不回去了
+            String mannerKey = ReviewMaterialAssembler.closeMannerKey(pos);
             out.add(new TradeRecord(pos.getId(), pos.getSymbol(), pos.getSide(), pos.getLeverage(),
                     pos.getEntryPrice(), pos.getClosedPrice(), pos.getClosedPnl(),
                     ReviewMaterialAssembler.msOf(pos.getCreatedAt()), ReviewMaterialAssembler.msOf(pos.getUpdatedAt()),
-                    manner, plan,
+                    mannerKey, plan,
                     open == null ? null
                             : new DecisionRef(open.getId(), open.getWakeTime(), open.getKind(), open.getReasoning(), null),
                     // 止损/止盈带走的依据就是计划里的原始止损/目标，不挂平仓决策
-                    "主动平仓".equals(manner) ? closeByPos.get(pos.getId()) : null));
+                    ReviewMaterialAssembler.MANNER_MANUAL.equals(mannerKey)
+                            ? closeByPos.get(pos.getId()) : null));
         }
         return out;
     }

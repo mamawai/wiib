@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { futuresApi } from '../api';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
@@ -12,11 +13,13 @@ import { formatCoinPrice } from '../lib/coinConfig';
 const SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'DOGEUSDT'] as const;
 const PAGE_SIZE = 20;
 
-function sideLabel(side: string): string {
-  return side === 'SELL' ? '多头爆仓' : '空头爆仓';
+/** 币安口径：强平单方向是被吃掉那侧的反向，SELL 单意味着多头被平掉 */
+function sideLabelKey(side: string): string {
+  return side === 'SELL' ? 'force.longLiquidated' : 'force.shortLiquidated';
 }
 
 export function ForceOrders() {
+  const { t } = useTranslation(['portfolio', 'common']);
   const [symbol, setSymbol] = useState<string>('BTCUSDT');
   const [page, setPage] = useState(1);
   const [refreshNonce, setRefreshNonce] = useState(0);
@@ -67,16 +70,16 @@ export function ForceOrders() {
                 <span className="p-1.5 sm:p-2 rounded-xl sm:rounded-2xl bg-loss/10 text-loss">
                   <Flame className="w-4 h-4 sm:w-5 sm:h-5" />
                 </span>
-                爆仓记录
+                {t('force.title')}
               </CardTitle>
               <div className="text-xs sm:text-sm leading-5 sm:leading-6 text-muted-foreground">
-                <span className="hidden sm:inline">Binance 合约市场最近爆仓记录。SELL 代表多头被强平，BUY 代表空头被强平。大额连续爆仓通常意味着短时波动和情绪放大，但不是独立交易信号。</span>
-                <span className="sm:hidden">Binance 合约爆仓记录。SELL=多头强平，BUY=空头强平。</span>
+                <span className="hidden sm:inline">{t('force.desc')}</span>
+                <span className="sm:hidden">{t('force.descShort')}</span>
               </div>
             </div>
             <Button variant="outline" size="sm" className="h-9 w-fit gap-2 shrink-0" onClick={() => setRefreshNonce(n => n + 1)}>
               <RefreshCw className={cn('w-4 h-4', loading && 'animate-spin')} />
-              刷新
+              {t('common:refresh')}
             </Button>
           </div>
 
@@ -105,23 +108,23 @@ export function ForceOrders() {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         <Card>
           <CardContent className="p-4 space-y-1">
-            <div className="text-xs font-bold text-muted-foreground">当前页多头爆仓</div>
+            <div className="text-xs font-bold text-muted-foreground">{t('force.statLong')}</div>
             <div className="text-xl sm:text-2xl font-black text-loss tabular-nums">{stats.longLiquidations}</div>
-            <div className="text-xs text-muted-foreground">对应 SELL 强平单</div>
+            <div className="text-xs text-muted-foreground">{t('force.statLongHint')}</div>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-4 space-y-1">
-            <div className="text-xs font-bold text-muted-foreground">当前页空头爆仓</div>
+            <div className="text-xs font-bold text-muted-foreground">{t('force.statShort')}</div>
             <div className="text-xl sm:text-2xl font-black text-gain tabular-nums">{stats.shortLiquidations}</div>
-            <div className="text-xs text-muted-foreground">对应 BUY 强平单</div>
+            <div className="text-xs text-muted-foreground">{t('force.statShortHint')}</div>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-4 space-y-1">
-            <div className="text-xs font-bold text-muted-foreground">当前页总名义金额</div>
+            <div className="text-xs font-bold text-muted-foreground">{t('force.statAmount')}</div>
             <div className="text-xl sm:text-2xl font-black tabular-nums">${fmtNum(stats.totalAmount, 0)}</div>
-            <div className="text-xs text-muted-foreground">仅统计当前页 {records.length} 条记录</div>
+            <div className="text-xs text-muted-foreground">{t('force.statAmountHint', { count: records.length })}</div>
           </CardContent>
         </Card>
       </div>
@@ -130,14 +133,14 @@ export function ForceOrders() {
         <CardHeader className="pb-3">
           <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
             <div className="space-y-1">
-              <CardTitle className="text-base font-black">{symbol} 强平列表</CardTitle>
+              <CardTitle className="text-base font-black">{t('force.listTitle', { symbol })}</CardTitle>
               <div className="text-xs text-muted-foreground">
-                按成交时间倒序展示，每页 {PAGE_SIZE} 条，当前共 {result.total} 条记录。
+                {t('force.listDesc', { size: PAGE_SIZE, total: result.total })}
               </div>
             </div>
             <div className="hidden sm:flex items-center gap-2 text-xs text-muted-foreground">
               <AlertTriangle className="w-3.5 h-3.5 text-loss shrink-0" />
-              爆仓金额大并不等于马上反转，只说明该方向刚经历了强制出清。
+              {t('force.warn')}
             </div>
           </div>
         </CardHeader>
@@ -147,19 +150,19 @@ export function ForceOrders() {
               {[...Array(8)].map((_, idx) => <Skeleton key={idx} className="h-16 w-full rounded-xl" />)}
             </div>
           ) : records.length === 0 ? (
-            <div className="py-16 text-center text-sm text-muted-foreground">暂无爆仓记录</div>
+            <div className="py-16 text-center text-sm text-muted-foreground">{t('force.empty')}</div>
           ) : (
             <>
               <div className="hidden md:block overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-border/50 text-muted-foreground">
-                      <th className="px-5 py-3 text-left font-bold">时间</th>
-                      <th className="px-4 py-3 text-left font-bold">方向</th>
-                      <th className="px-4 py-3 text-right font-bold">成交价</th>
-                      <th className="px-4 py-3 text-right font-bold">均价</th>
-                      <th className="px-4 py-3 text-right font-bold">数量</th>
-                      <th className="px-5 py-3 text-right font-bold">名义金额</th>
+                      <th className="px-5 py-3 text-left font-bold">{t('field.time')}</th>
+                      <th className="px-4 py-3 text-left font-bold">{t('field.side')}</th>
+                      <th className="px-4 py-3 text-right font-bold">{t('field.price')}</th>
+                      <th className="px-4 py-3 text-right font-bold">{t('field.avgPrice')}</th>
+                      <th className="px-4 py-3 text-right font-bold">{t('field.qty')}</th>
+                      <th className="px-5 py-3 text-right font-bold">{t('field.notional')}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -175,7 +178,7 @@ export function ForceOrders() {
                                 : 'bg-gain/10 text-gain border-gain/20',
                             )}
                           >
-                            {sideLabel(order.side)}
+                            {t(sideLabelKey(order.side))}
                           </Badge>
                         </td>
                         <td className="px-4 py-3 text-right font-mono font-bold">{formatCoinPrice(order.symbol, order.price)}</td>
@@ -204,24 +207,24 @@ export function ForceOrders() {
                             : 'bg-gain/10 text-gain border-gain/20',
                         )}
                       >
-                        {sideLabel(order.side)}
+                        {t(sideLabelKey(order.side))}
                       </Badge>
                     </div>
                     <div className="grid grid-cols-2 gap-3 text-xs">
                       <div className="space-y-1">
-                        <div className="text-muted-foreground">成交价</div>
+                        <div className="text-muted-foreground">{t('field.price')}</div>
                         <div className="font-mono font-bold">{formatCoinPrice(order.symbol, order.price)}</div>
                       </div>
                       <div className="space-y-1">
-                        <div className="text-muted-foreground">均价</div>
+                        <div className="text-muted-foreground">{t('field.avgPrice')}</div>
                         <div className="font-mono">{formatCoinPrice(order.symbol, order.avgPrice)}</div>
                       </div>
                       <div className="space-y-1">
-                        <div className="text-muted-foreground">数量</div>
+                        <div className="text-muted-foreground">{t('field.qty')}</div>
                         <div className="font-mono">{fmtNum(order.quantity, 4)}</div>
                       </div>
                       <div className="space-y-1">
-                        <div className="text-muted-foreground">名义金额</div>
+                        <div className="text-muted-foreground">{t('field.notional')}</div>
                         <div className="font-mono font-bold">${fmtNum(order.amount, 0)}</div>
                       </div>
                     </div>
@@ -231,7 +234,7 @@ export function ForceOrders() {
 
               <div className="flex items-center justify-between px-4 py-3 border-t border-border/30">
                 <span className="text-xs text-muted-foreground">
-                  第 {result.current} / {Math.max(result.pages, 1)} 页
+                  {t('pager.page', { page: result.current, pages: Math.max(result.pages, 1) })}
                 </span>
                 <div className="flex items-center gap-1">
                   <Button

@@ -1,5 +1,9 @@
 package com.mawai.wiibquant.agent.learning;
 
+import com.mawai.wiibquant.agent.i18n.LocalizedToolCallbacks;
+import com.mawai.wiibquant.agent.i18n.UserLangResolver;
+import com.mawai.wiibquant.agent.i18n.PromptCatalog;
+import com.mawai.wiibcommon.enums.AgentLang;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
@@ -9,8 +13,6 @@ import com.mawai.wiibquant.agent.trader.TraderModelFactory;
 import com.mawai.wiibquant.mapper.AiTraderDecisionMapper;
 import com.mawai.wiibquant.mapper.AiTraderMapper;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
-import org.bsc.langgraph4j.prebuilt.MessagesState;
-import org.bsc.langgraph4j.spring.ai.serializer.jackson.SpringAIJacksonStateSerializer;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -58,12 +60,20 @@ class LearningRunnerTest {
     private final AiTraderMapper traderMapper = mock(AiTraderMapper.class);
     private final AiTraderDecisionMapper decisionMapper = mock(AiTraderDecisionMapper.class);
 
+    private final UserLangResolver langResolver = mock(UserLangResolver.class);
+    private final PromptCatalog prompts = new PromptCatalog();
+
     private final LearningRunner runner = new LearningRunner(peerInsightService, modelFactory,
-            traderMapper, decisionMapper, new SpringAIJacksonStateSerializer<>(MessagesState::new));
+            traderMapper, decisionMapper, prompts, new LocalizedToolCallbacks(prompts), langResolver);
+
+    {
+        when(langResolver.of(anyLong())).thenReturn(AgentLang.ZH);
+    }
 
     private AiTrader trader() {
         AiTrader t = new AiTrader();
         t.setId(7L);
+        t.setUserId(1L);
         t.setName("我");
         t.setRoundNo(1);
         t.setSimUserId(70L);
@@ -75,7 +85,7 @@ class LearningRunnerTest {
     }
 
     private void stubLeaderboard() {
-        when(peerInsightService.leaderboard(anyLong())).thenReturn("""
+        when(peerInsightService.leaderboard(anyLong(), any())).thenReturn("""
                 【同侪排行榜】（本局快照，按收益率降序）
                 1. [id=8] 赢家 ｜ 运行中 ｜ 本局收益率 +20.00% ｜ 已了结 12 笔 ｜ 最新复盘: 只做回踩不追高
                 2. [id=7] 我 ｜ 运行中 ｜ 本局收益率 -5.00% ｜ 已了结 9 笔 ｜ 最新复盘: 追高又被扫（这是你）
@@ -226,11 +236,11 @@ class LearningRunnerTest {
         verify(traderMapper, never()).update(any(), any());
     }
 
-    /** 笔记总量是硬约束：模型不肯收敛就按 2000 字截断兜底（决策行仍存全文） */
+    /** 篇幅只由提示词那句"≤N"约束：模型写超了照样整段落库，代码不替它裁 */
     @Test
-    void notesTruncatedAtLimit() {
+    void notesStoredInFullEvenOverBudget() {
         stubLeaderboard();
-        String longOutput = QUALIFIED_OUTPUT + "\n" + "补".repeat(LearningRunner.NOTES_MAX_CHARS);
+        String longOutput = QUALIFIED_OUTPUT + "\n" + "这句凑长度的话以句号收尾。".repeat(200);
         ChatModel model = modelReturning(longOutput);
         when(modelFactory.modelFor(any())).thenReturn(model);
 
@@ -241,10 +251,11 @@ class LearningRunnerTest {
                 ArgumentCaptor.forClass((Class) LambdaUpdateWrapper.class);
         verify(traderMapper).update(any(), up.capture());
         String written = up.getValue().getParamNameValuePairs().values().stream()
-                .filter(v -> v instanceof String s && s.startsWith(LearningRunner.LEARN_MARK))
+                .filter(v -> v instanceof String s && s.startsWith("【本期学习】"))
                 .map(String.class::cast).findFirst().orElseThrow();
-        assertThat(written).hasSize(LearningRunner.NOTES_MAX_CHARS);
-        // 决策行留全文：公开时间线不该被这条兜底规则裁掉
+        assertThat(written.length()).isGreaterThan(NoteBudget.maxChars(AgentLang.ZH));   // 确实超了预算
+        assertThat(written).isEqualTo(longOutput);
+        // 决策行同样是全文（笔记与公开时间线本就是同一份产出）
         ArgumentCaptor<AiTraderDecision> dec = ArgumentCaptor.forClass(AiTraderDecision.class);
         verify(decisionMapper).insert(dec.capture());
         assertThat(dec.getValue().getReasoning()).hasSize(longOutput.length());
@@ -262,7 +273,8 @@ class LearningRunnerTest {
         verify(decisionMapper).insert(dec.capture());
         assertThat(dec.getValue().getKind()).isEqualTo(AiTraderDecision.KIND_LEARN);
         assertThat(dec.getValue().getStatus()).isEqualTo(AiTraderDecision.STATUS_ERROR);
-        assertThat(dec.getValue().getError()).contains("401");
+        // 公开行只存归类文案，上游原文不落库
+        assertThat(dec.getValue().getError()).contains("API key").doesNotContain("上游401");
         verify(traderMapper, never()).update(any(), any());
     }
 

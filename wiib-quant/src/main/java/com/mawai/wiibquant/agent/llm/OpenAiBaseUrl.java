@@ -8,11 +8,7 @@ package com.mawai.wiibquant.agent.llm;
  * 但官方 SDK 的约定相反——它的默认 baseUrl 就是 {@code https://api.openai.com/v1}，
  * <b>不会替你补</b>。
  * <p>
- * 两套约定撞在一起的后果很隐蔽：同一份配置，跑对话是好的（不经 SDK），
- * 一点「检测模型」就 404——因为那条路打的是 {@code {baseUrl}/models} 而不是
- * {@code {baseUrl}/v1/models}。
- * <p>
- * 所以凡是把 baseUrl 交给 SDK 的地方，都先过这里。
+ * 凡是把 baseUrl 交给 SDK 的地方都先过这里，两套约定才对得上。
  */
 public final class OpenAiBaseUrl {
 

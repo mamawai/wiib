@@ -1,0 +1,21 @@
+# 登录 / 注册的界面文案。语言跟当次请求的 X-Lang 头——这里绝大多数发生在还没登录的时候，
+# 那时候 user.lang 查无可查，头是唯一的语言来源。
+auth:
+  localLoginDisabled: 已启用正式登录方式，管理员直登不可用
+  passwordLoginDisabled: 账号密码登录未启用
+  usernameFormat: 用户名需为2-20位字母/数字/下划线/中文
+  passwordLength: 密码长度需为6-64位
+  inviteCodeRequired: 邀请码不能为空
+  inviteCodeInvalid: 邀请码无效或已用完
+  usernameTaken: 用户名已存在
+  badCredentials: 用户名或密码错误
+  loginFailed: "登录失败: {{reason}}"
+
+  # LinuxDo OAuth 的几步：拿 token、换用户信息。{{reason}} 是上游原样返回的内容，不翻
+  oauth:
+    tokenFailed: "获取access_token失败: {{reason}}"
+    tokenEmpty: "获取access_token失败: 空响应"
+    userInfoFailed: "获取用户信息失败: {{reason}}"
+    userInfoParseFailed: "解析用户信息失败: {{reason}}"
+    userInfoEmpty: "获取用户信息失败: 空响应"
+    userIdEmpty: "获取用户信息失败: id为空"

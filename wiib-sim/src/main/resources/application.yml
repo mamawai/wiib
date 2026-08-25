@@ -93,10 +93,10 @@ websocket:
   heartbeat-interval: 15         # 秒
 
 # quant 调 sim 的 /internal/** 须带 X-Internal-Token；须与 feed/quant 同值
-# (三进程读同一 .env，默认值也一致，不填即可互通)
+# (三进程读同一 .env；无默认值，不填起不来)
 internal:
   api:
-    token: ${INTERNAL_API_TOKEN:wiib-internal-dev}
+    token: ${INTERNAL_API_TOKEN}
 
 # FeedInternalClient：拉 WS 流健康快照 + 转发手动重试
 feed:
