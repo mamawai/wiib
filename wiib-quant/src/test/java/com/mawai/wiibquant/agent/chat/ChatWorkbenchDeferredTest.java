@@ -60,11 +60,16 @@ class ChatWorkbenchDeferredTest {
     private final LlmEndpointService endpointService = mock(LlmEndpointService.class);
     private final ChatAgentFactory factory = mock(ChatAgentFactory.class);
 
+    private ChatTurnStreamer streamer() {
+        return new ChatTurnStreamer(turnRunner, history, mock(WorkbenchRunRegistry.class), coordinator,
+                new ApprovalRegistry(), ChatTestEndpoints.PROMPTS);
+    }
+
     private ChatWorkbenchController controller() {
         when(endpointService.chatEndpoints(1L)).thenReturn(ChatTestEndpoints.eps(1L, "gpt-5"));
         when(factory.leavesFor(any(), any())).thenReturn(leaves());
         return new ChatWorkbenchController(factory, endpointService, new ApprovalRegistry(),
-                history, mock(ChatContextStore.class), turnRunner,
+                history, mock(ChatContextStore.class), streamer(),
                 mock(WorkbenchRunRegistry.class), gate, new MessageCatalog(), coordinator,
                 ChatTestEndpoints.PROMPTS, ChatTestEndpoints.zhLang());
     }
@@ -121,10 +126,10 @@ class ChatWorkbenchDeferredTest {
             ((Consumer<String>) inv.getArgument(5)).accept("补上的答案");
             return ChatTurnRunner.TurnResult.COMPLETED;
         }).when(turnRunner).run(any(), anyLong(), any(), any(), any(), any(), any(), any(), any());
-        ChatWorkbenchController controller = controller();
+        ChatTurnStreamer streamer = streamer();
         RecordingEmitter emitter = new RecordingEmitter();
 
-        controller.run(new SseChannel(emitter), 1L, SESSION, "看看行情", leaves(),
+        streamer.run(new SseChannel(emitter), 1L, SESSION, "看看行情", leaves(),
                 coordinator.openTurn(1L), null, null, doneBatch());
 
         String header = ChatTestEndpoints.PROMPTS.get(AgentLang.ZH, "chat.deferred.header", Map.of("question", "看看行情"));
@@ -144,9 +149,9 @@ class ChatWorkbenchDeferredTest {
         verify(turnRunner).run(any(), anyLong(), eq(SESSION), enriched.capture(), any(), any(), any(), any(),
                 argThat(b -> b != null && b.names().equals(List.of("market_agent"))));
         assertThat(enriched.getValue())
-                .startsWith(ChatWorkbenchController.TURN_MARKER)
+                .startsWith(ChatTurnStreamer.TURN_MARKER)
                 .contains("此前问题「看看行情」")
-                .doesNotContain(ChatWorkbenchController.QUESTION_MARKER);
+                .doesNotContain(ChatTurnStreamer.QUESTION_MARKER);
     }
 
     /**
@@ -159,10 +164,10 @@ class ChatWorkbenchDeferredTest {
         ChatTurnRunner.ExpertBatch batch = doneBatch();
         when(turnRunner.run(any(), anyLong(), any(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(new ChatTurnRunner.TurnResult(batch, false));
-        ChatWorkbenchController controller = controller();
+        ChatTurnStreamer streamer = streamer();
         RecordingEmitter emitter = new RecordingEmitter();
 
-        controller.run(new SseChannel(emitter), 1L, SESSION, "看看行情", leaves(),
+        streamer.run(new SseChannel(emitter), 1L, SESSION, "看看行情", leaves(),
                 coordinator.openTurn(1L), null, null, batch);
 
         assertThat(emitter.raw).noneMatch(s -> s.contains("\"role\":\"answer\""));

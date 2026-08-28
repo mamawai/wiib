@@ -1,8 +1,6 @@
 package com.mawai.wiibquant.agent.chat;
 
 import com.mawai.wiibcommon.enums.AgentLang;
-import com.mawai.wiibcommon.i18n.MessageCatalog;
-import com.mawai.wiibquant.agent.llm.LlmEndpointService;
 import com.mawai.wiibquant.agent.llm.SseChannel;
 import com.mawai.wiibquant.agent.llm.UsageTrackingChatModel;
 import org.junit.jupiter.api.Test;
@@ -52,21 +50,16 @@ class ChatWorkbenchStreamTest {
     void 断连后答案照样攒起来落进历史但不再发帧() {
         ChatHistoryService historyService = mock(ChatHistoryService.class);
         ChatTurnRunner turnRunner = mock(ChatTurnRunner.class);
-        // runner 分两帧把答案交出来，controller 的 sink 得把它们攒全
+        // runner 分两帧把答案交出来，streamer 的 sink 得把它们攒全
         doAnswer((Answer<ChatTurnRunner.TurnResult>) inv -> {
             Consumer<String> sink = inv.getArgument(5);   // leaves/userId/session/message/intent 之后才是答案 sink
             sink.accept("前半段");
             sink.accept("后半段");
             return ChatTurnRunner.TurnResult.COMPLETED;
         }).when(turnRunner).run(any(), anyLong(), any(), any(), any(), any(), any(), any(), any());
-        ChatConcurrencyGate gate = new ChatConcurrencyGate(10);
-        WorkbenchRunRegistry runRegistry = mock(WorkbenchRunRegistry.class);
-        ChatYieldCoordinator coordinator =
-                new ChatYieldCoordinator();
-        ChatWorkbenchController controller = new ChatWorkbenchController(mock(ChatAgentFactory.class),
-                mock(LlmEndpointService.class), new ApprovalRegistry(),
-                historyService, mock(ChatContextStore.class), turnRunner,
-                runRegistry, gate, new MessageCatalog(), coordinator, ChatTestEndpoints.PROMPTS, ChatTestEndpoints.zhLang());
+        ChatYieldCoordinator coordinator = new ChatYieldCoordinator();
+        ChatTurnStreamer streamer = new ChatTurnStreamer(turnRunner, historyService,
+                mock(WorkbenchRunRegistry.class), coordinator, new ApprovalRegistry(), ChatTestEndpoints.PROMPTS);
 
         RecordingEmitter emitter = new RecordingEmitter();
         SseChannel channel = new SseChannel(emitter);
@@ -77,7 +70,7 @@ class ChatWorkbenchStreamTest {
         ChatAgentFactory.Leaves leaves =
                 new ChatAgentFactory.Leaves("test", model, model, Map.of(), null, AgentLang.ZH);
 
-        controller.run(channel, 1L, SESSION, "看看行情", leaves, coordinator.openTurn(1L), null, null, null);
+        streamer.run(channel, 1L, SESSION, "看看行情", leaves, coordinator.openTurn(1L), null, null, null);
 
         // 答案完整进历史——这是断连用户唯一还拿得到东西的途径
         verify(historyService).append(eq(SESSION), eq(1L), eq("assistant"), eq("前半段后半段"), any());

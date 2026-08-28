@@ -1,10 +1,8 @@
 package com.mawai.wiibquant.agent.chat;
 
 import com.mawai.wiibcommon.enums.AgentLang;
-import com.mawai.wiibcommon.i18n.MessageCatalog;
 import com.mawai.wiibquant.agent.llm.SseChannel;
 import com.mawai.wiibquant.agent.llm.ChatEndpoints;
-import com.mawai.wiibquant.agent.llm.LlmEndpointService;
 import com.mawai.wiibquant.agent.llm.UsageTrackingChatModel;
 import com.mawai.wiibquant.agent.analysis.DeepAnalysisService;
 import com.mawai.wiibquant.agent.behavior.BehaviorAnalysisService;
@@ -128,22 +126,16 @@ class LlmErrorSurfaceTest {
         ChatTurnRunner turnRunner = mock(ChatTurnRunner.class);
         doThrow(new RuntimeException(RAW)).when(turnRunner)
                 .run(any(), anyLong(), any(), any(), any(), any(), any(), any(), any());
-        ChatConcurrencyGate gate = new ChatConcurrencyGate(10);
-        WorkbenchRunRegistry runRegistry = mock(WorkbenchRunRegistry.class);
-        ChatHistoryService history = mock(ChatHistoryService.class);
-        ChatYieldCoordinator coordinator =
-                new ChatYieldCoordinator();
-        ChatWorkbenchController controller = new ChatWorkbenchController(mock(ChatAgentFactory.class),
-                mock(LlmEndpointService.class), new ApprovalRegistry(),
-                history, mock(ChatContextStore.class), turnRunner,
-                runRegistry, gate, new MessageCatalog(), coordinator, ChatTestEndpoints.PROMPTS, ChatTestEndpoints.zhLang());
+        ChatYieldCoordinator coordinator = new ChatYieldCoordinator();
+        ChatTurnStreamer streamer = new ChatTurnStreamer(turnRunner, mock(ChatHistoryService.class),
+                mock(WorkbenchRunRegistry.class), coordinator, new ApprovalRegistry(), ChatTestEndpoints.PROMPTS);
 
         // run() 要拿叶子清账本，给不了 null；否则 NPE 会先于 runner 抛的那条上游异常，测的就不是这件事了
         UsageTrackingChatModel model = new UsageTrackingChatModel(mock(ChatModel.class));
         ChatAgentFactory.Leaves leaves =
                 new ChatAgentFactory.Leaves("test", model, model, Map.of(), null, AgentLang.ZH);
 
-        controller.run(new SseChannel(emitter), 1L, "wb-1-boom", "看看行情", leaves,
+        streamer.run(new SseChannel(emitter), 1L, "wb-1-boom", "看看行情", leaves,
                 coordinator.openTurn(1L), null, null, null);
 
         String errorEvent = sent.stream().filter(text -> text.startsWith("{") && text.contains("message"))

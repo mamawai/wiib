@@ -60,8 +60,8 @@ class ChatRegenerateTest {
 
     /** 上下文里一条轮起始提问，形状与 run() 拼的 enriched 一致 */
     private static Message turnStart(String question) {
-        return new UserMessage(ChatWorkbenchController.TURN_MARKER + "2026-08-18 14:32】\n"
-                + ChatWorkbenchController.QUESTION_MARKER + question);
+        return new UserMessage(ChatTurnStreamer.TURN_MARKER + "2026-08-18 14:32】\n"
+                + ChatTurnStreamer.QUESTION_MARKER + question);
     }
 
     private record Harness(ChatWorkbenchController controller, ChatHistoryService history,
@@ -95,10 +95,13 @@ class ChatRegenerateTest {
 
         ChatConcurrencyGate gate = new ChatConcurrencyGate(10);
         WorkbenchRunRegistry runRegistry = mock(WorkbenchRunRegistry.class);
-        ChatYieldCoordinator coordinator =
-                new ChatYieldCoordinator();
+        ChatYieldCoordinator coordinator = new ChatYieldCoordinator();
+        ApprovalRegistry approvals = new ApprovalRegistry();
+        ChatTurnStreamer streamer = new ChatTurnStreamer(turnRunner, history, runRegistry, coordinator,
+                approvals, ChatTestEndpoints.PROMPTS);
         ChatWorkbenchController controller = new ChatWorkbenchController(agentFactory, endpointService,
-                new ApprovalRegistry(), history, contextStore, turnRunner, runRegistry, gate, new MessageCatalog(), coordinator, ChatTestEndpoints.PROMPTS, ChatTestEndpoints.zhLang());
+                approvals, history, contextStore, streamer, runRegistry, gate, new MessageCatalog(), coordinator,
+                ChatTestEndpoints.PROMPTS, ChatTestEndpoints.zhLang());
         return new Harness(controller, history, contextStore, turnRunner, gate, coordinator);
     }
 
@@ -140,7 +143,7 @@ class ChatRegenerateTest {
         ArgumentCaptor<String> enriched = ArgumentCaptor.captor();
         verify(h.turnRunner(), timeout(5_000))
                 .run(any(), anyLong(), eq(SESSION), enriched.capture(), any(), any(), any(), any(), any());
-        assertThat(enriched.getValue()).endsWith(ChatWorkbenchController.QUESTION_MARKER + "BTC 怎么样");
+        assertThat(enriched.getValue()).endsWith(ChatTurnStreamer.QUESTION_MARKER + "BTC 怎么样");
         // 提问行已经在库里，再落一遍历史里就成了连问两遍
         verify(h.history(), never()).append(any(), anyLong(), eq("user"), any());
         // 新答案落库之后旧答案才被顶掉；提问行一直留着（前端气泡不闪、时间戳不变）

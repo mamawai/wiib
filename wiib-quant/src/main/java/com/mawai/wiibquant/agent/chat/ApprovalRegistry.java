@@ -38,8 +38,8 @@ public class ApprovalRegistry {
      * @param requestId  这张卡的唯一标识，前端原样回传用于比对"点的是哪张卡"
      * @param requestedAt 登记时刻。<b>不能当标识用</b>——两次登记之间是微秒级，同一毫秒内
      *                    比对恒成立，等于没有比对；那件事归 requestId。
-     *                    它的用处是"新旧"：Controller 据此只发本轮新登记的确认卡
-     *                    （见 {@code ChatWorkbenchController.run}），不然用户不点卡、
+     *                    它的用处是"新旧"：ChatTurnStreamer 据此只发本轮新登记的确认卡
+     *                    （见 {@code ChatTurnStreamer.Turn.sendHitlCardIfAny}），不然用户不点卡、
      *                    接着问下一句，每轮结束都会再弹一遍同一张
      */
     public record PendingRequest(String requestId, String toolName, String symbol,

@@ -1,10 +1,8 @@
 package com.mawai.wiibquant.agent.chat;
 
 import com.mawai.wiibcommon.enums.AgentLang;
-import com.mawai.wiibcommon.i18n.MessageCatalog;
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONObject;
-import com.mawai.wiibquant.agent.llm.LlmEndpointService;
 import com.mawai.wiibquant.agent.llm.SseChannel;
 import com.mawai.wiibquant.agent.llm.UsageTrackingChatModel;
 import org.junit.jupiter.api.Test;
@@ -93,8 +91,8 @@ class ChatTurnMetaTest {
         return new ChatAgentFactory.Leaves(LABEL, deep, light, Map.of(), null, AgentLang.ZH);
     }
 
-    /** 一套能真跑 {@code controller.run} 的最小装配 */
-    private record Harness(ChatWorkbenchController controller, ChatHistoryService history,
+    /** 一套能真跑 {@code ChatTurnStreamer.run} 的最小装配 */
+    private record Harness(ChatTurnStreamer streamer, ChatHistoryService history,
                            ChatYieldCoordinator coordinator) {
     }
 
@@ -111,14 +109,10 @@ class ChatTurnMetaTest {
             return ChatTurnRunner.TurnResult.COMPLETED;
         }).when(turnRunner).run(any(), anyLong(), any(), any(), any(), any(), any(), any(), any());
 
-        ChatConcurrencyGate gate = new ChatConcurrencyGate(10);
-        WorkbenchRunRegistry runRegistry = mock(WorkbenchRunRegistry.class);
         ChatYieldCoordinator coordinator = new ChatYieldCoordinator();
-        ChatWorkbenchController controller = new ChatWorkbenchController(mock(ChatAgentFactory.class),
-                mock(LlmEndpointService.class), new ApprovalRegistry(),
-                history, mock(ChatContextStore.class), turnRunner,
-                runRegistry, gate, new MessageCatalog(), coordinator, ChatTestEndpoints.PROMPTS, ChatTestEndpoints.zhLang());
-        return new Harness(controller, history, coordinator);
+        ChatTurnStreamer streamer = new ChatTurnStreamer(turnRunner, history, mock(WorkbenchRunRegistry.class),
+                coordinator, new ApprovalRegistry(), ChatTestEndpoints.PROMPTS);
+        return new Harness(streamer, history, coordinator);
     }
 
     /** 落库时那条 assistant 行带的读数 */
@@ -141,7 +135,7 @@ class ChatTurnMetaTest {
         });
 
         RecordingEmitter emitter = new RecordingEmitter();
-        h.controller().run(new SseChannel(emitter), 1L, SESSION, "看看行情",
+        h.streamer().run(new SseChannel(emitter), 1L, SESSION, "看看行情",
                 leaves(deep, light), h.coordinator().openTurn(1L), null, null, null);
 
         ChatHistoryService.TurnMeta meta = capturedMeta(h.history());
@@ -164,7 +158,7 @@ class ChatTurnMetaTest {
         UsageTrackingChatModel shared = new UsageTrackingChatModel(modelReporting(100, 20, 120));
         Harness h = harness(() -> shared.call(new Prompt("one")));
 
-        h.controller().run(new SseChannel(new RecordingEmitter()), 1L, SESSION, "看看行情",
+        h.streamer().run(new SseChannel(new RecordingEmitter()), 1L, SESSION, "看看行情",
                 leaves(shared, shared), h.coordinator().openTurn(1L), null, null, null);
 
         ChatHistoryService.TurnMeta meta = capturedMeta(h.history());
@@ -182,9 +176,9 @@ class ChatTurnMetaTest {
         });
         ChatAgentFactory.Leaves leaves = leaves(deep, light);
 
-        h.controller().run(new SseChannel(new RecordingEmitter()), 1L, SESSION, "第一问",
+        h.streamer().run(new SseChannel(new RecordingEmitter()), 1L, SESSION, "第一问",
                 leaves, h.coordinator().openTurn(1L), null, null, null);
-        h.controller().run(new SseChannel(new RecordingEmitter()), 1L, SESSION, "第二问",
+        h.streamer().run(new SseChannel(new RecordingEmitter()), 1L, SESSION, "第二问",
                 leaves, h.coordinator().openTurn(1L), null, null, null);
 
         ArgumentCaptor<ChatHistoryService.TurnMeta> captor =
@@ -213,7 +207,7 @@ class ChatTurnMetaTest {
         h.coordinator().registerDeferred(1L, SESSION, "上一个问题",
                 new ChatTurnRunner.ExpertBatch(List.of("market_agent"), List.of(new CompletableFuture<Message>())));
 
-        h.controller().run(new SseChannel(new RecordingEmitter()), 1L, SESSION, "插话",
+        h.streamer().run(new SseChannel(new RecordingEmitter()), 1L, SESSION, "插话",
                 leaves, h.coordinator().openTurn(1L), null, null, null);
 
         ChatHistoryService.TurnMeta meta = capturedMeta(h.history());

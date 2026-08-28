@@ -36,15 +36,18 @@ class ChatWorkbenchAdmissionTest {
     private final ChatTurnRunner turnRunner = mock(ChatTurnRunner.class);
 
     private ChatWorkbenchController controller(ChatConcurrencyGate gate) {
-        // mock runner 默认返回 null，controller 会在 result.yielded() 上 NPE——真跑到 run 的用例要正常收尾
+        // mock runner 默认返回 null，streamer 会在 result.cancelled() 上 NPE——真跑到 run 的用例要正常收尾
         when(turnRunner.run(any(), anyLong(), any(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(ChatTurnRunner.TurnResult.COMPLETED);
         ChatHistoryService history = mock(ChatHistoryService.class);
         WorkbenchRunRegistry runRegistry = mock(WorkbenchRunRegistry.class);
-        return new ChatWorkbenchController(factory, llmConfigService, new ApprovalRegistry(),
-                history, mock(ChatContextStore.class), turnRunner,
-                runRegistry, gate, new MessageCatalog(),
-                new ChatYieldCoordinator(),
+        ApprovalRegistry approvals = new ApprovalRegistry();
+        ChatYieldCoordinator coordinator = new ChatYieldCoordinator();
+        ChatTurnStreamer streamer = new ChatTurnStreamer(turnRunner, history, runRegistry, coordinator,
+                approvals, ChatTestEndpoints.PROMPTS);
+        return new ChatWorkbenchController(factory, llmConfigService, approvals,
+                history, mock(ChatContextStore.class), streamer,
+                runRegistry, gate, new MessageCatalog(), coordinator,
                 ChatTestEndpoints.PROMPTS, ChatTestEndpoints.zhLang());
     }
 
@@ -117,7 +120,7 @@ class ChatWorkbenchAdmissionTest {
         when(factory.leavesFor(any(), any())).thenReturn(null); // 跑不到用它的那一步
         ChatConcurrencyGate gate = new ChatConcurrencyGate(1);
         ChatWorkbenchController controller = controller(gate);
-        controller.streamExecutor.shutdown(); // 之后 submit 必被拒
+        controller.streamExecutor.shutdown(); // 之后 execute 必被拒
 
         assertThatThrownBy(() -> chat(controller, 1L)).isInstanceOf(RejectedExecutionException.class);
 

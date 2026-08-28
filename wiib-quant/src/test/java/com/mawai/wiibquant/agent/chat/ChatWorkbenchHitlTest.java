@@ -46,9 +46,9 @@ import static org.mockito.Mockito.when;
  * HITL 整条链路在 Controller 这一头的四件事：确认卡怎么发、点回来怎么比对、拒绝之后怎么办，
  * 以及确认后的续跑轮还看不看得见上一轮的上下文。
  * <p>
- * <b>必须真跑 {@link ChatWorkbenchController#run}</b>：确认卡是 run() 在这一轮跑完之后发的，
+ * <b>必须真跑 {@link ChatTurnStreamer#run}</b>：确认卡是它在这一轮跑完之后发的，
  * 发不发、发几张全是它自己的判断。测试自己调 registry 拼一遍只能证明 registry 好使，
- * controller 里写错照样绿。SSE 事件靠一个记账用的 emitter 收下来。
+ * streamer 里写错照样绿。SSE 事件靠一个记账用的 emitter 收下来。
  * <p>
  * 装的是<b>真</b> {@link ChatTurnRunner} + <b>真</b> {@link ChatContextStore}（mapper 换成
  * HashMap 假实现，字节真存真取）：跨轮上下文现在走这条路，mock 掉就等于把要验的东西验没了。
@@ -80,8 +80,9 @@ class ChatWorkbenchHitlTest {
     /** 会话上下文表的假实现：字节真存真取，跨轮上下文这条链才算真的被跑到 */
     private final Map<String, byte[]> contextRows = new HashMap<>();
 
-    /** controller() 里装配，turn() 造让位句柄用 */
+    /** controller() 里装配：turn() 用 streamer 跑轮、用 yieldCoordinator 造让位句柄 */
     private ChatYieldCoordinator yieldCoordinator;
+    private ChatTurnStreamer streamer;
 
     /** 记账用的 emitter：SseChannel 的每一次 send 都从这里过，事件原文攒起来供断言 */
     private static final class RecordingEmitter extends SseEmitter {
@@ -171,17 +172,18 @@ class ChatWorkbenchHitlTest {
         WorkbenchRunRegistry runRegistry = mock(WorkbenchRunRegistry.class);
         ChatHistoryService history = mock(ChatHistoryService.class);
         yieldCoordinator = new ChatYieldCoordinator();
+        streamer = new ChatTurnStreamer(turnRunner, history, runRegistry, yieldCoordinator, registry,
+                ChatTestEndpoints.PROMPTS);
         return new ChatWorkbenchController(mock(ChatAgentFactory.class), mock(LlmEndpointService.class),
-                registry, history, contextStore, turnRunner,
+                registry, history, contextStore, streamer,
                 runRegistry, gate, new MessageCatalog(), yieldCoordinator, ChatTestEndpoints.PROMPTS, ChatTestEndpoints.zhLang());
     }
 
     /** 跑一轮，返回这一轮发出去的全部 SSE 事件 */
-    private RecordingEmitter turn(ChatWorkbenchController controller,
-                                  ChatAgentFactory.Leaves leaves, String message) {
+    private RecordingEmitter turn(ChatAgentFactory.Leaves leaves, String message) {
         deepCallsThisTurn.set(0);
         RecordingEmitter emitter = new RecordingEmitter();
-        controller.run(new SseChannel(emitter), 1L, SESSION, message, leaves,
+        streamer.run(new SseChannel(emitter), 1L, SESSION, message, leaves,
                 yieldCoordinator.openTurn(1L), null, null, null);
         return emitter;
     }
@@ -205,7 +207,7 @@ class ChatWorkbenchHitlTest {
         ChatAgentFactory.Leaves leaves = productionLeaves();
         ChatWorkbenchController controller = controller();
 
-        JSONObject card = turn(controller, leaves, "深度研判 BTC").events("hitl_request").getFirst();
+        JSONObject card = turn(leaves, "深度研判 BTC").events("hitl_request").getFirst();
         assertThat(card.getString("requestId")).isNotBlank();
 
         Result<Void> stale = controller.approve(1L, decision("别的卡片的标识", true));
@@ -229,13 +231,13 @@ class ChatWorkbenchHitlTest {
     @Test
     void 用户没点的确认卡不会在下一轮重复弹() {
         ChatAgentFactory.Leaves leaves = productionLeaves();
-        ChatWorkbenchController controller = controller();
+        controller();
 
-        assertThat(turn(controller, leaves, "深度研判 BTC").events("hitl_request")).hasSize(1);
+        assertThat(turn(leaves, "深度研判 BTC").events("hitl_request")).hasSize(1);
 
         // 第二轮模型不再调深研判（用户问的是别的），但上一张卡还挂在 registry 里
         wantsDeepAnalysis.set(false);
-        RecordingEmitter second = turn(controller, leaves, "顺便说说最近行情");
+        RecordingEmitter second = turn(leaves, "顺便说说最近行情");
 
         assertThat(second.events("hitl_request")).isEmpty();
         assertThat(registry.peekPending(SESSION)).isPresent(); // 卡还在，只是不再重发
@@ -253,10 +255,10 @@ class ChatWorkbenchHitlTest {
         ChatAgentFactory.Leaves leaves = productionLeaves();
         ChatWorkbenchController controller = controller();
 
-        JSONObject card = turn(controller, leaves, "深度研判 BTC").events("hitl_request").getFirst();
+        JSONObject card = turn(leaves, "深度研判 BTC").events("hitl_request").getFirst();
         assertThat(controller.approve(1L, decision(card.getString("requestId"), false)).getCode()).isZero();
 
-        RecordingEmitter second = turn(controller, leaves, "再研判一次 BTC");
+        RecordingEmitter second = turn(leaves, "再研判一次 BTC");
 
         assertThat(second.events("hitl_request")).isEmpty();
         assertThat(registry.peekPending(SESSION)).isEmpty();   // 没有登记新的待确认
@@ -278,7 +280,7 @@ class ChatWorkbenchHitlTest {
         ChatAgentFactory.Leaves leaves = productionLeaves();
         ChatWorkbenchController controller = controller();
 
-        RecordingEmitter first = turn(controller, leaves, "先看行情，再深度研判 BTC");
+        RecordingEmitter first = turn(leaves, "先看行情，再深度研判 BTC");
         JSONObject card = first.events("hitl_request").getFirst();
         String expertConclusion = first.events("token").stream()
                 .filter(e -> "process".equals(e.getString("role")))
@@ -289,7 +291,7 @@ class ChatWorkbenchHitlTest {
         // 授权还在 → 第二轮直通汇总，专家不再派；上下文只能从存储来
         wantsMarketExpert.set(false);
         summarizerPrompts.clear();
-        turn(controller, leaves, "已确认，请继续执行深度研判");
+        turn(leaves, "已确认，请继续执行深度研判");
 
         String secondTurnInput = summarizerPrompts.getFirst().getInstructions().stream()
                 .map(m -> m.getText() == null ? "" : m.getText())
