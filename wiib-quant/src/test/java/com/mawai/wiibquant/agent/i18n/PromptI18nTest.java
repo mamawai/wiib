@@ -578,6 +578,8 @@ class PromptI18nTest {
                 closedPos("300", FROM + 3600_000, FROM + 7200_000)));
         when(planMapper.selectList(any())).thenReturn(List.of(
                 plan(AiTraderPlan.STATUS_LIVE), plan(AiTraderPlan.STATUS_CLOSED)));
+        // 两人都挂着仓 → 都在同侪池里（在场判据不依赖墙钟）
+        when(sim.getAllPositions(anyLong())).thenReturn(List.of(new FuturesPositionDTO()));
         return new PeerInsightService(traderMapper, decisionMapper, planMapper, sim, assembler, prompts);
     }
 

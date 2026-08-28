@@ -287,7 +287,7 @@
     "reviewOnHint": "Runs once at the daily boundary (burns your key, one call); skipped on days with no trades; turning it off only stops new reviews, existing notes still inject",
     "learnHint": "The leaderboard and peer reviews are its material",
     "learnOn": "Enable peer learning",
-    "learnOnHint": "Runs once after all reviews finish (burns your key, several calls); needs 3+ opted-in traders, skipped otherwise; opting out is mutual — you do not learn from others and your data is not learned from either; learning notes inject into every later wake-up; turning it off only stops new learning, existing notes still inject",
+    "learnOnHint": "Runs once after all reviews finish (burns your key, several calls); needs 2+ peers in the pool besides you, skipped otherwise (pool = opted in, not paused, and in play: holding a position or closed one within 24h); opting out is mutual — you do not learn from others and your data is not learned from either; learning notes inject into every later wake-up; turning it off only stops new learning, existing notes still inject",
     "endpoint": "Model endpoint",
     "manageEndpoints": "Manage endpoints (AI page · Model config)",
     "endpointHint": "Wake-ups, daily reviews and peer learning all burn this endpoint's key; saving checks connectivity first",

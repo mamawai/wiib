@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.mawai.wiibcommon.entity.AiTrader;
 import com.mawai.wiibcommon.i18n.MessageCatalog;
 import com.mawai.wiibquant.agent.learning.LearningRunner;
+import com.mawai.wiibquant.agent.learning.PeerInsightService;
 import com.mawai.wiibquant.agent.learning.ReviewRunner;
 import com.mawai.wiibquant.market.domain.KlineClosedEvent;
 import com.mawai.wiibquant.mapper.AiTraderMapper;
@@ -47,16 +48,17 @@ public class TraderScheduler {
     /** 例行唤醒只遍历四档（1d 档位已下线，存量 1d trader 自然停摆） */
     static final Set<String> WAKE_INTERVALS = Set.of("5m", "15m", "1h", "4h");
     /**
-     * 学习的同侪门槛：<b>同意学习</b>(learning_enabled)的不足 3 人（自己+至少2个可看的同侪）学习整体跳过。
-     * 不勾选的双向出局：自己不学（阶段2过滤），数据也不被别人学（PeerInsightService 同口径不上榜不可查），
-     * 所以门槛只数同意的人——不同意的既凑不了数，也进不了任何人的素材。
+     * 学习的同侪门槛：同侪池（{@link PeerInsightService#peers()}：同意学习 + 未暂停 + 在场）里
+     * 除自己外不足 2 人，该 learner 本日不学。池是同一把尺子：不在池里的既凑不了人数，也进不了任何人的素材。
+     * 学习者自己不必在池里——刚开局还没开过仓的新人恰恰最该学。
      */
-    static final int MIN_TRADERS_FOR_LEARNING = 3;
+    static final int MIN_PEERS_FOR_LEARNING = 2;
 
     private final AiTraderMapper traderMapper;
     private final TraderWakeupRunner runner;
     private final ReviewRunner reviewRunner;
     private final LearningRunner learningRunner;
+    private final PeerInsightService peerInsightService;
     /** 手动唤醒的拦因当场回给用户，跟界面语言 */
     private final MessageCatalog messages;
 
@@ -137,18 +139,19 @@ public class TraderScheduler {
                         .filter(t -> !Boolean.FALSE.equals(t.getReviewEnabled())).toList(),
                         t -> reviewRunner.review(t, boundary), "复盘"));
                 // ===== 屏障已过：全部复盘落库，learning 读到的同侪世界是同一天的 =====
-                // 只数同意学习的（null 当 true，与 !Boolean.FALSE.equals 口径一致）：不勾选的不在互看池里
-                Long total = traderMapper.selectCount(new LambdaQueryWrapper<AiTrader>()
-                        .and(w -> w.isNull(AiTrader::getLearningEnabled)
-                                .or().eq(AiTrader::getLearningEnabled, true)));
-                if (total == null || total < MIN_TRADERS_FOR_LEARNING) {
+                List<AiTrader> pool = peerInsightService.peers();
+                if (pool.size() < MIN_PEERS_FOR_LEARNING) {
                     // 设计定案的降级：同侪不足整体静默跳过，不写空话也不留 ERROR 行
-                    log.info("[TraderSched] 同意学习的 trader 不足{}人（现{}人），本日学习整体跳过", MIN_TRADERS_FOR_LEARNING, total);
+                    log.info("[TraderSched] 同侪池不足{}人（现{}人），本日学习整体跳过", MIN_PEERS_FOR_LEARNING, pool.size());
                     return;
                 }
+                Set<Long> poolIds = pool.stream().map(AiTrader::getId).collect(java.util.stream.Collectors.toSet());
                 // 阶段2：全体学习并行。再 fresh 一次——阶段1刚写完 memory，learner 注入要拿最新的
                 joinAll(phase(running().stream()
-                        .filter(t -> !Boolean.FALSE.equals(t.getLearningEnabled())).toList(),
+                        .filter(t -> !Boolean.FALSE.equals(t.getLearningEnabled()))
+                        // 自己在池里就占一格，剩下的才是同侪
+                        .filter(t -> pool.size() - (poolIds.contains(t.getId()) ? 1 : 0) >= MIN_PEERS_FOR_LEARNING)
+                        .toList(),
                         t -> learningRunner.learn(t, boundary), "学习"));
             } finally {
                 // 异常也不许卡死窗口：窗口关不上，全体 trader 就永久停摆了

@@ -73,14 +73,17 @@ class LearningLoopTest {
     private final UserLangResolver langResolver = mock(UserLangResolver.class);
     private final PromptCatalog prompts = new PromptCatalog();
 
-    private final LearningRunner runner = new LearningRunner(
-            new PeerInsightService(traderMapper, decisionMapper, planMapper, simTradeClient,
-                    assembler, prompts),
+    private final PeerInsightService peers = new PeerInsightService(
+            traderMapper, decisionMapper, planMapper, simTradeClient, assembler, prompts);
+
+    private final LearningRunner runner = new LearningRunner(peers,
             modelFactory, traderMapper, decisionMapper, prompts,
             new LocalizedToolCallbacks(prompts), langResolver);
 
     {
         when(langResolver.of(anyLong())).thenReturn(AgentLang.ZH);
+        // 看榜时刻定在边界：赢家 BOUNDARY-1h 的那笔了结落在 24h 窗口内
+        peers.nowMs = () -> BOUNDARY;
     }
 
     private static AiTrader trader(long id, String name) {

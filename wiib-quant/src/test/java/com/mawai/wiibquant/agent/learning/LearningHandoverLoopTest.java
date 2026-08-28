@@ -7,6 +7,7 @@ import com.mawai.wiibcommon.enums.AgentLang;
 import com.mawai.wiibcommon.i18n.MessageCatalog;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
+import com.mawai.wiibcommon.dto.FuturesPositionDTO;
 import com.mawai.wiibcommon.entity.AiTrader;
 import com.mawai.wiibcommon.entity.AiTraderDecision;
 import com.mawai.wiibquant.market.domain.KlineClosedEvent;
@@ -120,11 +121,12 @@ class LearningHandoverLoopTest {
         AiTrader loser = trader(9L, "输家");
         when(traderMapper.selectList(any())).thenReturn(List.of(me, winner, loser));
         when(traderMapper.selectById(8L)).thenReturn(winner);
-        when(traderMapper.selectCount(any())).thenReturn(3L);
         // 权益/复盘行都走空态：整链验证的是协作与并发，硬事实的口径在 PeerInsightServiceTest 已细验
         when(decisionMapper.selectOne(any())).thenReturn(null);
         when(assembler.lastReview(anyLong(), anyInt())).thenReturn(null);
         when(simTradeClient.getClosedPositions(anyLong(), anyInt())).thenReturn(List.of());
+        // 三人都挂着仓 → 都在同侪池里，每人除自己外还有 2 个同侪，过门槛
+        when(simTradeClient.getAllPositions(anyLong())).thenReturn(List.of(new FuturesPositionDTO()));
         when(planMapper.selectList(any())).thenReturn(List.of());
         // 先建好再 stub：thenReturn 参数里嵌套 when() 是 UnfinishedStubbing
         ChatModel model = sharedModel();
@@ -137,7 +139,7 @@ class LearningHandoverLoopTest {
                 traderMapper, decisionMapper, planMapper, simTradeClient, assembler, prompts);
         LearningRunner learningRunner = new LearningRunner(peers, modelFactory, traderMapper,
                 decisionMapper, prompts, new LocalizedToolCallbacks(prompts), langResolver);
-        TraderScheduler scheduler = new TraderScheduler(traderMapper, wakeupRunner, reviewRunner, learningRunner, new MessageCatalog());
+        TraderScheduler scheduler = new TraderScheduler(traderMapper, wakeupRunner, reviewRunner, learningRunner, peers, new MessageCatalog());
 
         scheduler.onKlineClosed(new KlineClosedEvent(this, "BTCUSDT", "5m", DAY_BOUNDARY - 1));
 

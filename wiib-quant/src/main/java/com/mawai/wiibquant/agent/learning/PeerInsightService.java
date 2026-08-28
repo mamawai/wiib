@@ -28,8 +28,9 @@ import java.util.Set;
  * 文本块整块进 learning 的用户消息，所以段名跟<b>看的人</b>的语言走（{@code learning.label.peer.*}）；
  * 块里回注的复盘/学习笔记是别人写的原文，是哪门语言就是哪门，不翻译。
  * 只读——不碰账本、不写任何人的数据，包括看的人自己的。
- * <b>互看以勾选为准</b>：learning_enabled=false 的 trader 不上榜、detail 也拒查——
- * 不同意学习的人，自己不学（调度侧过滤），数据也不进任何人的学习素材。
+ * <b>同侪池一把尺子</b>（{@link #peers()}）：同意学习 + 未暂停 + 在场（手里有仓，或最近一笔了结在 24h 内）。
+ * 调度侧的门槛计数、排行榜、detail 三处同一口径——不在池里的既凑不了人数，也不进任何人的学习素材。
+ * 爆仓的凭强平那笔了结在 24h 内留在榜上当前车之鉴，过后自然退场；注册后从没跑过的空壳不占名额。
  * 事实裁定归代码、模型只做甄别：收益率/笔数/论点→结局配对全在这里算死，模型拿到的是既成事实，
  * 它要判断的是"这份战绩值不值得学"，而不是"这个数对不对"。
  * 每行硬带已了结笔数：样本量不摆出来，模型就会把 1 笔的运气当成方法论。
@@ -44,6 +45,8 @@ public class PeerInsightService {
     static final int DIGEST_MAX_CHARS = 80;
     /** 详情页配对表条数上限：够看出手法就行，全部战绩不是这里的活 */
     static final int DETAIL_TRADES = 8;
+    /** 在场窗口：空仓的 trader 最近一笔了结距今超过这个时长就不算在场 */
+    static final long ACTIVE_WINDOW_MS = 24 * 3600_000L;
 
     private final AiTraderMapper traderMapper;
     private final AiTraderDecisionMapper decisionMapper;
@@ -52,24 +55,32 @@ public class PeerInsightService {
     private final ReviewMaterialAssembler assembler;
     private final PromptCatalog prompts;
 
+    /** 墙钟注入点：在场窗口要可测 */
+    java.util.function.LongSupplier nowMs = System::currentTimeMillis;
+
     /** 榜单一行的已算好事实（排序要先算完再排，所以先落成对象） */
     private record Row(AiTrader trader, BigDecimal returnPct, int closed, String digest) {
     }
 
+    /** 同侪池（按 id 升序）：调度侧数门槛用，与排行榜/detail 同一把尺子 */
+    public List<AiTrader> peers() {
+        return allTraders().stream().filter(t -> eligible(t, closedPositions(t))).toList();
+    }
+
     /**
-     * 本局排行榜快照：同意学习的 trader 全上榜，好的坏的都在（不勾选学习的不在互看池，直接不进榜）。
+     * 本局排行榜快照：同侪池里的全上榜，好的坏的都在。
      * 每行 = 谁 + 什么状态 + 赚亏多少 + 几笔样本 + 一句话复盘画像，selfTraderId 那行标出来。
      * 每个 trader 三次查询（权益/复盘/已平仓）不合并：trader 数量级几十，省这点查询不值得把 SQL 绕复杂。
      */
     public String leaderboard(long selfTraderId, AgentLang lang) {
         List<Row> rows = new ArrayList<>();
-        for (AiTrader t : traderMapper.selectList(new LambdaQueryWrapper<AiTrader>()
-                .orderByAsc(AiTrader::getId))) {
-            if (Boolean.FALSE.equals(t.getLearningEnabled())) {
-                continue;   // 不同意学习 → 数据不给任何人看（自己也不会走到这，调度侧已过滤）
+        for (AiTrader t : allTraders()) {
+            List<FuturesPositionDTO> closed = closedPositions(t);
+            if (!eligible(t, closed)) {
+                continue;
             }
             AiTraderDecision review = assembler.lastReview(t.getId(), t.getRoundNo());
-            rows.add(new Row(t, returnPct(t), closedPositions(t).size(),
+            rows.add(new Row(t, returnPct(t), closed.size(),
                     review == null ? null : review.getReasoning()));
         }
         rows.sort(Comparator.comparing(Row::returnPct).reversed());
@@ -102,11 +113,11 @@ public class PeerInsightService {
         if (t == null) {
             return prompts.get(lang, "learning.label.peer.notFound", Map.of("id", traderId));
         }
-        if (Boolean.FALSE.equals(t.getLearningEnabled())) {
+        List<FuturesPositionDTO> closed = closedPositions(t);
+        if (!eligible(t, closed)) {
             // 榜上没有它，但模型可能拿着旧笔记里的 id 来查：同样出一段话拒绝，透传给模型自己换人
             return prompts.get(lang, "learning.label.peer.notShared", Map.of("id", traderId));
         }
-        List<FuturesPositionDTO> closed = closedPositions(t);
         // 一次拉本局全部计划在内存里分用：LIVE 的进在场计划块，其余的给已了结交易配对
         List<AiTraderPlan> plans = planMapper.selectList(new LambdaQueryWrapper<AiTraderPlan>()
                 .eq(AiTraderPlan::getTraderId, t.getId())
@@ -168,6 +179,27 @@ public class PeerInsightService {
             }
         }
         return sb.toString();
+    }
+
+    // ==================== 同侪池准入 ====================
+
+    private List<AiTrader> allTraders() {
+        return traderMapper.selectList(new LambdaQueryWrapper<AiTrader>().orderByAsc(AiTrader::getId));
+    }
+
+    /**
+     * 同意学习 + 未暂停 + 在场。在场 = 手里有仓（拿三天的波段单也算），或空仓但最近一笔了结在 24h 内
+     * （sim 按 updatedAt 倒序返回，首条即最近；强平也在这份账本里，爆仓当天照样在场）。
+     */
+    private boolean eligible(AiTrader t, List<FuturesPositionDTO> closed) {
+        if (Boolean.FALSE.equals(t.getLearningEnabled()) || AiTrader.STATUS_PAUSED.equals(t.getStatus())) {
+            return false;
+        }
+        if (!simTradeClient.getAllPositions(t.getSimUserId()).isEmpty()) {
+            return true;
+        }
+        return !closed.isEmpty()
+                && ReviewMaterialAssembler.msOf(closed.get(0).getUpdatedAt()) >= nowMs.getAsLong() - ACTIVE_WINDOW_MS;
     }
 
     // ==================== 硬事实计算 ====================

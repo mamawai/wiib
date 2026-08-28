@@ -43,6 +43,8 @@ class PeerInsightServiceTest {
 
     /** 本局起点：某个整日边界 */
     private static final long T0 = 1785110400000L;
+    /** 看榜时刻：T0 后 12 小时，造数里 T0 附近的了结都落在 24h 窗口内 */
+    private static final long NOW = T0 + 43_200_000L;
 
     @BeforeAll
     static void initTableInfoCache() {
@@ -59,6 +61,10 @@ class PeerInsightServiceTest {
 
     private final PeerInsightService service = new PeerInsightService(
             traderMapper, decisionMapper, planMapper, simTradeClient, assembler, new PromptCatalog());
+
+    {
+        service.nowMs = () -> NOW;
+    }
 
     // ==================== 造数 ====================
 
@@ -150,6 +156,21 @@ class PeerInsightServiceTest {
         when(simTradeClient.getClosedPositions(eq(t.getSimUserId()), anyInt())).thenReturn(list);
     }
 
+    /** 该账户当前有一个持仓（在场判据之一） */
+    private void stubOpenPosition(AiTrader t) {
+        FuturesPositionDTO p = new FuturesPositionDTO();
+        p.setSymbol("BTCUSDT");
+        p.setSide("LONG");
+        p.setStatus("OPEN");
+        when(simTradeClient.getAllPositions(t.getSimUserId())).thenReturn(List.of(p));
+    }
+
+    /** 该账户最近一笔了结在 closeMs（在场判据之二：24h 内有了结） */
+    private void stubLastClosedAt(AiTrader t, long closeMs) {
+        when(simTradeClient.getClosedPositions(eq(t.getSimUserId()), anyInt())).thenReturn(List.of(
+                closedPos("LONG", "100000", "100100", "10", closeMs - 60_000L, closeMs)));
+    }
+
     private static String lineOf(String block, String idTag) {
         return block.lines().filter(l -> l.contains(idTag)).findFirst().orElseThrow();
     }
@@ -206,12 +227,14 @@ class PeerInsightServiceTest {
         optOut.setLearningEnabled(false);
         stubTraders(optOut);
 
-        assertThat(service.detail(8L, AgentLang.ZH)).contains("未开启同侪学习共享");
+        assertThat(service.detail(8L, AgentLang.ZH)).contains("不在同侪池");
     }
 
-    /** 好的和差的都看：已暂停/已爆仓不许从榜上消失，爆仓那份是前车之鉴 */
+    // ==================== 同侪池准入：未暂停 + 在场（有持仓或 24h 内有了结） ====================
+
+    /** 已暂停的出局；运行中与刚爆仓的（强平在 24h 内）照样在榜，爆仓那份是前车之鉴 */
     @Test
-    void 三种状态都上榜且渲染成中文() {
+    void 已暂停出局_运行中与已爆仓上榜() {
         AiTrader run = trader(7L, "在跑", AiTrader.STATUS_RUNNING);
         AiTrader paused = trader(8L, "歇了", AiTrader.STATUS_PAUSED);
         AiTrader dead = trader(9L, "炸了", AiTrader.STATUS_LIQUIDATED);
@@ -224,8 +247,78 @@ class PeerInsightServiceTest {
         String out = service.leaderboard(7L, AgentLang.ZH);
 
         assertThat(lineOf(out, "[id=7]")).contains("运行中");
-        assertThat(lineOf(out, "[id=8]")).contains("已暂停");
+        assertThat(out).doesNotContain("[id=8]").doesNotContain("歇了");
         assertThat(lineOf(out, "[id=9]")).contains("已爆仓").contains("-99.00%");
+    }
+
+    /** 已暂停的 detail 也拒：榜上没有它，拿旧笔记里的 id 直查同样吃闭门羹 */
+    @Test
+    void 已暂停的detail拒查() {
+        AiTrader paused = trader(8L, "歇了", AiTrader.STATUS_PAUSED);
+        stubTraders(paused);
+        stubClosedCount(paused, 3);
+
+        assertThat(service.detail(8L, AgentLang.ZH)).contains("不在同侪池").contains("8");
+    }
+
+    /** 空仓且最近一笔了结已超过 24h：不算在场，不上榜 */
+    @Test
+    void 空仓且24h内无了结的不上榜() {
+        AiTrader me = trader(7L, "我", AiTrader.STATUS_RUNNING);
+        AiTrader idle = trader(8L, "挂机", AiTrader.STATUS_RUNNING);
+        stubTraders(me, idle);
+        stubEquity(Map.of(7L, "10000", 8L, "11000"));
+        stubLastClosedAt(me, NOW - 3600_000L);
+        stubLastClosedAt(idle, NOW - 86_400_000L - 1);
+
+        String out = service.leaderboard(7L, AgentLang.ZH);
+
+        assertThat(out).contains("[id=7]").doesNotContain("[id=8]").doesNotContain("挂机");
+    }
+
+    /** 空仓且 24h 无了结的 detail 也拒 */
+    @Test
+    void 空仓且24h内无了结的detail拒查() {
+        AiTrader idle = trader(8L, "挂机", AiTrader.STATUS_RUNNING);
+        stubTraders(idle);
+        stubLastClosedAt(idle, NOW - 86_400_000L - 1);
+
+        assertThat(service.detail(8L, AgentLang.ZH)).contains("不在同侪池");
+    }
+
+    /** 手里有仓就是在场：拿三天的波段单这 24h 没开没平，照样上榜 */
+    @Test
+    void 持仓中但24h无了结的照样上榜() {
+        AiTrader me = trader(7L, "我", AiTrader.STATUS_RUNNING);
+        AiTrader swing = trader(8L, "波段", AiTrader.STATUS_RUNNING);
+        stubTraders(me, swing);
+        stubEquity(Map.of(7L, "10000", 8L, "14000"));
+        stubLastClosedAt(me, NOW - 3600_000L);
+        stubLastClosedAt(swing, NOW - 3 * 86_400_000L);
+        stubOpenPosition(swing);
+
+        String out = service.leaderboard(7L, AgentLang.ZH);
+
+        assertThat(lineOf(out, "[id=8]")).contains("波段").contains("+40.00%");
+    }
+
+    /** 同侪池：调度侧的门槛计数与榜单同一把尺子，出池的顺序按 id */
+    @Test
+    void 同侪池只含未暂停且在场的() {
+        AiTrader run = trader(7L, "在跑", AiTrader.STATUS_RUNNING);
+        AiTrader paused = trader(8L, "歇了", AiTrader.STATUS_PAUSED);
+        AiTrader idle = trader(9L, "挂机", AiTrader.STATUS_RUNNING);
+        AiTrader optOut = trader(10L, "独行侠", AiTrader.STATUS_RUNNING);
+        optOut.setLearningEnabled(false);
+        AiTrader holding = trader(11L, "持仓", AiTrader.STATUS_RUNNING);
+        stubTraders(run, paused, idle, optOut, holding);
+        stubLastClosedAt(run, NOW - 3600_000L);
+        stubLastClosedAt(paused, NOW - 3600_000L);
+        stubLastClosedAt(idle, NOW - 2 * 86_400_000L);
+        stubLastClosedAt(optOut, NOW - 3600_000L);
+        stubOpenPosition(holding);
+
+        assertThat(service.peers()).extracting(AiTrader::getId).containsExactly(7L, 11L);
     }
 
     /** 样本量披露：引用同侪战绩必须带笔数，每一行都得有，缺一行模型就能拿它当"没风险的经验" */
@@ -245,13 +338,14 @@ class PeerInsightServiceTest {
         assertThat(out).contains("样本量");
     }
 
-    /** 开局还没醒过（无决策行）：收益率是 0 不是负数，也不是空白 */
+    /** 开局还没醒过（无决策行）但已挂上仓：收益率是 0 不是负数，也不是空白 */
     @Test
     void 无决策行的收益率算零() {
-        AiTrader t = trader(7L, "新兵", AiTrader.STATUS_PAUSED);
+        AiTrader t = trader(7L, "新兵", AiTrader.STATUS_RUNNING);
         stubTraders(t);
         stubEquity(Map.of());
         stubClosedCount(t, 0);
+        stubOpenPosition(t);
 
         String out = service.leaderboard(7L, AgentLang.ZH);
 
@@ -284,6 +378,7 @@ class PeerInsightServiceTest {
         stubTraders(t);
         stubEquity(Map.of(7L, "10000"));
         stubClosedCount(t, 0);
+        stubOpenPosition(t);
         when(assembler.lastReview(7L, 1)).thenReturn(null);
 
         assertThat(service.leaderboard(7L, AgentLang.ZH)).contains("（尚无复盘）");
@@ -356,21 +451,22 @@ class PeerInsightServiceTest {
         assertThat(out.indexOf("B论点晚")).isLessThan(out.indexOf("A论点早"));
     }
 
-    /** 空态照说清楚：没复盘、没学习笔记、没在场计划、没成交，四块都得留话 */
+    /** 空态照说清楚：没复盘、没学习笔记、没立计划、没成交，四块都得留话（有仓才在池里，计划可以没立） */
     @Test
     void 详情空态四块都有交代() {
-        AiTrader t = trader(9L, "新号", AiTrader.STATUS_PAUSED);
+        AiTrader t = trader(9L, "新号", AiTrader.STATUS_RUNNING);
         stubTraders(t);
         stubEquity(Map.of());
         when(assembler.lastReview(9L, 1)).thenReturn(null);
         when(simTradeClient.getClosedPositions(eq(90L), anyInt())).thenReturn(List.of());
+        stubOpenPosition(t);
         when(planMapper.selectList(any())).thenReturn(List.of());
 
         String out = service.detail(9L, AgentLang.ZH);
 
         assertThat(out).contains("（尚无复盘）").contains("（尚无学习笔记）")
                 .contains("（当前空仓，无在场计划）").contains("（本局尚无已了结交易）");
-        assertThat(out).contains("已暂停").contains("+0.00%");
+        assertThat(out).contains("运行中").contains("+0.00%");
     }
 
     /** 查无此人给中文错误文本，不抛异常——这段话会原样透传给模型让它自己改 id */

@@ -61,7 +61,7 @@ learning:
       leaderboardHeader: |
         [PEER LEADERBOARD] (snapshot of this round, best return first)
         Basis: return = this trader's latest equity this round vs the 10000 starting capital; closed-trade count = the sample size behind that record, and any peer record you cite has to be quoted together with its count — a win rate over 3 trades is not a method.
-        Paused and liquidated traders stay on the board; what happened to them is material too.
+        Only traders in play are on the board (holding a position, or closed one within 24h); paused ones are not, freshly liquidated ones are — what happened to them is material too.
       row: "{{name}} | {{status}} | return this round {{pct}}% | {{closed}} closed | latest review: {{digest}}"
       # Without marking your own row, the model studies its own record as if it were someone else's experience
       self: (this is you)
@@ -70,10 +70,10 @@ learning:
         paused: paused
         liquidated: liquidated
         unknown: unknown
-      # Unknown trader / sharing off: returns text rather than throwing, and this text is passed
-      # straight through to the model so it can correct itself
+      # Unknown trader / not in the peer pool (sharing off, paused, not in play): returns text rather than
+      # throwing, and this text is passed straight through to the model so it can correct itself
       notFound: "No such trader (id={{id}}): it may have been deleted. Go back to the leaderboard for a valid id."
-      notShared: "This trader (id={{id}}) has not enabled peer-learning sharing, so its data cannot be viewed. Go back to the leaderboard and pick another."
+      notShared: "This trader (id={{id}}) is not in the peer pool right now, so its data cannot be viewed. Go back to the leaderboard and pick another."
       header: "[{{name}}] [id={{id}}] {{status}} | return this round {{pct}}% | {{closed}} closed"
       latestReview: "[LATEST REVIEW (FULL TEXT)]"
       noReview: (no review yet)
