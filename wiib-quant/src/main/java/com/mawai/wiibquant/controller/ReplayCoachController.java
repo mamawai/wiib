@@ -120,7 +120,7 @@ public class ReplayCoachController {
         });
         emitter.onError(ex -> channel.markClosed());
         try {
-            streamExecutor.submit(() -> {
+            streamExecutor.execute(() -> {
                 try {
                     run(channel, model, request, lang);
                 } catch (Throwable e) {
@@ -182,8 +182,10 @@ public class ReplayCoachController {
     }
 
     private static String textOf(ChatResponse frame) {
-        if (frame == null || frame.getResult() == null || frame.getResult().getOutput() == null) {
+        if (frame == null || frame.getResult() == null) {
             return null;
+        } else {
+            frame.getResult();
         }
         return frame.getResult().getOutput().getText();
     }

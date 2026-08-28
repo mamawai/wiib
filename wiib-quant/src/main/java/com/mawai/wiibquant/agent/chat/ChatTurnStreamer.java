@@ -170,9 +170,7 @@ public class ChatTurnStreamer {
         }
 
         /**
-         * 专家进度 → 前端事件。开始时发 agent_start（前端渲染成"接管分析"chip），
-         * 结论整段作为 role=process 的 token 发出（前端折叠成"工作过程"块）。
-         * 内容真实，只是并行下拿不到逐字流，一次性给。
+         * 给前端发一帧专家的进度
          */
         private void onExpertProgress(ChatTurnRunner.ExpertProgress event) {
             switch (event.phase()) {

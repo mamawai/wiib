@@ -89,14 +89,13 @@ public class ChatModelFactory {
      * Postgres 的 text 存不下这个字节，所以它绝不会出现在任何一个从库里读出来的字段值里。
      */
     public static String fingerprint(ChatEndpoints eps) {
-        // userId 必须进指纹：叶子里有按用户烤死的工具（TraderQueryToolkit 读的是"这个人的 trader"），
-        // 两人共用一份叶子就是把别人的持仓/决策端到对方眼前。隔离要靠键本身，不靠密文的随机性
+        // userId 必须进指纹，TraderQueryToolkit 读的是"这个人的 trader"，
         String raw = String.join("\0", String.valueOf(eps.userId()), part(eps.deep()), part(eps.light()));
         try {
             return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
                     .digest(raw.getBytes(StandardCharsets.UTF_8)));
         } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException("JDK 没有 SHA-256", e);   // 不可能发生
+            throw new IllegalStateException("JDK 没有 SHA-256", e);   // impossible
         }
     }
 
@@ -111,7 +110,6 @@ public class ChatModelFactory {
 
     private Models build(ChatEndpoints eps) {
         ChatModel deep = modelBuilder.build(eps.deep());
-        // 轻模型不绑就复用深模型这个实例本身（不是照参数再建一个）：省一份客户端和连接池
         ChatModel light = eps.light() == null ? deep : modelBuilder.build(eps.light());
         log.info("[ChatModel] 建模完成 model={} light={}", eps.deep().getModel(),
                 eps.light() == null ? "(同主模型)" : eps.light().getModel());

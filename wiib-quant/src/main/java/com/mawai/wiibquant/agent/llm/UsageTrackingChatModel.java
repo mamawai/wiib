@@ -6,9 +6,11 @@ import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.prompt.ChatOptions;
 import org.springframework.ai.chat.prompt.Prompt;
-import org.springframework.lang.NonNull;
+import org.jspecify.annotations.NonNull;
 import reactor.core.publisher.Flux;
 
+import java.util.Arrays;
+import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -81,9 +83,7 @@ public class UsageTrackingChatModel implements ChatModel {
         return delegate.stream(prompt)
                 .doOnNext(r -> {
                     Usage u = usageOf(r);
-                    if (u != null) {
-                        last.set(u);
-                    }
+                    last.set(u);
                 })
                 // 入账必须赶在终止信号传给下游之前：消费方一收到 onComplete 就会去读 snapshot()，
                 // 而 doFinally 是信号传播完才跑的——那一次（往往正是最贵的汇总）会漏记
@@ -100,12 +100,12 @@ public class UsageTrackingChatModel implements ChatModel {
 
     @Override
     public String call(@NonNull String message) {
-        return call(new Prompt(message)).getResult().getOutput().getText();
+        return Objects.requireNonNull(call(new Prompt(message)).getResult()).getOutput().getText();
     }
 
     @Override
-    public String call(@NonNull Message... messages) {
-        return call(new Prompt(java.util.Arrays.asList(messages))).getResult().getOutput().getText();
+    public String call(@NonNull Message @NonNull ... messages) {
+        return Objects.requireNonNull(call(new Prompt(Arrays.asList(messages))).getResult()).getOutput().getText();
     }
 
     /** 本轮累计；ReAct 循环可能跑在虚拟线程上，加锁保稳。 */
@@ -170,6 +170,6 @@ public class UsageTrackingChatModel implements ChatModel {
     }
 
     private static Usage usageOf(ChatResponse response) {
-        return response == null || response.getMetadata() == null ? null : response.getMetadata().getUsage();
+        return response == null ? null : response.getMetadata().getUsage();
     }
 }

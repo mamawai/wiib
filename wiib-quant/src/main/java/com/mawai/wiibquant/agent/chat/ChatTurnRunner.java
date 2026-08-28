@@ -45,12 +45,20 @@ import java.util.function.Consumer;
 /**
  * 一轮对话的编排：问路由 → 并行跑专家 → 汇总出答案 → 历史落库。
  * <pre>
- * 载入历史 ──► ┌─ 问路由（浅模型，结构化 tool_call）
- *              │      ├ FINISH / 已派过 / 到轮次上限 / 有未消费授权 → 跳出
- *              │      └ 派新专家 → 并行跑（专家等待期=让位窗口）→ 结论按派发顺序接进历史 ─┐
- *              │                                                                        │
- *              └────────────────────────────────────────────────────────────────────────┘ 回到循环开头
- *         └─► summarizer 叶子流式作答（token 逐帧外发）→ 终态整体覆盖会话历史
+ * 载入历史 + 本轮提问 → working
+ *   ↓
+ * 补答轮专属：接回让位那批在途专家，先等它们回来（普通轮跳过这步）
+ *   ↓
+ * 派发循环（while，最多 3 轮）
+ *   ├ 有未消费授权 / 按钮意图 / 满 3 轮 / 路由 FINISH / 专家都派过了 → 出循环去汇总
+ *   ├ 用户点停止 ──────────────────────────► 整轮结束：半截答案落库，不欠补答
+ *   ├ 新消息到达 ──────────────────────────► 整轮结束：让位，在途批次交协调器排队
+ *   └ 派新专家 → 虚拟线程并行跑 → 结论按派发顺序并入 working ↺ 回循环开头
+ *        └ 这段等待是唯一的让位窗口：中断与让位都在这儿被接住
+ *   ↓
+ * summarizer 流式作答（token 逐帧外发）
+ *   ↓
+ * 终态（含压缩替换）整体覆盖会话历史，下一轮从这里起跑
  * </pre>
  * 编排用普通 Java 循环：分支就是 if、并行就是虚拟线程、回环就是 while。
  * 叶子 agent 保留 ReactAgent，那里的 ReAct 循环确实是框架在管。
@@ -157,13 +165,12 @@ public class ChatTurnRunner {
         public static final ExpertBatch EMPTY = new ExpertBatch(List.of(), List.of());
 
         /**
-         * 全部到齐的 future。<b>按派发顺序接而不是先完成先接</b>：结论进历史的顺序得是确定的，
-         * 否则同一个问题两次跑出来的上下文不一样，行为不可复现。
-         * 出错的专家是一条说明失败的消息（见 runExpert），所以正常路径下不会异常完成。
+         * 全部到齐的 future。<b>按派发顺序接而不是先完成先接</b>
+         * 先等全部到齐，在join获取runExpert的Message结果
          */
         public CompletableFuture<List<Message>> all() {
             return CompletableFuture.allOf(futures.toArray(CompletableFuture[]::new))
-                    .thenApply(v -> futures.stream().map(CompletableFuture::join)
+                    .thenApply(_ -> futures.stream().map(CompletableFuture::join)
                             .filter(Objects::nonNull).toList());
         }
 
@@ -251,7 +258,7 @@ public class ChatTurnRunner {
                           ChatIntent intent, Consumer<String> answerTokenSink,
                           Consumer<ExpertProgress> progressSink, TurnYield yield, ExpertBatch deferred) {
         long startedAt = System.currentTimeMillis();
-        // 语言取自叶子：它是建叶子时按用户语言烤死的，已经在叶子缓存键里，不必再查一次
+        // 语言取自叶子：它是建叶子时按用户语言写死的，已经在叶子缓存键里，不必再查一次
         AgentLang lang = leaves.lang();
         List<Message> history = contextStore.load(sessionId);
         List<Message> working = new ArrayList<>(history);
@@ -259,6 +266,8 @@ public class ChatTurnRunner {
 
         Set<String> dispatched = new LinkedHashSet<>();
         int round = 0;
+
+        // 走这里一定是触发了让位
         if (deferred != null) {
             dispatched.addAll(deferred.names());
             round++;
@@ -269,27 +278,23 @@ public class ChatTurnRunner {
                 return ended;
             }
         }
+
         while (true) {
-            // 深研判确认后的那一轮：存在未消费授权说明这一轮的使命就是让 summarizer 重调工具。
-            // 专家数据上一轮刚取过、深研判也不消费它们，重派一遍纯烧钱——代码直通，不指望模型自觉 FINISH。
-            // 这一判必须排在轮次检查之前：那一轮的 round 本来就是 0，顺序反了看不出区别，
-            // 但语义上"有授权"是无条件直通，与还剩几轮无关
+            // 看是否存在未消费的深研判授权，跳过专家派发直通汇总
             if (approvalRegistry.hasApproval(sessionId)) {
                 log.info("[Workbench] 存在未消费的深研判授权，跳过派发直通汇总 session={}", sessionId);
                 break;
             }
-            // 功能按钮直发的一轮同理直通：该做什么已经写死在意图里，专家一个都用不上
+            // 功能按钮直发的一轮同理直通：该做什么已经写死在意图里，跳过专家派发直通汇总
             if (intent != null) {
                 log.info("[Workbench] 按钮意图 {}，跳过派发直通汇总 session={}", intent, sessionId);
                 break;
             }
-            // 中断压过让位：让位只是"这个问题稍后补答"，中断是"销账、不补"。
-            // 顺序反了的话，点完停止再发一条消息就会让让位赢，被停掉的问题照样被补答轮跑完
+            // 中断压过让位：两个信号都粘滞、可能同时为真，判反了被停掉的问题会被补答轮跑完
             if (yield.cancelRequested()) {
                 return cancelTurn(userId, sessionId, working, "", lang);
             }
-            // 信号粘滞的兜底：等待期的 anyOf 竞争恰好被批次赢了，但用户消息已在门口等——
-            // 结论已并入 working，不再烧新一轮派发，直接让位（空批次），欠的账交给补答轮
+            // 让位信号粘滞的兜底：anyOf 被批次赢了但用户消息已在门口——结论已并入 working，不再派新一轮，交空批次让位
             if (yield.yieldRequested()) {
                 return yieldTurn(userId, sessionId, working, ExpertBatch.EMPTY, lang);
             }
@@ -305,7 +310,7 @@ public class ChatTurnRunner {
             }
             // 同一专家不重复派：它取的数这一轮内不会变，再派一次只是空转烧钱，
             // 而且这正是死循环的来源（模型总觉得"再查一次说不定有新东西"）。
-            // 靠代码收敛，不指望模型自觉说 FINISH
+            // 所以需要靠代码收敛，不指望模型自觉说 FINISH
             List<String> fresh = next.stream().filter(name -> !dispatched.contains(name)).toList();
             if (fresh.isEmpty()) {
                 log.info("[Workbench] {} 本轮已取过数，转汇总", next);
@@ -389,15 +394,14 @@ public class ChatTurnRunner {
         CompletableFuture<Void> signal = yield.enterExpertWait();
         CompletableFuture<Void> stop = yield.cancelSignal();
         try {
-            // 中断也要能唤醒这一等：专家是带工具的 ReAct 图、同步阻塞几十秒起，
-            // 只等批次的话点了停止要挂到整批跑完，按钮会一直卡在"收尾中"
+            // 让位signal唤醒处是 handle.yieldSignal.complete(null); 比如用户在同一会话又发了一条消息
+            // stop唤醒处是 handle.cancelSignal.complete(null); 用户点击停止按钮
             CompletableFuture.anyOf(all, signal, stop).join();
         } finally {
             yield.exitExpertWait();
         }
         if (yield.cancelRequested()) {
-            // 在途批次照 fire-and-forget（与让位路径同哲学）：它们跑完也没人接，
-            // 但账本被它们写脏了，见 markAbandoned
+            // 账本被它们写脏了，见 markAbandoned
             leaves.deep().markAbandoned();
             leaves.light().markAbandoned();
             return cancelTurn(userId, sessionId, working, "", lang);
@@ -411,9 +415,8 @@ public class ChatTurnRunner {
     }
 
     /**
-     * 补答轮把接回的专家进度重推到本轮通道：让位那轮的通道早已关闭，专家跑完推的 DONE 没人看见。
-     * 已完成的立刻补 START+DONE，还在跑的先 START、跑完再 DONE。
-     * 失败/空结论的专家在批次里是一条说明消息，剥掉出处标注后照 DONE 推——过程轨里如实显示。
+     * 补答轮，在这里用 'thenAccept' 给之前让位的专家注册回调
+     * 回调的方法就是 onExpertProgress
      */
     private static void replayProgress(ExpertBatch batch, Consumer<ExpertProgress> progressSink) {
         for (int i = 0; i < batch.names().size(); i++) {
@@ -431,7 +434,7 @@ public class ChatTurnRunner {
      */
     private TurnResult yieldTurn(long userId, String sessionId, List<Message> working,
                                  ExpertBatch inFlight, AgentLang lang) {
-        // 让位时垫进模型上下文的占位答复：拦住新一轮 summarizer 替这个未回答的问题代答
+        // 让位时垫进一条消息，详见 chat.yml
         working.add(new AssistantMessage(prompts.get(lang, "chat.yieldPlaceholder")));
         contextStore.save(sessionId, userId, working);
         log.info("[Workbench] 专家等待期让位 session={}", sessionId);
@@ -557,14 +560,15 @@ public class ChatTurnRunner {
      * 两套括号都认（中文【】/英文 []）：标注是写入时那门语言拼的。
      */
     static String stripExpertTag(String text) {
-        return text.replaceFirst("^(【[^】]*】|\\[[^\\]]*])\n", "");
+        return text.replaceFirst("^(【[^】]*】|\\[[^]]*])\n", "");
     }
 
     /**
-     * 问模型"下一步给谁"。强制走 route 工具，模型没法用自由文本糊弄过去。
-     * 单次调用，无条件 required（不走 ResilientChatService 的"首轮强制"——历史里只要有过
-     * ToolResponseMessage 就会被首轮判据误判成非首轮）。options 从模型自己的派生、tool_choice 按协议落地，
-     * 都归 {@link ToolChoice}：openai 协议下泛型 builder 造的 options 会被 OpenAiChatModel 硬转失败（真跑实证）
+     * 问轻模型"下一步派谁"：单次调用，tool_choice 无条件 required，模型只能用 route 工具作答。
+     * <p>
+     * 返回本轮该派的专家名单；{@link #FINISH} 或空表示不再派发、转汇总——调用方据此出循环。
+     * 超时（{@link #ROUTER_TIMEOUT}）与任何异常也返回 FINISH：路由挂了照样作答，不拖死整轮。
+     * options 的派生与 tool_choice 的协议落地都归 {@link ToolChoice}。
      */
     private List<String> askRouter(ChatModel model, List<Message> history, AgentLang lang) {
         List<Message> messages = new ArrayList<>(history.size() + 1);

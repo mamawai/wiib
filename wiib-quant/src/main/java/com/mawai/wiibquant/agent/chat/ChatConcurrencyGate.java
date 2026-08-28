@@ -32,8 +32,7 @@ public class ChatConcurrencyGate {
     }
 
     public Acquire tryAcquire(long userId) {
-        // 先占用户位再占全局位：反过来的话，同一用户的第二次请求会先拿走一个全局名额再被拒回，
-        // 中间那一瞬间别人被无谓挡住
+        // 先占用户位自己的再占全局的
         if (!activeUsers.add(userId)) {
             return Acquire.USER_BUSY;
         }

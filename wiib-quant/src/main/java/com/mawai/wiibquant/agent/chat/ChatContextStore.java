@@ -13,14 +13,16 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 会话模型侧上下文的存取口（替代 PostgresSaver checkpoint）：一会话一行，整体替换。
+ * 会话模型侧上下文的存取口：{@code workbench_chat_context} 表一会话一行，
+ * 整体替换，没有增量语义。对话链路只经这里读写模型上下文。
  * <p>
- * 存的是每轮结束时 summarizer 叶子的最终 messages——含专家结论、工具调用配对、
- * 压缩后的摘要状态。压缩结果必须落下来：不落的话下一轮超阈值又重压一遍，白烧轻模型的钱。
+ * 存的是每轮结束时 summarizer 叶子的最终 messages——专家结论、tool_call/tool_response 配对、
+ * 压缩后的摘要状态都在里面。下一轮 {@link #load} 出来直接当起跑历史。
  * <p>
- * 序列化复用叶子 agent 同一个 {@link StateSerializer}（{@link AgentGraphs#STATE_SERIALIZER}，
- * Jackson 版）：Spring AI Message 全族的多态往返它已经打通，tool_call/tool_response 配对不丢——
- * 自己另写一套只会踩一遍老坑。同一常量保证"存进去读出来同一套格式"是结构事实，不靠装配。
+ * 序列化用 {@link AgentGraphs#STATE_SERIALIZER}（{@link StateSerializer} 的 Jackson 实现），
+ * 与叶子建图是同一个实例，存进去与读出来是同一套格式。
+ * <p>
+ * 三个方法一律不向上抛：读失败当这轮没有历史，写、删失败只记日志。上下文存取不中断对话。
  */
 @Slf4j
 @Component
@@ -32,7 +34,6 @@ public class ChatContextStore {
 
     /**
      * 取会话历史。无行（新会话）返回空；读失败也返回空——降级成"这轮没有上下文"，
-     * 对话还能继续，比整轮拒绝服务强。降级有代价（模型忘了之前聊的），所以是 error 级日志。
      */
     public List<Message> load(String sessionId) {
         List<byte[]> rows;

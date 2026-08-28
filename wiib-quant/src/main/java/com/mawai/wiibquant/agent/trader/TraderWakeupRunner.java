@@ -40,7 +40,6 @@ import org.bsc.langgraph4j.prebuilt.MessagesState;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.UserMessage;
-import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.stereotype.Component;
 
@@ -63,6 +62,7 @@ import java.util.Set;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.function.LongSupplier;
 import java.util.stream.Collectors;
 
 /**
@@ -111,7 +111,7 @@ public class TraderWakeupRunner {
     private final LocalizedToolCallbacks localizedTools;
 
     /** 墙钟注入点：预算计算要可测（测试里把"现在"钉在边界附近） */
-    java.util.function.LongSupplier nowMs = System::currentTimeMillis;
+    LongSupplier nowMs = System::currentTimeMillis;
 
     /** 唤醒预算(秒)：截止 = 下一边界前 5s——唤醒决不占用下一根K线；上限 600s。 */
     static long wakeBudgetSeconds(long boundary, long intervalMs, long now) {
@@ -424,8 +424,8 @@ public class TraderWakeupRunner {
         long toNextMin = Math.max(1, (intervalMs - Math.floorMod(trig.triggeredAt(), intervalMs)) / 60_000);
         String lastWake = recent.isEmpty() ? prompts.get(lang, "trader.wake.alertNoWake")
                 : prompts.get(lang, "trader.wake.alertWakeAt", Map.of(
-                        "time", TIME_FMT.format(Instant.ofEpochMilli(recent.get(0).getWakeTime())),
-                        "minutes", Math.max(1, (trig.triggeredAt() - recent.get(0).getWakeTime()) / 60_000)));
+                        "time", TIME_FMT.format(Instant.ofEpochMilli(recent.getFirst().getWakeTime())),
+                        "minutes", Math.max(1, (trig.triggeredAt() - recent.getFirst().getWakeTime()) / 60_000)));
         return prompts.get(lang, "trader.wake.alertHeader", Map.of(
                 "symbol", trig.symbol(),
                 "amplitude", trig.amplitudePct().stripTrailingZeros().toPlainString(),

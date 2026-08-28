@@ -205,8 +205,7 @@ public class ChatAgentFactory {
         if (prev != null) {
             return prev;
         }
-        log.info("对话工作台叶子已构建 model={} lang={} 缓存数={}",
-                eps.deep().getModel(), lang.code(), cache.size());
+        log.info("对话工作台叶子已构建 model={} lang={} 缓存数={}", eps.deep().getModel(), lang.code(), cache.size());
         return built;
     }
 
@@ -221,30 +220,21 @@ public class ChatAgentFactory {
         return ChatModelFactory.fingerprint(eps) + ':' + lang.code();
     }
 
-    // 形参不叫 config：这个包里 config 一律指 RunnableConfig，重名读起来会误导
     private Leaves build(ChatEndpoints eps, AgentLang lang) throws Exception {
         ChatModelFactory.Models models = chatModelFactory.modelsFor(eps);
-        // 用量装饰器包在这一层而不是 ChatModelFactory：叶子与模型同指纹、同寿命、同为每用户一份，
-        // 而闸门保证一个用户同时只有一轮在跑——于是它能当"轮级账本"使（轮开头 resetUsage 划边界）。
-        // 包在工厂里的话，复盘教练那条借模型的无关链路也要白背一层装饰
+        // 用量装饰器进行包装
         UsageTrackingChatModel deep = new UsageTrackingChatModel(models.deep());
-        // 没单独绑轻模型时工厂给的本就是同一个实例，装饰器也得共用一个，否则同一次调用记两遍账
-        UsageTrackingChatModel light = models.light() == models.deep()
-                ? deep : new UsageTrackingChatModel(models.light());
-
+        // 没单独绑轻模型时工厂给的是同一个实例，装饰器也得共用一个，否则同一次调用记两遍账
+        UsageTrackingChatModel light = models.light() == models.deep() ? deep : new UsageTrackingChatModel(models.light());
         // LinkedHashMap 保序：派发顺序、结论拼进历史的顺序都跟着它，market 在前 news 在后
         Map<String, Expert> experts = new LinkedHashMap<>();
         // market 的工具要按问题选 symbol，只能交给模型现取，所以没有 preload
         experts.put(MARKET_AGENT, new Expert(expertGraph(lang, light, marketToolkit, "required",
                 prompts.get(lang, "chat.expert.market")), null));
-        // 新闻专家只管 BlockBeats：数据走"预取"（news_search 无参数，预取 100% 保证快讯在
-        // 上下文里，不依赖模型行为；不挂 function tool——实测挂着它 auto 下还会再调一次纯浪费）。
-        // 联网补的那一路不归它：模型的服务端搜索关不掉（grok 实测所有请求参数/换模型均无效），
-        // 与其在两处禁，不如把搜索正式划给 summarizer 当职责、这里明令禁用——预取喂饱后它没有搜索动机，禁得住
+        // 新闻只预取 BlockBeats（news_search 入参语言，不挂 tool），这里不进行联网搜索
         experts.put(NEWS_AGENT, new Expert(expertGraph(lang, light, null, null,
                 prompts.get(lang, "chat.expert.news")), () -> newsToolkit.newsSearch(lang)));
-        // trader 专家只读这个用户自己的 trader：userId 在这里烤进工具实例，不做成模型可填的参数
-        //（做成参数就等于让模型自己说要看谁的档案）。无预取——四个工具各答一类问题，取哪个得看问题
+        // trader 专家只读这个用户自己的 trader
         experts.put(TRADER_AGENT, new Expert(expertGraph(lang, light,
                 new TraderQueryToolkit(traderChatService, eps.userId()), "required",
                 prompts.get(lang, "chat.expert.trader")), null));
