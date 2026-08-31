@@ -230,8 +230,12 @@ public class TraderService {
         return null;
     }
 
-    /** 重置开新局：round+1、新 sim 子账户注资、PAUSED 待手动启动；旧账户与决策历史留档。 */
-    public String reset(long userId) {
+    /**
+     * 重置开新局：round+1、新 sim 子账户注资、PAUSED 待手动启动；旧账户与决策历史留档。
+     * carryNotes=false 时连两份笔记的生效版本一并清空——历届存档在 REVIEW 行 memory_after /
+     * LEARN 行 reasoning 里，永远查得到，清的只是"下局还注不注入"。
+     */
+    public String reset(long userId, boolean carryNotes) {
         AiTrader t = mine(userId);
         if (t == null) {
             return messages.get("trader.notCreated");
@@ -248,7 +252,7 @@ public class TraderService {
                 .set(AiTraderRequest::getExecutedResult,
                         prompts.get(langResolver.of(userId), "trader.receipt.voidedByReset"))
                 .set(AiTraderRequest::getDecidedAt, LocalDateTime.now()));
-        traderMapper.update(null, new LambdaUpdateWrapper<AiTrader>()
+        LambdaUpdateWrapper<AiTrader> upd = new LambdaUpdateWrapper<AiTrader>()
                 .eq(AiTrader::getId, t.getId())
                 .set(AiTrader::getRoundNo, newRound)
                 .set(AiTrader::getSimUserId, simUserId)
@@ -258,10 +262,14 @@ public class TraderService {
                 // 未读留言同请求一起作废：那是对上一局那个 trader 说的话（"这周别碰 SOL"），
                 // 新账户新计划新战绩，唯独叮嘱跟过来最没道理；留言最多能挂 24 轮，
                 // 不清就会污染新局开头的一整天——而新局恰恰最需要干净的上下文。
-                // memory/learning_notes 不清是另一回事：那是跨局的认知积累，不是本局的未决事项
+                // memory/learning_notes 默认不清（跨局的认知积累，不是本局的未决事项），主人可选不带入
                 .set(AiTrader::getOwnerNote, null)
                 .set(AiTrader::getOwnerNoteRounds, 0)
-                .set(AiTrader::getUpdatedAt, LocalDateTime.now()));
+                .set(AiTrader::getUpdatedAt, LocalDateTime.now());
+        if (!carryNotes) {
+            upd.set(AiTrader::getMemory, null).set(AiTrader::getLearningNotes, null);
+        }
+        traderMapper.update(null, upd);
         purgeExpiredRounds(t.getId(), userId, newRound);
         log.info("[Trader] 重置开新局 traderId={} round={}", t.getId(), newRound);
         return null;

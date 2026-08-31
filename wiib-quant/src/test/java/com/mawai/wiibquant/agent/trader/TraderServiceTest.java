@@ -244,7 +244,7 @@ class TraderServiceTest {
         when(traderMapper.selectOne(any())).thenReturn(t);
         when(simTradeClient.ensureAccount(any(), any())).thenReturn(99L);
 
-        assertThat(service.reset(1L)).isNull();
+        assertThat(service.reset(1L, true)).isNull();
 
         verify(planStore).archiveRound(eq(7L), eq(3), org.mockito.ArgumentMatchers.anyLong());
         verify(requestMapper).update(any(), any());     // 待确认请求一并作废
@@ -264,7 +264,7 @@ class TraderServiceTest {
         when(traderMapper.selectOne(any())).thenReturn(t);
         when(simTradeClient.ensureAccount(any(), any())).thenReturn(99L);
 
-        assertThat(service.reset(1L)).isNull();
+        assertThat(service.reset(1L, true)).isNull();
 
         verify(decisionMapper).delete(any());
         verify(requestMapper).delete(any());
@@ -284,7 +284,7 @@ class TraderServiceTest {
         org.mockito.Mockito.doThrow(new IllegalStateException("sim down"))
                 .when(simTradeClient).deleteAccount(any());
 
-        assertThat(service.reset(1L)).isNull();
+        assertThat(service.reset(1L, true)).isNull();
 
         verify(planStore).purgeRounds(7L, 1);   // quant 三表照删
     }
@@ -343,6 +343,42 @@ class TraderServiceTest {
         verify(modelFactory).testConnection(next);
         verify(endpointService).bind(1L, UserLlmBinding.TRADER, 6L);
         verify(modelFactory).evict(7L);
+    }
+
+    /** 不带入笔记的重置：memory/learning_notes 只清生效版本（历届存档在 REVIEW/LEARN 决策行里，不动） */
+    @Test
+    void resetWithoutCarryClearsNotes() {
+        AiTrader t = new AiTrader();
+        t.setId(7L);
+        t.setUserId(1L);
+        t.setRoundNo(3);
+        when(traderMapper.selectOne(any())).thenReturn(t);
+        when(simTradeClient.ensureAccount(any(), any())).thenReturn(99L);
+
+        assertThat(service.reset(1L, false)).isNull();
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<LambdaUpdateWrapper<AiTrader>> cap = ArgumentCaptor.forClass(LambdaUpdateWrapper.class);
+        verify(traderMapper).update(isNull(), cap.capture());
+        assertThat(cap.getValue().getSqlSet()).contains("memory").contains("learning_notes");
+    }
+
+    /** 默认带入（carryNotes=true）：两份笔记不进 set 列表，跨局认知积累照旧 */
+    @Test
+    void resetWithCarryKeepsNotes() {
+        AiTrader t = new AiTrader();
+        t.setId(7L);
+        t.setUserId(1L);
+        t.setRoundNo(3);
+        when(traderMapper.selectOne(any())).thenReturn(t);
+        when(simTradeClient.ensureAccount(any(), any())).thenReturn(99L);
+
+        assertThat(service.reset(1L, true)).isNull();
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<LambdaUpdateWrapper<AiTrader>> cap = ArgumentCaptor.forClass(LambdaUpdateWrapper.class);
+        verify(traderMapper).update(isNull(), cap.capture());
+        assertThat(cap.getValue().getSqlSet()).doesNotContain("memory").doesNotContain("learning_notes");
     }
 
     /** stale 标记：本人的 CLOSED 计划可标可取消（教材层忽略，钱账与公开记录不动） */

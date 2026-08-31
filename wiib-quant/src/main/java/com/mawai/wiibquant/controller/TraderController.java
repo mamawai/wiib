@@ -210,10 +210,15 @@ public class TraderController {
         return err == null ? Result.ok(null) : Result.fail(err);
     }
 
+    /** carryNotes 空=true（带入笔记到新局）；false 只清生效版本，历届存档保留 */
+    public record ResetRequest(Boolean carryNotes) {
+    }
+
     @PostMapping("/reset")
-    @Operation(summary = "重置开新局（round+1，新子账户注资10000，历史留档）")
-    public Result<Void> reset(@CurrentUserId long userId) {
-        String err = traderService.reset(userId);
+    @Operation(summary = "重置开新局（round+1，新子账户注资10000，历史留档；carryNotes=false不带入复盘/学习笔记）")
+    public Result<Void> reset(@CurrentUserId long userId, @RequestBody(required = false) ResetRequest req) {
+        boolean carry = req == null || req.carryNotes() == null || req.carryNotes();
+        String err = traderService.reset(userId, carry);
         return err == null ? Result.ok(null) : Result.fail(err);
     }
 
