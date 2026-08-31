@@ -222,14 +222,17 @@ public class TraderController {
         return err == null ? Result.ok(null) : Result.fail(err);
     }
 
-    /** stale 开关请求体 */
-    public record PlanStaleRequest(boolean stale) {
+    /** stale 开关请求体。包装 Boolean：缺字段是格式错误要拒，不能被 Jackson 静默填成 false 当"取消忽略"执行 */
+    public record PlanStaleRequest(Boolean stale) {
     }
 
     @PostMapping("/plan/{planId}/stale")
     @Operation(summary = "标记/取消忽略一笔已了结交易（仅本人、仅CLOSED；忽略后AI统计与复盘不再参考，公开记录不变）")
     public Result<Void> setPlanStale(@CurrentUserId long userId, @PathVariable long planId,
                                      @RequestBody PlanStaleRequest req) {
+        if (req.stale() == null) {
+            return Result.fail(messages.get("trader.plan.staleRequired"));
+        }
         String err = traderService.setPlanStale(userId, planId, req.stale());
         return err == null ? Result.ok(null) : Result.fail(err);
     }

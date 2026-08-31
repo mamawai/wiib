@@ -15,6 +15,7 @@ trader:
   plan:
     notFound: Trade plan not found
     notClosed: Only settled trades can be ignored
+    staleRequired: Missing required field 'stale'
 
   # The two buttons on an approval card (add / reduce requests)
   request:

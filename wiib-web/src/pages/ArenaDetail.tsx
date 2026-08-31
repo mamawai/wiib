@@ -6,6 +6,7 @@ import {
   NotebookPen, RefreshCcw, X, type LucideIcon,
 } from 'lucide-react';
 import { traderApi } from '../api';
+import { useToast } from '../components/ui/use-toast';
 import { STATUS_META } from './Arena';
 import { EquityChart } from '../components/EquityChart';
 import { Markdown } from '../components/Markdown';
@@ -105,6 +106,7 @@ function NotesCard({ icon: Icon, tone, title, time, content, empty }: {
  */
 export function ArenaDetail() {
   const { t } = useTranslation(['ai', 'common']);
+  const { toast } = useToast();
   const { id } = useParams();
   const traderId = Number(id);
   const [detail, setDetail] = useState<TraderDetailView | null>(null);
@@ -130,15 +132,15 @@ export function ArenaDetail() {
     void traderApi.trades(traderId).then(setTrades).catch(() => setTrades([]));
   }, [traderId, round]);
 
-  // 忽略开关（仅主人可见）：成功后本地改写该行，不整页重拉
+  // 忽略开关（仅主人可见）：成功后本地改写该行，不整页重拉；失败要出声——静默吞掉用户会以为已忽略
   const toggleStale = useCallback((r: TradeRecordView) => {
     if (!r.plan) return;
     const next = r.plan.stale !== true;
     void traderApi.setPlanStale(r.plan.id, next).then(() =>
       setTrades(prev => prev.map(x => x.positionId === r.positionId && x.plan
         ? { ...x, plan: { ...x.plan, stale: next } } : x))
-    ).catch(() => {});
-  }, []);
+    ).catch((e: Error) => toast(e.message || t('toast.actionFailed'), 'error'));
+  }, [toast, t]);
 
   // 时间线单独拉：按天翻看只动它，持仓/曲线/已了结不跟着重拉
   const loadDecisions = useCallback(() => {

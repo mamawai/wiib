@@ -15,6 +15,7 @@ trader:
   plan:
     notFound: 找不到这笔交易计划
     notClosed: 只能忽略已了结的交易
+    staleRequired: 请求缺少 stale 参数
 
   # 审批卡上的两个按钮（加仓/减仓请求）
   request:

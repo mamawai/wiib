@@ -169,7 +169,7 @@ trader:
     playStatsHeader: "————— This round's thesis record (code-computed, last {{n}} settled trades; quote only, never recompute) —————"
     playStatsRow: "{{play}}: {{n}} trades, {{wins}}W {{losses}}L, total PnL {{pnl}} USDT"
     playStatsRowSmall: "{{play}}: {{n}} trades (insufficient sample, disregard)"
-    playStatsFooter: "(Covers all settled trades this round regardless of config changes in between; with few samples luck and skill look identical - never treat a small sample as a pattern.)"
+    playStatsFooter: "(Covers only the recent settled trades listed above, regardless of config changes in between; with few samples luck and skill look identical - never treat a small sample as a pattern.)"
     memory: ————— Review notes (your own lessons from past trades, for reference) —————
     learningNotes: ————— Learning notes (what you wrote up after studying peers — other people's experience, for reference) —————
     customPrompt: "————— Your owner's trading-style instructions (style and strategy follow these: where they conflict with the platform defaults above, your owner wins; the position spec and the hard rules are enforced by the system and are not overridable) —————"

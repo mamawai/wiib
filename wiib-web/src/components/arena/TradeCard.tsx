@@ -26,7 +26,8 @@ export function TradeCard({ r, onJump, onToggleStale }: {
   const { t } = useTranslation('ai');
   const isLong = r.side === 'LONG';
   const pnl = r.closedPnl;
-  const stale = r.plan?.stale === true;
+  // stale 视觉与开关同门槛（仅主人）：忽略是主人对自家教材的私人治理，公开视角的已了结列表与常人无异
+  const stale = r.plan?.stale === true && onToggleStale != null;
   return (
     <div className={cn('rounded-md border border-border bg-card p-2.5 text-[11px] space-y-1.5', stale && 'opacity-60')}>
       <div className="flex items-center gap-2 flex-wrap">

@@ -11,6 +11,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Set;
 
@@ -120,9 +121,11 @@ public class TraderPlanStore {
      * 此 stale 与 {@link #cleanupStale}（清理已了结残留计划）无关——那是生命周期，这是教材治理。
      */
     public void setStale(long planId, boolean stale) {
+        // wrapper 更新不走 INSERT_UPDATE 自动填充，updated_at 手动带上——本表所有写路径同一口径
         mapper.update(null, new LambdaUpdateWrapper<AiTraderPlan>()
                 .eq(AiTraderPlan::getId, planId)
-                .set(AiTraderPlan::getStale, stale));
+                .set(AiTraderPlan::getStale, stale)
+                .set(AiTraderPlan::getUpdatedAt, LocalDateTime.now()));
     }
 
     /** 本局最近归档的计划（最新在前）：对话轨要回答"上一笔为什么平了"，只看 LIVE 是答不了的。 */
