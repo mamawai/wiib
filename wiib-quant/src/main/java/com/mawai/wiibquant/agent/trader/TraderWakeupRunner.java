@@ -241,7 +241,10 @@ public class TraderWakeupRunner {
         decisionMapper.insert(d);
     }
 
-    /** ReactAgent 会话：返回模型最终文本；动作轨迹随 decision 一并写入。trigger 非空=警报唤醒（只换开场白）。 */
+    /**
+     * ReactAgent 会话：备料（工具/最近决策/计划/提示词）→ 建图 → 开场白 → 限时执行。
+     * 返回模型最终文本；动作轨迹随 decision 一并写入。trigger 非空=警报唤醒（只换开场白）。
+     */
     private String runAgentSession(AiTrader trader, long boundaryTime, long budgetSeconds,
                                    List<FuturesPositionDTO> positions, BigDecimal equity,
                                    AiTraderDecision decision, AlertTrigger trigger,
@@ -251,61 +254,14 @@ public class TraderWakeupRunner {
         UsageTrackingChatModel model = new UsageTrackingChatModel(modelFactory.modelFor(trader));
         Set<String> whitelist = Arrays.stream(trader.getSymbols().split(","))
                 .map(String::trim).filter(s -> !s.isEmpty()).collect(Collectors.toSet());
-        TraderRiskConfig risk = TraderRiskConfig.of(trader);
-        TradeTools tradeTools = new TradeTools(simTradeClient, trader.getSimUserId(), whitelist, equity,
-                sym -> JSON.parseObject(binanceRestClient.getPremiumIndex(sym)).getBigDecimal("markPrice"),
-                planStore, requestService,
-                // 截止时刻交给工具层：超时后 cancel(true) 未必立刻打断图里正在跑的工具调用，
-                // 写工具自己按这个时间点拒发，才不会在作废的一轮里继续下单
-                new TradeTools.WakeCtx(trader.getId(), trader.getRoundNo(), boundaryTime,
-                        System.currentTimeMillis() + budgetSeconds * 1000, risk, lang),
-                prompts, messages);
-
-        // 回注窗口只认交易决策行（白名单：例行/警报/手动）——REVIEW/LEARN 的产出已经走
-        // memory/learning_notes 注入，再进最近决策就是重复占字数；ALERT/MANUAL 是真实交易
-        // 决策必须保留——警报轮可能刚动过仓位，开场白的"上次唤醒"也取自本列表第一条
-        List<AiTraderDecision> recent = decisionMapper.selectList(new LambdaQueryWrapper<AiTraderDecision>()
-                .eq(AiTraderDecision::getTraderId, trader.getId())
-                .eq(AiTraderDecision::getRoundNo, trader.getRoundNo())
-                .in(AiTraderDecision::getKind, AiTraderDecision.KIND_TRADE,
-                        AiTraderDecision.KIND_ALERT, AiTraderDecision.KIND_MANUAL)
-                .lt(AiTraderDecision::getWakeTime, boundaryTime)
-                .orderByDesc(AiTraderDecision::getWakeTime)
-                .last("LIMIT " + RECENT_DECISIONS));
-        // stale 教材过滤：被忽略交易的内容不回注给下一轮（新格式剔段、旧格式命中轮清空正文）。
-        // 行本身保留——行头的时刻/权益是唤醒事实，警报开场白的"上次唤醒在X"要用真时刻
-        List<AiTraderPlan> allPlans = planStore.listAll(trader.getId(), trader.getRoundNo());
-        recent.forEach(d -> {
-            String r = materialAssembler.staleFiltered(d, allPlans);
-            d.setReasoning(r == null ? "" : r);
-        });
-
-        // 计划懒清理 + 补绑 + 加载：仓位/挂单还活着的计划保留，已了结（止损/止盈/平仓/撤单）的归档；
-        // 在场仓位 id 顺路传入——限价单成交后计划还挂着 null positionId，这一趟补绑
+        TradeTools tradeTools = tradeToolsFor(trader, whitelist, equity, boundaryTime, budgetSeconds, lang);
+        List<AiTraderDecision> recent = recentDecisionsStaleFiltered(trader, boundaryTime);
+        // 挂单一次拉取两用：计划补绑的判活依据 + 账户状态注入
         List<FuturesOrderResponse> pendingOrders = simTradeClient.getPendingOrders(trader.getSimUserId(), null);
-        Set<String> liveKeys = new HashSet<>();
-        Map<String, Long> positionIdByKey = new HashMap<>();
-        positions.forEach(p -> {
-            liveKeys.add(TraderPlanStore.key(p.getSymbol(), p.getSide()));
-            positionIdByKey.put(TraderPlanStore.key(p.getSymbol(), p.getSide()), p.getId());
-        });
-        for (FuturesOrderResponse o : pendingOrders) {
-            if (o.getOrderSide() != null && o.getOrderSide().startsWith("OPEN_")) {
-                liveKeys.add(TraderPlanStore.key(o.getSymbol(), o.getOrderSide().substring("OPEN_".length())));
-            }
-        }
-        List<AiTraderPlan> plans = planStore.cleanupStale(trader.getId(), trader.getRoundNo(),
-                liveKeys, positionIdByKey, boundaryTime);
-
-        List<AiTraderRequest> decided = requestService.decidedUnnotified(trader.getId(), trader.getRoundNo());
-        // assemble 会立刻消费留言（最后一轮还会把内存里的正文清掉），开场白要不要加指针必须先记下
+        List<AiTraderPlan> plans = cleanupAndRebindPlans(trader, positions, pendingOrders, boundaryTime);
+        // wakePrompt 里的 assemble 会立刻消费留言（最后一轮还会把内存里的正文清掉），开场白要不要加指针必须先记下
         boolean hasOwnerNote = trader.getOwnerNote() != null && !trader.getOwnerNote().isBlank();
-        // 系统提示词跟着 trader 主人的语言走：ai_trader.user_id → user.lang（取不到回落中文）
-        String prompt = promptAssembler.assemble(trader,
-                accountStateJson(prompts, lang, equity, positions, pendingOrders, plans, boundaryTime,
-                        requestService.pendingOf(trader.getId(), trader.getRoundNo()), decided), recent, lang);
-        // 结果说一次就够：注入本轮后置已通知，防同一条回执每轮反复出现
-        requestService.markNotified(decided);
+        String prompt = wakePrompt(trader, equity, positions, pendingOrders, plans, boundaryTime, recent, lang);
 
         // 全量工具轨迹（含数据工具）：收集器在本方法手里，超时 cancel 也保得住已发生的记录
         ToolCallTraceHook trace = new ToolCallTraceHook();
@@ -356,6 +312,79 @@ public class TraderWakeupRunner {
             decision.setError(prompts.get(lang, "trader.error.callLimit", Map.of("limit", MAX_MODEL_CALLS)));
         }
         return outcome.reasoning();
+    }
+
+    /** 交易工具：绑定该 trader 的 sim 子账户、白名单与风险规格，每次唤醒 new 一个。 */
+    private TradeTools tradeToolsFor(AiTrader trader, Set<String> whitelist, BigDecimal equity,
+                                     long boundaryTime, long budgetSeconds, AgentLang lang) {
+        return new TradeTools(simTradeClient, trader.getSimUserId(), whitelist, equity,
+                sym -> JSON.parseObject(binanceRestClient.getPremiumIndex(sym)).getBigDecimal("markPrice"),
+                planStore, requestService,
+                // 截止时刻交给工具层：超时后 cancel(true) 未必立刻打断图里正在跑的工具调用，
+                // 写工具自己按这个时间点拒发，才不会在作废的一轮里继续下单
+                new TradeTools.WakeCtx(trader.getId(), trader.getRoundNo(), boundaryTime,
+                        System.currentTimeMillis() + budgetSeconds * 1000, TraderRiskConfig.of(trader), lang),
+                prompts, messages);
+    }
+
+    /**
+     * 回注窗口只认交易决策行（白名单：例行/警报/手动）——REVIEW/LEARN 的产出已经走
+     * memory/learning_notes 注入，再进最近决策就是重复占字数；ALERT/MANUAL 是真实交易
+     * 决策必须保留——警报轮可能刚动过仓位，开场白的"上次唤醒"也取自本列表第一条。
+     * <p>
+     * stale 教材过滤：被忽略交易的内容不回注给下一轮（新格式剔段、旧格式命中轮清空正文）。
+     * 行本身保留——行头的时刻/权益是唤醒事实，警报开场白的"上次唤醒在X"要用真时刻。
+     */
+    private List<AiTraderDecision> recentDecisionsStaleFiltered(AiTrader trader, long boundaryTime) {
+        List<AiTraderDecision> recent = decisionMapper.selectList(new LambdaQueryWrapper<AiTraderDecision>()
+                .eq(AiTraderDecision::getTraderId, trader.getId())
+                .eq(AiTraderDecision::getRoundNo, trader.getRoundNo())
+                .in(AiTraderDecision::getKind, AiTraderDecision.KIND_TRADE,
+                        AiTraderDecision.KIND_ALERT, AiTraderDecision.KIND_MANUAL)
+                .lt(AiTraderDecision::getWakeTime, boundaryTime)
+                .orderByDesc(AiTraderDecision::getWakeTime)
+                .last("LIMIT " + RECENT_DECISIONS));
+        List<AiTraderPlan> allPlans = planStore.listAll(trader.getId(), trader.getRoundNo());
+        recent.forEach(d -> {
+            String r = materialAssembler.staleFiltered(d, allPlans);
+            d.setReasoning(r == null ? "" : r);
+        });
+        return recent;
+    }
+
+    /**
+     * 计划懒清理 + 补绑 + 加载：仓位/挂单还活着的计划保留，已了结（止损/止盈/平仓/撤单）的归档；
+     * 在场仓位 id 顺路传入——限价单成交后计划还挂着 null positionId，这一趟补绑。
+     */
+    private List<AiTraderPlan> cleanupAndRebindPlans(AiTrader trader, List<FuturesPositionDTO> positions,
+                                                     List<FuturesOrderResponse> pendingOrders, long boundaryTime) {
+        Set<String> liveKeys = new HashSet<>();
+        Map<String, Long> positionIdByKey = new HashMap<>();
+        positions.forEach(p -> {
+            liveKeys.add(TraderPlanStore.key(p.getSymbol(), p.getSide()));
+            positionIdByKey.put(TraderPlanStore.key(p.getSymbol(), p.getSide()), p.getId());
+        });
+        for (FuturesOrderResponse o : pendingOrders) {
+            if (o.getOrderSide() != null && o.getOrderSide().startsWith("OPEN_")) {
+                liveKeys.add(TraderPlanStore.key(o.getSymbol(), o.getOrderSide().substring("OPEN_".length())));
+            }
+        }
+        return planStore.cleanupStale(trader.getId(), trader.getRoundNo(), liveKeys, positionIdByKey, boundaryTime);
+    }
+
+    /**
+     * 系统提示词组装（跟 trader 主人的语言走：ai_trader.user_id → user.lang，取不到回落中文），
+     * 已处理审批的结果随账户状态注入本轮，注入后置已通知——结果说一次就够，防同一条回执每轮反复出现。
+     */
+    private String wakePrompt(AiTrader trader, BigDecimal equity, List<FuturesPositionDTO> positions,
+                              List<FuturesOrderResponse> pendingOrders, List<AiTraderPlan> plans,
+                              long boundaryTime, List<AiTraderDecision> recent, AgentLang lang) {
+        List<AiTraderRequest> decided = requestService.decidedUnnotified(trader.getId(), trader.getRoundNo());
+        String prompt = promptAssembler.assemble(trader,
+                accountStateJson(prompts, lang, equity, positions, pendingOrders, plans, boundaryTime,
+                        requestService.pendingOf(trader.getId(), trader.getRoundNo()), decided), recent, lang);
+        requestService.markNotified(decided);
+        return prompt;
     }
 
     /**
@@ -548,6 +577,29 @@ public class TraderWakeupRunner {
         plans.forEach(p -> planByKey.put(TraderPlanStore.key(p.getSymbol(), p.getSide()), p));
         JSONObject out = new JSONObject();
         out.put("equity", equity);
+        out.put("positions", positionsJson(prompts, lang, positions, planByKey, boundaryTime));
+        // 挂单同样给足：开仓挂单占坑且带着计划（成交后计划全文随持仓回注，这里给轻量版）。
+        // 挂出时刻与已挂时长必须在：限价单挂了多久只有代码知道，模型据此执行自己写的作废条件
+        if (pendingOrders != null && !pendingOrders.isEmpty()) {
+            out.put("pendingOrders", pendingOrdersJson(prompts, lang, pendingOrders, planByKey, boundaryTime));
+        }
+        // 已处理请求的结果回注一次：模型提的请求什么下场必须告诉它，不然它只能从仓位变化倒猜
+        if (decidedRequests != null && !decidedRequests.isEmpty()) {
+            out.put("requestResults", decidedRequestsJson(prompts, lang, decidedRequests));
+            out.put("requestResultsNote", prompts.get(lang, "trader.wake.requestResultsNote"));
+        }
+        // 待确认请求必须回注：不然模型看仓位没动，下一轮还会提同一个请求，卡片越堆越多
+        if (pendingRequests != null && !pendingRequests.isEmpty()) {
+            out.put("pendingRequests", pendingRequestsJson(prompts, lang, pendingRequests));
+            out.put("pendingRequestsNote", prompts.get(lang, "trader.wake.pendingRequestsNote"));
+        }
+        return out.toJSONString();
+    }
+
+    /** 持仓行：仓位事实 + 当前止损止盈 + 所属计划（含修订历史）。 */
+    private static JSONArray positionsJson(PromptCatalog prompts, AgentLang lang,
+                                           List<FuturesPositionDTO> positions,
+                                           Map<String, AiTraderPlan> planByKey, long boundaryTime) {
         JSONArray ps = new JSONArray();
         for (FuturesPositionDTO p : positions) {
             JSONObject row = new JSONObject()
@@ -582,68 +634,69 @@ public class TraderWakeupRunner {
             }
             ps.add(row);
         }
-        out.put("positions", ps);
-        // 挂单同样给足：开仓挂单占坑且带着计划（成交后计划全文随持仓回注，这里给轻量版）。
-        // 挂出时刻与已挂时长必须在：限价单挂了多久只有代码知道，模型据此执行自己写的作废条件
-        if (pendingOrders != null && !pendingOrders.isEmpty()) {
-            JSONArray po = new JSONArray();
-            for (FuturesOrderResponse o : pendingOrders) {
-                JSONObject row = new JSONObject()
-                        .fluentPut("orderId", o.getOrderId())
-                        .fluentPut("symbol", o.getSymbol())
-                        .fluentPut("orderSide", o.getOrderSide())
-                        .fluentPut("quantity", o.getQuantity())
-                        .fluentPut("limitPrice", o.getLimitPrice())
-                        .fluentPut("leverage", o.getLeverage());
-                if (o.getOrderSide() != null && o.getOrderSide().startsWith("OPEN_")) {
-                    AiTraderPlan plan = planByKey.get(TraderPlanStore.key(o.getSymbol(),
-                            o.getOrderSide().substring("OPEN_".length())));
-                    if (plan != null) {
-                        row.put("plan", new JSONObject()
-                                .fluentPut("playType", plan.getPlayType())
-                                .fluentPut("invalidationCondition", plan.getInvalidationCondition())
-                                .fluentPut("placedAt", TIME_FMT.format(Instant.ofEpochMilli(plan.getOpenedWakeTime())))
-                                .fluentPut("pendingFor", humanizeHeld(prompts, lang, boundaryTime - plan.getOpenedWakeTime())));
-                    }
+        return ps;
+    }
+
+    /** 挂单行：订单事实 + 开仓挂单所属计划的轻量版。 */
+    private static JSONArray pendingOrdersJson(PromptCatalog prompts, AgentLang lang,
+                                               List<FuturesOrderResponse> pendingOrders,
+                                               Map<String, AiTraderPlan> planByKey, long boundaryTime) {
+        JSONArray po = new JSONArray();
+        for (FuturesOrderResponse o : pendingOrders) {
+            JSONObject row = new JSONObject()
+                    .fluentPut("orderId", o.getOrderId())
+                    .fluentPut("symbol", o.getSymbol())
+                    .fluentPut("orderSide", o.getOrderSide())
+                    .fluentPut("quantity", o.getQuantity())
+                    .fluentPut("limitPrice", o.getLimitPrice())
+                    .fluentPut("leverage", o.getLeverage());
+            if (o.getOrderSide() != null && o.getOrderSide().startsWith("OPEN_")) {
+                AiTraderPlan plan = planByKey.get(TraderPlanStore.key(o.getSymbol(),
+                        o.getOrderSide().substring("OPEN_".length())));
+                if (plan != null) {
+                    row.put("plan", new JSONObject()
+                            .fluentPut("playType", plan.getPlayType())
+                            .fluentPut("invalidationCondition", plan.getInvalidationCondition())
+                            .fluentPut("placedAt", TIME_FMT.format(Instant.ofEpochMilli(plan.getOpenedWakeTime())))
+                            .fluentPut("pendingFor", humanizeHeld(prompts, lang, boundaryTime - plan.getOpenedWakeTime())));
                 }
-                po.add(row);
             }
-            out.put("pendingOrders", po);
+            po.add(row);
         }
-        // 已处理请求的结果回注一次：模型提的请求什么下场必须告诉它，不然它只能从仓位变化倒猜
-        if (decidedRequests != null && !decidedRequests.isEmpty()) {
-            JSONArray rr = new JSONArray();
-            for (AiTraderRequest r : decidedRequests) {
-                rr.add(new JSONObject()
-                        .fluentPut("type", r.getType())
-                        .fluentPut("symbol", r.getSymbol())
-                        .fluentPut("quantity", r.getQuantity())
-                        .fluentPut("decision", prompts.get(lang,
-                                AiTraderRequest.STATUS_APPROVED.equals(r.getStatus())
-                                        ? "trader.wake.request.approved" : "trader.wake.request.rejected"))
-                        .fluentPut("result", r.getExecutedResult()));
-            }
-            out.put("requestResults", rr);
-            out.put("requestResultsNote", prompts.get(lang, "trader.wake.requestResultsNote"));
+        return po;
+    }
+
+    private static JSONArray decidedRequestsJson(PromptCatalog prompts, AgentLang lang,
+                                                 List<AiTraderRequest> decidedRequests) {
+        JSONArray rr = new JSONArray();
+        for (AiTraderRequest r : decidedRequests) {
+            rr.add(new JSONObject()
+                    .fluentPut("type", r.getType())
+                    .fluentPut("symbol", r.getSymbol())
+                    .fluentPut("quantity", r.getQuantity())
+                    .fluentPut("decision", prompts.get(lang,
+                            AiTraderRequest.STATUS_APPROVED.equals(r.getStatus())
+                                    ? "trader.wake.request.approved" : "trader.wake.request.rejected"))
+                    .fluentPut("result", r.getExecutedResult()));
         }
-        // 待确认请求必须回注：不然模型看仓位没动，下一轮还会提同一个请求，卡片越堆越多
-        if (pendingRequests != null && !pendingRequests.isEmpty()) {
-            JSONArray rs = new JSONArray();
-            for (AiTraderRequest r : pendingRequests) {
-                rs.add(new JSONObject()
-                        .fluentPut("type", r.getType())
-                        .fluentPut("symbol", r.getSymbol())
-                        .fluentPut("side", r.getSide())
-                        .fluentPut("positionId", r.getPositionId())
-                        .fluentPut("quantity", r.getQuantity())
-                        .fluentPut("requestPrice", r.getRequestPrice())
-                        .fluentPut("askedAt", TIME_FMT.format(Instant.ofEpochMilli(r.getWakeTime())))
-                        .fluentPut("reason", r.getReason()));
-            }
-            out.put("pendingRequests", rs);
-            out.put("pendingRequestsNote", prompts.get(lang, "trader.wake.pendingRequestsNote"));
+        return rr;
+    }
+
+    private static JSONArray pendingRequestsJson(PromptCatalog prompts, AgentLang lang,
+                                                 List<AiTraderRequest> pendingRequests) {
+        JSONArray rs = new JSONArray();
+        for (AiTraderRequest r : pendingRequests) {
+            rs.add(new JSONObject()
+                    .fluentPut("type", r.getType())
+                    .fluentPut("symbol", r.getSymbol())
+                    .fluentPut("side", r.getSide())
+                    .fluentPut("positionId", r.getPositionId())
+                    .fluentPut("quantity", r.getQuantity())
+                    .fluentPut("requestPrice", r.getRequestPrice())
+                    .fluentPut("askedAt", TIME_FMT.format(Instant.ofEpochMilli(r.getWakeTime())))
+                    .fluentPut("reason", r.getReason()));
         }
-        return out.toJSONString();
+        return rs;
     }
 
     private static String humanizeHeld(PromptCatalog prompts, AgentLang lang, long ms) {
