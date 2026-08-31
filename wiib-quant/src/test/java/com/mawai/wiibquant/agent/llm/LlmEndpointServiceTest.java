@@ -57,7 +57,28 @@ class LlmEndpointServiceTest {
     }
 
     private static LlmEndpointService.SaveReq req(String protocol, String effort, String key) {
-        return new LlmEndpointService.SaveReq("主力", protocol, "https://8.8.8.8/", " deepseek-chat ", effort, key);
+        return req(protocol, effort, key, null);
+    }
+
+    private static LlmEndpointService.SaveReq req(String protocol, String effort, String key, Boolean webSearch) {
+        return new LlmEndpointService.SaveReq("主力", protocol, "https://8.8.8.8/", " deepseek-chat ", effort, key, webSearch);
+    }
+
+    /** 搜索开关只对 responses 协议有意义：openai 协议勾了也归一 false，不把兑现不了的承诺存进库 */
+    @Test
+    void webSearch只在responses协议下入库() {
+        when(endpointMapper.selectList(any())).thenReturn(List.of());
+        when(crypto.encrypt(any())).thenReturn("enc");
+
+        assertThat(service.create(1L, req("responses", "", "sk-x", true))).isNull();
+        assertThat(service.create(1L, req("openai", "", "sk-x", true))).isNull();
+        assertThat(service.create(1L, req("responses", "", "sk-x", null))).isNull();
+
+        ArgumentCaptor<UserLlmEndpoint> cap = ArgumentCaptor.forClass(UserLlmEndpoint.class);
+        verify(endpointMapper, times(3)).insert(cap.capture());
+        assertThat(cap.getAllValues().get(0).getWebSearch()).isTrue();
+        assertThat(cap.getAllValues().get(1).getWebSearch()).isFalse();
+        assertThat(cap.getAllValues().get(2).getWebSearch()).isFalse();
     }
 
     @Test
@@ -105,11 +126,11 @@ class LlmEndpointServiceTest {
     @Test
     void 校验挡住内网地址与超长档位与缺key() {
         when(endpointMapper.selectList(any())).thenReturn(List.of());
-        assertThat(service.create(1L, new LlmEndpointService.SaveReq("x", "openai", "http://127.0.0.1:8080", "m", "", "sk")))
+        assertThat(service.create(1L, new LlmEndpointService.SaveReq("x", "openai", "http://127.0.0.1:8080", "m", "", "sk", null)))
                 .contains("内网");
         assertThat(service.create(1L, req("openai", "seventeen-chars-x", "sk"))).contains("思考档位");   // 17 字符，超列宽
         assertThat(service.create(1L, req("openai", "", ""))).isEqualTo("apiKey不能为空");
-        assertThat(service.create(1L, new LlmEndpointService.SaveReq(" ", "openai", "https://8.8.8.8", "m", "", "sk")))
+        assertThat(service.create(1L, new LlmEndpointService.SaveReq(" ", "openai", "https://8.8.8.8", "m", "", "sk", null)))
                 .contains("名称");
         verify(endpointMapper, never()).insert(any(UserLlmEndpoint.class));
     }

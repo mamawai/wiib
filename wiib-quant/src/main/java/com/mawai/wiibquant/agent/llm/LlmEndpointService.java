@@ -46,9 +46,9 @@ public class LlmEndpointService {
 
     private static final Set<String> PURPOSES = Set.of(UserLlmBinding.CHAT_MAIN, UserLlmBinding.CHAT_LIGHT, UserLlmBinding.TRADER);
 
-    /** apiKey 传空=沿用已存的 key（只在 update/探测已有端点时合法） */
+    /** apiKey 传空=沿用已存的 key（只在 update/探测已有端点时合法）；webSearch 仅 responses 协议生效 */
     public record SaveReq(String name, String apiProtocol, String baseUrl, String model,
-                          String reasoningEffort, String apiKey) {
+                          String reasoningEffort, String apiKey, Boolean webSearch) {
     }
 
     public record ListModelsResult(String error, List<String> models) {
@@ -338,6 +338,9 @@ public class LlmEndpointService {
         row.setBaseUrl(stripTrailingSlash(req.baseUrl().trim()));
         row.setModel(req.model().trim());
         row.setReasoningEffort(normalizeEffort(req.reasoningEffort()));
+        // 归一而非报错：chat-completions 没有标准的服务端搜索，openai 协议勾了也不把兑现不了的承诺存进库
+        row.setWebSearch(Boolean.TRUE.equals(req.webSearch())
+                && AiProtocols.isResponses(row.getApiProtocol()));
         row.setApiKeyEnc(keepKeyEnc != null ? keepKeyEnc : apiKeyCrypto.encrypt(req.apiKey().trim()));
         return row;
     }

@@ -17,7 +17,9 @@ import reactor.util.retry.Retry;
 
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -71,10 +73,11 @@ public class ResilientChatService implements ReactAgent.ChatService {
         this.forceFirstToolChoice = builder.forceFirstToolChoice;
         // 工具挂进 options（与框架 DefaultChatService 同构）：没工具的 agent 保持 null 走模型默认。
         // 从模型自己的 options 派生而非泛型 builder：具体类型必须跟着模型走，理由见 ToolChoice 类头
-        this.chatOptions = agentBuilder.tools().isEmpty()
+        ChatOptions base = agentBuilder.tools().isEmpty()
                 || !(primaryModel.getOptions() instanceof ToolCallingChatOptions)
                 ? null
                 : ToolChoice.withTools(primaryModel, agentBuilder.tools());
+        this.chatOptions = builder.webSearch ? withWebSearch(base, primaryModel) : base;
         this.systemMessage = SystemMessage.builder()
                 .text(agentBuilder.systemMessage().orElse("You are a helpful AI Assistant answering questions."))
                 .build();
@@ -82,6 +85,22 @@ public class ResilientChatService implements ReactAgent.ChatService {
 
     public static Builder builder() {
         return new Builder();
+    }
+
+    /**
+     * 服务端搜索许可盖进 options 的 toolContext（{@link ResponsesChatModel#WEB_SEARCH_KEY}）。
+     * 与首轮强制不同，它对本 agent 的每次调用都生效——联网补充不限于首轮，落在底稿上而非逐次现算。
+     * 没挂 function 工具时（base=null）也要从模型 options 派生一份来捎：许可不许静默丢。
+     */
+    private static ChatOptions withWebSearch(ChatOptions base, ChatModel model) {
+        ChatOptions source = base != null ? base : model.getOptions();
+        if (!(source instanceof ToolCallingChatOptions tool)) {
+            return base;    // openai 协议之外的裸 options：捎不了也不该在这炸，端点本就搜不了
+        }
+        Map<String, Object> context = tool.getToolContext() == null
+                ? new HashMap<>() : new HashMap<>(tool.getToolContext());
+        context.put(ResponsesChatModel.WEB_SEARCH_KEY, true);
+        return tool.mutate().toolContext(context).build();
     }
 
     /**
@@ -216,6 +235,8 @@ public class ResilientChatService implements ReactAgent.ChatService {
     /**
      * 兜底调用的 options：从兜底模型自己的 options 派生、只搬工具语义——model/temperature 等生成参数
      * 必须归兜底模型自己的默认，原样透传会把主模型的 model 名打到兜底端点上；首轮强制照旧。
+     * 搜索许可（{@link ResponsesChatModel#WEB_SEARCH_KEY}）有意不搬：搜索是端点级能力，
+     * 兜底是另一条端点、按它自己的配置算；生产兜底恒 null（见字段注释），真启用时再议。
      */
     private ChatOptions fallbackOptions(List<Message> messages) {
         if (!(chatOptions instanceof ToolCallingChatOptions source)
@@ -235,6 +256,7 @@ public class ResilientChatService implements ReactAgent.ChatService {
         private long initialDelayMs = 500;
         private long maxDelayMs = 4000;
         private String forceFirstToolChoice;
+        private boolean webSearch;
 
         /**
          * 首轮强制用工具（"required" 或具体工具名）。给"必须拿真实数据"的专家用：
@@ -243,6 +265,15 @@ public class ResilientChatService implements ReactAgent.ChatService {
          */
         public Builder forceFirstToolChoice(String forceFirstToolChoice) {
             this.forceFirstToolChoice = forceFirstToolChoice;
+            return this;
+        }
+
+        /**
+         * 授权本 agent 使用服务端联网搜索（每次调用都生效）。只给 chat 的 summarizer 开——
+         * 真正搜不搜还要过端点那道闸（{@link ResponsesChatModel} 的 webSearch 构造参数），双闸门缺一不可。
+         */
+        public Builder webSearch(boolean webSearch) {
+            this.webSearch = webSearch;
             return this;
         }
 

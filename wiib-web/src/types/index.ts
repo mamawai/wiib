@@ -754,6 +754,8 @@ export interface LlmEndpointView {
   model: string;
   /** 任意上游认的档位值（none/low/medium/high/xhigh…），null=不传给上游走模型默认 */
   reasoningEffort: string | null;
+  /** 服务端联网搜索（仅 responses 协议端点；只有对话汇总者用它） */
+  webSearch: boolean;
   apiKeyTail: string;
   /** 默认端点：没按用途绑定的地方都用它 */
   isDefault: boolean;
@@ -767,6 +769,7 @@ export interface LlmEndpointSaveRequest {
   model: string;
   reasoningEffort: string;
   apiKey: string;
+  webSearch: boolean;
 }
 
 /** 用途 → 端点 id；缺的用途 = 跟随默认端点 */

@@ -1,5 +1,6 @@
 package com.mawai.wiibquant.agent.chat;
 
+import com.mawai.wiibcommon.constant.AiProtocols;
 import com.mawai.wiibcommon.entity.UserLlmEndpoint;
 import com.mawai.wiibcommon.enums.AgentLang;
 import com.mawai.wiibquant.agent.i18n.LocalizedToolCallbacks;
@@ -135,10 +136,10 @@ public class ChatAgentFactory {
                     });
 
     /**
-     * @param supplementSource 补充源名。BlockBeats 之外那一路是 summarizer 模型自带的联网搜索捞的，
-     *                         搜到的是哪个平台随模型走（当前 grok 出的是 X），换模型就未必还是它。
+     * @param supplementSource 补充源名。BlockBeats 之外那一路是 summarizer 经服务端 web_search 工具搜的
+     *                         （端点勾选开启，见 {@link #build} 的 webSearch），搜到什么平台随上游走。
      *                         所以提示词里一律只说"联网搜索"不点名平台，只有输出标签用这个名字——
-     *                         换源改配置一处，提示词不用动
+     *                         换源改配置一处，提示词不用动；留空标 [Web]
      */
     public ChatAgentFactory(ChatModelFactory chatModelFactory,
                             MarketToolkit marketToolkit,
@@ -222,6 +223,10 @@ public class ChatAgentFactory {
 
     private Leaves build(ChatEndpoints eps, AgentLang lang) throws Exception {
         ChatModelFactory.Models models = chatModelFactory.modelsFor(eps);
+        // 服务端搜索能力 = 端点勾了 web_search 且走 responses 协议（chat-completions 没有标准的服务端搜索）。
+        // 它决定两件事：summarizer 提示词的新闻条款用哪版、summarizer 的调用捎不捎搜索许可
+        boolean webSearch = AiProtocols.isResponses(eps.deep().getApiProtocol())
+                && Boolean.TRUE.equals(eps.deep().getWebSearch());
         // 用量装饰器进行包装
         UsageTrackingChatModel deep = new UsageTrackingChatModel(models.deep());
         // 没单独绑轻模型时工厂给的是同一个实例，装饰器也得共用一个，否则同一次调用记两遍账
@@ -240,7 +245,19 @@ public class ChatAgentFactory {
                 prompts.get(lang, "chat.expert.trader")), null));
 
         return new Leaves(modelLabel(eps.deep()), deep, light, experts,
-                summarizerLeaf(deep, light, eps.userId(), lang), lang);
+                summarizerLeaf(deep, light, eps.userId(), lang, webSearch), lang);
+    }
+
+    /**
+     * summarizer 系统提示词按端点搜索能力拼装：新闻条款二选一（{@code chat.newsRule.search} 承诺联网补充 /
+     * {@code chat.newsRule.noSearch} 如实说没有检索能力），其余原则两版共有。
+     * 提示词不许承诺端点给不了的能力——文案跟着能力走，能力跟着端点走。
+     */
+    // 包私有非 private：ChatAgentFactoryTest 要直接断言两版文案
+    String summarizerInstruction(AgentLang lang, boolean webSearch) {
+        String newsRule = prompts.get(lang, webSearch ? "chat.newsRule.search" : "chat.newsRule.noSearch",
+                Map.of("supplementTag", supplementTag, "mergedTag", mergedTag));
+        return prompts.get(lang, "chat.summarizer", Map.of("newsRule", newsRule));
     }
 
     /** 端点名 · 模型名：站内展示模型的统一口径（见 LlmEndpointSelect / ReplayPanel）；没起名就只报模型 */
@@ -317,13 +334,15 @@ public class ChatAgentFactory {
      *
      * @param light  压缩用浅模型：摘要是简单活，用深模型纯烧钱
      * @param userId 动作类工具烤死的归属；查询归专家，动手归汇总者，理由见 {@link TraderActionToolkit}
+     * @param webSearch 端点声明了服务端搜索：提示词用承诺联网的那版，且每次调用捎搜索许可。
+     *                  许可只在这一个叶子发——专家与 trader 链路的数据源必须可控，物理拿不到搜索
      */
     private CompiledGraph<MessagesState<Message>> summarizerLeaf(ChatModel deep, ChatModel light,
-                                                                 long userId, AgentLang lang) throws Exception {
+                                                                 long userId, AgentLang lang,
+                                                                 boolean webSearch) throws Exception {
         // 工具的模型在这一层绑死："当前用的是谁的 key"只有这里知道
         ReactAgent.Builder<MessagesState<Message>> builder = AgentGraphs.reactAgent(deep,
-                        prompts.get(lang, "chat.summarizer",
-                                Map.of("supplementTag", supplementTag, "mergedTag", mergedTag)))
+                        summarizerInstruction(lang, webSearch))
                 .streaming(true) // 答案要逐字推给前端
                 .tools(localizedTools.of(lang,
                         new DeepAnalysisToolkit(deep, deepAnalysisService, runRegistry, prompts, lang),
@@ -342,6 +361,8 @@ public class ChatAgentFactory {
                         // 不给兜底模型：BYOK 只有一个端点，切到同端点的另一个模型没意义
                         //（端点挂了两个一起挂）。ResilientChatService 支持兜底为空，退避重试照旧
                         .model(deep)
+                        // 搜索许可（双闸门的调用方那半）：ResponsesChatModel 还要再对端点配置那半
+                        .webSearch(webSearch)
                         .maxAttempts(3).initialDelay(500).maxDelay(4000)
                         .asFactory())
                 // 框架默认硬顶 25 不够：流式模型节点一轮吃 2 格（交回 token 生成器 + 合并它的

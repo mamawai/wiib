@@ -154,6 +154,36 @@ class ResilientChatServiceTest {
     }
 
     /**
+     * 服务端搜索许可（只有 chat 的 summarizer 开）：与首轮强制不同，它对本 agent 的<b>每次</b>调用
+     * 都生效——联网补充不限于首轮。经 toolContext 捎带，ResponsesChatModel 建请求体时读回。
+     */
+    @Test
+    void webSearch开关_许可落进chatOptions的toolContext() {
+        when(primary.getOptions()).thenReturn(ToolCallingChatOptions.builder().build());
+
+        ReactAgent.ChatService service = ResilientChatService.builder()
+                .model(primary).webSearch(true).asFactory().apply(agentWithOneTool());
+
+        ToolCallingChatOptions options = (ToolCallingChatOptions) service.chatOptions().orElseThrow();
+        assertThat(options.getToolContext().get(ResponsesChatModel.WEB_SEARCH_KEY)).isEqualTo(Boolean.TRUE);
+    }
+
+    @Test
+    void webSearch开关_无function工具的agent也捎得上() {
+        // 没挂工具时 chatOptions 本是 null；搜索许可不许因此静默丢
+        ReactAgentBuilder<?, ?> agentBuilder = mock(ReactAgentBuilder.class);
+        when(agentBuilder.tools()).thenReturn(List.of());
+        when(agentBuilder.systemMessage()).thenReturn(Optional.of("你是汇总者"));
+        when(primary.getOptions()).thenReturn(ToolCallingChatOptions.builder().build());
+
+        ReactAgent.ChatService service = ResilientChatService.builder()
+                .model(primary).webSearch(true).asFactory().apply(agentBuilder);
+
+        ToolCallingChatOptions options = (ToolCallingChatOptions) service.chatOptions().orElseThrow();
+        assertThat(options.getToolContext().get(ResponsesChatModel.WEB_SEARCH_KEY)).isEqualTo(Boolean.TRUE);
+    }
+
+    /**
      * SDK 重试盲区的唯一豁免：响应体读到一半被掐（OpenAIInvalidDataException，如 HTTP/2 stream reset）
      * SDK 的 maxRetries 不管这类失败——这里单次重试救整轮唤醒，不与 SDK 重试叠乘。
      */

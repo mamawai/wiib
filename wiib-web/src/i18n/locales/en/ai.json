@@ -538,6 +538,8 @@
     "effort": "Reasoning effort",
     "effortPh": "Blank = not sent; try none / low / medium / high / xhigh…",
     "effortHint": "Blank = the parameter is not sent and the model uses its own default; you can also enter any other level it accepts (xhigh, minimal…). Not every model accepts this, and there is no way to check up front — fill it in and hit Test connection.",
+    "webSearch": "Web search (web_search)",
+    "webSearchHint": "Declares the server-side search tool in requests; it only actually searches when the upstream supports it (OpenAI and xAI do; relays depend on their backend). Only the workbench chat's final answer uses it — the trader and the data experts are unaffected. Searches count toward upstream usage.",
     "test": "Test connection",
     "testTitle": "Send a real request with the current settings to confirm the endpoint and model work",
     "testOk": "Connection OK",

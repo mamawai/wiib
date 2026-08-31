@@ -64,7 +64,9 @@ public class ByokModelBuilder {
         String apiKey = apiKeyCrypto.decrypt(e.getApiKeyEnc());
         String effort = e.getReasoningEffort() == null || e.getReasoningEffort().isBlank() ? null : e.getReasoningEffort();
         if (AiProtocols.isResponses(e.getApiProtocol())) {
-            return new ResponsesChatModel(apiKey, e.getBaseUrl(), e.getModel(), null, effort, toolCallingManager);
+            // webSearch 只是端点能力声明：真发不发 web_search 还要看调用方授权（summarizer 独有），见 ResponsesChatModel
+            return new ResponsesChatModel(apiKey, e.getBaseUrl(), e.getModel(), null, effort, toolCallingManager,
+                    Boolean.TRUE.equals(e.getWebSearch()));
         }
         // timeout 非空是硬约束（SDK 是 Kotlin，null 运行时 NPE）
         OpenAIClient client = OpenAiSetup.setupSyncClient(

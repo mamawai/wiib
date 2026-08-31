@@ -1,5 +1,7 @@
 package com.mawai.wiibquant.agent.llm;
 
+import com.alibaba.fastjson2.JSON;
+import com.alibaba.fastjson2.JSONObject;
 import com.sun.net.httpserver.HttpServer;
 import org.bsc.langgraph4j.spring.ai.agent.ReactAgent;
 import org.bsc.langgraph4j.spring.ai.agent.ReactAgentBuilder;
@@ -23,6 +25,7 @@ import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -47,11 +50,14 @@ class ResponsesChatModelTest {
     private static volatile String[] events = new String[0];
     /** 挂死模拟：发完 events 后挂住这么久再关流（0=立即关）。心跳挂死＝发心跳后既不出结果也不断流 */
     private static volatile long holdMs = 0;
+    /** 最近一次请求体：请求侧断言（服务端工具注入等）从这取 */
+    private static volatile String lastRequestBody = "";
 
     @BeforeAll
     static void startServer() throws IOException {
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/v1/responses", exchange -> {
+            lastRequestBody = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
             exchange.getResponseHeaders().add("Content-Type", "text/event-stream");
             exchange.sendResponseHeaders(200, 0);
             try (OutputStream os = exchange.getResponseBody()) {
@@ -86,8 +92,77 @@ class ResponsesChatModelTest {
     }
 
     private ResponsesChatModel model() {
+        return model(false);
+    }
+
+    /** webSearch=端点配置层的开关（建模时烤死）；调用层的许可另经 toolContext 捎带 */
+    private ResponsesChatModel model(boolean webSearch) {
         return new ResponsesChatModel("key", "http://127.0.0.1:" + server.getAddress().getPort(),
-                "grok-test", null, null, mock(ToolCallingManager.class));
+                "grok-test", null, null, mock(ToolCallingManager.class), webSearch);
+    }
+
+    /** 汇总者那样的调用方：本次调用允许服务端搜索（经 toolContext 捎给模型） */
+    private ChatOptions allowWebSearch(ResponsesChatModel model) {
+        return ((ToolCallingChatOptions) model.getOptions()).mutate()
+                .toolContext(Map.of(ResponsesChatModel.WEB_SEARCH_KEY, true)).build();
+    }
+
+    private static final String[] PLAIN_COMPLETED = new String[]{
+            """
+            {"type":"response.completed","response":{"id":"resp_ws","status":"completed",
+             "model":"grok-test","output":[{"type":"message","content":[
+                 {"type":"output_text","text":"答"}]}]}}"""
+    };
+
+    // ========== 服务端搜索（web_search）：端点配置 ∧ 调用许可 双闸门 ==========
+
+    @Test
+    void 请求侧_端点开启且调用允许_注入web_search服务端工具() {
+        events = PLAIN_COMPLETED;
+        ResponsesChatModel m = model(true);
+        m.call(new Prompt("过去24小时BTC新闻", allowWebSearch(m)));
+
+        JSONObject body = JSON.parseObject(lastRequestBody);
+        assertThat(body.getJSONArray("tools"))
+                .extracting(t -> ((JSONObject) t).getString("type"))
+                .contains("web_search");
+    }
+
+    @Test
+    void 请求侧_调用未捎许可_端点开了也不注入() {
+        // 专家/trader 链路不捎许可键：同一个端点开了搜索，它们的请求里也不许出现服务端工具
+        events = PLAIN_COMPLETED;
+        ResponsesChatModel m = model(true);
+        m.call(new Prompt("查行情", m.getOptions()));
+
+        assertThat(JSON.parseObject(lastRequestBody).containsKey("tools")).isFalse();
+    }
+
+    @Test
+    void 请求侧_端点未开启_调用允许也不注入() {
+        events = PLAIN_COMPLETED;
+        ResponsesChatModel m = model(false);
+        m.call(new Prompt("过去24小时BTC新闻", allowWebSearch(m)));
+
+        assertThat(JSON.parseObject(lastRequestBody).containsKey("tools")).isFalse();
+    }
+
+    @Test
+    void 响应侧_usage带服务端搜索计数_落进响应metadata() {
+        // 真实上游（xAI）usage 形态：搜没搜要有据可查
+        events = new String[]{
+                """
+                {"type":"response.completed","response":{"id":"resp_ws2","status":"completed",
+                 "model":"grok-test","output":[],
+                 "usage":{"input_tokens":10,"output_tokens":5,"total_tokens":15,
+                     "num_server_side_tools_used":7,
+                     "server_side_tool_usage_details":{"web_search_calls":7,"x_search_calls":0}}}}"""
+        };
+        ChatResponse response = model().call(new Prompt("问题"));
+
+        assertThat(response.getMetadata().<Integer>get("num_server_side_tools_used")).isEqualTo(7);
+        assertThat(response.getMetadata().<String>get("server_side_tool_usage_details"))
+                .contains("web_search_calls");
     }
 
     @Test

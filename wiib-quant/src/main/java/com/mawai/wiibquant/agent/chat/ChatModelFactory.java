@@ -104,8 +104,10 @@ public class ChatModelFactory {
         if (e == null) {
             return "-";
         }
+        // webSearch 也是建模要素（ResponsesChatModel 构造参数 + summarizer 提示词按它拼），勾了必须换指纹
         return String.join("\0", String.valueOf(e.getApiProtocol()), String.valueOf(e.getBaseUrl()),
-                String.valueOf(e.getModel()), String.valueOf(e.getReasoningEffort()), String.valueOf(e.getApiKeyEnc()));
+                String.valueOf(e.getModel()), String.valueOf(e.getReasoningEffort()),
+                String.valueOf(e.getWebSearch()), String.valueOf(e.getApiKeyEnc()));
     }
 
     private Models build(ChatEndpoints eps) {

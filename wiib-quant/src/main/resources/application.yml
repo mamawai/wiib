@@ -77,9 +77,9 @@ quant:
     run-model-call-limit: 8
     summarize-threshold-tokens: 32000  # 历史估算 token 超此值触发压缩：浅模型把老消息总结成一段替换原文
     summarize-keep-messages: 6         # 压缩后保留的最近消息数(首条用户消息另外无条件保留原文)
-    # summarizer 在 BlockBeats 之外补的新闻来自模型自带联网搜索，出自哪个平台随模型走(当前 grok 出 X)。
-    # 这里配的是来源标签名，只影响 [X]/[BlockBeats+X] 怎么标；换模型改这里，提示词不用动。留空标 [Web]
-    news-supplement-source: X
+    # summarizer 在 BlockBeats 之外补的新闻来自服务端 web_search 工具(端点勾选开启)，搜到什么平台随上游走。
+    # 这里配的是来源标签名，只影响补充条目怎么标；换源改这里，提示词不用动。留空标 [Web]
+    news-supplement-source:
 
 # 快讯采集打标轨（NewsEventCollector）：定时经 NewsCache 拉重要快讯，新条目轻模型打标后落 news_event
 news:

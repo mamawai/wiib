@@ -77,6 +77,7 @@ public class TraderModelFactory {
      * 与 ChatModelFactory 那个跨用户缓存主键的 SHA-256 语义不同。
      */
     private static String fingerprint(UserLlmEndpoint e) {
-        return Objects.hash(e.getApiProtocol(), e.getBaseUrl(), e.getModel(), e.getReasoningEffort(), e.getApiKeyEnc()) + "";
+        return Objects.hash(e.getApiProtocol(), e.getBaseUrl(), e.getModel(), e.getReasoningEffort(),
+                e.getWebSearch(), e.getApiKeyEnc()) + "";
     }
 }

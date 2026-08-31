@@ -34,14 +34,14 @@ public class LlmEndpointController {
 
     /** key 只回尾 4 位 */
     public record EndpointView(long id, String name, String apiProtocol, String baseUrl, String model,
-                               String reasoningEffort, String apiKeyTail, boolean isDefault) {
+                               String reasoningEffort, boolean webSearch, String apiKeyTail, boolean isDefault) {
     }
 
-    /** reasoningEffort 留空=不传给上游走模型默认；apiKey 更新时留空=不换 */
+    /** reasoningEffort 留空=不传给上游走模型默认；apiKey 更新时留空=不换；webSearch 仅 responses 协议生效 */
     public record SaveRequest(String name, String apiProtocol, String baseUrl, String model,
-                              String reasoningEffort, String apiKey) {
+                              String reasoningEffort, String apiKey, Boolean webSearch) {
         LlmEndpointService.SaveReq toReq() {
-            return new LlmEndpointService.SaveReq(name, apiProtocol, baseUrl, model, reasoningEffort, apiKey);
+            return new LlmEndpointService.SaveReq(name, apiProtocol, baseUrl, model, reasoningEffort, apiKey, webSearch);
         }
     }
 
@@ -51,7 +51,8 @@ public class LlmEndpointController {
 
     private EndpointView view(UserLlmEndpoint e) {
         return new EndpointView(e.getId(), e.getName(), e.getApiProtocol(), e.getBaseUrl(), e.getModel(),
-                e.getReasoningEffort(), service.keyTail(e), Boolean.TRUE.equals(e.getIsDefault()));
+                e.getReasoningEffort(), Boolean.TRUE.equals(e.getWebSearch()),
+                service.keyTail(e), Boolean.TRUE.equals(e.getIsDefault()));
     }
 
     @GetMapping

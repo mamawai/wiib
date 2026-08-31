@@ -154,6 +154,10 @@ class ChatModelFactoryTest {
         // 档位也是建模要素：漏算它的话用户从 low 调到 high，拿到的还是那个 low 的旧模型
         ChatEndpoints highEffort = new ChatEndpoints(1L, endpoint("gpt-5", "high"), endpoint("gpt-5-mini", null));
         assertThat(ChatModelFactory.fingerprint(highEffort)).isNotEqualTo(base);
+        // 搜索开关同理：勾了 web_search 不换指纹的话，模型与叶子（summarizer 提示词按它拼）都还是旧的
+        ChatEndpoints searchOn = config("gpt-5", "gpt-5-mini");
+        searchOn.deep().setWebSearch(true);
+        assertThat(ChatModelFactory.fingerprint(searchOn)).isNotEqualTo(base);
     }
 
     /**

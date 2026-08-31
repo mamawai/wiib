@@ -11,7 +11,7 @@ import i18n from '../i18n';
 import { cn } from '../lib/utils';
 import type { LlmBindings, LlmEndpointView, LlmPurpose, TraderOwnerView } from '../types';
 
-const EMPTY: LlmEndpointValue = { name: '', apiProtocol: 'openai', baseUrl: '', model: '', reasoningEffort: '', apiKey: '' };
+const EMPTY: LlmEndpointValue = { name: '', apiProtocol: 'openai', baseUrl: '', model: '', reasoningEffort: '', apiKey: '', webSearch: false };
 
 /** 一条端点被谁用着：主标签 + 是否经"默认"落到它头上 */
 interface Usage { label: string; viaDefault: boolean; }
@@ -73,6 +73,7 @@ export function ModelConfig() {
     setForm({
       name: e.name, apiProtocol: e.apiProtocol, baseUrl: e.baseUrl, model: e.model,
       reasoningEffort: e.reasoningEffort ?? '', apiKey: '',   // 明文 key 不出服务端，改 key 才填
+      webSearch: e.webSearch,
     });
     setEditing({ id: e.id, keyTail: e.apiKeyTail });
   };
@@ -183,7 +184,7 @@ export function ModelConfig() {
                       )}
                     </div>
                     <div className="text-[10px] text-muted-foreground num truncate mt-0.5">
-                      {e.apiProtocol} · {e.baseUrl} · {t('model.effortTail', {
+                      {e.apiProtocol}{e.webSearch ? '+search' : ''} · {e.baseUrl} · {t('model.effortTail', {
                         effort: e.reasoningEffort || t('effort.default'), tail: e.apiKeyTail,
                       })}
                     </div>

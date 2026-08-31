@@ -178,8 +178,9 @@ public class AiAgentRuntimeManager {
     private ChatModel buildChatModel(AiRuntimeConfig config) {
         // 不设置 temperature：走各模型默认值，思考模型（多数拒收或忽略温度）也安全
         if (AiProtocols.isResponses(config.getApiProtocol())) {
+            // 平台轨没有搜索配置位：webSearch 恒关（服务端搜索是 BYOK 对话侧的能力）
             return new ResponsesChatModel(config.getApiKey(), config.getBaseUrl(), config.getModel(),
-                    null, config.getReasoningEffort(), toolCallingManager);
+                    null, config.getReasoningEffort(), toolCallingManager, false);
         }
 
         // Spring AI 2.0 起底层换成官方 OpenAI SDK，连接参数经 OpenAiSetup 建 client（照抄官方

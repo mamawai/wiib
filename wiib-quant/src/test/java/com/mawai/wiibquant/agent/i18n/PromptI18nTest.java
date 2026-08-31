@@ -150,9 +150,10 @@ class PromptI18nTest {
                 "tool.route", "tool.run_deep_analysis")) {
             assertNoCjk("英文 " + key, prompts.get(AgentLang.EN, key));
         }
-        // 带占位符的那些：真填一遍再扫，模板里的中文标点藏在占位符两边
-        assertNoCjk("英文 summarizer", prompts.get(AgentLang.EN, "chat.summarizer",
-                Map.of("supplementTag", "[X]", "mergedTag", "[BlockBeats+X]")));
+        // 带占位符的那些：真填一遍再扫，模板里的中文标点藏在占位符两边。
+        // summarizer 两版新闻条款（有无联网搜索）都要扫，哪版被建出来取决于用户端点配置
+        assertNoCjk("英文 summarizer(search)", summarizer(AgentLang.EN, "chat.newsRule.search"));
+        assertNoCjk("英文 summarizer(noSearch)", summarizer(AgentLang.EN, "chat.newsRule.noSearch"));
         assertNoCjk("英文历史压缩提示词",
                 prompts.get(AgentLang.EN, "chat.compress.prompt", Map.of("history", "u: hi")));
         assertNoCjk("英文专家出处标注", prompts.get(AgentLang.EN, "chat.expertTag",
@@ -302,11 +303,17 @@ class PromptI18nTest {
         }
     }
 
+    /** 生产同款两步渲染：先按变体键出新闻条款，再填进 summarizer 的 {{newsRule}} 槽位 */
+    private String summarizer(AgentLang lang, String newsRuleKey) {
+        String newsRule = prompts.get(lang, newsRuleKey,
+                Map.of("supplementTag", "[X]", "mergedTag", "[BlockBeats+X]"));
+        return prompts.get(lang, "chat.summarizer", Map.of("newsRule", newsRule));
+    }
+
     /** chat：汇总者的六条回答原则 + news/summarizer 的分工红线，搬家时丢哪条都在这里红 */
     @Test
     void 中文chat保住汇总者六原则与新闻分工() {
-        String p = prompts.get(AgentLang.ZH, "chat.summarizer",
-                Map.of("supplementTag", "[X]", "mergedTag", "[BlockBeats+X]"));
+        String p = summarizer(AgentLang.ZH, "chat.newsRule.search");
         assertThat(p)
                 .as("① 结论可追溯").contains("结论必须可追溯到专家给的数据，不编造")
                 .as("② 新闻分工").contains("news_agent 只管 BlockBeats，联网补充归你")
@@ -327,12 +334,12 @@ class PromptI18nTest {
      */
     @Test
     void 快讯译文口径在news专家与summarizer两处同时钉住() {
-        Map<String, Object> tags = Map.of("supplementTag", "[X]", "mergedTag", "[BlockBeats+X]");
         for (AgentLang lang : AgentLang.values()) {
             String anchor = lang == AgentLang.ZH ? "中文源" : "machine translation";
             assertThat(prompts.get(lang, "chat.expert.news"))
                     .as("%s 的 news 专家没交代快讯是原文还是译文", lang.code()).contains(anchor);
-            assertThat(prompts.get(lang, "chat.summarizer", tags))
+            // 译文口径只在承诺联网的那版新闻条款里有意义（noSearch 版没有第二个来源要去重）
+            assertThat(summarizer(lang, "chat.newsRule.search"))
                     .as("%s 的 summarizer 没交代 [BlockBeats] 那批是原文还是译文", lang.code()).contains(anchor);
         }
     }

@@ -986,6 +986,7 @@ CREATE TABLE IF NOT EXISTS user_llm_endpoint (
     base_url         VARCHAR(255)  NOT NULL,
     model            VARCHAR(128)  NOT NULL,
     reasoning_effort VARCHAR(16),
+    web_search       BOOLEAN       NOT NULL DEFAULT FALSE,
     api_key_enc      VARCHAR(1024) NOT NULL,
     is_default       BOOLEAN       NOT NULL DEFAULT FALSE,
     created_at       TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -996,8 +997,11 @@ CREATE INDEX IF NOT EXISTS idx_user_llm_endpoint_user ON user_llm_endpoint(user_
 UPDATE user_llm_endpoint e SET is_default = FALSE
  WHERE e.is_default AND e.id <> (SELECT min(d.id) FROM user_llm_endpoint d WHERE d.user_id = e.user_id AND d.is_default);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_user_llm_endpoint_default ON user_llm_endpoint(user_id) WHERE is_default;
+-- 旧库补列（新库的 CREATE 里已有），可反复执行
+ALTER TABLE user_llm_endpoint ADD COLUMN IF NOT EXISTS web_search BOOLEAN NOT NULL DEFAULT FALSE;
 COMMENT ON TABLE  user_llm_endpoint IS '用户 BYOK 端点库：一条=协议+URL+key+模型(+思考档位)，一人多条；对话/交易员/复盘教练从中选';
 COMMENT ON COLUMN user_llm_endpoint.reasoning_effort IS '思考档位，任意上游认的值（none/low/medium/high/xhigh…），NULL=不传走模型默认；模型支不支持查不到，由用户自选';
+COMMENT ON COLUMN user_llm_endpoint.web_search IS '服务端联网搜索(web_search)：请求显式声明才搜(opt-in)；仅responses协议有效，端点支不支持由用户自己勾；当前只有对话summarizer用';
 COMMENT ON COLUMN user_llm_endpoint.api_key_enc IS 'AES-256-GCM 密文，密钥来自 WIIB_TRADER_KEY_SECRET';
 COMMENT ON COLUMN user_llm_endpoint.is_default IS '默认端点：没按用途绑定的地方都用它；一人恰一条（首条自动、删默认时最早的顶上）';
 

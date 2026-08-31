@@ -71,12 +71,23 @@ public class ResponsesChatModel implements ChatModel {
     /** toolContext 键：本次调用整体超时（Duration）。路由这类轻调用传短值快速失败进重试，缺省 {@link #CALL_TIMEOUT} */
     public static final String TIMEOUT_KEY = "wiib_call_timeout";
 
+    /**
+     * toolContext 键：本次调用允许服务端搜索（Boolean.TRUE 时生效）。
+     * 与端点配置构成双闸门——{@code webSearch}（端点声明支持）∧ 本键（这个 agent 被授权搜）
+     * 同时成立才往 tools 里加 {@code {"type":"web_search"}}。搜索是 opt-in 语义：不声明上游就不搜，
+     * 只有 chat 的 summarizer 捎这个键（ResilientChatService.Builder#webSearch），
+     * 专家与 trader 链路的数据源必须可控，拿不到搜索。
+     */
+    public static final String WEB_SEARCH_KEY = "wiib_web_search";
+
     private final WebClient webClient;
     private final String model;
     private final Double temperature;
     /** 思考档位 none/low/medium/high；null=不传走模型默认（来自 DB 配置行，非请求级） */
     private final String reasoningEffort;
     private final ToolCallingManager toolCallingManager;
+    /** 端点声明支持服务端联网搜索（web_search 是 OpenAI Responses 与 xAI Agent Tools 通认的类型名） */
+    private final boolean webSearch;
 
     /** 瞬时错误重试参数，与 ResilientModelInterceptor 对齐 */
     private static final int MAX_ATTEMPTS = 3;
@@ -84,11 +95,13 @@ public class ResponsesChatModel implements ChatModel {
     private static final long MAX_BACKOFF_MS = 4000;
 
     public ResponsesChatModel(String apiKey, String baseUrl, String model, Double temperature,
-                              String reasoningEffort, ToolCallingManager toolCallingManager) {
+                              String reasoningEffort, ToolCallingManager toolCallingManager,
+                              boolean webSearch) {
         this.model = model;
         this.temperature = temperature;
         this.reasoningEffort = reasoningEffort;
         this.toolCallingManager = toolCallingManager;
+        this.webSearch = webSearch;
         // 深研判单次回包可达数百KB，默认256KB codec上限不够。
         // baseUrl 过 forResponses 剥掉手滑带上的 /v1——与 openai 协议路的 forSdk 同等容忍
         this.webClient = WebClient.builder()
@@ -395,8 +408,20 @@ public class ResponsesChatModel implements ChatModel {
         ChatResponseMetadata.Builder metadata = ChatResponseMetadata.builder().model(model);
         if (response != null) {
             metadata.id(response.getString("id"));
-            if (response.getJSONObject("usage") != null) {
-                metadata.usage(parseUsage(response.getJSONObject("usage")));
+            JSONObject usage = response.getJSONObject("usage");
+            if (usage != null) {
+                metadata.usage(parseUsage(usage));
+                // 服务端搜索观测（xAI usage 形态）："搜没搜"必须有据可查——7月那次搜索能力
+                // 随上游配置静默消失，拖了一个月才被发现，病根就是这里没有任何观测
+                Integer serverTools = usage.getInteger("num_server_side_tools_used");
+                if (serverTools != null && serverTools > 0) {
+                    metadata.keyValue("num_server_side_tools_used", serverTools);
+                    JSONObject details = usage.getJSONObject("server_side_tool_usage_details");
+                    if (details != null) {
+                        metadata.keyValue("server_side_tool_usage_details", details.toJSONString());
+                    }
+                    log.info("[Responses] {} 服务端工具调用{}次 明细={}", model, serverTools, details);
+                }
             }
         }
         return new ChatResponse(List.of(generation), metadata.build());
@@ -464,16 +489,21 @@ public class ResponsesChatModel implements ChatModel {
 
         // 工具定义：Responses 是扁平结构（name 在顶层，不像 completions 嵌在 function 下）
         if (options instanceof ToolCallingChatOptions toolOptions) {
-            List<ToolDefinition> definitions = toolCallingManager.resolveToolDefinitions(toolOptions);
-            if (!definitions.isEmpty()) {
-                JSONArray tools = new JSONArray();
-                for (ToolDefinition def : definitions) {
-                    tools.add(new JSONObject()
-                            .fluentPut("type", "function")
-                            .fluentPut("name", def.name())
-                            .fluentPut("description", def.description())
-                            .fluentPut("parameters", JSON.parseObject(def.inputSchema())));
-                }
+            JSONArray tools = new JSONArray();
+            for (ToolDefinition def : toolCallingManager.resolveToolDefinitions(toolOptions)) {
+                tools.add(new JSONObject()
+                        .fluentPut("type", "function")
+                        .fluentPut("name", def.name())
+                        .fluentPut("description", def.description())
+                        .fluentPut("parameters", JSON.parseObject(def.inputSchema())));
+            }
+            // 服务端搜索双闸门：端点声明支持 ∧ 本次调用授权（toolContext 键，只有 summarizer 捎）。
+            // 不声明上游就不搜（opt-in 语义）——搜索显式可控，不寄生于网关的默认行为
+            if (webSearch && toolOptions.getToolContext() != null
+                    && Boolean.TRUE.equals(toolOptions.getToolContext().get(WEB_SEARCH_KEY))) {
+                tools.add(new JSONObject().fluentPut("type", "web_search"));
+            }
+            if (!tools.isEmpty()) {
                 body.put("tools", tools);
                 // 强不强制用工具由调用方按次决定（首轮强制/单次结构化调用），经 toolContext 捎进来（ToolChoice）：
                 // 模型自带联网/搜索等内置能力，auto 下不保证用挂上去的工具，数据源必须可控的场景靠它兜住
@@ -481,12 +511,15 @@ public class ResponsesChatModel implements ChatModel {
             }
         }
         // 请求侧证据日志，与响应侧 toolCalls 日志对称：排"模型不调工具"先看这——
-        // tool_choice=null 即压根没发工具定义，required/auto 则是强制与否的实据
+        // tool_choice=null 即压根没发工具定义，required/auto 则是强制与否的实据；服务端工具无 name 记 type
         JSONArray toolsOut = body.getJSONArray("tools");
         log.info("[Responses] 请求 model={} stream={} tool_choice={} tools={}",
                 body.getString("model"), stream, body.getString("tool_choice"),
                 toolsOut == null ? List.of() : toolsOut.stream()
-                        .map(t -> ((JSONObject) t).getString("name")).toList());
+                        .map(t -> {
+                            JSONObject tool = (JSONObject) t;
+                            return tool.getString("name") != null ? tool.getString("name") : tool.getString("type");
+                        }).toList());
         return body;
     }
 
