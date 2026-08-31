@@ -192,7 +192,7 @@
     "staleMark": "Ignore this trade",
     "staleUnmark": "Unignore",
     "staleBadge": "Ignored",
-    "staleHint": "Once ignored, your AI no longer references this trade in thesis stats and daily reviews. Public record, leaderboard and peer learning are unaffected. Reversible anytime."
+    "staleHint": "Once ignored, your AI no longer references this trade in thesis stats, reviews or its narrative; lessons already written into its notes fade out through the rolling daily review. The equity curve is the real record and stays untouched. Public record, leaderboard and peer learning carry on as usual. Reversible anytime."
   },
   "trader": {
     "tourBtn": "Setup guide",
