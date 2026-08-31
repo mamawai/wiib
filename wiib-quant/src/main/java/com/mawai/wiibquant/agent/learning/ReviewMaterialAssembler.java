@@ -27,6 +27,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -118,11 +119,32 @@ public class ReviewMaterialAssembler {
         List<FuturesPositionDTO> fetched = simTradeClient.getClosedPositions(trader.getSimUserId(), CLOSED_FETCH_LIMIT);
         boolean maybeTruncated = fetched.size() >= CLOSED_FETCH_LIMIT;
         List<FuturesPositionDTO> closed = inWindow(fetched, fromMs, toMs);
-        String stats = statsBlock(trader, fromMs, toMs, closed, maybeTruncated, lang);
-        String trades = tradesBlock(trader, closed, fromMs, toMs, lang);
+        // 配对一次、配对表与战绩表共用；stale 过滤在配对之后——被忽略的计划仍占配对位，先滤后配会错配
+        List<AiTraderPlan> plans = planMapper.selectList(new LambdaQueryWrapper<AiTraderPlan>()
+                .eq(AiTraderPlan::getTraderId, trader.getId())
+                .eq(AiTraderPlan::getRoundNo, trader.getRoundNo()));
+        Set<AiTraderPlan> used = new HashSet<>();
+        // 键用对象身份：窗口内配对不依赖仓位 id
+        Map<FuturesPositionDTO, AiTraderPlan> planByPos = new IdentityHashMap<>();
+        for (FuturesPositionDTO pos : closed) {
+            AiTraderPlan plan = bestMatch(plans, pos, used);
+            if (plan != null) {
+                planByPos.put(pos, plan);
+            }
+        }
+        // 主人标记忽略的交易从复盘教材整体消失（配对表 + 战绩表的了结统计行）；权益线来自决策行序列，不动
+        List<FuturesPositionDTO> visible = closed.stream()
+                .filter(p -> !isStale(planByPos.get(p)))
+                .toList();
+        String stats = statsBlock(trader, fromMs, toMs, visible, maybeTruncated, lang);
+        String trades = tradesBlock(visible, planByPos, plans, fromMs, toMs, lang);
         String timeline = timelineBlock(trader, fromMs, toMs, lang);
         String pricePath = pricePathBlock(trader, fromMs, toMs, lang);
-        return new ReviewMaterial(stats, trades, timeline, pricePath, closed.size());
+        return new ReviewMaterial(stats, trades, timeline, pricePath, visible.size());
+    }
+
+    private static boolean isStale(AiTraderPlan p) {
+        return p != null && Boolean.TRUE.equals(p.getStale());
     }
 
     // ==================== 战绩表 ====================
@@ -192,17 +214,12 @@ public class ReviewMaterialAssembler {
 
     // ==================== 已了结交易配对表 ====================
 
-    private String tradesBlock(AiTrader t, List<FuturesPositionDTO> closed, long fromMs, long toMs,
-                               AgentLang lang) {
-        // 全量拉本局计划在内存配对：一局的计划量有限，省掉按笔查询
-        List<AiTraderPlan> plans = planMapper.selectList(new LambdaQueryWrapper<AiTraderPlan>()
-                .eq(AiTraderPlan::getTraderId, t.getId())
-                .eq(AiTraderPlan::getRoundNo, t.getRoundNo()));
+    private String tradesBlock(List<FuturesPositionDTO> visible, Map<FuturesPositionDTO, AiTraderPlan> planByPos,
+                               List<AiTraderPlan> plans, long fromMs, long toMs, AgentLang lang) {
         StringBuilder sb = new StringBuilder(prompts.get(lang, "reviewer.label.tradesHeader")).append('\n');
-        Set<AiTraderPlan> used = new HashSet<>();
         int i = 1;
-        for (FuturesPositionDTO pos : closed) {
-            AiTraderPlan plan = bestMatch(plans, pos, used);
+        for (FuturesPositionDTO pos : visible) {
+            AiTraderPlan plan = planByPos.get(pos);
             sb.append(i++).append(". ").append(pos.getSymbol()).append(' ').append(pos.getSide());
             if (plan != null && plan.getPlayType() != null) {
                 sb.append(" [").append(plan.getPlayType()).append(']');
@@ -215,9 +232,11 @@ public class ReviewMaterialAssembler {
                 sb.append("   ").append(prompts.get(lang, "reviewer.label.noPlan")).append('\n');
             }
         }
-        // 窗口内归档却没配对上仓位的计划（多为挂单未成交撤销）：论点没得到执行机会也要留痕
+        // 窗口内归档却没配对上仓位的计划（多为挂单未成交撤销）：论点没得到执行机会也要留痕；stale 的不出
+        Set<AiTraderPlan> paired = new HashSet<>(planByPos.values());
         for (AiTraderPlan plan : plans) {
-            if (AiTraderPlan.STATUS_CLOSED.equals(plan.getStatus()) && !used.contains(plan)
+            if (AiTraderPlan.STATUS_CLOSED.equals(plan.getStatus()) && !paired.contains(plan)
+                    && !isStale(plan)
                     && plan.getClosedWakeTime() != null
                     && plan.getClosedWakeTime() > fromMs && plan.getClosedWakeTime() <= toMs) {
                 sb.append("· ").append(plan.getSymbol()).append(' ').append(plan.getSide())

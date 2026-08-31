@@ -239,6 +239,61 @@ class ReviewMaterialAssemblerTest {
         assertThat(m.tradesBlock()).contains("ETHUSDT").contains("RANGE").contains("未配对");
     }
 
+    // ==================== stale：主人标记忽略的交易从教材消失 ====================
+
+    private static AiTraderPlan planOf(String symbol, String playType, long openedWakeTime, boolean stale) {
+        AiTraderPlan plan = new AiTraderPlan();
+        plan.setSymbol(symbol);
+        plan.setSide("LONG");
+        plan.setPlayType(playType);
+        plan.setSignalsUsed("信号-" + playType);
+        plan.setInvalidationCondition("失效-" + playType);
+        plan.setStatus(AiTraderPlan.STATUS_CLOSED);
+        plan.setOpenedWakeTime(openedWakeTime);
+        plan.setClosedWakeTime(openedWakeTime + 3600_000L);
+        plan.setStale(stale);
+        return plan;
+    }
+
+    /**
+     * stale 交易从配对表与了结统计行整体消失；权益/回撤线来自决策行序列，不动。
+     * 过滤必须在配对之后：stale 计划提前拿掉的话，它的仓位会错配到同 symbol/side 的
+     * 别的计划上——所以正常那笔配的必须还是自己的 PULLBACK（带 +30），不能被 -50 顶包。
+     */
+    @Test
+    void staleTradeVanishesFromTradesAndStatsButNotEquity() {
+        when(decisionMapper.selectOne(any())).thenReturn(equityRow(FROM - 3600_000, "10000"));
+        when(decisionMapper.selectList(any())).thenReturn(
+                List.of(equityRow(FROM + 10800_000, "10500")), List.of());
+        FuturesPositionDTO stalePos = closedPos("LONG", "100000", "99000", "-50", FROM + 3600_000, FROM + 7200_000);
+        FuturesPositionDTO keptPos = closedPos("LONG", "100000", "101000", "30", FROM + 10800_000, FROM + 14400_000);
+        when(simTradeClient.getClosedPositions(eq(99L), anyInt())).thenReturn(List.of(stalePos, keptPos));
+        when(planMapper.selectList(any())).thenReturn(List.of(
+                planOf("BTCUSDT", "REVERSAL", FROM + 3600_000, true),
+                planOf("BTCUSDT", "PULLBACK", FROM + 10800_000, false)));
+
+        ReviewMaterialAssembler.ReviewMaterial m = assembler.assemble(trader(), FROM, TO, AgentLang.ZH);
+
+        assertThat(m.tradesBlock()).contains("PULLBACK").contains("+30")
+                .doesNotContain("REVERSAL").doesNotContain("-50");
+        assertThat(m.statsBlock()).contains("1 笔");
+        // 权益线不许跟着变：钱账是决策行权益序列算的，stale 只动教材
+        assertThat(m.statsBlock()).contains("+5.00%");
+        assertThat(m.closedTrades()).isEqualTo(1);
+    }
+
+    /** 窗口内归档、未配对、stale 的计划：孤儿行也不出 */
+    @Test
+    void staleOrphanPlanOmitted() {
+        when(decisionMapper.selectOne(any())).thenReturn(null);
+        AiTraderPlan orphan = planOf("ETHUSDT", "RANGE", FROM + 3600_000, true);
+        when(planMapper.selectList(any())).thenReturn(List.of(orphan));
+
+        ReviewMaterialAssembler.ReviewMaterial m = assembler.assemble(trader(), FROM, TO, AgentLang.ZH);
+
+        assertThat(m.tradesBlock()).doesNotContain("RANGE").doesNotContain("ETHUSDT");
+    }
+
     // ==================== 时间线摘编 ====================
 
     @Test
