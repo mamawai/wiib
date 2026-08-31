@@ -11,6 +11,11 @@ trader:
 
   noEndpoint: 还没有可用的模型端点，请先到 AI 页「模型配置」里添加
 
+  # 已了结交易的忽略标记（stale）：教材层治理，公开记录不动
+  plan:
+    notFound: 找不到这笔交易计划
+    notClosed: 只能忽略已了结的交易
+
   # 审批卡上的两个按钮（加仓/减仓请求）
   request:
     notFoundOrHandled: 请求不存在或已处理

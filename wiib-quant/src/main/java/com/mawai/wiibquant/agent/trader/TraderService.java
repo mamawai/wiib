@@ -27,6 +27,7 @@ import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 
 /**
@@ -206,6 +207,26 @@ public class TraderService {
                 .set(AiTrader::getStatus, AiTrader.STATUS_PAUSED)
                 .set(AiTrader::getPausedReason, prompts.get(langResolver.of(userId), "trader.pause.manual"))
                 .set(AiTrader::getUpdatedAt, LocalDateTime.now()));
+        return null;
+    }
+
+    /**
+     * 标记/取消忽略一笔已归档计划：只有主人能标；LIVE 是在场纪律不许藏，只有 CLOSED 可标。
+     * stale 只作用于教材层（论点战绩统计、复盘素材），权益/排行榜/同侪学习照常。
+     */
+    public String setPlanStale(long userId, long planId, boolean stale) {
+        AiTrader t = mine(userId);
+        if (t == null) {
+            return messages.get("trader.notCreated");
+        }
+        AiTraderPlan p = planStore.byId(planId);
+        if (p == null || !Objects.equals(p.getTraderId(), t.getId())) {
+            return messages.get("trader.plan.notFound");
+        }
+        if (!AiTraderPlan.STATUS_CLOSED.equals(p.getStatus())) {
+            return messages.get("trader.plan.notClosed");
+        }
+        planStore.setStale(planId, stale);
         return null;
     }
 

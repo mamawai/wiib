@@ -217,6 +217,18 @@ public class TraderController {
         return err == null ? Result.ok(null) : Result.fail(err);
     }
 
+    /** stale 开关请求体 */
+    public record PlanStaleRequest(boolean stale) {
+    }
+
+    @PostMapping("/plan/{planId}/stale")
+    @Operation(summary = "标记/取消忽略一笔已了结交易（仅本人、仅CLOSED；忽略后AI统计与复盘不再参考，公开记录不变）")
+    public Result<Void> setPlanStale(@CurrentUserId long userId, @PathVariable long planId,
+                                     @RequestBody PlanStaleRequest req) {
+        String err = traderService.setPlanStale(userId, planId, req.stale());
+        return err == null ? Result.ok(null) : Result.fail(err);
+    }
+
     // ========== 动作面板（留言 / 手动唤醒 / 点播复盘） ==========
     // 三个动作的执行入口只有这里。对话轨的工具只把表单推给用户看，模型碰不到执行那一步。
     // 一律 Result.ok(ActionResult)：业务结果（被拦下、无素材跳过）要显示在卡片里，

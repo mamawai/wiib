@@ -4,6 +4,7 @@ import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.mawai.wiibcommon.entity.AiTraderPlan;
 import com.mawai.wiibquant.mapper.AiTraderPlanMapper;
 import lombok.RequiredArgsConstructor;
@@ -107,6 +108,21 @@ public class TraderPlanStore {
             log.info("[TraderPlan] 归档已了结计划 traderId={} {} {}", traderId, p.getSymbol(), p.getSide());
             return false;
         }).toList();
+    }
+
+    /** 按 id 取计划（stale 开关的归属校验用），无则 null。 */
+    public AiTraderPlan byId(long planId) {
+        return mapper.selectById(planId);
+    }
+
+    /**
+     * 主人标记忽略/取消：只动 stale 列，计划本体不碰。
+     * 此 stale 与 {@link #cleanupStale}（清理已了结残留计划）无关——那是生命周期，这是教材治理。
+     */
+    public void setStale(long planId, boolean stale) {
+        mapper.update(null, new LambdaUpdateWrapper<AiTraderPlan>()
+                .eq(AiTraderPlan::getId, planId)
+                .set(AiTraderPlan::getStale, stale));
     }
 
     /** 本局最近归档的计划（最新在前）：对话轨要回答"上一笔为什么平了"，只看 LIVE 是答不了的。 */

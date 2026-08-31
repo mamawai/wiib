@@ -345,6 +345,62 @@ class TraderServiceTest {
         verify(modelFactory).evict(7L);
     }
 
+    /** stale 标记：本人的 CLOSED 计划可标可取消（教材层忽略，钱账与公开记录不动） */
+    @Test
+    void setPlanStaleMarksClosedPlan() {
+        AiTrader t = new AiTrader();
+        t.setId(7L);
+        t.setUserId(1L);
+        when(traderMapper.selectOne(any())).thenReturn(t);
+        com.mawai.wiibcommon.entity.AiTraderPlan p = new com.mawai.wiibcommon.entity.AiTraderPlan();
+        p.setId(9L);
+        p.setTraderId(7L);
+        p.setStatus(com.mawai.wiibcommon.entity.AiTraderPlan.STATUS_CLOSED);
+        when(planStore.byId(9L)).thenReturn(p);
+
+        assertThat(service.setPlanStale(1L, 9L, true)).isNull();
+
+        verify(planStore).setStale(9L, true);
+    }
+
+    /** 别人的计划标不了：stale 是主人对自己教材的治理权 */
+    @Test
+    void setPlanStaleRejectsOthersPlan() {
+        AiTrader t = new AiTrader();
+        t.setId(7L);
+        t.setUserId(1L);
+        when(traderMapper.selectOne(any())).thenReturn(t);
+        com.mawai.wiibcommon.entity.AiTraderPlan p = new com.mawai.wiibcommon.entity.AiTraderPlan();
+        p.setId(9L);
+        p.setTraderId(8L);
+        p.setStatus(com.mawai.wiibcommon.entity.AiTraderPlan.STATUS_CLOSED);
+        when(planStore.byId(9L)).thenReturn(p);
+
+        assertThat(service.setPlanStale(1L, 9L, true)).isNotNull();
+
+        verify(planStore, never()).setStale(org.mockito.ArgumentMatchers.anyLong(),
+                org.mockito.ArgumentMatchers.anyBoolean());
+    }
+
+    /** LIVE 是在场纪律不许藏，只有 CLOSED 可标 */
+    @Test
+    void setPlanStaleRejectsLivePlan() {
+        AiTrader t = new AiTrader();
+        t.setId(7L);
+        t.setUserId(1L);
+        when(traderMapper.selectOne(any())).thenReturn(t);
+        com.mawai.wiibcommon.entity.AiTraderPlan p = new com.mawai.wiibcommon.entity.AiTraderPlan();
+        p.setId(9L);
+        p.setTraderId(7L);
+        p.setStatus(com.mawai.wiibcommon.entity.AiTraderPlan.STATUS_LIVE);
+        when(planStore.byId(9L)).thenReturn(p);
+
+        assertThat(service.setPlanStale(1L, 9L, true)).isNotNull();
+
+        verify(planStore, never()).setStale(org.mockito.ArgumentMatchers.anyLong(),
+                org.mockito.ArgumentMatchers.anyBoolean());
+    }
+
     /**
      * 暂停原因落库即上屏（trader 面板 + 竞技场），跟 trader 主人的语言写入——
      * 与自动暂停那三种（keyInvalid/连败/爆仓）同一口径，英文用户不该在面板上看见一行中文
