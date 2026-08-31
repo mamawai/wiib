@@ -29,6 +29,7 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -383,14 +384,10 @@ public class ReviewMaterialAssembler {
         int errors = 0;
         int skipped = 0;
         int opens = 0;
-        // HOLD 段游标：连续同一等待条件压成一段，遇动作行或条件变化就结算。
-        // 15m 档一天 96 轮，行情不动时几十轮等的是同一句话，一轮一行只会把动作行的信号稀释掉
-        String holdKey = null;
-        String holdWait = null;
-        String holdKind = null;
-        long holdFrom = 0;
-        long holdTo = 0;
-        int holdRounds = 0;
+        // HOLD 段游标（按币各一个）：同币连续同一等待条件压成一段，遇动作行或条件变化就结算。
+        // 15m 档一天 96 轮，行情不动时几十轮等的是同一句话，一轮一行只会把动作行的信号稀释掉。
+        // 旧格式整块观望占 WHOLE 伪键，与新格式的币键互不干扰
+        Map<String, Hold> holds = new LinkedHashMap<>();
         for (AiTraderDecision d : rows) {
             if (AiTraderDecision.STATUS_ERROR.equals(d.getStatus())) {
                 errors++;
@@ -405,9 +402,7 @@ public class ReviewMaterialAssembler {
                     ? prompts.get(lang, "reviewer.label.alertTag") + " " : "";
             if (!acts.isEmpty()) {
                 // 动作行逐条出、内容不动：它是复盘主菜，判断/依据/等待整块都是"为什么做这一手"的证据
-                flushHold(entries, holdKind, holdWait, holdFrom, holdTo, holdRounds, lang);
-                holdKey = null;
-                holdRounds = 0;
+                flushHolds(entries, holds, lang);
                 // 数开仓动作按摘要文本认工具名：actionSummary 已过滤成 tool(args) 形态，误中不了正文
                 opens += countOccurrences(acts, "open_position(");
                 entries.add(new TimelineEntry("- " + TIME_FMT.format(Instant.ofEpochMilli(d.getWakeTime()))
@@ -415,24 +410,24 @@ public class ReviewMaterialAssembler {
                                 "actions", acts, "conclusion", conclusion(d.getReasoning(), lang))), true));
                 continue;
             }
-            // 观望轮只留等待条件：它有对账物（价格路径能验证到没到），"判断"那段指标读数没有
-            String wait = waitSection(d.getReasoning(), lang);
+            // 观望轮只留等待条件：它有对账物（价格路径能验证到没到），"判断"那段指标读数没有。
             // 警报轮与例行观望不混段：同样条件下被警报叫醒仍按兵不动，这件事本身就是复盘证据
-            String key = (tag.isEmpty() ? "N|" : "A|") + waitKey(wait);
-            if (holdKey != null && holdKey.equals(key)) {
-                holdTo = d.getWakeTime();
-                holdRounds++;
-            } else {
-                flushHold(entries, holdKind, holdWait, holdFrom, holdTo, holdRounds, lang);
-                holdKey = key;
-                holdWait = wait;
-                holdKind = d.getKind();
-                holdFrom = d.getWakeTime();
-                holdTo = d.getWakeTime();
-                holdRounds = 1;
+            String kindPrefix = tag.isEmpty() ? "N|" : "A|";
+            for (Map.Entry<String, String> w : waitsBySymbol(d.getReasoning(), lang).entrySet()) {
+                String key = kindPrefix + waitKey(w.getValue());
+                Hold h = holds.get(w.getKey());
+                if (h != null && h.key.equals(key)) {
+                    h.to = d.getWakeTime();
+                    h.rounds++;
+                } else {
+                    if (h != null) {
+                        flushHold(entries, h, lang);
+                    }
+                    holds.put(w.getKey(), new Hold(key, d.getKind(), w.getKey(), w.getValue(), d.getWakeTime()));
+                }
             }
         }
-        flushHold(entries, holdKind, holdWait, holdFrom, holdTo, holdRounds, lang);
+        flushHolds(entries, holds, lang);
 
         StringBuilder sb = new StringBuilder(prompts.get(lang, "reviewer.label.timelineHeader")).append('\n');
         // 活动统计给保守度自检当对照物：唤醒多动作少是"没信号"还是"吓缩了"，得先有数才能问。
@@ -570,13 +565,74 @@ public class ReviewMaterialAssembler {
         return idx < 0 ? null : new Conclusion(lang, idx, mark.length());
     }
 
+    // ==================== 结论分段（总分结构） ====================
+
     /**
-     * 观望行的原料：结论块里的"等待"段，返回完整内容不截断
+     * 结论块内的币种分段标记：方括号币码独占一行（[BTCUSDT]）。语言无关——两门语言的模板同一形状。
+     * 只在结论块正文里匹配，[ROUND CONCLUSION] 带空格够不到，[警报] 非拉丁字母也够不到。
+     */
+    private static final Pattern SEGMENT_TAG = Pattern.compile("(?m)^\\s*\\[([A-Z0-9]{2,20})\\]\\s*$");
+
+    /** 结论块里的一个币种分段：段头币码 + 段身（判断/动作/等待） */
+    public record ConclusionSegment(String symbol, String body) {
+    }
+
+    /** 旧格式整块观望在按币容器里的伪键：没有分段标记时全部条件归它 */
+    static final String WHOLE = "";
+
+    /**
+     * 结论块正文按 [SYMBOL] 标记切段；无标记（旧格式）返回空列表。
+     * 首个标记之前的引子（总评）不绑定任何币，不进结果——归属计算只认分段。
+     */
+    public static List<ConclusionSegment> splitSegments(String conclusionBody) {
+        Matcher m = SEGMENT_TAG.matcher(conclusionBody);
+        List<ConclusionSegment> out = new ArrayList<>();
+        String symbol = null;
+        int start = 0;
+        while (m.find()) {
+            if (symbol != null) {
+                out.add(new ConclusionSegment(symbol, conclusionBody.substring(start, m.start())));
+            }
+            symbol = m.group(1);
+            start = m.end();
+        }
+        if (symbol != null) {
+            out.add(new ConclusionSegment(symbol, conclusionBody.substring(start)));
+        }
+        return out;
+    }
+
+    /**
+     * 观望轮的等待条件按币抽取：新格式（总分结构）每个 [SYMBOL] 段各抽各的，键=币码；
+     * 旧格式整块抽一条，键={@link #WHOLE}。没有结论块 → 单条 WHOLE 空值（"这轮没给条件"）。
+     */
+    LinkedHashMap<String, String> waitsBySymbol(String reasoning, AgentLang lang) {
+        LinkedHashMap<String, String> out = new LinkedHashMap<>();
+        if (reasoning == null || reasoning.isBlank()) {
+            out.put(WHOLE, "");
+            return out;
+        }
+        Conclusion c = locateConclusion(reasoning, lang);
+        if (c == null) {
+            out.put(WHOLE, "");
+            return out;
+        }
+        String body = c.body(reasoning);
+        List<ConclusionSegment> segments = splitSegments(body);
+        if (segments.isEmpty()) {
+            out.put(WHOLE, extractWait(body, c.lang()));
+            return out;
+        }
+        for (ConclusionSegment s : segments) {
+            out.put(s.symbol(), extractWait(s.body(), c.lang()));
+        }
+        return out;
+    }
+
+    /**
+     * 观望行的原料：结论块里的"等待"段（整块口径，不分币），返回完整内容不截断
      * （截断留给输出——先截再算合并键，会把"前段相同、后段不同"的两条误并成一条）。
-     * <p>
-     * 按标签块切而不是按行取：模型有时把条件写在标签同一行、有时换行分条列，
-     * 整段吃到下一个小节标签才两种都接得住；只认标签行的话，分条写的条件会整段丢掉，
-     * 观望对账没了原料就是空转。行首锚定防正文里的"等待："被误认。
+     * 按币的口径见 {@link #waitsBySymbol}。
      */
     String waitSection(String reasoning, AgentLang lang) {
         if (reasoning == null || reasoning.isBlank()) {
@@ -588,9 +644,16 @@ public class ReviewMaterialAssembler {
             // 命中/未命中，只能编出假结论——观望对账正是复盘的核心产出
             return "";
         }
-        // 小节标签按结论块自己那门语言认：块是中文写的，段名就是"等待/判断/动作"
-        Matcher m = waitPattern(c.lang()).matcher(c.body(reasoning));
-        // 没有等待段就是没有：不拿正文冒充条件，对账时它该被当成"这轮没给条件"
+        return extractWait(c.body(reasoning), c.lang());
+    }
+
+    /**
+     * 从一段结论正文里抽"等待"：按标签块切而不是按行取——模型有时把条件写在标签同一行、
+     * 有时换行分条列，整段吃到下一个小节标签才两种都接得住。行首锚定防正文里的"等待："被误认。
+     * 小节标签按结论块自己那门语言认；没有等待段就是没有，不拿正文冒充条件。
+     */
+    private String extractWait(String body, AgentLang lang) {
+        Matcher m = waitPattern(lang).matcher(body);
         return m.find() ? m.group(1).replaceAll("\\s+", " ").strip() : "";
     }
 
@@ -617,25 +680,53 @@ public class ReviewMaterialAssembler {
         return wait.replaceAll("[（(](?![^）)]*[且或><≥≤0-9])[^）)]*[）)]", "").replaceAll("\\s+", "");
     }
 
+    /** 观望段游标：同币连续同一等待条件的多轮压成一段。symbol={@link #WHOLE} 即旧格式整块 */
+    private static final class Hold {
+        final String key;
+        final String kind;
+        final String symbol;
+        final String wait;
+        final long from;
+        long to;
+        int rounds;
+
+        Hold(String key, String kind, String symbol, String wait, long at) {
+            this.key = key;
+            this.kind = kind;
+            this.symbol = symbol;
+            this.wait = wait;
+            this.from = at;
+            this.to = at;
+            this.rounds = 1;
+        }
+    }
+
+    /** 全部在途观望段一并结算（遇动作行/时间线收尾），按各段起始顺序输出后清空 */
+    private void flushHolds(List<TimelineEntry> out, Map<String, Hold> holds, AgentLang lang) {
+        holds.values().forEach(h -> flushHold(out, h, lang));
+        holds.clear();
+    }
+
     /**
      * 结算一个观望段。多轮的写成时间段+轮数——"这个条件挂了多久、耗了多少轮"本身就是
      * 保守度自检的证据（该行动没行动 vs 市场真没信号），比同一句话重复 N 遍有用。
+     * 按币的段带 [币码] 前缀（语言无关）；旧格式整块段不带。
      */
-    private void flushHold(List<TimelineEntry> out, String kind, String wait,
-                           long from, long to, int rounds, AgentLang lang) {
-        if (rounds == 0) {
+    private void flushHold(List<TimelineEntry> out, Hold h, AgentLang lang) {
+        if (h == null || h.rounds == 0) {
             return;
         }
-        String tag = AiTraderDecision.KIND_ALERT.equals(kind)
+        String tag = AiTraderDecision.KIND_ALERT.equals(h.kind)
                 ? prompts.get(lang, "reviewer.label.alertTag") + " " : "";
-        String head = rounds == 1
-                ? "- " + TIME_FMT.format(Instant.ofEpochMilli(from)) + " " + tag
-                : "- " + TIME_FMT.format(Instant.ofEpochMilli(from)) + "~"
-                  + TIME_FMT.format(Instant.ofEpochMilli(to))
-                  + prompts.get(lang, "reviewer.label.holdRounds", Map.of("rounds", rounds)) + tag;
-        String w = wait.isEmpty() ? prompts.get(lang, "reviewer.label.noWait")
-                : wait.length() > WAIT_MAX_CHARS ? wait.substring(0, WAIT_MAX_CHARS) + "…" : wait;
-        out.add(new TimelineEntry(head + prompts.get(lang, "reviewer.label.waiting",
+        String head = h.rounds == 1
+                ? "- " + TIME_FMT.format(Instant.ofEpochMilli(h.from)) + " " + tag
+                : "- " + TIME_FMT.format(Instant.ofEpochMilli(h.from)) + "~"
+                  + TIME_FMT.format(Instant.ofEpochMilli(h.to))
+                  + prompts.get(lang, "reviewer.label.holdRounds", Map.of("rounds", h.rounds)) + tag;
+        String w = h.wait.isEmpty() ? prompts.get(lang, "reviewer.label.noWait")
+                : h.wait.length() > WAIT_MAX_CHARS ? h.wait.substring(0, WAIT_MAX_CHARS) + "…" : h.wait;
+        String symbolTag = WHOLE.equals(h.symbol) ? "" : "[" + h.symbol + "] ";
+        out.add(new TimelineEntry(head + symbolTag + prompts.get(lang, "reviewer.label.waiting",
                 Map.of("wait", w)), false));
     }
 

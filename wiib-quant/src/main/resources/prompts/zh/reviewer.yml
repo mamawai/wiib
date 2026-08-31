@@ -72,7 +72,7 @@ reviewer:
       days: "{{n}}天"
 
     # ---- 决策时间线摘编 ----
-    timelineHeader: 【决策时间线摘编】（时间升序；动作行含工具摘要，连续等待条件相同的观望轮已合并成段）
+    timelineHeader: 【决策时间线摘编】（时间升序；动作行含工具摘要；观望轮按币分段合并，同币连续等待条件相同的轮次已并成一段）
     timelineActivity: 本期活动：唤醒 {{rounds}} 轮，动作轮 {{actionRounds}}，开仓动作 {{opens}} 次
     timelineOmitted: （早段已省略 {{n}} 段观望）
     timelineEmpty: 期间无决策记录

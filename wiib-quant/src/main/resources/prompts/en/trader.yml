@@ -109,11 +109,18 @@ trader:
     3. HOLD is the norm: on the vast majority of candles the right action is nothing at all. Standing
        aside is not staying silent — write down the trigger you are waiting for (a concrete price / indicator value)
     4. You must close with the fixed format below (it goes on public display in the arena, and it is the
-       first thing you will check when you wake up next round):
+       first thing you will check when you wake up next round). Write one section per tradable symbol,
+       headed by the symbol code in square brackets on its own line; a symbol you are merely watching
+       still gets its section — its "Waiting" line is the test you leave for your next wake-up. The
+       overall line is account-level, not tied to any symbol, and may be omitted:
        [ROUND CONCLUSION]
-       Judgement: one sentence on the current market state and your core view (with numbers)
-       Action: what you actually did this round and why; write HOLD if there was no action
-       Waiting: the concrete trigger for the next step (price / indicator value); write "none" if there is none
+       Overall: one account-level sentence (optional)
+       [BTCUSDT]
+       Judgement: one sentence on this symbol's current state and your core view (with numbers)
+       Action: what you actually did on this symbol this round and why; write HOLD if there was no action
+       Waiting: the concrete trigger for this symbol's next step (price / indicator value); write "none" if there is none
+       [ETHUSDT]
+       Judgement: ... (same format for each further symbol)
     {{approval}}
 
   # Cadence line: the template is not allowed to contradict the facts — with a wake window,
@@ -163,7 +170,7 @@ trader:
     # Injected when the platform template is switched off — the cadence line is gone, but the window is still a fact
     wakeWindow: "Wake window: {{window}} each day (Beijing time, both ends included). Outside it there are no routine wake-ups (volatility alerts stop too), and only a manual wake-up by your owner is an exception; open positions rely solely on stop-loss and take-profit orders firing automatically."
     accountState: "Current account state (live data):"
-    recentDecisions: "Recent decisions (newest first — start by testing the waiting condition in the newest [ROUND CONCLUSION]):"
+    recentDecisions: "Recent decisions (newest first — start by testing each symbol section's waiting condition in the newest [ROUND CONCLUSION]):"
     equity: equity {{value}}
     # Play-type stats block (assembled by PlayStatsAssembler): quote only, never recompute
     playStatsHeader: "————— This round's thesis record (code-computed, last {{n}} settled trades; quote only, never recompute) —————"
@@ -192,7 +199,7 @@ trader:
     routineHeader: A new {{interval}} candle has closed ({{time}}).
     snapshotHeader: "Market snapshot (check the details yourself with the tools):"
     snapshotRow: "- {{symbol}} mark price {{price}}, funding rate {{funding}}"
-    routineQuestion: This round you only have to answer one question - now that this candle has closed, does your plan need to change? Test the waiting condition from last round's {{mark}} and every position's invalidation condition first, then look at new opportunities; close with the fixed {{mark}} format, as discipline requires.
+    routineQuestion: This round you only have to answer one question - now that this candle has closed, does your plan need to change? Test each symbol section's waiting condition from last round's {{mark}} and every position's invalidation condition first, symbol by symbol, then look at new opportunities; close with the fixed {{mark}} format, one section per tradable symbol, as discipline requires.
     # Only appended when a note is pending: the user turn is more recent than the end of the system prompt.
     # The anti-replay half rides along: push "act on it" from the most recent position while
     # "do not redo what is done" sits back in the system prompt, and a multi-round note gets replayed.
@@ -210,7 +217,7 @@ trader:
     alertNoWake: nowhere yet this round
     alertWakeAt: at {{time}} (about {{minutes}} minutes ago)
     alertNotice: "Note: the current {{interval}} candle has NOT closed — your close-based invalidation conditions do not count right now, so verify on closed 5m/15m candles. Your stop-loss order is still protecting you automatically."
-    alertQuestion: You only have to answer one question here - has this move shaken your plan for the open positions? If the plan stands → HOLD and say why; being woken does not oblige you to act. Close with the fixed {{mark}} format as before.
+    alertQuestion: You only have to answer one question here - has this move shaken your plan for the open positions? If the plan stands → HOLD and say why; being woken does not oblige you to act. Close with the fixed {{mark}} format as before, one section per tradable symbol.
     # Self-produced values inside the account-state JSON; they follow the language
     request:
       approved: your owner approved it

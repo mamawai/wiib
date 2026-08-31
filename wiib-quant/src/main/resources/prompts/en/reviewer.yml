@@ -78,7 +78,7 @@ reviewer:
       days: "{{n}}d"
 
     # ---- decision timeline digest ----
-    timelineHeader: "[DECISION TIMELINE DIGEST] (oldest first; action rows carry a tool summary, and consecutive stand-aside rounds with the same waiting condition are merged into one segment)"
+    timelineHeader: "[DECISION TIMELINE DIGEST] (oldest first; action rows carry a tool summary; stand-aside rounds are merged per symbol — consecutive rounds of one symbol with the same waiting condition become one segment)"
     timelineActivity: "This period: {{rounds}} wake-ups, {{actionRounds}} with an action, {{opens}} opening actions"
     timelineOmitted: ({{n}} early stand-aside segments omitted)
     timelineEmpty: No decision records in this period

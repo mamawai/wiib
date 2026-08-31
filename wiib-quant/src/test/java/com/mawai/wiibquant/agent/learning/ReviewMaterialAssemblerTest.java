@@ -498,6 +498,121 @@ class ReviewMaterialAssemblerTest {
                 .isEmpty();
     }
 
+    // ==================== 结论总分结构：按币分段 ====================
+
+    private static final String SEGMENTED_ZH = """
+            行情铺垫……【本轮结论】
+            总评：账户整体轻仓观望，等方向
+            [BTCUSDT]
+            判断：63500 上方震荡收敛
+            动作：HOLD
+            等待：回踩 63370–63480 企稳再做多
+            [ETHUSDT]
+            判断：1900 附近弱势
+            动作：HOLD
+            等待：15m 收盘跌破 1888 转空""";
+
+    /** 新格式：每个 [SYMBOL] 段各抽各的等待；总评不绑定任何币，不进结果 */
+    @Test
+    void waitsBySymbolSplitsSegments() {
+        var waits = assembler.waitsBySymbol(SEGMENTED_ZH, AgentLang.ZH);
+
+        assertThat(waits).containsOnlyKeys("BTCUSDT", "ETHUSDT");
+        assertThat(waits.get("BTCUSDT")).contains("63370–63480");
+        assertThat(waits.get("ETHUSDT")).contains("1888");
+    }
+
+    /** 旧格式（无分段标记）整块归 WHOLE 伪键——历史决策行不回填，双格式兼容 */
+    @Test
+    void waitsBySymbolFallsBackToWholeBlockForLegacyRows() {
+        var waits = assembler.waitsBySymbol(
+                "【本轮结论】\n判断：观望\n动作：HOLD\n等待：站稳 99000", AgentLang.ZH);
+
+        assertThat(waits).containsOnlyKeys(ReviewMaterialAssembler.WHOLE);
+        assertThat(waits.get(ReviewMaterialAssembler.WHOLE)).isEqualTo("站稳 99000");
+    }
+
+    /** 英文新格式 + 切语言后旧语言行照样解析（结论块两套标记都认，段标记本身语言无关） */
+    @Test
+    void waitsBySymbolReadsEnglishSegmentsUnderZhLang() {
+        String en = """
+                context...[ROUND CONCLUSION]
+                Overall: light exposure, waiting
+                [BTCUSDT]
+                Judgement: consolidating above 63500
+                Action: HOLD
+                Waiting: retest 63370-63480 then long""";
+
+        var waits = assembler.waitsBySymbol(en, AgentLang.ZH);
+
+        assertThat(waits).containsOnlyKeys("BTCUSDT");
+        assertThat(waits.get("BTCUSDT")).contains("63370-63480");
+    }
+
+    /** [ROUND CONCLUSION] 自己带空格，不会被误认成分段标记 */
+    @Test
+    void segmentTagDoesNotMatchConclusionMark() {
+        assertThat(ReviewMaterialAssembler.splitSegments(
+                "Overall: fine\n[BTCUSDT]\nWaiting: none")).hasSize(1);
+        assertThat(ReviewMaterialAssembler.splitSegments("Judgement: no tags here")).isEmpty();
+    }
+
+    /**
+     * 观望合并按币段走：BTC 三轮同一条件并成一段，ETH 第二轮条件变了断开——
+     * 一个币的条件变化不再把另一个币的连续段冲断（旧的整块合并正是这么失真的）。
+     */
+    @Test
+    void timelineMergesHoldsPerSymbol() {
+        String r1 = """
+                【本轮结论】
+                [BTCUSDT]
+                动作：HOLD
+                等待：回踩 63400 做多
+                [ETHUSDT]
+                动作：HOLD
+                等待：跌破 1888 转空""";
+        String r2 = """
+                【本轮结论】
+                [BTCUSDT]
+                动作：HOLD
+                等待：回踩 63400 做多
+                [ETHUSDT]
+                动作：HOLD
+                等待：站上 1925 做多""";
+        String r3 = r2;
+        when(decisionMapper.selectOne(any())).thenReturn(null);
+        when(decisionMapper.selectList(any())).thenReturn(List.of(), List.of(
+                okRow(FROM + 900_000, AiTraderDecision.KIND_TRADE, r1, "[]"),
+                okRow(FROM + 1800_000, AiTraderDecision.KIND_TRADE, r2, "[]"),
+                okRow(FROM + 2700_000, AiTraderDecision.KIND_TRADE, r3, "[]")));
+
+        String timeline = assembler.assemble(trader(), FROM, TO, AgentLang.ZH).timelineBlock();
+
+        // BTC：三轮一段；ETH：1888 一段(1轮) + 1925 一段(2轮) → 共 3 行
+        assertThat(timeline.lines().filter(l -> l.startsWith("- ")).count()).isEqualTo(3);
+        assertThat(timeline).contains("[BTCUSDT] 等待：回踩 63400 做多").contains("（3轮）");
+        assertThat(timeline).contains("[ETHUSDT] 等待：跌破 1888 转空");
+        assertThat(timeline).contains("[ETHUSDT] 等待：站上 1925 做多").contains("（2轮）");
+        // 轮数统计仍按原始行走
+        assertThat(timeline).contains("本期活动：唤醒 3 轮");
+    }
+
+    /** 新旧格式混排（中途升级/切语言）：旧行走整块段、新行走币段，互不冲断 */
+    @Test
+    void timelineHandlesMixedLegacyAndSegmentedRows() {
+        when(decisionMapper.selectOne(any())).thenReturn(null);
+        when(decisionMapper.selectList(any())).thenReturn(List.of(), List.of(
+                okRow(FROM + 900_000, AiTraderDecision.KIND_TRADE,
+                        "【本轮结论】\n判断：观望\n动作：HOLD\n等待：站稳 99000", "[]"),
+                okRow(FROM + 1800_000, AiTraderDecision.KIND_TRADE, SEGMENTED_ZH, "[]")));
+
+        String timeline = assembler.assemble(trader(), FROM, TO, AgentLang.ZH).timelineBlock();
+
+        assertThat(timeline).contains("等待：站稳 99000");
+        assertThat(timeline).contains("[BTCUSDT] 等待：回踩 63370–63480 企稳再做多");
+        assertThat(timeline).contains("[ETHUSDT] 等待：15m 收盘跌破 1888 转空");
+    }
+
     // ==================== 价格路径 ====================
 
     /** 5m bar 造数：一根 5m 的 OHLC */
