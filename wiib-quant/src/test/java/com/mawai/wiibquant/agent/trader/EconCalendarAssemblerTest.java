@@ -28,11 +28,11 @@ class EconCalendarAssemblerTest {
     private final EconCalendarAssembler assembler =
             new EconCalendarAssembler(mapper, new PromptCatalog());
 
-    private static EconCalendarMapper.Row row(long time, String country, String impact,
+    private static EconCalendarMapper.Row row(long time, String currency, String impact,
                                               String title, String forecast, String previous) {
         EconCalendarMapper.Row r = new EconCalendarMapper.Row();
         r.setEventTime(time);
-        r.setCountry(country);
+        r.setCurrency(currency);
         r.setImpact(impact);
         r.setTitle(title);
         r.setForecast(forecast);

@@ -715,7 +715,7 @@ COMMENT ON COLUMN news_event.content_en IS '正文英文译文;NULL 同 title_en
 CREATE TABLE IF NOT EXISTS econ_calendar_event (
     id         BIGSERIAL    PRIMARY KEY,
     event_time BIGINT       NOT NULL,
-    country    VARCHAR(8)   NOT NULL,
+    currency   VARCHAR(8)   NOT NULL,
     title      VARCHAR(200) NOT NULL,
     impact     VARCHAR(16)  NOT NULL,
     forecast   VARCHAR(32),
@@ -725,6 +725,7 @@ CREATE TABLE IF NOT EXISTS econ_calendar_event (
 CREATE INDEX IF NOT EXISTS idx_econ_calendar_time ON econ_calendar_event (event_time);
 COMMENT ON TABLE econ_calendar_event IS '财经日历:ForexFactory周历快照,采集删窗口重插;唤醒注入±窗口内高影响事件';
 COMMENT ON COLUMN econ_calendar_event.event_time IS '公布/开始时刻epoch毫秒(feed的ISO带时区时间换算)';
+COMMENT ON COLUMN econ_calendar_event.currency IS '事件影响的货币代码(USD/EUR/…,德国CPI标EUR;All=全局事件);feed字段名叫country是上游历史命名';
 COMMENT ON COLUMN econ_calendar_event.impact IS 'feed原样:High/Medium/Low/Holiday(外汇视角评级,注入过滤另有USD讲话补捞)';
 COMMENT ON COLUMN econ_calendar_event.forecast IS '共识预测值原样文本(55K/0.3%等);NULL=无数值(讲话/会议类);免费feed无实际值列';
 

@@ -20,7 +20,7 @@ public interface EconCalendarMapper {
     @Data
     class Row {
         private Long eventTime;
-        private String country;
+        private String currency;
         private String title;
         private String impact;
         /** 共识预测值；null=该事件无数值（讲话/会议类） */
@@ -33,15 +33,15 @@ public interface EconCalendarMapper {
     int deleteFrom(@Param("fromMs") long fromMs);
 
     @Insert("""
-            INSERT INTO econ_calendar_event (event_time, country, title, impact, forecast, previous)
-            VALUES (#{eventTime}, #{country}, #{title}, #{impact}, #{forecast}, #{previous})
+            INSERT INTO econ_calendar_event (event_time, currency, title, impact, forecast, previous)
+            VALUES (#{eventTime}, #{currency}, #{title}, #{impact}, #{forecast}, #{previous})
             """)
-    int insert(@Param("eventTime") long eventTime, @Param("country") String country,
+    int insert(@Param("eventTime") long eventTime, @Param("currency") String currency,
                @Param("title") String title, @Param("impact") String impact,
                @Param("forecast") String forecast, @Param("previous") String previous);
 
     @Select("""
-            SELECT event_time AS eventTime, country, title, impact, forecast, previous
+            SELECT event_time AS eventTime, currency, title, impact, forecast, previous
               FROM econ_calendar_event
              WHERE event_time BETWEEN #{fromMs} AND #{toMs}
              ORDER BY event_time

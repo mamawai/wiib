@@ -40,7 +40,7 @@ import java.util.function.Supplier;
 public class EconCalendarCollector {
 
     /** 解析后的一条事件；forecast/previous null=该事件无数值（讲话/会议类） */
-    public record Event(long eventTime, String country, String title, String impact,
+    public record Event(long eventTime, String currency, String title, String impact,
                         String forecast, String previous) {
     }
 
@@ -78,7 +78,7 @@ public class EconCalendarCollector {
         long from = events.stream().mapToLong(Event::eventTime).min().orElseThrow();
         int deleted = mapper.deleteFrom(from);
         for (Event e : events) {
-            mapper.insert(e.eventTime(), e.country(), e.title(), e.impact(), e.forecast(), e.previous());
+            mapper.insert(e.eventTime(), e.currency(), e.title(), e.impact(), e.forecast(), e.previous());
         }
         log.info("[EconCalendar] 同步 {} 条（覆盖旧 {} 条）", events.size(), deleted);
     }
@@ -93,6 +93,7 @@ public class EconCalendarCollector {
                 String title = o.getString("title");
                 long time = OffsetDateTime.parse(o.getString("date")).toInstant().toEpochMilli();
                 // 缺必填字段与坏日期同罪：这里不拦的话会活到 insert 撞 NOT NULL，整批事务回滚
+                // feed 字段名叫 country 是上游的历史命名，值实为货币代码（德国CPI标EUR、G20标All）
                 out.add(new Event(time, Objects.requireNonNull(o.getString("country")),
                         title.length() > MAX_TITLE_LEN ? title.substring(0, MAX_TITLE_LEN) : title,
                         Objects.requireNonNull(o.getString("impact")),

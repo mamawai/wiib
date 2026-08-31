@@ -65,7 +65,7 @@ public class EconCalendarAssembler {
     static boolean relevant(EconCalendarMapper.Row r) {
         String title = r.getTitle().toLowerCase(Locale.ROOT);
         return "High".equals(r.getImpact()) || "Medium".equals(r.getImpact())
-                || ("USD".equals(r.getCountry()) && (title.contains("speak") || title.contains("testif")));
+                || ("USD".equals(r.getCurrency()) && (title.contains("speak") || title.contains("testif")));
     }
 
     private void appendSection(StringBuilder sb, AgentLang lang, String labelKey,
@@ -77,7 +77,7 @@ public class EconCalendarAssembler {
         for (EconCalendarMapper.Row r : rows) {
             sb.append("- ").append(BJ_FMT.format(Instant.ofEpochMilli(r.getEventTime())))
                     .append(" [").append(r.getImpact()).append("] ")
-                    .append(r.getCountry()).append(' ').append(r.getTitle());
+                    .append(r.getCurrency()).append(' ').append(r.getTitle());
             if (r.getForecast() != null) {
                 sb.append(' ').append(prompts.get(lang, "trader.calendar.forecast")).append(r.getForecast());
             }

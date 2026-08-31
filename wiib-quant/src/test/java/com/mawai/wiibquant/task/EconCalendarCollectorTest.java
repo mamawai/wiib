@@ -38,7 +38,7 @@ class EconCalendarCollectorTest {
         assertThat(events).hasSize(3);
         EconCalendarCollector.Event nfp = events.getFirst();
         assertThat(nfp.title()).isEqualTo("Non-Farm Employment Change");
-        assertThat(nfp.country()).isEqualTo("USD");
+        assertThat(nfp.currency()).isEqualTo("USD");
         assertThat(nfp.impact()).isEqualTo("High");
         assertThat(nfp.forecast()).isEqualTo("55K");
         assertThat(nfp.previous()).isEqualTo("-23K");
