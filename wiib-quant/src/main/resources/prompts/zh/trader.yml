@@ -126,6 +126,11 @@ trader:
     accountState: 当前账户状态（实时数据）：
     recentDecisions: 最近决策（最新在前——先检验最新一条【本轮结论】里的等待条件）：
     equity: 权益{{value}}
+    # 论点战绩统计块（PlayStatsAssembler 代码算好注入）：数字只许引用禁止自算，与复盘战绩表同纪律
+    playStatsHeader: ————— 本局论点战绩（代码统计，最近{{n}}笔已了结；只许引用，禁止自行计算）—————
+    playStatsRow: "{{play}}：{{n}}笔 {{wins}}胜{{losses}}负 盈亏合计{{pnl}} USDT"
+    playStatsRowSmall: "{{play}}：{{n}}笔（样本不足，不作参考）"
+    playStatsFooter: （统计为本局全部了结记录，不区分期间的配置调整；样本少时运气与方法不可分，禁止把小样本当规律。）
     memory: ————— 复盘笔记（你过去交易教训的整理，供决策参考）—————
     learningNotes: ————— 学习笔记（你研究同侪交易后的整理，来自别人的经验，供决策参考）—————
     customPrompt: ————— 主人的交易风格指令（风格与策略以此为准：与上文平台默认有冲突时，听主人的；仓位规格与硬性规则由系统强制执行，不在可覆盖范围）—————
