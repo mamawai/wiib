@@ -547,7 +547,8 @@ export const traderApi = {
   updateConfig: (req: TraderUpsertRequest) => api.put<unknown, void>('/ai/trader/config', req),
   start: () => api.post<unknown, void>('/ai/trader/start'),
   pause: () => api.post<unknown, void>('/ai/trader/pause'),
-  reset: () => api.post<unknown, void>('/ai/trader/reset'),
+  /** carryNotes=false 不带入复盘/学习笔记（只清生效版本，历届存档保留） */
+  reset: (carryNotes: boolean) => api.post<unknown, void>('/ai/trader/reset', { carryNotes }),
   arena: () => api.get<unknown, TraderPublicView[]>('/ai/trader/arena'),
   detail: (id: number) => api.get<unknown, TraderDetailView>(`/ai/trader/${id}`),
   /**
@@ -560,6 +561,8 @@ export const traderApi = {
     api.get<unknown, TraderEquityPoint[]>(`/ai/trader/${id}/equity-curve`, { params: { round } }),
   /** 已了结交易（只有当前局：每局独立子账户，历史局的子账户查不回来） */
   trades: (id: number) => api.get<unknown, TradeRecordView[]>(`/ai/trader/${id}/trades`),
+  /** 标记/取消忽略一笔已了结交易（仅本人、仅CLOSED）：AI 统计与复盘不再参考，公开记录不变 */
+  setPlanStale: (planId: number, stale: boolean) => api.post<unknown, void>(`/ai/trader/plan/${planId}/stale`, { stale }),
 
   // ---- 动作面板：三个动作的唯一执行入口，对话轨只负责把表单卡弹出来 ----
   /** 三张卡的状态一次取齐；每张卡挂载且未落地时拉一次 */

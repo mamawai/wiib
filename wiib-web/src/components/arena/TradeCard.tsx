@@ -1,5 +1,5 @@
 import { useTranslation } from 'react-i18next';
-import { ArrowDownRight, ArrowRight, ArrowUpRight } from 'lucide-react';
+import { ArrowDownRight, ArrowRight, ArrowUpRight, Eye, EyeOff } from 'lucide-react';
 import { cn, fmtDateTime, fmtDuration, fmtNum } from '../../lib/utils';
 import type { TradeDecisionRef, TradeRecordView } from '../../types';
 import { PlanBlock } from './PlanBlock';
@@ -16,13 +16,19 @@ const CLOSE_MANNER_TONE: Record<string, string> = {
 /**
  * 单笔已了结交易：头行（币种·多空·了结方式·入场→出场·盈亏）→ 开/平时刻 → 计划（论点/失效条件/修订史）
  * → 开仓/平仓决策的跳转链接。决策全文不在这里重复——时间线才是它的家，onJump 把人带过去。
+ * onToggleStale 只有主人视角才传：忽略开关只治理自己 AI 的教材，公开记录不动。
  */
-export function TradeCard({ r, onJump }: { r: TradeRecordView; onJump: (d: TradeDecisionRef) => void }) {
+export function TradeCard({ r, onJump, onToggleStale }: {
+  r: TradeRecordView;
+  onJump: (d: TradeDecisionRef) => void;
+  onToggleStale?: (r: TradeRecordView) => void;
+}) {
   const { t } = useTranslation('ai');
   const isLong = r.side === 'LONG';
   const pnl = r.closedPnl;
+  const stale = r.plan?.stale === true;
   return (
-    <div className="rounded-md border border-border bg-card p-2.5 text-[11px] space-y-1.5">
+    <div className={cn('rounded-md border border-border bg-card p-2.5 text-[11px] space-y-1.5', stale && 'opacity-60')}>
       <div className="flex items-center gap-2 flex-wrap">
         {isLong ? <ArrowUpRight className="w-3.5 h-3.5 text-gain" /> : <ArrowDownRight className="w-3.5 h-3.5 text-loss" />}
         <span className="font-black text-xs">{r.symbol}</span>
@@ -32,10 +38,22 @@ export function TradeCard({ r, onJump }: { r: TradeRecordView; onJump: (d: Trade
         <span className={cn('text-[10px] font-bold px-1.5 py-0.5 rounded', CLOSE_MANNER_TONE[r.closeMannerKey] ?? 'bg-muted text-muted-foreground')}>
           {t(`trade.closeManner.${r.closeMannerKey}`)}
         </span>
+        {stale && (
+          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
+            {t('trade.staleBadge')}
+          </span>
+        )}
         <span className="text-muted-foreground num">{fmtNum(r.entryPrice)} → {r.closedPrice != null ? fmtNum(r.closedPrice) : '—'}</span>
         <span className={cn('ml-auto num font-black', pnl == null ? 'text-muted-foreground' : pnl >= 0 ? 'text-gain' : 'text-loss')}>
           {pnl == null ? '—' : `${pnl >= 0 ? '+' : ''}${fmtNum(pnl)}`}
         </span>
+        {onToggleStale && r.plan && (
+          <button type="button" title={t('trade.staleHint')} onClick={() => onToggleStale(r)}
+                  className="inline-flex items-center gap-1 text-[10px] font-bold text-muted-foreground hover:text-primary">
+            {stale ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
+            {stale ? t('trade.staleUnmark') : t('trade.staleMark')}
+          </button>
+        )}
       </div>
       <div className="text-muted-foreground num flex flex-wrap gap-x-3 gap-y-0.5">
         <span>{t('trade.openedAt', { time: fmtDateTime(r.openedAt) })}</span>

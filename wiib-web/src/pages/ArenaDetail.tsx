@@ -130,6 +130,16 @@ export function ArenaDetail() {
     void traderApi.trades(traderId).then(setTrades).catch(() => setTrades([]));
   }, [traderId, round]);
 
+  // 忽略开关（仅主人可见）：成功后本地改写该行，不整页重拉
+  const toggleStale = useCallback((r: TradeRecordView) => {
+    if (!r.plan) return;
+    const next = r.plan.stale !== true;
+    void traderApi.setPlanStale(r.plan.id, next).then(() =>
+      setTrades(prev => prev.map(x => x.positionId === r.positionId && x.plan
+        ? { ...x, plan: { ...x.plan, stale: next } } : x))
+    ).catch(() => {});
+  }, []);
+
   // 时间线单独拉：按天翻看只动它，持仓/曲线/已了结不跟着重拉
   const loadDecisions = useCallback(() => {
     if (!Number.isFinite(traderId)) return;
@@ -418,7 +428,8 @@ export function ArenaDetail() {
               <div className="flex-1 flex items-center justify-center py-10 text-xs text-muted-foreground">{t('detail.noTrades')}</div>
             ) : (
               <div className="space-y-2 lg:flex-1 lg:min-h-0 lg:overflow-y-auto lg:pr-1">
-                {trades.map(r => <TradeCard key={r.positionId} r={r} onJump={jumpToDecision} />)}
+                {trades.map(r => <TradeCard key={r.positionId} r={r} onJump={jumpToDecision}
+                                            onToggleStale={detail?.trader.mine ? toggleStale : undefined} />)}
               </div>
             )
           )}

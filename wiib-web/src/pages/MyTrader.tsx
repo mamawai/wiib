@@ -69,6 +69,9 @@ export function MyTrader() {
   const [template, setTemplate] = useState('');
   const [requests, setRequests] = useState<TraderRequestView[]>([]);
   const [tour, setTour] = useState(false);
+  // 重置确认面板：打开时笔记默认带入，每次重新打开都回到默认
+  const [resetAsk, setResetAsk] = useState(false);
+  const [carryNotes, setCarryNotes] = useState(true);
   /** 端点库（下拉选项）；进页面拉一次，改动在 AI 页做 */
   const [endpoints, setEndpoints] = useState<LlmEndpointView[]>([]);
   useEffect(() => { llmEndpointApi.list().then(setEndpoints).catch(() => setEndpoints([])); }, []);
@@ -212,7 +215,7 @@ export function MyTrader() {
             </button>
           )}
           <button
-            onClick={() => { if (window.confirm(t('trader.resetConfirm', { round: (mine?.pub.roundNo ?? 1) + 1 }))) void run('reset', traderApi.reset, t('toast.reset')); }}
+            onClick={() => { setCarryNotes(true); setResetAsk(true); }}
             disabled={busy != null}
             className="border border-border hover:bg-surface-hover rounded-lg px-3 py-1.5 text-xs font-bold text-muted-foreground flex items-center gap-1.5 disabled:opacity-50">
             {busy === 'reset' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />} {t('trader.reset')}
@@ -221,6 +224,31 @@ export function MyTrader() {
             <Link to={`/arena/${mine.pub.id}`} className="ml-auto text-xs font-bold text-primary hover:underline">
               {t('trader.viewTimeline')}
             </Link>
+          )}
+          {resetAsk && (
+            <div className="w-full rounded-lg border border-border bg-card p-3 space-y-2.5 text-xs">
+              <p className="font-bold">{t('trader.resetConfirm', { round: (mine?.pub.roundNo ?? 1) + 1 })}</p>
+              <label className="flex items-start gap-2 cursor-pointer">
+                <input type="checkbox" checked={carryNotes} onChange={e => setCarryNotes(e.target.checked)}
+                       className="mt-0.5 accent-primary" />
+                <span>
+                  <span className="font-bold">{t('trader.resetCarryNotes')}</span>
+                  <span className="block text-[11px] text-muted-foreground mt-0.5">{t('trader.resetCarryHint')}</span>
+                </span>
+              </label>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => { setResetAsk(false); void run('reset', () => traderApi.reset(carryNotes), t('toast.reset')); }}
+                  disabled={busy != null}
+                  className="border border-border hover:bg-surface-hover rounded-lg px-3 py-1.5 font-bold text-loss disabled:opacity-50">
+                  {t('trader.reset')}
+                </button>
+                <button onClick={() => setResetAsk(false)}
+                        className="border border-border hover:bg-surface-hover rounded-lg px-3 py-1.5 font-bold text-muted-foreground">
+                  {t('common:cancel')}
+                </button>
+              </div>
+            </div>
           )}
         </div>
       )}

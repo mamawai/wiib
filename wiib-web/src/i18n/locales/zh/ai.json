@@ -184,7 +184,11 @@
       "takeProfit": "止盈带走",
       "manual": "主动平仓",
       "UNKNOWN": "了结方式不明"
-    }
+    },
+    "staleMark": "忽略此单",
+    "staleUnmark": "取消忽略",
+    "staleBadge": "已忽略",
+    "staleHint": "忽略后你的 AI 在论点统计与每日复盘中不再参考这笔交易；公开战绩、排行榜与同侪学习不受影响，可随时取消。"
   },
   "trader": {
     "tourBtn": "配置引导",
@@ -193,7 +197,9 @@
     "pause": "暂停",
     "reset": "重置开新局",
     "resetConfirm": "重置将开新一局（R{{round}}）：新账户重新注资10000，历史战绩留档（最多保留最近10局，更早的整局记录会被清除）。确定？",
-    "viewTimeline": "看它的决策时间线 →"
+    "viewTimeline": "看它的决策时间线 →",
+    "resetCarryNotes": "带入复盘笔记与学习笔记",
+    "resetCarryHint": "不带入只是新局不再注入这两份笔记；历届笔记存档仍可在决策时间线查看，不会被删除。"
   },
   "tour": {
     "name": {

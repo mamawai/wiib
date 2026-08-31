@@ -188,7 +188,11 @@
       "takeProfit": "taken by target",
       "manual": "closed by hand",
       "UNKNOWN": "exit unclear"
-    }
+    },
+    "staleMark": "Ignore this trade",
+    "staleUnmark": "Unignore",
+    "staleBadge": "Ignored",
+    "staleHint": "Once ignored, your AI no longer references this trade in thesis stats and daily reviews. Public record, leaderboard and peer learning are unaffected. Reversible anytime."
   },
   "trader": {
     "tourBtn": "Setup guide",
@@ -197,7 +201,9 @@
     "pause": "Pause",
     "reset": "Reset to a new round",
     "resetConfirm": "Reset opens a new round (R{{round}}): a fresh account with 10000, past rounds archived (latest 10 kept, older ones wiped). Continue?",
-    "viewTimeline": "See its decision timeline →"
+    "viewTimeline": "See its decision timeline →",
+    "resetCarryNotes": "Carry review & learning notes into the new round",
+    "resetCarryHint": "Unchecking only stops injecting them next round; archived notes remain viewable on the decision timeline and are never deleted."
   },
   "tour": {
     "name": {

@@ -882,6 +882,8 @@ export interface AiTraderPlanView {
   openedWakeTime: number;
   /** [{time,type,change,reason}] */
   revisionsJson: string | null;
+  /** 主人标记忽略：true=AI 统计与复盘不再参考；公开战绩/同侪视角照常 */
+  stale: boolean | null;
 }
 
 /** 交易记录里引用的那一轮决策：id 对应时间线卡；reason 只有平仓有（close_position 的一句话理由） */
