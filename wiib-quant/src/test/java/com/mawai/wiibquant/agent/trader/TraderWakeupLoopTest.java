@@ -94,7 +94,8 @@ class TraderWakeupLoopTest {
             traderMapper, decisionMapper, new TraderPlanStore(planMapper), requestService, langResolver,
             prompts, new MessageCatalog(), new LocalizedToolCallbacks(prompts),
             new ReviewMaterialAssembler(decisionMapper, planMapper, simTradeClient,
-                    mock(KlineHistoryStore.class), prompts));
+                    mock(KlineHistoryStore.class), prompts),
+            mock(EconCalendarAssembler.class));
 
     {
         // 测试边界是固定历史时刻，墙钟钉在边界后 1s——预算充足，各用例不受真实时间影响

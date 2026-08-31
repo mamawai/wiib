@@ -112,6 +112,8 @@ public class TraderWakeupRunner {
     private final LocalizedToolCallbacks localizedTools;
     /** stale 教材过滤的共用入口（与复盘时间线/chat 同一套识别逻辑） */
     private final ReviewMaterialAssembler materialAssembler;
+    /** 财经日历注入块（过去12h已公布+未来24h即将公布）；null=无相关事件或取数失败，整块缺席 */
+    private final EconCalendarAssembler econCalendar;
 
     /** 墙钟注入点：预算计算要可测（测试里把"现在"钉在边界附近） */
     LongSupplier nowMs = System::currentTimeMillis;
@@ -315,9 +317,10 @@ public class TraderWakeupRunner {
                 .build(ResilientChatService.builder().model(model).forceFirstToolChoice("required").asFactory())
                 .compile();
 
+        String calendar = econCalendar.assemble(nowMs.getAsLong(), lang);
         String instruction = trigger != null
-                ? alertInstruction(trader, trigger, recent, lang, hasOwnerNote)
-                : routineInstruction(trader, boundaryTime, marketSnapshot(whitelist, lang), lang, hasOwnerNote);
+                ? alertInstruction(trader, trigger, recent, calendar, lang, hasOwnerNote)
+                : routineInstruction(trader, boundaryTime, marketSnapshot(whitelist, lang), calendar, lang, hasOwnerNote);
         RunnableConfig config = RunnableConfig.builder()
                 .threadId("trader-" + trader.getId() + "-" + boundaryTime).build();
 
@@ -388,15 +391,18 @@ public class TraderWakeupRunner {
      * <p>
      * 包私有非 private：标记同源那条钉子（{@code WakeInstructionI18nTest}）要拿它的成文比对。
      *
+     * @param calendar     财经日历块（{@link EconCalendarAssembler}），null=整块缺席。
+     *                     与快照同属事实区，排在快照之后、休眠提示与单问题框架之前
      * @param hasOwnerNote 本轮有待读留言——末尾追加指针，见 {@link #ownerNoteHint}
      */
-    String routineInstruction(AiTrader trader, long boundaryTime, String snapshot, AgentLang lang,
-                              boolean hasOwnerNote) {
+    String routineInstruction(AiTrader trader, long boundaryTime, String snapshot, String calendar,
+                              AgentLang lang, boolean hasOwnerNote) {
         return prompts.get(lang, "trader.wake.routineHeader", Map.of(
                 "interval", trader.getIntervalCode(),
                 "time", TIME_FMT.format(Instant.ofEpochMilli(boundaryTime))))
                 + (snapshot.isEmpty() ? ""
                         : "\n" + prompts.get(lang, "trader.wake.snapshotHeader") + "\n" + snapshot)
+                + (calendar == null ? "" : "\n" + calendar)
                 // 休眠提示放快照之后（事实区）、单问题框架之前：不让"要睡了"成为模型读到的第一件事
                 + sleepNotice(prompts, lang, WakeWindow.of(trader), boundaryTime,
                         TraderScheduler.INTERVAL_MS.getOrDefault(trader.getIntervalCode(), 300_000L), nowMs.getAsLong())
@@ -432,10 +438,11 @@ public class TraderWakeupRunner {
      * 反锚定是灵魂——被波动惊醒正是恐慌平仓的高发场景，必须明说"未收盘不作数、
      * 止损在岗、不因被叫醒而必须动作"。
      *
+     * @param calendar     财经日历块，null=整块缺席——被波动惊醒时"刚才是否有数据公布/讲话"正是归因的关键事实
      * @param hasOwnerNote 本轮有待读留言——末尾追加指针，见 {@link #ownerNoteHint}
      */
     String alertInstruction(AiTrader trader, AlertTrigger trig, List<AiTraderDecision> recent,
-                            AgentLang lang, boolean hasOwnerNote) {
+                            String calendar, AgentLang lang, boolean hasOwnerNote) {
         long intervalMs = TraderScheduler.INTERVAL_MS.getOrDefault(trader.getIntervalCode(), 3_600_000L);
         long toNextMin = Math.max(1, (intervalMs - Math.floorMod(trig.triggeredAt(), intervalMs)) / 60_000);
         String lastWake = recent.isEmpty() ? prompts.get(lang, "trader.wake.alertNoWake")
@@ -450,6 +457,7 @@ public class TraderWakeupRunner {
                 "price", trig.price().stripTrailingZeros().toPlainString())) + "\n"
                 + prompts.get(lang, "trader.wake.alertLastWake",
                         Map.of("lastWake", lastWake, "minutes", toNextMin)) + "\n"
+                + (calendar == null ? "" : calendar)
                 + prompts.get(lang, "trader.wake.alertNotice",
                         Map.of("interval", trader.getIntervalCode())) + "\n"
                 + prompts.get(lang, "trader.wake.alertQuestion",

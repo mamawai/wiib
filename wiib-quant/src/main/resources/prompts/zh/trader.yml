@@ -151,6 +151,14 @@ trader:
     # 整篇提示词的最末一行，排在自定义指令与主人留言之后
     outputLanguage: 输出语言：中文。
 
+  # 财经日历注入块（EconCalendarAssembler）：只给事实；措辞红线与休眠提示同款——事件临近不构成方向动作的理由
+  calendar:
+    header: 【财经日历】宏观事件时刻表（北京时间）。已公布事件的实际值不在表内，结果自查快讯与价格；事件临近本身不构成任何方向动作的理由。
+    published: 已公布（过去12小时）：
+    upcoming: 即将公布（未来24小时）：
+    forecast: "预测:"
+    previous: "前值:"
+
   # 唤醒开场白（用户消息侧，不是系统提示词）。骨架在 TraderWakeupRunner。
   # 收尾标记一律用 {{mark}} 注入 trader.mark.conclusion，与系统提示词同源
   wake:

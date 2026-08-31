@@ -192,6 +192,15 @@ trader:
     # The very last line of the whole prompt, after the custom instructions and the owner's note
     outputLanguage: "Output language: English."
 
+  # Economic-calendar block (EconCalendarAssembler): facts only; same wording red line as the sleep
+  # notice - an event being near is not by itself a reason for any directional action.
+  calendar:
+    header: "[Economic calendar] Scheduled macro events (Beijing time, UTC+8). Actual readings of published events are NOT in this table - check the news flashes and price action; an event being near is not by itself a reason for any directional action."
+    published: "Published (last 12h):"
+    upcoming: "Upcoming (next 24h):"
+    forecast: "forecast:"
+    previous: "previous:"
+
   # Wake-up opening (a user-side message, not the system prompt). The skeleton lives in TraderWakeupRunner.
   # The closing marker is always injected as {{mark}} from trader.mark.conclusion, the same source the
   # system prompt uses.

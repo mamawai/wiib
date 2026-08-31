@@ -81,6 +81,13 @@ quant:
     # 这里配的是来源标签名，只影响补充条目怎么标；换源改这里，提示词不用动。留空标 [Web]
     news-supplement-source:
 
+# 财经日历采集轨（EconCalendarCollector）：定时拉 ForexFactory 本周日历（免费无key）落 econ_calendar_event，
+# 唤醒开场白注入"过去12h已公布+未来24h即将公布"。feed 为个人用途口径，节奏别调快——日历天然耐过期
+econ:
+  calendar:
+    enabled: true
+    interval-ms: 14400000  # 4h 一次：事件改期一般提前数天，再快也换不来新信息
+
 # 快讯采集打标轨（NewsEventCollector）：定时经 NewsCache 拉重要快讯，新条目轻模型打标后落 news_event
 news:
   collect:

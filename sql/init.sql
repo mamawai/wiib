@@ -709,6 +709,25 @@ COMMENT ON COLUMN news_event.tagged_model IS '打标用的模型名,坏标追责
 COMMENT ON COLUMN news_event.title_en IS '标题英文译文,打标同一次调用顺带产出;NULL=没译成(模型没给/正文超长/老行),取用侧回落中文原文——不许拿原文冒充译文';
 COMMENT ON COLUMN news_event.content_en IS '正文英文译文;NULL 同 title_en。正文超过打标输入上限的那条不留译文:半截译文比原文更糟';
 
+-- ============ econ_calendar_event：财经日历（ForexFactory 周历，唤醒开场白注入） ============
+-- 采集轨 EconCalendarCollector 定时拉本周 JSON 删窗口重插（feed 是全量快照，改期/取消靠整窗覆盖自愈）；
+-- EconCalendarAssembler 注入"过去12h已公布+未来24h即将公布"，防 trader 撞数据公布/讲话时刻
+CREATE TABLE IF NOT EXISTS econ_calendar_event (
+    id         BIGSERIAL    PRIMARY KEY,
+    event_time BIGINT       NOT NULL,
+    country    VARCHAR(8)   NOT NULL,
+    title      VARCHAR(200) NOT NULL,
+    impact     VARCHAR(16)  NOT NULL,
+    forecast   VARCHAR(32),
+    previous   VARCHAR(32),
+    created_at TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_econ_calendar_time ON econ_calendar_event (event_time);
+COMMENT ON TABLE econ_calendar_event IS '财经日历:ForexFactory周历快照,采集删窗口重插;唤醒注入±窗口内高影响事件';
+COMMENT ON COLUMN econ_calendar_event.event_time IS '公布/开始时刻epoch毫秒(feed的ISO带时区时间换算)';
+COMMENT ON COLUMN econ_calendar_event.impact IS 'feed原样:High/Medium/Low/Holiday(外汇视角评级,注入过滤另有USD讲话补捞)';
+COMMENT ON COLUMN econ_calendar_event.forecast IS '共识预测值原样文本(55K/0.3%等);NULL=无数值(讲话/会议类);免费feed无实际值列';
+
 -- ============================================
 -- 27. 留言板评论（全站唯一，无附着实体）
 -- ============================================
