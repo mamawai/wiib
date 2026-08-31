@@ -341,15 +341,18 @@ class ReviewMaterialAssemblerTest {
     void timelineDropsStaleSegmentsKeepsOthers() {
         when(decisionMapper.selectOne(any())).thenReturn(null);
         AiTraderPlan staleBtc = planOf("BTCUSDT", "BREAKOUT", FROM + 3600_000, true);
-        staleBtc.setClosedWakeTime(FROM + 21600_000);
+        staleBtc.setClosedWakeTime(FROM + 36000_000);
         when(planMapper.selectList(any())).thenReturn(List.of(staleBtc));
+        // 两轮同条件相隔 7h：ETH 段升格对账块（条件全文可见），BTC 段两轮都被剔——连短观望汇总都不该有它
         when(decisionMapper.selectList(any())).thenReturn(List.of(), List.of(
-                okRow(FROM + 7200_000, AiTraderDecision.KIND_TRADE, SEGMENTED_ZH, "[]")));
+                okRow(FROM + 7200_000, AiTraderDecision.KIND_TRADE, SEGMENTED_ZH, "[]"),
+                okRow(FROM + 32400_000, AiTraderDecision.KIND_TRADE, SEGMENTED_ZH, "[]")));
 
         String timeline = assembler.assemble(trader(), FROM, TO, AgentLang.ZH).timelineBlock();
 
         assertThat(timeline).doesNotContain("63370–63480").doesNotContain("[BTCUSDT]");
-        assertThat(timeline).contains("[ETHUSDT] 等待：15m 收盘跌破 1888 转空");
+        assertThat(timeline).contains("[ETHUSDT] 观望对账段").contains("等待：15m 收盘跌破 1888 转空");
+        assertThat(timeline).doesNotContain("另有");
     }
 
     /** 双开粒度=币：该币该轮任一覆盖计划未被忽略，段就得留 */
@@ -357,17 +360,18 @@ class ReviewMaterialAssemblerTest {
     void timelineKeepsSegmentWhenAnyCoveringPlanNotStale() {
         when(decisionMapper.selectOne(any())).thenReturn(null);
         AiTraderPlan staleLong = planOf("BTCUSDT", "BREAKOUT", FROM + 3600_000, true);
-        staleLong.setClosedWakeTime(FROM + 21600_000);
+        staleLong.setClosedWakeTime(FROM + 36000_000);
         AiTraderPlan liveShort = planOf("BTCUSDT", "REVERSAL", FROM + 3600_000, false);
         liveShort.setSide("SHORT");
-        liveShort.setClosedWakeTime(FROM + 21600_000);
+        liveShort.setClosedWakeTime(FROM + 36000_000);
         when(planMapper.selectList(any())).thenReturn(List.of(staleLong, liveShort));
         when(decisionMapper.selectList(any())).thenReturn(List.of(), List.of(
-                okRow(FROM + 7200_000, AiTraderDecision.KIND_TRADE, SEGMENTED_ZH, "[]")));
+                okRow(FROM + 7200_000, AiTraderDecision.KIND_TRADE, SEGMENTED_ZH, "[]"),
+                okRow(FROM + 32400_000, AiTraderDecision.KIND_TRADE, SEGMENTED_ZH, "[]")));
 
         String timeline = assembler.assemble(trader(), FROM, TO, AgentLang.ZH).timelineBlock();
 
-        assertThat(timeline).contains("[BTCUSDT] 等待：回踩 63370–63480 企稳再做多");
+        assertThat(timeline).contains("[BTCUSDT] 观望对账段").contains("等待：回踩 63370–63480 企稳再做多");
     }
 
     /** 旧格式退化为按轮剔：stale 计划的开仓轮 + positionId 命中的调仓轮整行消失，无关轮保留，唤醒轮数不缩水 */
@@ -390,7 +394,7 @@ class ReviewMaterialAssemblerTest {
         String timeline = assembler.assemble(trader(), FROM, TO, AgentLang.ZH).timelineBlock();
 
         assertThat(timeline).doesNotContain("open_position").doesNotContain("set_stop_loss");
-        assertThat(timeline).contains("等待：站稳 99000");
+        assertThat(timeline).contains("另有 1 段短观望共 1 轮");
         assertThat(timeline).contains("本期活动：唤醒 3 轮，动作轮 0");
     }
 
@@ -429,10 +433,9 @@ class ReviewMaterialAssemblerTest {
 
         ReviewMaterialAssembler.ReviewMaterial m = assembler.assemble(trader(), FROM, TO, AgentLang.ZH);
 
-        // 动作行带工具摘要+结论；HOLD行压缩但等待条件必须保住（观望对账的原料）；警报行有标记；ERROR聚合计数
+        // 动作行带工具摘要+结论；短观望（HOLD/警报各一段，条件不同不并）收进一行汇总；ERROR聚合计数
         assertThat(m.timelineBlock()).contains("open_position").contains("突破确认");
-        assertThat(m.timelineBlock()).contains("1h收盘跌破100500减仓");
-        assertThat(m.timelineBlock()).contains("警报");
+        assertThat(m.timelineBlock()).contains("另有 2 段短观望共 2 轮");
         assertThat(m.timelineBlock()).contains("1 轮 ERROR");
         // 活动统计头：保守度自检的对照物（唤醒计全部轮含 ERROR，动作轮/开仓只数 OK 行）
         assertThat(m.timelineBlock()).contains("本期活动：唤醒 4 轮，动作轮 1，开仓动作 1 次");
@@ -456,14 +459,17 @@ class ReviewMaterialAssemblerTest {
     @Test
     void timelineCompressesOldHoldsWhenOverCap() {
         List<AiTraderDecision> rows = new ArrayList<>();
-        // 200 条 HOLD + 最早的 1 条动作行：动作行必须保住，早段观望被省略且有说明。
-        // 等待条件逐条不同，否则会先被合并压成一段、根本走不到上限这条路上
+        // 85 段 ≥6h 的真观望（每段两轮同条件相隔 6h）+ 最早的 1 条动作行：
+        // 动作行必须保住，早段对账块被省略且有说明。条件逐段不同，否则会并成一段够不到上限
         rows.add(okRow(FROM + 60_000, AiTraderDecision.KIND_TRADE,
                 "【本轮结论】\n判断：早段开仓\n动作：开多\n等待：无",
                 "[{\"tool\":\"open_position\",\"args\":{\"symbol\":\"BTCUSDT\"},\"result\":\"ok\"}]"));
-        for (int i = 1; i <= 200; i++) {
-            rows.add(okRow(FROM + 60_000L + i * 300_000L, AiTraderDecision.KIND_TRADE,
-                    "【本轮结论】\n判断：无事(" + i + ")\n动作：HOLD\n等待：回踩 " + (100000 + i) + " 再评估", "[]"));
+        for (int i = 1; i <= 85; i++) {
+            long segStart = FROM + 120_000L + i * 25_200_000L;
+            String reasoning = "【本轮结论】\n判断：无事(" + i + ")\n动作：HOLD\n等待：回踩 " + (100000 + i) + " 再评估";
+            rows.add(okRow(segStart, AiTraderDecision.KIND_TRADE, reasoning, "[]"));
+            rows.add(okRow(segStart + ReviewMaterialAssembler.LONG_HOLD_MS,
+                    AiTraderDecision.KIND_TRADE, reasoning, "[]"));
         }
         when(decisionMapper.selectOne(any())).thenReturn(null);
         when(decisionMapper.selectList(any())).thenReturn(List.of(), rows);
@@ -472,7 +478,7 @@ class ReviewMaterialAssemblerTest {
 
         assertThat(m.timelineBlock()).contains("open_position");
         assertThat(m.timelineBlock()).contains("已省略");
-        // 上限内：条目数 = 动作1 + 补齐的最新观望段
+        // 上限内：条目数 = 动作1 + 补齐的最新对账块
         long lines = m.timelineBlock().lines().filter(l -> l.startsWith("- ")).count();
         assertThat(lines).isLessThanOrEqualTo(ReviewMaterialAssembler.MAX_TIMELINE_ENTRIES);
     }
@@ -503,6 +509,7 @@ class ReviewMaterialAssemblerTest {
     /**
      * 连续同一等待条件压成一段：15m 档一天 96 轮，行情不动时几十轮等的是同一句话。
      * 纯文字注解括号每轮微动不算条件变化；条件真变了要断开；警报轮不并进例行观望。
+     * 全部短于 6h → 段数/轮数进一行汇总，合并语义靠段数验证（并错了段数就不是 3）。
      */
     @Test
     void timelineMergesConsecutiveSameWaits() {
@@ -520,18 +527,13 @@ class ReviewMaterialAssemblerTest {
 
         String timeline = assembler.assemble(trader(), FROM, TO, AgentLang.ZH).timelineBlock();
 
-        // 前两轮只有纯文字注解不同 → 一段两轮；后两轮条件相同但一例行一警报 → 不并
-        assertThat(timeline).contains("（2轮）");
-        assertThat(timeline).contains("[警报]");
-        assertThat(timeline.lines().filter(l -> l.startsWith("- ")).count()).isEqualTo(3);
+        // 前两轮注解不同并成一段 + 条件变了断开一段 + 警报不并进例行一段 = 3 段 4 轮
+        assertThat(timeline).contains("另有 3 段短观望共 4 轮");
         // 合并只省字，轮数统计仍按原始行走，保守度自检的对照物不能缩水
         assertThat(timeline).contains("本期活动：唤醒 4 轮");
     }
 
-    /**
-     * 括号里带价位的两轮绝不能并段：并了 flushHold 只输出段首那条，后一个价位在对账素材里就没了。
-     * 而等待条件是观望对账的唯一原料，丢一个价位＝模型对着不存在的条件判命中。
-     */
+    /** 括号里带价位的两轮绝不能并段（丢价位=对着不存在的条件判命中）：段数必须是 2 不是 1 */
     @Test
     void timelineKeepsDifferentPricesInParenthesesApart() {
         List<AiTraderDecision> rows = List.of(
@@ -544,9 +546,7 @@ class ReviewMaterialAssemblerTest {
 
         String timeline = assembler.assemble(trader(), FROM, TO, AgentLang.ZH).timelineBlock();
 
-        assertThat(timeline.lines().filter(l -> l.startsWith("- ")).count()).isEqualTo(2);
-        assertThat(timeline).contains("63140").contains("62800");
-        assertThat(timeline).doesNotContain("（2轮）");
+        assertThat(timeline).contains("另有 2 段短观望共 2 轮");
     }
 
     /** 没有【本轮结论】块就是这轮没给条件，不能拿正文尾巴冒充——那段是行情叙述，对账对不了 */
@@ -616,11 +616,11 @@ class ReviewMaterialAssemblerTest {
     }
 
     /**
-     * 观望合并按币段走：BTC 三轮同一条件并成一段，ETH 第二轮条件变了断开——
-     * 一个币的条件变化不再把另一个币的连续段冲断（旧的整块合并正是这么失真的）。
+     * 观望按币段合并 + 6h 分层：BTC 三轮同一条件跨 6.5h → 升格对账块（段头/条件全文/起点结构快照）；
+     * ETH 条件中途变了断成两短段，与 BTC 的连续段互不冲断，短段收进一行汇总。
      */
     @Test
-    void timelineMergesHoldsPerSymbol() {
+    void timelineMergesHoldsPerSymbolAndUpgradesLongOnes() {
         String r1 = """
                 【本轮结论】
                 [BTCUSDT]
@@ -637,25 +637,29 @@ class ReviewMaterialAssemblerTest {
                 [ETHUSDT]
                 动作：HOLD
                 等待：站上 1925 做多""";
-        String r3 = r2;
         when(decisionMapper.selectOne(any())).thenReturn(null);
         when(decisionMapper.selectList(any())).thenReturn(List.of(), List.of(
-                okRow(FROM + 900_000, AiTraderDecision.KIND_TRADE, r1, "[]"),
-                okRow(FROM + 1800_000, AiTraderDecision.KIND_TRADE, r2, "[]"),
-                okRow(FROM + 2700_000, AiTraderDecision.KIND_TRADE, r3, "[]")));
+                okRow(FROM + 3600_000, AiTraderDecision.KIND_TRADE, r1, "[]"),
+                okRow(FROM + 14400_000, AiTraderDecision.KIND_TRADE, r2, "[]"),
+                okRow(FROM + 27000_000, AiTraderDecision.KIND_TRADE, r2, "[]")));
+        // 段起点结构快照的对照物：与价格路径同源的本地 5m
+        when(historyStore.load(eq("BTCUSDT"), eq("5m"), anyLong(), anyLong())).thenReturn(List.of(
+                bar5m(FROM, "61000", "61200", "60800", "61100"),
+                bar5m(FROM + 3600_000L, "61100", "61500", "61000", "61200")));
 
         String timeline = assembler.assemble(trader(), FROM, TO, AgentLang.ZH).timelineBlock();
 
-        // BTC：三轮一段；ETH：1888 一段(1轮) + 1925 一段(2轮) → 共 3 行
-        assertThat(timeline.lines().filter(l -> l.startsWith("- ")).count()).isEqualTo(3);
-        assertThat(timeline).contains("[BTCUSDT] 等待：回踩 63400 做多").contains("（3轮）");
-        assertThat(timeline).contains("[ETHUSDT] 等待：跌破 1888 转空");
-        assertThat(timeline).contains("[ETHUSDT] 等待：站上 1925 做多").contains("（2轮）");
-        // 轮数统计仍按原始行走
+        // BTC 真观望：段头（3轮）+ 条件全文 + 起点结构快照一行（现价=段起点前最后一根1h收盘）
+        assertThat(timeline).contains("（3轮）[BTCUSDT] 观望对账段");
+        assertThat(timeline).contains("等待：回踩 63400 做多");
+        assertThat(timeline).contains("起点结构 BTCUSDT：现价 61200");
+        // ETH 两个短段收进汇总，条件从略
+        assertThat(timeline).contains("另有 2 段短观望共 3 轮");
+        assertThat(timeline).doesNotContain("1888").doesNotContain("1925");
         assertThat(timeline).contains("本期活动：唤醒 3 轮");
     }
 
-    /** 新旧格式混排（中途升级/切语言）：旧行走整块段、新行走币段，互不冲断 */
+    /** 新旧格式混排（中途升级/切语言）：旧行走整块段、新行走币段，互不冲断——段数=WHOLE+BTC+ETH 三段 */
     @Test
     void timelineHandlesMixedLegacyAndSegmentedRows() {
         when(decisionMapper.selectOne(any())).thenReturn(null);
@@ -666,9 +670,7 @@ class ReviewMaterialAssemblerTest {
 
         String timeline = assembler.assemble(trader(), FROM, TO, AgentLang.ZH).timelineBlock();
 
-        assertThat(timeline).contains("等待：站稳 99000");
-        assertThat(timeline).contains("[BTCUSDT] 等待：回踩 63370–63480 企稳再做多");
-        assertThat(timeline).contains("[ETHUSDT] 等待：15m 收盘跌破 1888 转空");
+        assertThat(timeline).contains("另有 3 段短观望共 3 轮");
     }
 
     // ==================== 价格路径 ====================
@@ -743,6 +745,43 @@ class ReviewMaterialAssemblerTest {
 
         assertThat(m.pricePathBlock()).contains("无K线数据");
         assertThat(m.statsBlock()).contains("【战绩表】");
+    }
+
+    // ==================== 观望门控（口径8） ====================
+
+    /** 纯观望 + 各币振幅低于阈值 → 平静，可跳过复盘；振幅一超线立刻不算平静（错失素材要照常复盘） */
+    @Test
+    void quietHoldWindowJudgesByAmplitude() {
+        when(simTradeClient.getClosedPositions(eq(99L), anyInt())).thenReturn(List.of());
+        when(decisionMapper.selectCount(any())).thenReturn(0L);
+        // 振幅 (61500-60900)/61000 ≈ 0.98% < 2% → 平静
+        when(historyStore.load(eq("BTCUSDT"), eq("5m"), anyLong(), anyLong())).thenReturn(List.of(
+                bar5m(FROM, "61000", "61500", "60900", "61200")));
+        assertThat(assembler.quietHoldWindow(trader(), FROM, TO)).isTrue();
+
+        // 振幅 (64000-60900)/61000 ≈ 5.08% ≥ 2% → 大动，不许跳
+        when(historyStore.load(eq("BTCUSDT"), eq("5m"), anyLong(), anyLong())).thenReturn(List.of(
+                bar5m(FROM, "61000", "64000", "60900", "63500")));
+        assertThat(assembler.quietHoldWindow(trader(), FROM, TO)).isFalse();
+    }
+
+    /** 有已了结交易 / 有开仓动作 / K线缺数据，任一条都不算纯观望平静窗口 */
+    @Test
+    void quietHoldWindowBlockedByTradesOpensOrMissingBars() {
+        // 有已了结交易
+        when(simTradeClient.getClosedPositions(eq(99L), anyInt())).thenReturn(List.of(
+                closedPos("LONG", "100000", "101000", "10", FROM + 3600_000, FROM + 7200_000)));
+        assertThat(assembler.quietHoldWindow(trader(), FROM, TO)).isFalse();
+
+        // 无了结但有开仓动作（含被拒的尝试——粗筛 LIKE，宁可多复盘）
+        when(simTradeClient.getClosedPositions(eq(99L), anyInt())).thenReturn(List.of());
+        when(decisionMapper.selectCount(any())).thenReturn(1L);
+        assertThat(assembler.quietHoldWindow(trader(), FROM, TO)).isFalse();
+
+        // 纯观望但K线缺数据：判不了平静，照常复盘
+        when(decisionMapper.selectCount(any())).thenReturn(0L);
+        when(historyStore.load(eq("BTCUSDT"), eq("5m"), anyLong(), anyLong())).thenReturn(List.of());
+        assertThat(assembler.quietHoldWindow(trader(), FROM, TO)).isFalse();
     }
 
     // ==================== 素材有无与上次复盘定位 ====================

@@ -66,7 +66,10 @@ export function DecisionCard({ d, highlight }: { d: AiTraderDecisionView; highli
   const meta = d.kind === 'REVIEW'
     ? (d.status === 'OK'
         ? { labelKey: 'term.dailyReview', tone: 'bg-violet-500/15 text-violet-500' }
-        : { labelKey: 'decision.reviewFailed', tone: 'bg-loss/15 text-loss' })
+        // 观望门控跳过的复盘行（SKIPPED）不是失败：灰徽章，error 字段带着跳过缘由
+        : d.status === 'SKIPPED'
+          ? DECISION_STATUS.SKIPPED
+          : { labelKey: 'decision.reviewFailed', tone: 'bg-loss/15 text-loss' })
     : d.kind === 'LEARN'
       ? (d.status === 'OK'
           ? { labelKey: 'term.peerLearn', tone: 'bg-sky-500/15 text-sky-500' }
@@ -175,6 +178,10 @@ export function DecisionCard({ d, highlight }: { d: AiTraderDecisionView; highli
 
       {d.status === 'ERROR' && d.error && (
         <p className="text-[11px] text-loss leading-relaxed">{d.error}</p>
+      )}
+      {/* SKIPPED 的缘由（调度跳过/观望门控跳过复盘）：灰字注明，不是错误 */}
+      {d.status === 'SKIPPED' && d.error && (
+        <p className="text-[11px] text-muted-foreground leading-relaxed">{d.error}</p>
       )}
 
       <ReasoningFold reasoning={d.reasoning} />

@@ -137,7 +137,10 @@ class ReviewLoopTest {
                 List.of(okTradeRow(FROM + 3600_000, "10000",
                                 "【本轮结论】\n判断：突破确认\n动作：开多BTCUSDT\n等待：无"),
                         okTradeRow(FROM + 18_000_000, "9989",
-                                "【本轮结论】\n判断：止损离场\n动作：HOLD\n等待：99000上方站稳再进")));
+                                "【本轮结论】\n判断：止损离场\n动作：HOLD\n等待：99000上方站稳再进"),
+                        // 同条件再等 6h：真观望升格对账块，等待条件全文才进素材（短观望只进汇总行）
+                        okTradeRow(FROM + 39_600_000, "9989",
+                                "【本轮结论】\n判断：仍在等\n动作：HOLD\n等待：99000上方站稳再进")));
         // 真本地库路径：5m bar 进去，组装器现聚合成 1h
         long h = FROM + 3600_000;
         when(historyStore.load(eq("BTCUSDT"), eq("5m"), anyLong(), anyLong())).thenReturn(List.of(

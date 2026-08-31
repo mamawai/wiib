@@ -241,6 +241,23 @@ class ReviewRunnerTest {
         verify(decisionMapper, never()).insert(any(AiTraderDecision.class));
     }
 
+    /** 观望门控（口径8）：纯观望且各币平静 → 留 SKIPPED 行注明缘由，不烧模型调用 */
+    @Test
+    void quietHoldWindowLeavesSkippedRowWithoutModelCall() {
+        when(assembler.lastReview(7L, 1)).thenReturn(priorReview());
+        when(assembler.hasNewMaterial(eq(7L), eq(1), anyLong(), anyLong())).thenReturn(true);
+        when(assembler.quietHoldWindow(any(), anyLong(), anyLong())).thenReturn(true);
+
+        runner.review(trader(), BOUNDARY);
+
+        verify(modelFactory, never()).modelFor(any());
+        ArgumentCaptor<AiTraderDecision> dec = ArgumentCaptor.forClass(AiTraderDecision.class);
+        verify(decisionMapper).insert(dec.capture());
+        assertThat(dec.getValue().getKind()).isEqualTo(AiTraderDecision.KIND_REVIEW);
+        assertThat(dec.getValue().getStatus()).isEqualTo(AiTraderDecision.STATUS_SKIPPED);
+        assertThat(dec.getValue().getError()).contains("平静").contains("2%");
+    }
+
     @Test
     void failureWritesErrorRowWithoutMemoryOrFailureCount() {
         stubMaterial();

@@ -13,6 +13,7 @@ import com.mawai.wiibcommon.market.KlineBar;
 import com.mawai.wiibcommon.market.KlineHistoryStore;
 import com.mawai.wiibquant.agent.i18n.PromptCatalog;
 import com.mawai.wiibquant.external.sim.SimTradeClient;
+import com.mawai.wiibquant.market.indicator.KlineStructureCalculator;
 import com.mawai.wiibquant.mapper.AiTraderDecisionMapper;
 import com.mawai.wiibquant.mapper.AiTraderPlanMapper;
 import lombok.RequiredArgsConstructor;
@@ -25,6 +26,7 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -113,6 +115,54 @@ public class ReviewMaterialAssembler {
                 .gt(AiTraderDecision::getWakeTime, fromMs)
                 .le(AiTraderDecision::getWakeTime, toMs));
         return n != null && n > 0;
+    }
+
+    /** 观望门控阈值（口径8，常量起步不做每档配置）：窗口内各币振幅全部低于此百分比才算"平静" */
+    static final BigDecimal QUIET_AMPLITUDE_PCT = new BigDecimal("2");
+
+    /**
+     * 纯观望且各币平静（口径8）：窗口内无已了结交易、无开仓动作，且各币窗口振幅
+     * （(最高-最低)/开盘）全部低于 {@link #QUIET_AMPLITUDE_PCT}——这样的窗口跳过复盘不烧钱。
+     * 开仓动作按 actionsJson 粗筛 open_position 字样：被拒的开仓尝试也算动过手，宁可多复盘不漏评。
+     * 任一币窗口内无K线 → 不算平静（数据缺口时照常复盘）。振幅回看与价格路径同上限 48h。
+     */
+    public boolean quietHoldWindow(AiTrader trader, long fromMs, long toMs) {
+        List<FuturesPositionDTO> closed = inWindow(
+                simTradeClient.getClosedPositions(trader.getSimUserId(), CLOSED_FETCH_LIMIT), fromMs, toMs);
+        if (!closed.isEmpty()) {
+            return false;
+        }
+        Long opens = decisionMapper.selectCount(new LambdaQueryWrapper<AiTraderDecision>()
+                .eq(AiTraderDecision::getTraderId, trader.getId())
+                .eq(AiTraderDecision::getRoundNo, trader.getRoundNo())
+                .in(AiTraderDecision::getKind, AiTraderDecision.KIND_TRADE,
+                        AiTraderDecision.KIND_ALERT, AiTraderDecision.KIND_MANUAL)
+                .gt(AiTraderDecision::getWakeTime, fromMs)
+                .le(AiTraderDecision::getWakeTime, toMs)
+                .like(AiTraderDecision::getActionsJson, "open_position"));
+        if (opens != null && opens > 0) {
+            return false;
+        }
+        long effectiveFrom = Math.max(fromMs, toMs - MAX_PATH_HOURS * 3_600_000L);
+        for (String symbol : trader.getSymbols().split(",")) {
+            symbol = symbol.trim();
+            if (symbol.isEmpty()) {
+                continue;
+            }
+            List<KlineBar> bars = historyStore.load(symbol, KlineHistoryStore.DEFAULT_INTERVAL,
+                    effectiveFrom, toMs);
+            if (bars.isEmpty()) {
+                return false;
+            }
+            BigDecimal high = bars.stream().map(KlineBar::high).max(BigDecimal::compareTo).orElseThrow();
+            BigDecimal low = bars.stream().map(KlineBar::low).min(BigDecimal::compareTo).orElseThrow();
+            BigDecimal open = bars.get(0).open();
+            if (open.signum() <= 0 || high.subtract(low).multiply(BigDecimal.valueOf(100))
+                    .divide(open, 2, RoundingMode.HALF_UP).compareTo(QUIET_AMPLITUDE_PCT) >= 0) {
+                return false;
+            }
+        }
+        return true;
     }
 
     public ReviewMaterial assemble(AiTrader trader, long fromMs, long toMs, AgentLang lang) {
@@ -381,6 +431,10 @@ public class ReviewMaterialAssembler {
                 .le(AiTraderDecision::getWakeTime, toMs)
                 .orderByAsc(AiTraderDecision::getWakeTime));
         List<TimelineEntry> entries = new ArrayList<>();
+        // <6h 碎观望不逐条列，收进这里、段尾一行汇总（口径7）
+        List<Hold> shorts = new ArrayList<>();
+        List<String> symbols = Arrays.stream(t.getSymbols().split(","))
+                .map(String::trim).filter(s -> !s.isEmpty()).toList();
         int errors = 0;
         int skipped = 0;
         int opens = 0;
@@ -407,7 +461,7 @@ public class ReviewMaterialAssembler {
                     ? prompts.get(lang, "reviewer.label.alertTag") + " " : "";
             if (!acts.isEmpty()) {
                 // 动作行逐条出、内容不动：它是复盘主菜，判断/依据/等待整块都是"为什么做这一手"的证据
-                flushHolds(entries, holds, lang);
+                flushHolds(entries, shorts, symbols, holds, lang);
                 // 数开仓动作按摘要文本认工具名：actionSummary 已过滤成 tool(args) 形态，误中不了正文
                 opens += countOccurrences(acts, "open_position(");
                 entries.add(new TimelineEntry("- " + TIME_FMT.format(Instant.ofEpochMilli(d.getWakeTime()))
@@ -426,13 +480,13 @@ public class ReviewMaterialAssembler {
                     h.rounds++;
                 } else {
                     if (h != null) {
-                        flushHold(entries, h, lang);
+                        flushHold(entries, shorts, symbols, h, lang);
                     }
                     holds.put(w.getKey(), new Hold(key, d.getKind(), w.getKey(), w.getValue(), d.getWakeTime()));
                 }
             }
         }
-        flushHolds(entries, holds, lang);
+        flushHolds(entries, shorts, symbols, holds, lang);
 
         StringBuilder sb = new StringBuilder(prompts.get(lang, "reviewer.label.timelineHeader")).append('\n');
         // 活动统计给保守度自检当对照物：唤醒多动作少是"没信号"还是"吓缩了"，得先有数才能问。
@@ -463,10 +517,18 @@ public class ReviewMaterialAssembler {
             }
             entries = kept;
         }
-        if (entries.isEmpty() && errors == 0 && skipped == 0) {
+        if (entries.isEmpty() && shorts.isEmpty() && errors == 0 && skipped == 0) {
             sb.append(prompts.get(lang, "reviewer.label.timelineEmpty")).append('\n');
         }
         entries.forEach(e -> sb.append(e.line()).append('\n'));
+        // 碎观望一行带过：段数/轮数/最长跨度给保守度自检当底数，条件本身从略
+        if (!shorts.isEmpty()) {
+            long maxSpanMs = shorts.stream().mapToLong(h -> h.to - h.from).max().orElse(0);
+            sb.append(prompts.get(lang, "reviewer.label.shortHolds", Map.of(
+                    "n", shorts.size(),
+                    "rounds", shorts.stream().mapToInt(h -> h.rounds).sum(),
+                    "hours", String.format(java.util.Locale.ROOT, "%.1f", maxSpanMs / 3_600_000.0)))).append('\n');
+        }
         if (errors > 0 || skipped > 0) {
             List<String> parts = new ArrayList<>(2);
             if (errors > 0) {
@@ -786,6 +848,9 @@ public class ReviewMaterialAssembler {
         return wait.replaceAll("[（(](?![^）)]*[且或><≥≤0-9])[^）)]*[）)]", "").replaceAll("\\s+", "");
     }
 
+    /** 真观望分界（口径7）：段跨度 ≥6h 才升格对账块，短于它的碎观望全部收进一行汇总 */
+    static final long LONG_HOLD_MS = 6 * 3_600_000L;
+
     /** 观望段游标：同币连续同一等待条件的多轮压成一段。symbol={@link #WHOLE} 即旧格式整块 */
     private static final class Hold {
         final String key;
@@ -808,32 +873,67 @@ public class ReviewMaterialAssembler {
     }
 
     /** 全部在途观望段一并结算（遇动作行/时间线收尾），按各段起始顺序输出后清空 */
-    private void flushHolds(List<TimelineEntry> out, Map<String, Hold> holds, AgentLang lang) {
-        holds.values().forEach(h -> flushHold(out, h, lang));
+    private void flushHolds(List<TimelineEntry> out, List<Hold> shorts, List<String> symbols,
+                            Map<String, Hold> holds, AgentLang lang) {
+        holds.values().forEach(h -> flushHold(out, shorts, symbols, h, lang));
         holds.clear();
     }
 
     /**
-     * 结算一个观望段。多轮的写成时间段+轮数——"这个条件挂了多久、耗了多少轮"本身就是
-     * 保守度自检的证据（该行动没行动 vs 市场真没信号），比同一句话重复 N 遍有用。
-     * 按币的段带 [币码] 前缀（语言无关）；旧格式整块段不带。
+     * 结算一个观望段，按跨度分层（口径7）：<6h 碎观望进汇总桶，段尾一行带过；
+     * ≥6h 真观望升格对账块——段头（起止/轮数）+ 等待条件全文 + 段起点结构快照，
+     * 给 reviewer 显式评估"好观望还是错失"。按币的段带 [币码] 前缀（语言无关）。
      */
-    private void flushHold(List<TimelineEntry> out, Hold h, AgentLang lang) {
+    private void flushHold(List<TimelineEntry> out, List<Hold> shorts, List<String> symbols,
+                           Hold h, AgentLang lang) {
         if (h == null || h.rounds == 0) {
+            return;
+        }
+        if (h.to - h.from < LONG_HOLD_MS) {
+            shorts.add(h);
             return;
         }
         String tag = AiTraderDecision.KIND_ALERT.equals(h.kind)
                 ? prompts.get(lang, "reviewer.label.alertTag") + " " : "";
-        String head = h.rounds == 1
-                ? "- " + TIME_FMT.format(Instant.ofEpochMilli(h.from)) + " " + tag
-                : "- " + TIME_FMT.format(Instant.ofEpochMilli(h.from)) + "~"
-                  + TIME_FMT.format(Instant.ofEpochMilli(h.to))
-                  + prompts.get(lang, "reviewer.label.holdRounds", Map.of("rounds", h.rounds)) + tag;
-        String w = h.wait.isEmpty() ? prompts.get(lang, "reviewer.label.noWait")
-                : h.wait.length() > WAIT_MAX_CHARS ? h.wait.substring(0, WAIT_MAX_CHARS) + "…" : h.wait;
         String symbolTag = WHOLE.equals(h.symbol) ? "" : "[" + h.symbol + "] ";
-        out.add(new TimelineEntry(head + symbolTag + prompts.get(lang, "reviewer.label.waiting",
-                Map.of("wait", w)), false));
+        StringBuilder block = new StringBuilder("- ")
+                .append(TIME_FMT.format(Instant.ofEpochMilli(h.from))).append('~')
+                .append(TIME_FMT.format(Instant.ofEpochMilli(h.to)))
+                .append(prompts.get(lang, "reviewer.label.holdRounds", Map.of("rounds", h.rounds)))
+                .append(tag).append(symbolTag)
+                .append(prompts.get(lang, "reviewer.label.holdAuditTag")).append('\n');
+        // 等待条件全文不截断：它是这段对账的唯一原料
+        block.append("  ").append(prompts.get(lang, "reviewer.label.waiting", Map.of(
+                "wait", h.wait.isEmpty() ? prompts.get(lang, "reviewer.label.noWait") : h.wait))).append('\n');
+        // 段起点结构快照：旧格式整块段不知道在等哪个币，各币都给一行
+        for (String symbol : WHOLE.equals(h.symbol) ? symbols : List.of(h.symbol)) {
+            block.append("  ").append(structureSnapshot(symbol, h.from, lang)).append('\n');
+        }
+        out.add(new TimelineEntry(block.substring(0, block.length() - 1), false));
+    }
+
+    /**
+     * 段起点结构快照：本地 5m 聚合成 1h、as-of 截断到段起点，喂 {@link KlineStructureCalculator}
+     * （与 kline_structure 工具同一套计算）后取一行摘要——方向（窗口涨跌）/近端摆动高低/段起点现价。
+     * 不算"现价距条件价位的距离"：条件价位藏在自然语言里，程序抽取不可靠，对照是 LLM 的活。
+     * 不出 ATR：快照窗口（48×1h）与工具的 192 根窗口不同，同名不同值会误导（见 IndicatorToolkit 告诫）。
+     */
+    private String structureSnapshot(String symbol, long asOfMs, AgentLang lang) {
+        List<KlineBar> hourly = hourlyBars(symbol, asOfMs - MAX_PATH_HOURS * 3_600_000L, asOfMs);
+        if (hourly.isEmpty()) {
+            return prompts.get(lang, "reviewer.label.holdSnapshotNoBars", Map.of("symbol", symbol));
+        }
+        Map<String, Object> structure = KlineStructureCalculator.compute(hourly,
+                KlineStructureCalculator.Params.defaults());
+        Map<?, ?> range = (Map<?, ?>) structure.get("range");
+        Map<?, ?> levels = (Map<?, ?>) structure.get("levels");
+        return prompts.get(lang, "reviewer.label.holdSnapshot", Map.of(
+                "symbol", symbol,
+                "close", String.valueOf(range.get("close")),
+                "hours", MAX_PATH_HOURS,
+                "pct", String.valueOf(range.get("change_pct")),
+                "highs", String.valueOf(levels.get("recent_swing_highs")),
+                "lows", String.valueOf(levels.get("recent_swing_lows"))));
     }
 
     // ==================== 各币价格路径 ====================

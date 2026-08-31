@@ -22,6 +22,7 @@ reviewer:
     - This review is a rolling one: next period you will see this review and no earlier one. So the lessons and rules from the previous review that still hold get carried forward and written out again, and whatever this period falsified or you have already fixed gets dropped — once you are done, reading this one review alone should tell you everything you know so far. The item caps are hard: carried-over and new items compete for the same slots, and an old item that no longer fits is an old item that no longer matters as much as the new one
     - Errors before highlights; every lesson must cite a specific trade and specific numbers, and a lesson that cites no numbers counts as no lesson at all
     - Reconcile the standing-aside: take every "waiting" condition in the timeline and check it against the price paths one at a time. Hit or missed has to be backed by a specific price, and then judge did-not-act-when-you-should / did-not-wait-when-you-should. When a condition depends on something the price paths cannot give you (moving averages, indicator values, a timeframe finer than 1h), rule it "cannot be judged" outright — inventing a plausible-looking piece of evidence is worse than admitting you cannot tell. Only prices inside the coverage range printed in the price-path block header count; market action outside it (before the round began, above all) is not evidence about whether you should have acted at the time
+    - Timeline entries marked as stand-aside audit segments are the real stand-asides (≥6 hours). Evaluate each one, and there are only two verdicts: a good stand-aside (the condition never triggered / the market gave no chance) gets one sentence and no self-congratulation; a miss (the condition itself was set wrong, or it triggered and you did not act — judge by holding the segment-start structure snapshot against the price paths) must go into the lessons. The short-stand-aside summary line is only a base count for the conservatism self-check, not to be evaluated segment by segment
     - Write everything in English. The material and notes below may have been written in another language; read and use them as they are, but this period's output is English only. Follow the two-section format below strictly, and both section titles must appear:
 
     [REVIEW]
@@ -95,6 +96,11 @@ reviewer:
     holdRounds: ({{rounds}} rounds)
     noWait: (no waiting condition given this round)
     waiting: "Waiting: {{wait}}"
+    # ---- stand-aside layering (≥6h segments become audit blocks, shorter ones fold into one summary line) ----
+    holdAuditTag: stand-aside audit segment (≥6 hours, evaluate one by one)
+    holdSnapshot: "structure at segment start, {{symbol}}: price {{close}}, prior {{hours}}h change {{pct}}%, recent swing highs {{highs}} / lows {{lows}}"
+    holdSnapshotNoBars: "structure at segment start, {{symbol}}: no candle data in the window"
+    shortHolds: "(plus {{n}} short stand-aside segments over {{rounds}} rounds, longest {{hours}}h, conditions omitted — stand-asides under 6 hours are not listed individually)"
 
     # ---- per-symbol price paths ----
     pathHeader: "[1h PRICE PATHS PER SYMBOL] (the reference for reconciling stand-asides; covers {{from}} → {{to}})"
@@ -108,3 +114,4 @@ reviewer:
   error:
     timeout: Review timed out ({{seconds}}s)
     emptyOutput: The model returned nothing
+    quietSkip: "Standing aside in a calm market: no trades closed and no opening actions in the window, and every symbol's amplitude stayed below {{pct}}%, so this period's review was skipped (no model call spent)"

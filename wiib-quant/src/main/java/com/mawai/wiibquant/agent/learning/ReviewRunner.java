@@ -105,6 +105,16 @@ public class ReviewRunner {
         d.setIntervalCode(REVIEW_INTERVAL_CODE);
         d.setKind(AiTraderDecision.KIND_REVIEW);
         d.setToolCalls(0);
+        // 观望门控（口径8）：纯观望且各币平静的窗口不烧钱，留 SKIPPED 说明缘由；
+        // 大动的纯观望窗口不拦——那正是要复盘"错失"的素材
+        if (assembler.quietHoldWindow(trader, fromMs, boundaryMs)) {
+            d.setStatus(AiTraderDecision.STATUS_SKIPPED);
+            d.setError(prompts.get(lang, "reviewer.error.quietSkip",
+                    Map.of("pct", ReviewMaterialAssembler.QUIET_AMPLITUDE_PCT.toPlainString())));
+            decisionMapper.insert(d);
+            log.info("[Review] 纯观望且市场平静跳过 traderId={} boundary={}", trader.getId(), boundaryMs);
+            return;
+        }
         try {
             ReviewMaterialAssembler.ReviewMaterial material =
                     assembler.assemble(trader, fromMs, boundaryMs, lang);
