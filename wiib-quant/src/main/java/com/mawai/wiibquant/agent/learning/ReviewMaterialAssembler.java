@@ -59,8 +59,6 @@ public class ReviewMaterialAssembler {
     static final int MAX_TIMELINE_ENTRIES = 80;
     /** 动作行结论字数上限 */
     static final int ACTION_MAX_CHARS = 300;
-    /** 等待条件字数上限：观望对账的唯一原料，与动作行同档 */
-    static final int WAIT_MAX_CHARS = 300;
     /** 「等待」段的正则按语言现编（标签跟着 trader 提示词走），编一次缓存住——一天几百行不必每行重编 */
     private final Map<AgentLang, Pattern> waitPatterns = new ConcurrentHashMap<>();
     /** 价格路径回看上限(小时)：窗口通常一天，首篇复盘 fromMs=0 时靠它兜住 */
@@ -456,12 +454,25 @@ public class ReviewMaterialAssembler {
             if (reasoning == null) {
                 continue;
             }
-            String acts = actionSummary(d.getActionsJson(), lang);
+            String acts = actionSummary(d, plans, lang);
             String tag = AiTraderDecision.KIND_ALERT.equals(d.getKind())
                     ? prompts.get(lang, "reviewer.label.alertTag") + " " : "";
             if (!acts.isEmpty()) {
-                // 动作行逐条出、内容不动：它是复盘主菜，判断/依据/等待整块都是"为什么做这一手"的证据
-                flushHolds(entries, shorts, symbols, holds, lang);
+                // 动作行逐条出、内容不动：它是复盘主菜，判断/依据/等待整块都是"为什么做这一手"的证据。
+                // 只结算涉及币（与 WHOLE）的观望游标：无关币的连续等待被别币动作冲碎后，
+                // 6h 分层会让它永远凑不满对账块、条件在汇总行里失声
+                Set<String> acted = actedSymbols(d.getActionsJson(), plans);
+                if (acted == null) {
+                    flushHolds(entries, shorts, symbols, holds, lang);
+                } else {
+                    acted.add(WHOLE);
+                    for (String key : acted) {
+                        Hold h = holds.remove(key);
+                        if (h != null) {
+                            flushHold(entries, shorts, symbols, h, lang);
+                        }
+                    }
+                }
                 // 数开仓动作按摘要文本认工具名：actionSummary 已过滤成 tool(args) 形态，误中不了正文
                 opens += countOccurrences(acts, "open_position(");
                 entries.add(new TimelineEntry("- " + TIME_FMT.format(Instant.ofEpochMilli(d.getWakeTime()))
@@ -543,18 +554,21 @@ public class ReviewMaterialAssembler {
         return sb.toString();
     }
 
-    /** 动作轨迹 JSON → 一行摘要；只取交易动作工具，拒/错标注结果。解析失败当无动作（摘编缺一行不挡复盘）。 */
-    private String actionSummary(String actionsJson, AgentLang lang) {
-        if (actionsJson == null || actionsJson.isBlank()) {
+    /**
+     * 动作轨迹 JSON → 一行摘要；只取交易动作工具，拒/错标注结果，被忽略交易的动作剔除
+     * （否则忽略承诺在动作行上漏水——结论段剔了、开平仓摘要还在）。解析失败当无动作（摘编缺一行不挡复盘）。
+     */
+    private String actionSummary(AiTraderDecision d, List<AiTraderPlan> plans, AgentLang lang) {
+        if (d.getActionsJson() == null || d.getActionsJson().isBlank()) {
             return "";
         }
         try {
-            JSONArray arr = JSON.parseArray(actionsJson);
+            JSONArray arr = JSON.parseArray(d.getActionsJson());
             List<String> parts = new ArrayList<>();
             for (int i = 0; i < arr.size(); i++) {
                 JSONObject a = arr.getJSONObject(i);
                 String tool = a.getString("tool");
-                if (tool == null || !ACTION_TOOLS.contains(tool)) {
+                if (tool == null || !ACTION_TOOLS.contains(tool) || staleAction(a, d.getWakeTime(), plans)) {
                     continue;
                 }
                 JSONObject args = a.getJSONObject("args");
@@ -762,32 +776,21 @@ public class ReviewMaterialAssembler {
                 && wakeTime <= (p.getClosedWakeTime() == null ? Long.MAX_VALUE : p.getClosedWakeTime());
     }
 
-    /** 旧格式按轮剔：stale 计划的开仓轮，或动作轨迹里 positionId 命中 stale 仓位（平仓/调止损止盈轮） */
+    /** 旧格式按轮剔：stale 计划的开仓轮，或动作轨迹里任一动作命中被忽略交易（平仓/调止损止盈轮） */
     private static boolean staleLegacyRow(AiTraderDecision d, List<AiTraderPlan> plans) {
         for (AiTraderPlan p : plans) {
-            if (!Boolean.TRUE.equals(p.getStale())) {
-                continue;
-            }
-            if (java.util.Objects.equals(p.getOpenedWakeTime(), d.getWakeTime())) {
-                return true;
-            }
-            if (p.getPositionId() != null && actionsHitPosition(d.getActionsJson(), p.getPositionId())) {
+            if (Boolean.TRUE.equals(p.getStale())
+                    && java.util.Objects.equals(p.getOpenedWakeTime(), d.getWakeTime())) {
                 return true;
             }
         }
-        return false;
-    }
-
-    private static boolean actionsHitPosition(String actionsJson, long positionId) {
-        if (actionsJson == null || actionsJson.isBlank()) {
+        if (d.getActionsJson() == null || d.getActionsJson().isBlank()) {
             return false;
         }
         try {
-            JSONArray arr = JSON.parseArray(actionsJson);
+            JSONArray arr = JSON.parseArray(d.getActionsJson());
             for (int i = 0; i < arr.size(); i++) {
-                JSONObject args = arr.getJSONObject(i).getJSONObject("args");
-                Long id = args == null ? null : args.getLong("positionId");
-                if (id != null && id == positionId) {
+                if (staleAction(arr.getJSONObject(i), d.getWakeTime(), plans)) {
                     return true;
                 }
             }
@@ -798,27 +801,57 @@ public class ReviewMaterialAssembler {
     }
 
     /**
-     * 观望行的原料：结论块里的"等待"段（整块口径，不分币），返回完整内容不截断
-     * （截断留给输出——先截再算合并键，会把"前段相同、后段不同"的两条误并成一条）。
-     * 按币的口径见 {@link #waitsBySymbol}。
+     * 单个动作是否属于被忽略交易（时间线摘要/chat 工具名/旧格式剔轮共用同一识别核心）：
+     * positionId 命中 stale 仓位绑定，或该轮是 stale 计划的开仓轮且动作开的正是该币向。
      */
-    String waitSection(String reasoning, AgentLang lang) {
-        if (reasoning == null || reasoning.isBlank()) {
-            return "";
+    private static boolean staleAction(JSONObject action, long wakeTime, List<AiTraderPlan> plans) {
+        JSONObject args = action == null ? null : action.getJSONObject("args");
+        for (AiTraderPlan p : plans) {
+            if (!Boolean.TRUE.equals(p.getStale())) {
+                continue;
+            }
+            Long id = args == null ? null : args.getLong("positionId");
+            if (p.getPositionId() != null && id != null && id.longValue() == p.getPositionId()) {
+                return true;
+            }
+            if ("open_position".equals(action.getString("tool"))
+                    && java.util.Objects.equals(p.getOpenedWakeTime(), wakeTime)
+                    && args != null
+                    && p.getSymbol().equals(args.getString("symbol"))
+                    && p.getSide().equals(args.getString("side"))) {
+                return true;
+            }
         }
-        Conclusion c = locateConclusion(reasoning, lang);
-        if (c == null) {
-            // 没有结论块就没有等待条件。这里若退回正文尾巴，对账那步会拿一段行情叙述当条件去判
-            // 命中/未命中，只能编出假结论——观望对账正是复盘的核心产出
-            return "";
+        return false;
+    }
+
+    /** chat 决策行的工具名列表（stale 治理后）：被忽略交易的动作名剔除，数据工具与其余动作照常 */
+    public List<String> staleFilteredToolNames(AiTraderDecision d, List<AiTraderPlan> plans) {
+        if (d.getActionsJson() == null || d.getActionsJson().isBlank()) {
+            return List.of();
         }
-        return extractWait(c.body(reasoning), c.lang());
+        try {
+            JSONArray arr = JSON.parseArray(d.getActionsJson());
+            List<String> out = new ArrayList<>(arr.size());
+            for (int i = 0; i < arr.size(); i++) {
+                JSONObject a = arr.getJSONObject(i);
+                String tool = a.getString("tool");
+                if (tool == null || staleAction(a, d.getWakeTime(), plans)) {
+                    continue;
+                }
+                out.add(tool);
+            }
+            return out;
+        } catch (Exception e) {
+            return List.of();
+        }
     }
 
     /**
      * 从一段结论正文里抽"等待"：按标签块切而不是按行取——模型有时把条件写在标签同一行、
      * 有时换行分条列，整段吃到下一个小节标签才两种都接得住。行首锚定防正文里的"等待："被误认。
-     * 小节标签按结论块自己那门语言认；没有等待段就是没有，不拿正文冒充条件。
+     * 小节标签按结论块自己那门语言认；没有等待段就是没有，不拿正文冒充条件——
+     * 退回正文尾巴的话，对账那步会拿行情叙述当条件判命中，编出假结论。
      */
     private String extractWait(String body, AgentLang lang) {
         Matcher m = waitPattern(lang).matcher(body);
@@ -872,6 +905,39 @@ public class ReviewMaterialAssembler {
         }
     }
 
+    /**
+     * 动作行涉及的币（可变集合）：args.symbol 直取，只带 positionId 的动作经计划绑定反查；
+     * 任一动作解析不出币 → null，调用方保守结算全部游标（历史无绑定数据的兜底）。
+     * WHOLE（旧格式整块）由调用方自行加入——账户级叙述随任何动作作废。
+     */
+    private static Set<String> actedSymbols(String actionsJson, List<AiTraderPlan> plans) {
+        try {
+            JSONArray arr = JSON.parseArray(actionsJson);
+            Set<String> out = new HashSet<>();
+            for (int i = 0; i < arr.size(); i++) {
+                JSONObject a = arr.getJSONObject(i);
+                if (!ACTION_TOOLS.contains(String.valueOf(a.getString("tool")))) {
+                    continue;
+                }
+                JSONObject args = a.getJSONObject("args");
+                String symbol = args == null ? null : args.getString("symbol");
+                if (symbol == null) {
+                    Long id = args == null ? null : args.getLong("positionId");
+                    symbol = id == null ? null : plans.stream()
+                            .filter(p -> p.getPositionId() != null && p.getPositionId().longValue() == id)
+                            .map(AiTraderPlan::getSymbol).findFirst().orElse(null);
+                }
+                if (symbol == null) {
+                    return null;
+                }
+                out.add(symbol);
+            }
+            return out;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
     /** 全部在途观望段一并结算（遇动作行/时间线收尾），按各段起始顺序输出后清空 */
     private void flushHolds(List<TimelineEntry> out, List<Hold> shorts, List<String> symbols,
                             Map<String, Hold> holds, AgentLang lang) {
@@ -886,9 +952,6 @@ public class ReviewMaterialAssembler {
      */
     private void flushHold(List<TimelineEntry> out, List<Hold> shorts, List<String> symbols,
                            Hold h, AgentLang lang) {
-        if (h == null || h.rounds == 0) {
-            return;
-        }
         if (h.to - h.from < LONG_HOLD_MS) {
             shorts.add(h);
             return;

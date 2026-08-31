@@ -217,6 +217,43 @@ class TraderWakeupLoopTest {
         assertThat(d.getToolCalls()).isGreaterThanOrEqualTo(1);
     }
 
+    /** 唤醒"最近决策"回注同样过 stale：被忽略交易的分段不注入；行本身保留——行头时刻是唤醒事实 */
+    @Test
+    void recentDecisionsInjectionScrubsStaleSegments() {
+        stubHealthyAccount();
+        long prevWake = 1785171600000L - 3600_000L;
+        AiTraderDecision prev = new AiTraderDecision();
+        prev.setWakeTime(prevWake);
+        prev.setKind(AiTraderDecision.KIND_TRADE);
+        prev.setStatus(AiTraderDecision.STATUS_OK);
+        prev.setReasoning("【本轮结论】\n[BTCUSDT]\n动作：HOLD\n等待：回踩 63400 做多"
+                + "\n[ETHUSDT]\n动作：HOLD\n等待：站上 1925 做多");
+        when(decisionMapper.selectList(any())).thenReturn(List.of(prev));
+        AiTraderPlan stale = new AiTraderPlan();
+        stale.setSymbol("BTCUSDT");
+        stale.setSide("LONG");
+        stale.setStatus(AiTraderPlan.STATUS_CLOSED);
+        stale.setStale(true);
+        stale.setOpenedWakeTime(prevWake - 7200_000L);
+        stale.setClosedWakeTime(prevWake + 1800_000L);
+        stale.setPositionId(42L);
+        when(planMapper.selectList(any())).thenReturn(List.of(stale));
+        ChatModel model = modelCheckingThenSummary();
+        when(modelFactory.modelFor(any())).thenReturn(model);
+
+        runner.wake(trader(), 1785171600000L);
+
+        ArgumentCaptor<Prompt> prompt = ArgumentCaptor.forClass(Prompt.class);
+        verify(model, org.mockito.Mockito.atLeastOnce()).call(prompt.capture());
+        String injected = prompt.getAllValues().get(0).getInstructions().stream()
+                .map(org.springframework.ai.chat.messages.Message::getText).reduce("", String::concat);
+        assertThat(injected).contains("站上 1925").doesNotContain("回踩 63400");
+        // 行头时刻保留：警报开场白的"上次唤醒在X"要用真时刻，剔的是内容不是行
+        assertThat(injected).contains(java.time.format.DateTimeFormatter.ofPattern("MM-dd HH:mm")
+                .withZone(java.time.ZoneId.systemDefault())
+                .format(java.time.Instant.ofEpochMilli(prevWake)));
+    }
+
     /**
      * 永远只想再查一次账户、永不给总结的模型 → 只能靠保险丝收束（每轮独立 call id，同真实模型口径）。
      * contentOf 决定第 i 轮的正文——真实 Responses 调工具那一轮正文往往就是空串。

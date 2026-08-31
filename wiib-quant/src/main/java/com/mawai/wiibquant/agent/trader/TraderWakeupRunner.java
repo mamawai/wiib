@@ -270,16 +270,12 @@ public class TraderWakeupRunner {
                 .lt(AiTraderDecision::getWakeTime, boundaryTime)
                 .orderByDesc(AiTraderDecision::getWakeTime)
                 .last("LIMIT " + RECENT_DECISIONS));
-        // stale 教材过滤：主人标记忽略的交易不回注给下一轮（新格式剔段/旧格式剔轮，与复盘时间线同口径）
+        // stale 教材过滤：被忽略交易的内容不回注给下一轮（新格式剔段、旧格式命中轮清空正文）。
+        // 行本身保留——行头的时刻/权益是唤醒事实，警报开场白的"上次唤醒在X"要用真时刻
         List<AiTraderPlan> allPlans = planStore.listAll(trader.getId(), trader.getRoundNo());
-        recent = new ArrayList<>(recent);
-        recent.removeIf(d -> {
+        recent.forEach(d -> {
             String r = materialAssembler.staleFiltered(d, allPlans);
-            if (r == null) {
-                return true;
-            }
-            d.setReasoning(r);
-            return false;
+            d.setReasoning(r == null ? "" : r);
         });
 
         // 计划懒清理 + 补绑 + 加载：仓位/挂单还活着的计划保留，已了结（止损/止盈/平仓/撤单）的归档；

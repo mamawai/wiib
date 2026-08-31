@@ -30,15 +30,18 @@ function splitBlocks(text: string): Block[] {
   return blocks;
 }
 
-/** 长文折叠：默认一行纯文本预览，展开成 markdown——时间线卡、交易记录卡、手机上的笔记块同一套阅读节奏 */
-export function ReasoningFold({ reasoning }: { reasoning: string | null }) {
+/**
+ * 长文折叠：默认一行纯文本预览，展开成 markdown——时间线卡、交易记录卡、手机上的笔记块同一套阅读节奏。
+ * segmentable=false 关掉币种分段渲染：复盘/学习行的段标题（如英文 [REVIEW]）与币码同形状，只有交易决策才分段。
+ */
+export function ReasoningFold({ reasoning, segmentable = true }: { reasoning: string | null; segmentable?: boolean }) {
   const { t } = useTranslation(['ai', 'common']);
   const [open, setOpen] = useState(false);
   const text = reasoning?.trim() || '';
   if (!text) return null;
   // 折叠预览是纯文本，去掉 markdown 符号免得满屏井号
   const preview = text.replace(/[#*`]/g, '').replace(/\s+/g, ' ').slice(0, 120) + (text.length > 120 ? '…' : '');
-  const blocks = splitBlocks(text);
+  const blocks = segmentable ? splitBlocks(text) : [];
   const segmented = blocks.some(b => b.symbol != null);
   return (
     <div className="text-xs leading-relaxed text-foreground/90">

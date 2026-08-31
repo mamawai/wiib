@@ -241,6 +241,21 @@ class ReviewRunnerTest {
         verify(decisionMapper, never()).insert(any(AiTraderDecision.class));
     }
 
+    /** 门控自己抖了（sim/K线故障）也得落 ERROR 行——review.started 承诺"失败也会留记录，不会没有下文" */
+    @Test
+    void quietHoldWindowFailureStillWritesErrorRow() {
+        when(assembler.lastReview(7L, 1)).thenReturn(priorReview());
+        when(assembler.hasNewMaterial(eq(7L), eq(1), anyLong(), anyLong())).thenReturn(true);
+        when(assembler.quietHoldWindow(any(), anyLong(), anyLong()))
+                .thenThrow(new IllegalStateException("sim down"));
+
+        runner.review(trader(), BOUNDARY);
+
+        ArgumentCaptor<AiTraderDecision> dec = ArgumentCaptor.forClass(AiTraderDecision.class);
+        verify(decisionMapper).insert(dec.capture());
+        assertThat(dec.getValue().getStatus()).isEqualTo(AiTraderDecision.STATUS_ERROR);
+    }
+
     /** 观望门控（口径8）：纯观望且各币平静 → 留 SKIPPED 行注明缘由，不烧模型调用 */
     @Test
     void quietHoldWindowLeavesSkippedRowWithoutModelCall() {

@@ -184,7 +184,7 @@ export function DecisionCard({ d, highlight }: { d: AiTraderDecisionView; highli
         <p className="text-[11px] text-muted-foreground leading-relaxed">{d.error}</p>
       )}
 
-      <ReasoningFold reasoning={d.reasoning} />
+      <ReasoningFold reasoning={d.reasoning} segmentable={d.kind !== 'REVIEW' && d.kind !== 'LEARN'} />
     </div>
   );
 }

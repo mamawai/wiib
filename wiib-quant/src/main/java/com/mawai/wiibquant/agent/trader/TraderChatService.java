@@ -136,7 +136,8 @@ public class TraderChatService {
         JSONArray arr = new JSONArray();
         for (AiTraderDecision d : traderService.decisions(t.getId(), n, null, null, null, null)) {
             String reasoning = d.getReasoning();
-            if (TRADE_KINDS.contains(d.getKind())) {
+            boolean tradeRow = TRADE_KINDS.contains(d.getKind());
+            if (tradeRow) {
                 reasoning = materialAssembler.staleFiltered(d, allPlans);
                 if (reasoning == null) {
                     continue;
@@ -150,7 +151,9 @@ public class TraderChatService {
                     .fluentPut("equity", d.getEquity())
                     .fluentPut("toolCalls", d.getToolCalls())
                     .fluentPut("error", d.getError())
-                    .fluentPut("tools", toolNames(d.getActionsJson()))
+                    // 交易行的工具名同样过 stale：被忽略交易的 open/close 动作名不出现
+                    .fluentPut("tools", tradeRow ? materialAssembler.staleFilteredToolNames(d, allPlans)
+                            : toolNames(d.getActionsJson()))
                     .fluentPut("reasoning", reasoning));
         }
         return new JSONObject()

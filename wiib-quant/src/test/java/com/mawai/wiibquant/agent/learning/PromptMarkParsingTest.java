@@ -24,7 +24,7 @@ import static org.mockito.Mockito.mock;
  *   <li><b>模型这一轮刚交回的输出</b>（{@link ReviewRunner#parse} / {@link LearningRunner#missingMarks}）
  *       只认当前语言那一套：提示词刚说了用哪套标记，交回另一套就是没照格式走，该判失守。
  *       两套都认的话，"英文提示词却输出中文"这种真失守会被悄悄放过。</li>
- *   <li><b>库里的历史决策</b>（{@link ReviewMaterialAssembler#waitSection}）两套都认：决策是
+ *   <li><b>库里的历史决策</b>（{@link ReviewMaterialAssembler#waitsBySymbol}）两套都认：决策是
  *       写入时那门语言落库的，用户切过语言后只认当前这套，整条时间线会变成"未给等待条件"，
  *       观望对账当场没了原料。两套标记字面不同，多认一套不会误伤。</li>
  * </ul>
@@ -104,40 +104,38 @@ class PromptMarkParsingTest {
     private static final String EN_CONCLUSION =
             "some market context\n[ROUND CONCLUSION]\nJudgement: breakout confirmed\nAction: HOLD\nWaiting: retest 99000 holds";
 
+    /** 旧格式（无分段标记）整块的等待条件从 waitsBySymbol 的 WHOLE 伪键取 */
+    private String wholeWait(String reasoning, AgentLang lang) {
+        return assembler().waitsBySymbol(reasoning, lang).get(ReviewMaterialAssembler.WHOLE);
+    }
+
     @Test
     void 结论块_同语言取得出等待条件() {
-        ReviewMaterialAssembler a = assembler();
-
-        assertThat(a.waitSection(ZH_CONCLUSION, AgentLang.ZH)).isEqualTo("回踩 99000 站稳");
-        assertThat(a.waitSection(EN_CONCLUSION, AgentLang.EN)).isEqualTo("retest 99000 holds");
+        assertThat(wholeWait(ZH_CONCLUSION, AgentLang.ZH)).isEqualTo("回踩 99000 站稳");
+        assertThat(wholeWait(EN_CONCLUSION, AgentLang.EN)).isEqualTo("retest 99000 holds");
     }
 
     /** 用户切了语言：旧决策还是旧语言写的，reviewer 照样得读得出来，否则观望对账整段空转 */
     @Test
     void 结论块_切语言后旧决策照样读得出() {
-        ReviewMaterialAssembler a = assembler();
-
-        assertThat(a.waitSection(ZH_CONCLUSION, AgentLang.EN)).isEqualTo("回踩 99000 站稳");
-        assertThat(a.waitSection(EN_CONCLUSION, AgentLang.ZH)).isEqualTo("retest 99000 holds");
+        assertThat(wholeWait(ZH_CONCLUSION, AgentLang.EN)).isEqualTo("回踩 99000 站稳");
+        assertThat(wholeWait(EN_CONCLUSION, AgentLang.ZH)).isEqualTo("retest 99000 holds");
     }
 
     /** "等待条件："全称与"等待："都得认（中文侧原有的容忍不许在搬家时丢） */
     @Test
     void 结论块_等待条件全称也认() {
-        assertThat(assembler().waitSection(
-                "【本轮结论】\n判断：观望\n等待条件：站稳 99000", AgentLang.ZH)).isEqualTo("站稳 99000");
-        assertThat(assembler().waitSection(
-                "[ROUND CONCLUSION]\nAction: HOLD\nWaiting for: 99000 holds", AgentLang.EN))
+        assertThat(wholeWait("【本轮结论】\n判断：观望\n等待条件：站稳 99000", AgentLang.ZH))
+                .isEqualTo("站稳 99000");
+        assertThat(wholeWait("[ROUND CONCLUSION]\nAction: HOLD\nWaiting for: 99000 holds", AgentLang.EN))
                 .isEqualTo("99000 holds");
     }
 
     /** 没有结论块就是没有条件：不拿正文冒充，否则对账只能编出假结论 */
     @Test
     void 没有结论块_两门语言都返回空() {
-        ReviewMaterialAssembler a = assembler();
-
-        assertThat(a.waitSection("BTC 走强，我先看着。", AgentLang.ZH)).isEmpty();
-        assertThat(a.waitSection("BTC looks strong, watching for now.", AgentLang.EN)).isEmpty();
+        assertThat(wholeWait("BTC 走强，我先看着。", AgentLang.ZH)).isEmpty();
+        assertThat(wholeWait("BTC looks strong, watching for now.", AgentLang.EN)).isEmpty();
     }
 
     // ==================== 输出语言硬收尾：恒在用户消息最末一行 ====================

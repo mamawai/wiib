@@ -398,6 +398,54 @@ class ReviewMaterialAssemblerTest {
         assertThat(timeline).contains("本期活动：唤醒 3 轮，动作轮 0");
     }
 
+    /**
+     * 新格式的动作也在忽略范围内：结论段剔了、开仓摘要还挂在时间线上就是承诺漏水。
+     * 同轮的非 stale 动作照常保留（手术刀）；开仓统计跟着摘要走，不数被忽略的开仓。
+     */
+    @Test
+    void timelineFiltersStaleActionsFromSummary() {
+        when(decisionMapper.selectOne(any())).thenReturn(null);
+        AiTraderPlan stale = planOf("BTCUSDT", "BREAKOUT", FROM + 3600_000, true);
+        stale.setPositionId(42L);
+        when(planMapper.selectList(any())).thenReturn(List.of(stale));
+        // 开仓轮：开 stale 的 BTC 多（symbol/side+开仓时刻命中）+ 给别的仓位调止损（不剔）
+        String acts = "[{\"tool\":\"open_position\",\"args\":{\"symbol\":\"BTCUSDT\",\"side\":\"LONG\"},\"status\":\"ok\"},"
+                + "{\"tool\":\"set_stop_loss\",\"args\":{\"positionId\":42,\"stopLossPrice\":99000},\"status\":\"ok\"},"
+                + "{\"tool\":\"set_take_profit\",\"args\":{\"positionId\":7,\"takeProfitPrice\":2000},\"status\":\"ok\"}]";
+        when(decisionMapper.selectList(any())).thenReturn(List.of(), List.of(
+                okRow(FROM + 3600_000, AiTraderDecision.KIND_TRADE, SEGMENTED_ZH, acts)));
+
+        String timeline = assembler.assemble(trader(), FROM, TO, AgentLang.ZH).timelineBlock();
+
+        assertThat(timeline).doesNotContain("open_position").doesNotContain("set_stop_loss");
+        assertThat(timeline).contains("set_take_profit(7)");
+        assertThat(timeline).contains("开仓动作 0 次");
+        // 结论段同轮剔除：BTC 段没了，ETH 段还在动作行结论里
+        assertThat(timeline).doesNotContain("63370–63480");
+    }
+
+    /** 动作只冲断涉及币的观望游标：ETH 连续等同一条件跨过一次 BTC 动作，仍凑得满 ≥6h 对账块 */
+    @Test
+    void actionOnOneSymbolDoesNotBreakOtherSymbolsHold() {
+        when(decisionMapper.selectOne(any())).thenReturn(null);
+        String ethWait = """
+                【本轮结论】
+                [ETHUSDT]
+                动作：HOLD
+                等待：站上 1925 做多""";
+        String btcAct = "[{\"tool\":\"set_stop_loss\",\"args\":{\"symbol\":\"BTCUSDT\",\"positionId\":5,\"stopLossPrice\":99000},\"status\":\"ok\"}]";
+        when(decisionMapper.selectList(any())).thenReturn(List.of(), List.of(
+                okRow(FROM + 3600_000, AiTraderDecision.KIND_TRADE, ethWait, "[]"),
+                okRow(FROM + 10800_000, AiTraderDecision.KIND_TRADE,
+                        "【本轮结论】\n[BTCUSDT]\n动作：上移止损\n等待：无", btcAct),
+                okRow(FROM + 27000_000, AiTraderDecision.KIND_TRADE, ethWait, "[]")));
+
+        String timeline = assembler.assemble(trader(), FROM, TO, AgentLang.ZH).timelineBlock();
+
+        // ETH 段跨 6.5h 未被 BTC 动作冲断 → 对账块；被冲断的话只剩两段碎观望、条件失声
+        assertThat(timeline).contains("（2轮）[ETHUSDT] 观望对账段").contains("等待：站上 1925 做多");
+    }
+
     /** 窗口内归档、未配对、stale 的计划：孤儿行也不出 */
     @Test
     void staleOrphanPlanOmitted() {
@@ -499,7 +547,7 @@ class ReviewMaterialAssemblerTest {
                 - ETH 多：15m 回踩 1896–1901 且收盘站上 1892，目标 1925/1937
                 - 转空：BTC 15m 收盘跌破 63140；ETH 15m 收盘跌破 1888""";
 
-        String wait = assembler.waitSection(reasoning, AgentLang.ZH);
+        String wait = assembler.waitsBySymbol(reasoning, AgentLang.ZH).get(ReviewMaterialAssembler.WHOLE);
 
         assertThat(wait).contains("63370–63480").contains("1896–1901").contains("63140");
         // 判断段是当时的指标读数，复盘没有对账物，不该混进等待里占额度
@@ -552,8 +600,8 @@ class ReviewMaterialAssemblerTest {
     /** 没有【本轮结论】块就是这轮没给条件，不能拿正文尾巴冒充——那段是行情叙述，对账对不了 */
     @Test
     void waitSectionReturnsEmptyWhenNoConclusionBlock() {
-        assertThat(assembler.waitSection("BTC 走强，我先看着。ETH 也在震荡，暂时不动手。", AgentLang.ZH))
-                .isEmpty();
+        assertThat(assembler.waitsBySymbol("BTC 走强，我先看着。ETH 也在震荡，暂时不动手。", AgentLang.ZH)
+                .get(ReviewMaterialAssembler.WHOLE)).isEmpty();
     }
 
     // ==================== 结论总分结构：按币分段 ====================
@@ -642,10 +690,11 @@ class ReviewMaterialAssemblerTest {
                 okRow(FROM + 3600_000, AiTraderDecision.KIND_TRADE, r1, "[]"),
                 okRow(FROM + 14400_000, AiTraderDecision.KIND_TRADE, r2, "[]"),
                 okRow(FROM + 27000_000, AiTraderDecision.KIND_TRADE, r2, "[]")));
-        // 段起点结构快照的对照物：与价格路径同源的本地 5m
+        // 段起点结构快照的对照物：与价格路径同源的本地 5m。两根都在段起点（FROM+1h）之前的
+        // 整点内——真实 load 是 [from,to)，openTime==段起点的 bar 生产上取不到，夹具不许造出前视
         when(historyStore.load(eq("BTCUSDT"), eq("5m"), anyLong(), anyLong())).thenReturn(List.of(
                 bar5m(FROM, "61000", "61200", "60800", "61100"),
-                bar5m(FROM + 3600_000L, "61100", "61500", "61000", "61200")));
+                bar5m(FROM + 300_000L, "61100", "61500", "61000", "61200")));
 
         String timeline = assembler.assemble(trader(), FROM, TO, AgentLang.ZH).timelineBlock();
 
