@@ -14,6 +14,7 @@ import com.mawai.wiibcommon.market.KlineBar;
 import com.mawai.wiibcommon.market.KlineHistoryStore;
 import com.mawai.wiibquant.agent.learning.PeerInsightService;
 import com.mawai.wiibquant.agent.learning.ReviewMaterialAssembler;
+import com.mawai.wiibquant.agent.trader.PlayStatsAssembler;
 import com.mawai.wiibquant.agent.trader.TraderPromptAssembler;
 import com.mawai.wiibquant.agent.trader.TraderRiskConfig;
 import com.mawai.wiibquant.external.sim.SimTradeClient;
@@ -79,7 +80,7 @@ class PromptI18nTest {
     @Test
     void 英文trader提示词全文无中文() {
         TraderPromptAssembler assembler =
-                new TraderPromptAssembler(mock(AiTraderMapper.class), prompts);
+                new TraderPromptAssembler(mock(AiTraderMapper.class), prompts, mock(PlayStatsAssembler.class));
         AiTrader t = enTrader();
         t.setMemory("突破回踩不守住颈线就别追。");            // 旧笔记是中文：原样注入不算违规
         t.setLearningNotes("同侪A的BREAKOUT 12笔8胜。");
@@ -203,7 +204,7 @@ class PromptI18nTest {
     /** trader 模板的 7 条认知设计原则，各钉一句锚点——搬家时丢哪条都在这里红 */
     @Test
     void 中文trader模板保住七条认知设计原则() {
-        String p = new TraderPromptAssembler(mock(AiTraderMapper.class), prompts)
+        String p = new TraderPromptAssembler(mock(AiTraderMapper.class), prompts, mock(PlayStatsAssembler.class))
                 .platformTemplate(AgentLang.ZH, "1h", "BTCUSDT", TraderRiskConfig.of(new AiTrader()), null);
 
         assertThat(p)
@@ -220,7 +221,7 @@ class PromptI18nTest {
         t.setOwnerNote("今晚有 CPI");
         t.setOwnerNoteRounds(2);
         t.setId(7L);
-        String full = new TraderPromptAssembler(mock(AiTraderMapper.class), prompts)
+        String full = new TraderPromptAssembler(mock(AiTraderMapper.class), prompts, mock(PlayStatsAssembler.class))
                 .assemble(t, "{}", List.of(), AgentLang.ZH);
         assertThat(full.indexOf("主人的交易风格指令"))
                 .as("⑥ 用户风格指令放最后并明示优先级").isGreaterThan(full.indexOf("纪律："));
@@ -259,7 +260,7 @@ class PromptI18nTest {
     /** 任务 4：三处都要显式交代"笔记可能是另一门语言，照读照用，输出用当前语言" */
     @Test
     void 三处提示词都交代了跨语言笔记() {
-        assertThat(new TraderPromptAssembler(mock(AiTraderMapper.class), prompts)
+        assertThat(new TraderPromptAssembler(mock(AiTraderMapper.class), prompts, mock(PlayStatsAssembler.class))
                 .platformTemplate(AgentLang.ZH, "1h", "BTCUSDT", TraderRiskConfig.of(new AiTrader()), null))
                 .contains("可能是另一门语言写的").contains("本轮输出一律用中文");
         assertThat(prompts.get(AgentLang.ZH, "reviewer.system", NOTE_CAP_ZH)).contains("可能是另一门语言写的");
@@ -394,7 +395,7 @@ class PromptI18nTest {
             t.setOwnerNote(lang == AgentLang.ZH ? "Close ETH today." : "今天把 ETH 平掉。");
             t.setOwnerNoteRounds(2);
 
-            String prompt = new TraderPromptAssembler(mock(AiTraderMapper.class), prompts)
+            String prompt = new TraderPromptAssembler(mock(AiTraderMapper.class), prompts, mock(PlayStatsAssembler.class))
                     .assemble(t, "{}", List.of(), lang);
             String tail = prompts.get(lang, "trader.label.outputLanguage");
             String note = prompts.get(lang, "trader.label.ownerWritten");
@@ -420,7 +421,7 @@ class PromptI18nTest {
             AiTrader t = enTrader();
             t.setUseDefaultPrompt(false);
             t.setCustomPrompt("Do whatever you want.");
-            assertThat(new TraderPromptAssembler(mock(AiTraderMapper.class), prompts)
+            assertThat(new TraderPromptAssembler(mock(AiTraderMapper.class), prompts, mock(PlayStatsAssembler.class))
                     .assemble(t, "{}", List.of(), lang).stripTrailing())
                     .as("%s 退出平台模板后仍要有输出语言硬收尾", lang.code())
                     .endsWith(prompts.get(lang, "trader.label.outputLanguage"));

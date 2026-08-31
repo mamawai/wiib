@@ -17,7 +17,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * trader 系统提示词组装：平台模板 + 账户状态 + 最近决策 + 复盘笔记 + 学习笔记 + 用户自定义段。
+ * trader 系统提示词组装：平台模板 + 账户状态 + 最近决策 + 论点战绩统计 + 复盘笔记 + 学习笔记 + 用户自定义段。
  * 每次唤醒现读现拼——用户改完 customPrompt，下一根 K 线自然生效，热更新零机制。
  * <p>
  * 文本全在 {@link PromptCatalog} 的 {@code trader.*}，按用户的 {@link AgentLang} 取；骨架
@@ -47,6 +47,7 @@ public class TraderPromptAssembler {
     /** 只为留言而来：注入的同一处就得把轮次减掉，见 {@link #consumeOwnerNote} */
     private final AiTraderMapper traderMapper;
     private final PromptCatalog prompts;
+    private final PlayStatsAssembler playStats;
 
     public String assemble(AiTrader trader, String accountStateJson, List<AiTraderDecision> recent, AgentLang lang) {
         StringBuilder sb = new StringBuilder();
@@ -84,6 +85,12 @@ public class TraderPromptAssembler {
                 }
                 sb.append('\n');
             }
+        }
+
+        // 数据档连排：账户状态/最近决策/论点战绩都是本局事实；null=本局无可统计或取数失败，整块缺席
+        String stats = playStats.assemble(trader, lang);
+        if (stats != null) {
+            sb.append('\n').append(stats);
         }
 
         if (trader.getMemory() != null && !trader.getMemory().isBlank()) {

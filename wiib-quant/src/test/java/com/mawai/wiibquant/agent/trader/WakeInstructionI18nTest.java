@@ -44,7 +44,7 @@ class WakeInstructionI18nTest {
     private final BinanceRestClient binance = mock(BinanceRestClient.class);
 
     private final TraderWakeupRunner runner = new TraderWakeupRunner(
-            mock(TraderModelFactory.class), new TraderPromptAssembler(traderMapper, prompts),
+            mock(TraderModelFactory.class), new TraderPromptAssembler(traderMapper, prompts, mock(PlayStatsAssembler.class)),
             mock(SimTradeClient.class), binance,
             new IndicatorToolkit(new KlineFetcher(binance, 60_000)),
             new MarketToolkit(mock(MarketDataService.class)),
@@ -78,7 +78,7 @@ class WakeInstructionI18nTest {
     void 例行开场白的收尾标记与系统提示词同源() {
         for (AgentLang lang : AgentLang.values()) {
             String mark = prompts.get(lang, "trader.mark.conclusion");
-            String template = new TraderPromptAssembler(traderMapper, prompts)
+            String template = new TraderPromptAssembler(traderMapper, prompts, mock(PlayStatsAssembler.class))
                     .platformTemplate(lang, "1h", "BTCUSDT", TraderRiskConfig.of(new AiTrader()), null);
             String opening = runner.routineInstruction(trader(), BOUNDARY, "", lang, false);
 

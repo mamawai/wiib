@@ -84,7 +84,7 @@ class TraderWakeupLoopTest {
     private final PromptCatalog prompts = new PromptCatalog();
 
     private final TraderWakeupRunner runner = new TraderWakeupRunner(
-            modelFactory, new TraderPromptAssembler(traderMapper, prompts),
+            modelFactory, new TraderPromptAssembler(traderMapper, prompts, mock(PlayStatsAssembler.class)),
             simTradeClient, binanceRestClient,
             new IndicatorToolkit(new KlineFetcher(binanceRestClient, 60_000)),
             new MarketToolkit(mock(MarketDataService.class)),

@@ -32,7 +32,10 @@ class TraderPromptAssemblerTest {
     }
 
     private final AiTraderMapper traderMapper = mock(AiTraderMapper.class);
-    private final TraderPromptAssembler assembler = new TraderPromptAssembler(traderMapper, new PromptCatalog());
+    /** 默认（未打桩）返回 null = 本局无统计不注入，既有用例不受影响 */
+    private final PlayStatsAssembler playStats = mock(PlayStatsAssembler.class);
+    private final TraderPromptAssembler assembler =
+            new TraderPromptAssembler(traderMapper, new PromptCatalog(), playStats);
 
     private AiTrader trader() {
         AiTrader t = new AiTrader();
@@ -430,5 +433,32 @@ class TraderPromptAssemblerTest {
         assertThat(prompt)
                 .contains("等待：跌破94000")
                 .doesNotContain("旧的开头行情铺垫");
+    }
+
+    // ---------- 论点战绩统计块 ----------
+
+    /** 统计块归数据档：排在最近决策之后、复盘笔记之前——数据连排，笔记殿后 */
+    @Test
+    void playStatsInjectedBetweenRecentDecisionsAndMemory() {
+        org.mockito.Mockito.when(playStats.assemble(any(), any())).thenReturn("STATS_BLOCK");
+        AiTrader t = trader();
+        t.setMemory("反转单要等确认");
+
+        String prompt = assembler.assemble(t, "{}", List.of(decision("最新决策")), AgentLang.ZH);
+
+        assertThat(prompt).contains("STATS_BLOCK");
+        // "最近决策/复盘笔记"用段标头全文定位：模板正文里也会提到这些词，短词首现位置不可靠
+        assertThat(prompt.indexOf("最近决策（最新在前")).isLessThan(prompt.indexOf("STATS_BLOCK"));
+        assertThat(prompt.indexOf("STATS_BLOCK")).isLessThan(prompt.indexOf("复盘笔记（你过去交易教训"));
+    }
+
+    /** 统计缺席（本局无了结/取数失败）：整块不出现，不留空标头 */
+    @Test
+    void playStatsAbsentWhenNull() {
+        org.mockito.Mockito.when(playStats.assemble(any(), any())).thenReturn(null);
+
+        String prompt = assembler.assemble(trader(), "{}", List.of(), AgentLang.ZH);
+
+        assertThat(prompt).doesNotContain("论点战绩");
     }
 }

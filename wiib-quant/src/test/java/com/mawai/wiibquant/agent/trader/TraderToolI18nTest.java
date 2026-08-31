@@ -46,7 +46,7 @@ class TraderToolI18nTest {
 
     private final TraderWakeupRunner runner = new TraderWakeupRunner(
             mock(TraderModelFactory.class),
-            new TraderPromptAssembler(mock(AiTraderMapper.class), prompts),
+            new TraderPromptAssembler(mock(AiTraderMapper.class), prompts, mock(PlayStatsAssembler.class)),
             mock(SimTradeClient.class), binance,
             new IndicatorToolkit(new KlineFetcher(binance, 60_000)),
             new MarketToolkit(mock(MarketDataService.class)),
