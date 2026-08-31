@@ -910,10 +910,12 @@ CREATE TABLE IF NOT EXISTS ai_trader_plan (
     status          VARCHAR(8) NOT NULL DEFAULT 'LIVE',
     closed_wake_time BIGINT,
     stale           BOOLEAN NOT NULL DEFAULT FALSE,
+    position_id     BIGINT,
     created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 ALTER TABLE ai_trader_plan ADD COLUMN IF NOT EXISTS stale BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE ai_trader_plan ADD COLUMN IF NOT EXISTS position_id BIGINT;
 -- 同键同一时刻至多一份存活计划；归档行不占键——同轮重开/跨轮重开都能再立新计划
 CREATE UNIQUE INDEX IF NOT EXISTS uq_atp_live ON ai_trader_plan (trader_id, round_no, symbol, side)
     WHERE status = 'LIVE';
@@ -925,6 +927,7 @@ COMMENT ON COLUMN ai_trader_plan.revisions_json IS '修订历史追加式JSON [{
 COMMENT ON COLUMN ai_trader_plan.status IS 'LIVE=仓位/挂单存活 CLOSED=已了结归档。归档不删：论点→结局的配对数据是reviewer每日复盘的原料（结局按symbol/side/时间窗join sim已平仓位）';
 COMMENT ON COLUMN ai_trader_plan.closed_wake_time IS '归档时刻(ms)：懒清理发现仓位已了结的唤醒边界/重置时刻，与opened_wake_time围出计划生命期';
 COMMENT ON COLUMN ai_trader_plan.stale IS '主人标记忽略:true=本笔不进论点战绩统计与复盘教材(配对表/了结统计行);权益/排行榜/同侪学习照常。仅CLOSED可标,可随时取消';
+COMMENT ON COLUMN ai_trader_plan.position_id IS 'sim仓位id:市价开仓/加仓从下单响应落盘,限价单成交后唤醒懒清理趟补绑;计划↔仓位配对的精确键,NULL(历史行/未成交挂单)走bestMatch时间就近兜底';
 
 -- ============ ai_trader_request：加仓/减仓待主人确认（allow_self_add/reduce 关闭时才产生） ============
 -- 异步不阻塞：模型调工具即落库返回，本轮唤醒照常收尾；主人在"我的trader"页点同意才市价执行。

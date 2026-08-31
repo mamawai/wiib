@@ -26,6 +26,7 @@ import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.List;
@@ -123,15 +124,7 @@ public class ReviewMaterialAssembler {
         List<AiTraderPlan> plans = planMapper.selectList(new LambdaQueryWrapper<AiTraderPlan>()
                 .eq(AiTraderPlan::getTraderId, trader.getId())
                 .eq(AiTraderPlan::getRoundNo, trader.getRoundNo()));
-        Set<AiTraderPlan> used = new HashSet<>();
-        // 键用对象身份：窗口内配对不依赖仓位 id
-        Map<FuturesPositionDTO, AiTraderPlan> planByPos = new IdentityHashMap<>();
-        for (FuturesPositionDTO pos : closed) {
-            AiTraderPlan plan = bestMatch(plans, pos, used);
-            if (plan != null) {
-                planByPos.put(pos, plan);
-            }
-        }
+        Map<FuturesPositionDTO, AiTraderPlan> planByPos = pairAll(closed, plans);
         // 主人标记忽略的交易从复盘教材整体消失（配对表 + 战绩表的了结统计行）；权益线来自决策行序列，不动
         List<FuturesPositionDTO> visible = closed.stream()
                 .filter(p -> !isStale(planByPos.get(p)))
@@ -274,9 +267,47 @@ public class ReviewMaterialAssembler {
     }
 
     /**
+     * 统一配对入口：已平仓位 ⟵配对⟶ 本局计划，两趟——先按 position_id 精确 join（开仓即落 id 的
+     * 新数据），剩余未绑定的仓位按平仓时刻升序跑 {@link #bestMatch} 时间就近兜底（无 id 的历史行）。
+     * 复盘/竞技场/统计/同侪四处共用这一个入口：各配各的、喂入顺序不同（复盘升序、竞技场倒序），
+     * 贪心就近对顺序敏感，同一笔交易会在两处配到不同计划。
+     * <p>
+     * 兜底池只放无 id 的计划：带 id 的计划要么已在精确趟配走，要么它的仓位不在本批——
+     * 拿它配别的仓位就是明知故犯的错配。键用对象身份，不依赖仓位 id 非空。
+     */
+    public static Map<FuturesPositionDTO, AiTraderPlan> pairAll(List<FuturesPositionDTO> positions,
+                                                                List<AiTraderPlan> plans) {
+        Map<FuturesPositionDTO, AiTraderPlan> out = new IdentityHashMap<>();
+        Map<Long, AiTraderPlan> byPosId = new HashMap<>();
+        plans.forEach(p -> {
+            if (p.getPositionId() != null) {
+                byPosId.putIfAbsent(p.getPositionId(), p);
+            }
+        });
+        List<FuturesPositionDTO> unbound = new ArrayList<>();
+        for (FuturesPositionDTO pos : positions) {
+            AiTraderPlan hit = pos.getId() == null ? null : byPosId.get(pos.getId());
+            if (hit != null) {
+                out.put(pos, hit);
+            } else {
+                unbound.add(pos);
+            }
+        }
+        List<AiTraderPlan> unboundPlans = plans.stream().filter(p -> p.getPositionId() == null).toList();
+        unbound.sort(Comparator.comparingLong(p -> msOf(p.getUpdatedAt())));
+        Set<AiTraderPlan> used = new HashSet<>();
+        for (FuturesPositionDTO pos : unbound) {
+            AiTraderPlan plan = bestMatch(unboundPlans, pos, used);
+            if (plan != null) {
+                out.put(pos, plan);
+            }
+        }
+        return out;
+    }
+
+    /**
      * 同 symbol/side 里选开仓时刻最贴近该仓位开仓时间的计划（懒归档时刻粗糙，openedWakeTime 才可靠）。
-     * 对同侪学习（PeerInsightService）与竞技场（TradeRecordService）开放：论点→结局的配对三处必须同一套算法，
-     * 各配一套就会自相矛盾。
+     * 兜底算法：新数据的精确配对与喂入顺序统一都在 {@link #pairAll}，消费端一律走那个入口。
      */
     public static AiTraderPlan bestMatch(List<AiTraderPlan> plans, FuturesPositionDTO pos, Set<AiTraderPlan> used) {
         long posOpen = msOf(pos.getCreatedAt());

@@ -139,6 +139,40 @@ class PlayStatsAssemblerTest {
         assertThat(out).contains("PULLBACK：5笔 4胜1负 盈亏合计+100.50 USDT");
     }
 
+    /**
+     * 精确趟归位：绑了 position_id 的计划不受时间就近摆布——亏单的 -100 必须挂在
+     * 自己的 REVERSAL 名下，不许把贴着它开仓时刻的 PULLBACK 顶下水。
+     */
+    @Test
+    void positionIdJoinKeepsPnlUnderRightPlay() {
+        List<FuturesPositionDTO> positions = new ArrayList<>();
+        List<AiTraderPlan> plans = new ArrayList<>();
+        // 5 笔 PULLBACK 各 +10，id 绑定
+        for (int i = 0; i < 5; i++) {
+            long open = T0 + i * 7200_000L;
+            FuturesPositionDTO p = pos("10", open);
+            p.setId((long) (i + 1));
+            positions.add(p);
+            AiTraderPlan pl = plan("PULLBACK", open, false);
+            pl.setPositionId((long) (i + 1));
+            plans.add(pl);
+        }
+        // 亏 -100 的 REVERSAL：开仓时刻故意造得跟第一笔 PULLBACK 一样近，仅靠 id 区分
+        FuturesPositionDTO loser = pos("-100", T0);
+        loser.setId(6L);
+        positions.add(loser);
+        AiTraderPlan reversal = plan("REVERSAL", T0, false);
+        reversal.setPositionId(6L);
+        plans.add(reversal);
+        when(simTradeClient.getClosedPositions(eq(99L), anyInt())).thenReturn(positions);
+        when(planMapper.selectList(any())).thenReturn(plans);
+
+        String out = assembler.assemble(trader(), AgentLang.ZH);
+
+        assertThat(out).contains("PULLBACK：5笔 5胜0负 盈亏合计+50.00 USDT");
+        assertThat(out).contains("REVERSAL：1笔");
+    }
+
     /** 无已平仓位 / 全配不上计划 → null，不注入 */
     @Test
     void returnsNullWhenNoPairedTrades() {

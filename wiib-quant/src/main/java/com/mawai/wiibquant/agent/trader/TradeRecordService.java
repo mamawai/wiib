@@ -19,7 +19,6 @@ import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -61,24 +60,17 @@ public class TradeRecordService {
         if (closed.isEmpty()) {
             return List.of();
         }
-        // 全量拉本局计划在内存配对（与复盘同口径：一局的计划量有限）
+        // 全量拉本局计划在内存配对（与复盘同口径：一局的计划量有限），配对走 pairAll 统一入口
         List<AiTraderPlan> plans = planMapper.selectList(new LambdaQueryWrapper<AiTraderPlan>()
                 .eq(AiTraderPlan::getTraderId, t.getId())
                 .eq(AiTraderPlan::getRoundNo, t.getRoundNo()));
-        Set<AiTraderPlan> used = new HashSet<>();
-        Map<Long, AiTraderPlan> planByPos = new HashMap<>();
-        for (FuturesPositionDTO pos : closed) {
-            AiTraderPlan plan = ReviewMaterialAssembler.bestMatch(plans, pos, used);
-            if (plan != null) {
-                planByPos.put(pos.getId(), plan);
-            }
-        }
+        Map<FuturesPositionDTO, AiTraderPlan> planByPos = ReviewMaterialAssembler.pairAll(closed, plans);
         Map<Long, AiTraderDecision> openByWake = openDecisions(t, planByPos.values());
         Map<Long, DecisionRef> closeByPos = closeDecisions(t, closed);
 
         List<TradeRecord> out = new ArrayList<>(closed.size());
         for (FuturesPositionDTO pos : closed) {
-            AiTraderPlan plan = planByPos.get(pos.getId());
+            AiTraderPlan plan = planByPos.get(pos);
             AiTraderDecision open = plan == null ? null : openByWake.get(plan.getOpenedWakeTime());
             // 下发语言无关的码，文案由前端查自己的词表：这张卡是给人看的界面元素，
             // 该跟界面语言走；服务端渲染成某一门语言存下来，切了语言就翻不回去了

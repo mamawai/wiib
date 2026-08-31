@@ -16,15 +16,13 @@ import org.springframework.stereotype.Component;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 /**
  * 本局论点战绩统计（纯代码，可单测）：sim 已平仓位 ⟵配对⟶ 本局计划，按论点标签聚合成
- * 每次唤醒注入的统计块。配对复用 {@link ReviewMaterialAssembler#bestMatch}——复盘/同侪/竞技场/统计
+ * 每次唤醒注入的统计块。配对复用 {@link ReviewMaterialAssembler#pairAll}——复盘/同侪/竞技场/统计
  * 四处必须同一套算法。事实裁定归代码，模型只许引用不许自算，与复盘战绩表同一条纪律。
  * <p>
  * stale 过滤在<b>配对之后</b>：被忽略的计划仍参与配对占位，先滤后配会让它的仓位
@@ -58,12 +56,12 @@ public class PlayStatsAssembler {
             List<AiTraderPlan> plans = planMapper.selectList(new LambdaQueryWrapper<AiTraderPlan>()
                     .eq(AiTraderPlan::getTraderId, t.getId())
                     .eq(AiTraderPlan::getRoundNo, t.getRoundNo()));
-            // sim 按 updatedAt 倒序返回，顺序遍历即最近优先
-            Set<AiTraderPlan> used = new HashSet<>();
+            // 配对走 pairAll 统一入口；sim 按 updatedAt 倒序返回，顺序遍历即最近优先
+            Map<FuturesPositionDTO, AiTraderPlan> planByPos = ReviewMaterialAssembler.pairAll(closed, plans);
             Map<String, List<BigDecimal>> byPlay = new LinkedHashMap<>();
             int taken = 0;
             for (FuturesPositionDTO pos : closed) {
-                AiTraderPlan plan = ReviewMaterialAssembler.bestMatch(plans, pos, used);
+                AiTraderPlan plan = planByPos.get(pos);
                 if (plan == null || plan.getPlayType() == null || pos.getClosedPnl() == null) {
                     continue;
                 }

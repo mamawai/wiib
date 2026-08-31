@@ -13,12 +13,14 @@ import org.springframework.stereotype.Component;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
  * 交易计划存取（存活键：trader+round+symbol+side，DB 部分唯一索引只约束 LIVE）。
  * 计划了结一律归档不删——"当初的论点/失效条件"与"实际结局"的配对是 reviewer
- * 每日复盘的原料（ReviewMaterialAssembler 按 symbol/side/时间窗 join sim 已平仓位配对）。
+ * 每日复盘的原料（ReviewMaterialAssembler.pairAll：position_id 精确 join，
+ * 无 id 历史行按 symbol/side/时间就近兜底）。
  * 单 trader 的唤醒是串行的（调度层抢占互斥），select-then-write 无并发问题。
  */
 @Slf4j
@@ -75,6 +77,10 @@ public class TraderPlanStore {
         plan.setId(old.getId());
         plan.setOpenedWakeTime(old.getOpenedWakeTime());
         plan.setRevisionsJson(old.getRevisionsJson());
+        // sim 并仓 id 不变：市价加仓响应带的就是同一仓 id；限价加仓挂单响应无 id，保留旧值
+        if (plan.getPositionId() == null) {
+            plan.setPositionId(old.getPositionId());
+        }
         appendRevision(plan, revisedAt, "加仓",
                 "旧论点[" + old.getPlayType() + " / " + old.getInvalidationCondition() + "]被新论点覆盖",
                 plan.getSignalsUsed());
@@ -96,13 +102,24 @@ public class TraderPlanStore {
     }
 
     /**
-     * 懒清理：计划的 (symbol|side) 既无持仓也无挂单 → 止损/止盈/主动平/撤单殊途同归，
+     * 懒清理 + 补绑：计划的 (symbol|side) 既无持仓也无挂单 → 止损/止盈/主动平/撤单殊途同归，
      * 计划完成使命，归档带上了结时刻。返回仍存活的计划（清理与查询一次唤醒只跑一趟）。
+     * <p>
+     * 补绑：LIVE 计划无 positionId（限价挂单成交前响应里没有）且同键有在场仓位 → 盖仓位 id。
+     * liveKeys 含挂单键（挂单保活的计划没有仓位可绑），所以映射单独传；同键至多一仓，无歧义。
      */
-    public List<AiTraderPlan> cleanupStale(long traderId, int roundNo, Set<String> liveKeys, long boundaryTime) {
+    public List<AiTraderPlan> cleanupStale(long traderId, int roundNo, Set<String> liveKeys,
+                                           Map<String, Long> positionIdByKey, long boundaryTime) {
         List<AiTraderPlan> plans = list(traderId, roundNo);
         return plans.stream().filter(p -> {
             if (liveKeys.contains(key(p.getSymbol(), p.getSide()))) {
+                Long posId = positionIdByKey.get(key(p.getSymbol(), p.getSide()));
+                if (p.getPositionId() == null && posId != null) {
+                    p.setPositionId(posId);
+                    mapper.updateById(p);
+                    log.info("[TraderPlan] 限价成交补绑仓位id traderId={} {} {} positionId={}",
+                            traderId, p.getSymbol(), p.getSide(), posId);
+                }
                 return true;
             }
             archive(p, boundaryTime);

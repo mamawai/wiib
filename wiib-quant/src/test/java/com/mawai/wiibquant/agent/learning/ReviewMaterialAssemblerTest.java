@@ -239,6 +239,60 @@ class ReviewMaterialAssemblerTest {
         assertThat(m.tradesBlock()).contains("ETHUSDT").contains("RANGE").contains("未配对");
     }
 
+    // ==================== pairAll 统一配对 ====================
+
+    /** 精确趟：position_id 说了算，时间就近想反着配也翻不了案——配对漂移的根治 */
+    @Test
+    void pairAllPrefersPositionIdOverTimeProximity() {
+        FuturesPositionDTO pos1 = closedPos("LONG", "100000", "101000", "10", FROM + 3600_000, FROM + 7200_000);
+        pos1.setId(101L);
+        FuturesPositionDTO pos2 = closedPos("LONG", "100000", "99000", "-10", FROM + 10800_000, FROM + 14400_000);
+        pos2.setId(102L);
+        // planA 绑 pos1，但开仓时刻造得离 pos2 更近（反之亦然）：贪心时间就近会交叉错配
+        AiTraderPlan planA = planOf("BTCUSDT", "BREAKOUT", FROM + 10800_000, false);
+        planA.setPositionId(101L);
+        AiTraderPlan planB = planOf("BTCUSDT", "PULLBACK", FROM + 3600_000, false);
+        planB.setPositionId(102L);
+
+        var paired = ReviewMaterialAssembler.pairAll(List.of(pos1, pos2), List.of(planA, planB));
+
+        assertThat(paired.get(pos1)).isSameAs(planA);
+        assertThat(paired.get(pos2)).isSameAs(planB);
+    }
+
+    /**
+     * 兜底趟喂入顺序无关：三个消费端喂入顺序不同（复盘升序/竞技场倒序）曾让同一笔交易
+     * 配到不同计划——统一按平仓时刻升序后，怎么喂结果都一样。
+     */
+    @Test
+    void pairAllFallbackIsFeedOrderIndependent() {
+        FuturesPositionDTO early = closedPos("LONG", "100000", "101000", "10", FROM + 3600_000, FROM + 10800_000);
+        FuturesPositionDTO late = closedPos("LONG", "100000", "99000", "-10", FROM + 7200_000, FROM + 14400_000);
+        // 单个无 id 计划：谁先配谁得手，喂入顺序就是结果——统一顺序后必须永远归 early
+        AiTraderPlan plan = planOf("BTCUSDT", "BREAKOUT", FROM + 7200_000, false);
+
+        var ascFeed = ReviewMaterialAssembler.pairAll(List.of(early, late), List.of(plan));
+        var descFeed = ReviewMaterialAssembler.pairAll(List.of(late, early), List.of(plan));
+
+        assertThat(ascFeed.get(early)).isSameAs(plan);
+        assertThat(ascFeed.get(late)).isNull();
+        assertThat(descFeed.get(early)).isSameAs(plan);
+        assertThat(descFeed.get(late)).isNull();
+    }
+
+    /** 已绑别的仓位的计划不许被兜底趟借走：它的仓位只是不在本批，拿去配别人就是明知故犯 */
+    @Test
+    void pairAllNeverLendsBoundPlanToOtherPosition() {
+        FuturesPositionDTO pos = closedPos("LONG", "100000", "101000", "10", FROM + 3600_000, FROM + 7200_000);
+        pos.setId(101L);
+        AiTraderPlan boundElsewhere = planOf("BTCUSDT", "BREAKOUT", FROM + 3600_000, false);
+        boundElsewhere.setPositionId(999L);
+
+        var paired = ReviewMaterialAssembler.pairAll(List.of(pos), List.of(boundElsewhere));
+
+        assertThat(paired.get(pos)).isNull();
+    }
+
     // ==================== stale：主人标记忽略的交易从教材消失 ====================
 
     private static AiTraderPlan planOf(String symbol, String playType, long openedWakeTime, boolean stale) {

@@ -187,6 +187,33 @@ class TradeRecordServiceTest {
         assertThat(r.closeDecision().reason()).isEqualTo("失效条件触发");
     }
 
+    /** 配对走 pairAll 精确趟：position_id 绑定说了算，时间就近想交叉错配也不行 */
+    @Test
+    void positionIdJoinBeatsTimeProximity() {
+        FuturesPositionDTO pos1 = closedLong(1L, "108");
+        FuturesPositionDTO pos2 = closedLong(2L, "94");
+        pos2.setCreatedAt(at(OPEN_MS + 600_000L));
+        pos2.setUpdatedAt(at(CLOSE_MS + 600_000L));
+        when(sim.getClosedPositions(99L, TradeRecordService.LIMIT)).thenReturn(List.of(pos1, pos2));
+        // planX 绑 pos2 但开仓时刻贴着 pos1（反之亦然）：贪心时间就近会交叉错配
+        AiTraderPlan planX = plan(OPEN_MS);
+        planX.setId(11L);
+        planX.setSignalsUsed("论点X");
+        planX.setPositionId(2L);
+        AiTraderPlan planY = plan(OPEN_MS + 600_000L);
+        planY.setId(12L);
+        planY.setSignalsUsed("论点Y");
+        planY.setPositionId(1L);
+        when(planMapper.selectList(any())).thenReturn(List.of(planX, planY));
+
+        List<TradeRecordService.TradeRecord> out = service.closedTrades(trader());
+
+        assertThat(out).hasSize(2);
+        assertThat(out.get(0).positionId()).isEqualTo(1L);
+        assertThat(out.get(0).plan().getSignalsUsed()).isEqualTo("论点Y");
+        assertThat(out.get(1).plan().getSignalsUsed()).isEqualTo("论点X");
+    }
+
     /** 无计划记录：plan/openDecision 为 null，记录本身仍在；开仓决策不查库 */
     @Test
     void noPlanStillListsTradeWithoutOpenDecision() {

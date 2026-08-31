@@ -268,16 +268,22 @@ public class TraderWakeupRunner {
                 .orderByDesc(AiTraderDecision::getWakeTime)
                 .last("LIMIT " + RECENT_DECISIONS));
 
-        // 计划懒清理 + 加载：仓位/挂单还活着的计划保留，已了结（止损/止盈/平仓/撤单）的归档；存活计划随持仓/挂单回注
+        // 计划懒清理 + 补绑 + 加载：仓位/挂单还活着的计划保留，已了结（止损/止盈/平仓/撤单）的归档；
+        // 在场仓位 id 顺路传入——限价单成交后计划还挂着 null positionId，这一趟补绑
         List<FuturesOrderResponse> pendingOrders = simTradeClient.getPendingOrders(trader.getSimUserId(), null);
         Set<String> liveKeys = new HashSet<>();
-        positions.forEach(p -> liveKeys.add(TraderPlanStore.key(p.getSymbol(), p.getSide())));
+        Map<String, Long> positionIdByKey = new HashMap<>();
+        positions.forEach(p -> {
+            liveKeys.add(TraderPlanStore.key(p.getSymbol(), p.getSide()));
+            positionIdByKey.put(TraderPlanStore.key(p.getSymbol(), p.getSide()), p.getId());
+        });
         for (FuturesOrderResponse o : pendingOrders) {
             if (o.getOrderSide() != null && o.getOrderSide().startsWith("OPEN_")) {
                 liveKeys.add(TraderPlanStore.key(o.getSymbol(), o.getOrderSide().substring("OPEN_".length())));
             }
         }
-        List<AiTraderPlan> plans = planStore.cleanupStale(trader.getId(), trader.getRoundNo(), liveKeys, boundaryTime);
+        List<AiTraderPlan> plans = planStore.cleanupStale(trader.getId(), trader.getRoundNo(),
+                liveKeys, positionIdByKey, boundaryTime);
 
         List<AiTraderRequest> decided = requestService.decidedUnnotified(trader.getId(), trader.getRoundNo());
         // assemble 会立刻消费留言（最后一轮还会把内存里的正文清掉），开场白要不要加指针必须先记下

@@ -18,10 +18,8 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 /**
  * 同侪只读查询（learning agent 的眼睛）：排行榜快照 + 单 trader 深看详情，两个方法都返回拼好的文本块。
@@ -162,10 +160,11 @@ public class PeerInsightService {
         if (recent.isEmpty()) {
             sb.append(prompts.get(lang, "learning.label.peer.noRecentTrades")).append('\n');
         }
-        Set<AiTraderPlan> used = new HashSet<>();
+        // 配对走 pairAll 统一入口：同一笔交易在同侪详情与复盘/竞技场里必须配到同一份计划
+        Map<FuturesPositionDTO, AiTraderPlan> planByPos = ReviewMaterialAssembler.pairAll(recent, plans);
         int i = 1;
         for (FuturesPositionDTO pos : recent) {
-            AiTraderPlan plan = ReviewMaterialAssembler.bestMatch(plans, pos, used);
+            AiTraderPlan plan = planByPos.get(pos);
             sb.append(i++).append(". ").append(pos.getSymbol()).append(' ').append(pos.getSide());
             if (plan != null && plan.getPlayType() != null) {
                 sb.append(" [").append(plan.getPlayType()).append(']');

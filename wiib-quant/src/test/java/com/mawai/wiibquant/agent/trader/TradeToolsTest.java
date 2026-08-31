@@ -309,6 +309,25 @@ class TradeToolsTest {
         assertThat(p.getStopLossPrice()).isEqualByComparingTo("95000");
         assertThat(p.getInvalidationCondition()).contains("94000");
         assertThat(p.getRevisionsJson()).contains("补立");
+        // 补立同样绑仓位：id 已经 findPosition 对 sim 校验过
+        assertThat(p.getPositionId()).isEqualTo(5L);
+    }
+
+    /** 市价开仓响应即带仓位 id，计划落库时直接绑定——配对从"事后算"变成"当场存"的源头 */
+    @Test
+    void marketOpenPersistsPositionIdFromResponse() {
+        FuturesOrderResponse resp = new FuturesOrderResponse();
+        resp.setOrderId(888L);
+        resp.setPositionId(42L);
+        when(simTradeClient.openPosition(eq(99L), any())).thenReturn(resp);
+        when(planMapper.selectOne(any())).thenReturn(null);
+
+        String r = openOnce(tools);
+
+        assertThat(r).contains("888");
+        ArgumentCaptor<AiTraderPlan> cap = ArgumentCaptor.forClass(AiTraderPlan.class);
+        verify(planMapper).insert(cap.capture());
+        assertThat(cap.getValue().getPositionId()).isEqualTo(42L);
     }
 
     // ---------- 下单结果未知：幂等键 + 同键重发 ----------
@@ -486,16 +505,19 @@ class TradeToolsTest {
         verify(simTradeClient, never()).openPosition(anyLong(), any());
     }
 
-    /** 加仓覆盖：旧论点进修订历史（含理由），持有时长按最初开仓算 */
+    /** 加仓覆盖：旧论点进修订历史（含理由），持有时长按最初开仓算；sim 并仓 id 不变，绑定跟着保留 */
     @Test
     void upsertExistingPlanKeepsOldThesisAsRevision() {
         AiTraderPlan old = existingPlan();
+        old.setPositionId(42L);
         when(planMapper.selectOne(any())).thenReturn(old);
         AiTraderPlan neu = existingPlan();
         neu.setId(null);
         neu.setSignalsUsed("回踩确认支撑，加仓");
         neu.setInvalidationCondition("4h收盘跌破97000");
         neu.setOpenedWakeTime(1785171600000L);
+        // 限价加仓挂单响应不带仓位 id：覆盖不能把已有绑定抹掉
+        neu.setPositionId(null);
 
         new TraderPlanStore(planMapper).upsert(neu, true);
 
@@ -505,6 +527,7 @@ class TradeToolsTest {
         assertThat(p.getInvalidationCondition()).isEqualTo("4h收盘跌破97000");
         assertThat(p.getRevisionsJson()).contains("加仓").contains("1h收盘跌回98000下方");
         assertThat(p.getOpenedWakeTime()).isEqualTo(1785168000000L);
+        assertThat(p.getPositionId()).isEqualTo(42L);
     }
 
     /** 同轮内平掉再开同向仓＝重开不是加仓：旧计划归档留档、仓龄从新仓起算、修订史不继承（仓龄诚实） */

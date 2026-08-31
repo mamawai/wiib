@@ -72,6 +72,12 @@ public class AiTraderPlan {
     /** 主人标记忽略：true=不进论点战绩统计与复盘教材；权益/排行榜/同侪视角照常。仅 CLOSED 可标，可逆 */
     private Boolean stale;
 
+    /**
+     * sim 仓位 id：市价开仓/加仓从下单响应落盘，限价单成交后由唤醒懒清理趟补绑。
+     * 计划↔仓位配对的精确键；NULL（历史行/未成交挂单）配对走 bestMatch 时间就近兜底。
+     */
+    private Long positionId;
+
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdAt;
 

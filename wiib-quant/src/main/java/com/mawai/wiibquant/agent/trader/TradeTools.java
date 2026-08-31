@@ -222,7 +222,7 @@ public class TradeTools {
                 openReq.setTakeProfits(List.of(tp));
             }
             FuturesOrderResponse resp = SimOrderRetry.send(() -> simTradeClient.openPosition(simUserId, openReq));
-            persistPlan(req, mark, sameSide != null);
+            persistPlan(req, mark, sameSide != null, resp);
             return ok("open_position", argSummary, JSON.toJSONString(resp));
         } catch (SimOrderRetry.UnknownOutcome e) {
             return unknown("open_position", argSummary, e);
@@ -232,7 +232,7 @@ public class TradeTools {
     }
 
     /** 成交/挂单即落计划（下轮唤醒回注）；写失败只记日志不回错——交易已真实发生，回错误会诱导模型重复开仓。 */
-    private void persistPlan(TradeGuard.OpenReq req, BigDecimal mark, boolean isAddOn) {
+    private void persistPlan(TradeGuard.OpenReq req, BigDecimal mark, boolean isAddOn, FuturesOrderResponse resp) {
         try {
             AiTraderPlan plan = new AiTraderPlan();
             plan.setTraderId(ctx.traderId());
@@ -246,6 +246,8 @@ public class TradeTools {
             plan.setStopLossPrice(req.stopLossPrice());
             plan.setTakeProfitPrice(req.takeProfitPrice());
             plan.setOpenedWakeTime(ctx.boundaryTime());
+            // 市价单/市价加仓响应即带仓位id；限价挂单为null，成交后唤醒懒清理趟补绑
+            plan.setPositionId(resp.getPositionId());
             planStore.upsert(plan, isAddOn);
         } catch (Exception e) {
             log.warn("[TradeTools] 计划落库失败 traderId={} {} msg={}", ctx.traderId(), req.symbol(), e.getMessage());
@@ -473,6 +475,8 @@ public class TradeTools {
             plan.setStopLossPrice(TradeGuard.extremePrice(pos.getStopLosses() == null ? List.of()
                     : pos.getStopLosses().stream().map(FuturesStopLoss::getPrice).toList(), isLong));
             plan.setTakeProfitPrice(targetPrice == null ? null : BigDecimal.valueOf(targetPrice));
+            // 补立也盖仓位id：入参已经 findPosition 对 sim 校验过，不是模型凭空抄的
+            plan.setPositionId(pos.getId());
             // 持有时长按仓位真实开仓时间算，不是补立时刻——补立不能"清零仓龄"
             plan.setOpenedWakeTime(pos.getCreatedAt() != null
                     ? pos.getCreatedAt().atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
