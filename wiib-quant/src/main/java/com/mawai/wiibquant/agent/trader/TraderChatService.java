@@ -10,6 +10,7 @@ import com.mawai.wiibcommon.entity.AiTraderPlan;
 import com.mawai.wiibcommon.entity.FuturesStopLoss;
 import com.mawai.wiibcommon.entity.FuturesTakeProfit;
 import com.mawai.wiibcommon.entity.UserLlmEndpoint;
+import com.mawai.wiibquant.agent.learning.ReviewMaterialAssembler;
 import com.mawai.wiibquant.external.sim.SimTradeClient;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -39,11 +40,15 @@ public class TraderChatService {
     static final int MAX_DECISIONS = 20;
     static final int DEFAULT_DECISIONS = 5;
     private static final int RECENT_CLOSED_PLANS = 5;
+    private static final List<String> TRADE_KINDS =
+            List.of(AiTraderDecision.KIND_TRADE, AiTraderDecision.KIND_ALERT, AiTraderDecision.KIND_MANUAL);
 
     private final TraderService traderService;
     private final TraderModelFactory modelFactory;
     private final TraderPlanStore planStore;
     private final SimTradeClient simTradeClient;
+    /** stale 教材过滤的共用入口（与复盘时间线/唤醒回注同一套识别逻辑） */
+    private final ReviewMaterialAssembler materialAssembler;
 
     // ===== 查询（纯读库） =====
 
@@ -126,8 +131,17 @@ public class TraderChatService {
             return noTrader();
         }
         int n = limit == null ? DEFAULT_DECISIONS : Math.clamp(limit, 1, MAX_DECISIONS);
+        // stale 教材过滤（口径3：chat 跟随忽略）：新格式剔段、旧格式整轮剔，与复盘时间线同一套识别
+        List<AiTraderPlan> allPlans = planStore.listAll(t.getId(), t.getRoundNo());
         JSONArray arr = new JSONArray();
         for (AiTraderDecision d : traderService.decisions(t.getId(), n, null, null, null, null)) {
+            String reasoning = d.getReasoning();
+            if (TRADE_KINDS.contains(d.getKind())) {
+                reasoning = materialAssembler.staleFiltered(d, allPlans);
+                if (reasoning == null) {
+                    continue;
+                }
+            }
             arr.add(new JSONObject()
                     .fluentPut("time", TIME_FMT.format(Instant.ofEpochMilli(d.getWakeTime())))
                     .fluentPut("wakeTime", d.getWakeTime())
@@ -137,7 +151,7 @@ public class TraderChatService {
                     .fluentPut("toolCalls", d.getToolCalls())
                     .fluentPut("error", d.getError())
                     .fluentPut("tools", toolNames(d.getActionsJson()))
-                    .fluentPut("reasoning", d.getReasoning()));
+                    .fluentPut("reasoning", reasoning));
         }
         return new JSONObject()
                 .fluentPut("hasTrader", true)
@@ -156,7 +170,9 @@ public class TraderChatService {
         JSONArray live = new JSONArray();
         planStore.list(t.getId(), t.getRoundNo()).forEach(p -> live.add(planJson(p)));
         JSONArray closed = new JSONArray();
-        planStore.recentClosed(t.getId(), t.getRoundNo(), RECENT_CLOSED_PLANS)
+        // 主人标记忽略的不进对话教材（口径3），滤掉后可能不足 N 条——诚实缺席好过顶替
+        planStore.recentClosed(t.getId(), t.getRoundNo(), RECENT_CLOSED_PLANS).stream()
+                .filter(p -> !Boolean.TRUE.equals(p.getStale()))
                 .forEach(p -> closed.add(planJson(p)));
         return new JSONObject()
                 .fluentPut("hasTrader", true)

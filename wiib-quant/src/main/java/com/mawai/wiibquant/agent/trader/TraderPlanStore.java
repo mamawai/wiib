@@ -93,6 +93,13 @@ public class TraderPlanStore {
         mapper.updateById(plan);
     }
 
+    /** 本局全部计划（含归档）：stale 教材过滤按计划生命期与仓位绑定识别，要看全量。 */
+    public List<AiTraderPlan> listAll(long traderId, int roundNo) {
+        return mapper.selectList(new LambdaQueryWrapper<AiTraderPlan>()
+                .eq(AiTraderPlan::getTraderId, traderId)
+                .eq(AiTraderPlan::getRoundNo, roundNo));
+    }
+
     /** 本局存活计划。 */
     public List<AiTraderPlan> list(long traderId, int roundNo) {
         return mapper.selectList(new LambdaQueryWrapper<AiTraderPlan>()

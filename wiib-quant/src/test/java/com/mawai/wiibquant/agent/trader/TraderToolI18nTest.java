@@ -55,7 +55,8 @@ class TraderToolI18nTest {
             new TraderPlanStore(mock(AiTraderPlanMapper.class)),
             mock(TraderRequestService.class), mock(UserLangResolver.class), prompts,
             new MessageCatalog(),
-            new LocalizedToolCallbacks(prompts));
+            new LocalizedToolCallbacks(prompts),
+            mock(com.mawai.wiibquant.agent.learning.ReviewMaterialAssembler.class));
 
     /** 只做反射扫描的壳：工具方法一个都不会被调起来，依赖给 null 即可 */
     private final TradeTools tradeTools = new TradeTools(

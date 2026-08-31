@@ -1,16 +1,28 @@
 package com.mawai.wiibquant.agent.trader;
 
 import com.alibaba.fastjson2.JSON;
+import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
 import com.mawai.wiibcommon.entity.AiTrader;
+import com.mawai.wiibcommon.entity.AiTraderDecision;
+import com.mawai.wiibcommon.entity.AiTraderPlan;
+import com.mawai.wiibcommon.market.KlineHistoryStore;
+import com.mawai.wiibquant.agent.i18n.PromptCatalog;
+import com.mawai.wiibquant.agent.learning.ReviewMaterialAssembler;
 import com.mawai.wiibquant.external.sim.SimTradeClient;
+import com.mawai.wiibquant.mapper.AiTraderDecisionMapper;
+import com.mawai.wiibquant.mapper.AiTraderPlanMapper;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.math.BigDecimal;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -29,9 +41,13 @@ class TraderChatServiceTest {
     private final TraderPlanStore planStore = mock(TraderPlanStore.class);
     private final SimTradeClient simTradeClient = mock(SimTradeClient.class);
     private final TraderModelFactory modelFactory = mock(TraderModelFactory.class);
+    /** stale 过滤走真实实现：chat 面的剔段/剔轮断言要打在真逻辑上 */
+    private final ReviewMaterialAssembler assembler = new ReviewMaterialAssembler(
+            mock(AiTraderDecisionMapper.class), mock(AiTraderPlanMapper.class),
+            simTradeClient, mock(KlineHistoryStore.class), new PromptCatalog());
 
     private final TraderChatService service =
-            new TraderChatService(traderService, modelFactory, planStore, simTradeClient);
+            new TraderChatService(traderService, modelFactory, planStore, simTradeClient, assembler);
 
     private AiTrader running() {
         AiTrader t = new AiTrader();
@@ -78,5 +94,67 @@ class TraderChatServiceTest {
             case "decisions" -> service.decisions(userId, null);
             default -> service.plans(userId);
         };
+    }
+
+    // ==================== stale：忽略的交易从 chat 教材消失（口径3：chat 跟随忽略） ====================
+
+    private static AiTraderDecision decision(long wakeTime, String reasoning, String actionsJson) {
+        AiTraderDecision d = new AiTraderDecision();
+        d.setWakeTime(wakeTime);
+        d.setKind(AiTraderDecision.KIND_TRADE);
+        d.setStatus(AiTraderDecision.STATUS_OK);
+        d.setReasoning(reasoning);
+        d.setActionsJson(actionsJson);
+        return d;
+    }
+
+    /** decisions：新格式剔 stale 分段、旧格式命中轮整行剔——与复盘时间线同一套识别逻辑 */
+    @Test
+    void decisions剔stale分段与旧格式整轮() {
+        when(traderService.mine(ME)).thenReturn(running());
+        AiTraderPlan stale = new AiTraderPlan();
+        stale.setSymbol("BTCUSDT");
+        stale.setSide("LONG");
+        stale.setStatus(AiTraderPlan.STATUS_CLOSED);
+        stale.setStale(true);
+        stale.setOpenedWakeTime(1000L);
+        stale.setClosedWakeTime(5000L);
+        stale.setPositionId(42L);
+        when(planStore.listAll(7L, 1)).thenReturn(List.of(stale));
+        AiTraderDecision segmented = decision(2000L,
+                "【本轮结论】\n[BTCUSDT]\n动作：HOLD\n等待：回踩再看\n[ETHUSDT]\n动作：HOLD\n等待：跌破 1888 转空", "[]");
+        AiTraderDecision legacyClose = decision(9000L, "【本轮结论】\n动作：平仓\n等待：无",
+                "[{\"tool\":\"close_position\",\"args\":{\"positionId\":42},\"status\":\"ok\"}]");
+        when(traderService.decisions(eq(7L), anyInt(), any(), any(), any(), any()))
+                .thenReturn(List.of(segmented, legacyClose));
+
+        JSONArray out = parse(service.decisions(ME, null)).getJSONArray("decisions");
+
+        assertThat(out).hasSize(1);
+        String reasoning = out.getJSONObject(0).getString("reasoning");
+        assertThat(reasoning).doesNotContain("BTCUSDT").contains("[ETHUSDT]").contains("跌破 1888");
+    }
+
+    /** plans：recentClosedPlans 滤 stale，宁缺不顶替 */
+    @Test
+    void plans滤掉stale的最近归档计划() {
+        when(traderService.mine(ME)).thenReturn(running());
+        AiTraderPlan ignored = new AiTraderPlan();
+        ignored.setSymbol("BTCUSDT");
+        ignored.setSide("LONG");
+        ignored.setStatus(AiTraderPlan.STATUS_CLOSED);
+        ignored.setStale(true);
+        ignored.setOpenedWakeTime(1000L);
+        AiTraderPlan kept = new AiTraderPlan();
+        kept.setSymbol("ETHUSDT");
+        kept.setSide("SHORT");
+        kept.setStatus(AiTraderPlan.STATUS_CLOSED);
+        kept.setOpenedWakeTime(2000L);
+        when(planStore.recentClosed(7L, 1, 5)).thenReturn(List.of(ignored, kept));
+
+        JSONArray closed = parse(service.plans(ME)).getJSONArray("recentClosedPlans");
+
+        assertThat(closed).hasSize(1);
+        assertThat(closed.getJSONObject(0).getString("symbol")).isEqualTo("ETHUSDT");
     }
 }

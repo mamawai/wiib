@@ -53,7 +53,8 @@ class WakeInstructionI18nTest {
             new TraderPlanStore(mock(AiTraderPlanMapper.class)),
             mock(TraderRequestService.class), mock(UserLangResolver.class), prompts,
             new MessageCatalog(),
-            new LocalizedToolCallbacks(prompts));
+            new LocalizedToolCallbacks(prompts),
+            mock(com.mawai.wiibquant.agent.learning.ReviewMaterialAssembler.class));
 
     {
         runner.nowMs = () -> BOUNDARY + 1_000L;

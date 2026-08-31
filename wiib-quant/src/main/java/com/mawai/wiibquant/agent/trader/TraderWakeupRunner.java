@@ -20,6 +20,7 @@ import com.mawai.wiibcommon.market.BinanceRestClient;
 import com.mawai.wiibquant.agent.i18n.LocalizedToolCallbacks;
 import com.mawai.wiibquant.agent.i18n.PromptCatalog;
 import com.mawai.wiibquant.agent.i18n.UserLangResolver;
+import com.mawai.wiibquant.agent.learning.ReviewMaterialAssembler;
 import com.mawai.wiibquant.agent.llm.AgentGraphs;
 import com.mawai.wiibquant.agent.llm.LlmErrorMessages;
 import com.mawai.wiibquant.agent.llm.ModelCallLimiter;
@@ -109,6 +110,8 @@ public class TraderWakeupRunner {
     /** sim 拒因按错误码成文（见 SimTradeClient.describe），同样跟 trader 主人的语言 */
     private final MessageCatalog messages;
     private final LocalizedToolCallbacks localizedTools;
+    /** stale 教材过滤的共用入口（与复盘时间线/chat 同一套识别逻辑） */
+    private final ReviewMaterialAssembler materialAssembler;
 
     /** 墙钟注入点：预算计算要可测（测试里把"现在"钉在边界附近） */
     LongSupplier nowMs = System::currentTimeMillis;
@@ -267,6 +270,17 @@ public class TraderWakeupRunner {
                 .lt(AiTraderDecision::getWakeTime, boundaryTime)
                 .orderByDesc(AiTraderDecision::getWakeTime)
                 .last("LIMIT " + RECENT_DECISIONS));
+        // stale 教材过滤：主人标记忽略的交易不回注给下一轮（新格式剔段/旧格式剔轮，与复盘时间线同口径）
+        List<AiTraderPlan> allPlans = planStore.listAll(trader.getId(), trader.getRoundNo());
+        recent = new ArrayList<>(recent);
+        recent.removeIf(d -> {
+            String r = materialAssembler.staleFiltered(d, allPlans);
+            if (r == null) {
+                return true;
+            }
+            d.setReasoning(r);
+            return false;
+        });
 
         // 计划懒清理 + 补绑 + 加载：仓位/挂单还活着的计划保留，已了结（止损/止盈/平仓/撤单）的归档；
         // 在场仓位 id 顺路传入——限价单成交后计划还挂着 null positionId，这一趟补绑

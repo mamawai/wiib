@@ -336,6 +336,64 @@ class ReviewMaterialAssemblerTest {
         assertThat(m.closedTrades()).isEqualTo(1);
     }
 
+    /** 新格式：stale 仓位的分段整段从时间线消失，其余币的段保留（手术刀，不误伤） */
+    @Test
+    void timelineDropsStaleSegmentsKeepsOthers() {
+        when(decisionMapper.selectOne(any())).thenReturn(null);
+        AiTraderPlan staleBtc = planOf("BTCUSDT", "BREAKOUT", FROM + 3600_000, true);
+        staleBtc.setClosedWakeTime(FROM + 21600_000);
+        when(planMapper.selectList(any())).thenReturn(List.of(staleBtc));
+        when(decisionMapper.selectList(any())).thenReturn(List.of(), List.of(
+                okRow(FROM + 7200_000, AiTraderDecision.KIND_TRADE, SEGMENTED_ZH, "[]")));
+
+        String timeline = assembler.assemble(trader(), FROM, TO, AgentLang.ZH).timelineBlock();
+
+        assertThat(timeline).doesNotContain("63370–63480").doesNotContain("[BTCUSDT]");
+        assertThat(timeline).contains("[ETHUSDT] 等待：15m 收盘跌破 1888 转空");
+    }
+
+    /** 双开粒度=币：该币该轮任一覆盖计划未被忽略，段就得留 */
+    @Test
+    void timelineKeepsSegmentWhenAnyCoveringPlanNotStale() {
+        when(decisionMapper.selectOne(any())).thenReturn(null);
+        AiTraderPlan staleLong = planOf("BTCUSDT", "BREAKOUT", FROM + 3600_000, true);
+        staleLong.setClosedWakeTime(FROM + 21600_000);
+        AiTraderPlan liveShort = planOf("BTCUSDT", "REVERSAL", FROM + 3600_000, false);
+        liveShort.setSide("SHORT");
+        liveShort.setClosedWakeTime(FROM + 21600_000);
+        when(planMapper.selectList(any())).thenReturn(List.of(staleLong, liveShort));
+        when(decisionMapper.selectList(any())).thenReturn(List.of(), List.of(
+                okRow(FROM + 7200_000, AiTraderDecision.KIND_TRADE, SEGMENTED_ZH, "[]")));
+
+        String timeline = assembler.assemble(trader(), FROM, TO, AgentLang.ZH).timelineBlock();
+
+        assertThat(timeline).contains("[BTCUSDT] 等待：回踩 63370–63480 企稳再做多");
+    }
+
+    /** 旧格式退化为按轮剔：stale 计划的开仓轮 + positionId 命中的调仓轮整行消失，无关轮保留，唤醒轮数不缩水 */
+    @Test
+    void timelineDropsLegacyStaleRounds() {
+        when(decisionMapper.selectOne(any())).thenReturn(null);
+        AiTraderPlan stale = planOf("BTCUSDT", "BREAKOUT", FROM + 3600_000, true);
+        stale.setPositionId(42L);
+        when(planMapper.selectList(any())).thenReturn(List.of(stale));
+        String openRound = "【本轮结论】\n判断：突破\n动作：开多\n等待：无";
+        String slRound = "【本轮结论】\n判断：走高\n动作：上移止损\n等待：无";
+        String openActs = "[{\"tool\":\"open_position\",\"args\":{\"symbol\":\"BTCUSDT\",\"side\":\"LONG\"},\"status\":\"ok\"}]";
+        String slActs = "[{\"tool\":\"set_stop_loss\",\"args\":{\"positionId\":42,\"stopLossPrice\":99000},\"status\":\"ok\"}]";
+        when(decisionMapper.selectList(any())).thenReturn(List.of(), List.of(
+                okRow(FROM + 3600_000, AiTraderDecision.KIND_TRADE, openRound, openActs),
+                okRow(FROM + 7200_000, AiTraderDecision.KIND_TRADE, slRound, slActs),
+                okRow(FROM + 10800_000, AiTraderDecision.KIND_TRADE,
+                        "【本轮结论】\n判断：观望\n动作：HOLD\n等待：站稳 99000", "[]")));
+
+        String timeline = assembler.assemble(trader(), FROM, TO, AgentLang.ZH).timelineBlock();
+
+        assertThat(timeline).doesNotContain("open_position").doesNotContain("set_stop_loss");
+        assertThat(timeline).contains("等待：站稳 99000");
+        assertThat(timeline).contains("本期活动：唤醒 3 轮，动作轮 0");
+    }
+
     /** 窗口内归档、未配对、stale 的计划：孤儿行也不出 */
     @Test
     void staleOrphanPlanOmitted() {

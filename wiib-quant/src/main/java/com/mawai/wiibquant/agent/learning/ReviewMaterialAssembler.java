@@ -132,7 +132,7 @@ public class ReviewMaterialAssembler {
                 .toList();
         String stats = statsBlock(trader, fromMs, toMs, visible, maybeTruncated, lang);
         String trades = tradesBlock(visible, planByPos, plans, fromMs, toMs, lang);
-        String timeline = timelineBlock(trader, fromMs, toMs, lang);
+        String timeline = timelineBlock(trader, fromMs, toMs, plans, lang);
         String pricePath = pricePathBlock(trader, fromMs, toMs, lang);
         return new ReviewMaterial(stats, trades, timeline, pricePath, visible.size());
     }
@@ -369,7 +369,7 @@ public class ReviewMaterialAssembler {
     private record TimelineEntry(String line, boolean hasAction) {
     }
 
-    private String timelineBlock(AiTrader t, long fromMs, long toMs, AgentLang lang) {
+    private String timelineBlock(AiTrader t, long fromMs, long toMs, List<AiTraderPlan> plans, AgentLang lang) {
         // 白名单同 hasNewMaterial：时间线是交易行为的摘编，LEARN/REVIEW 进来会虚增"唤醒轮数"，
         // 保守度自检的对照物就失真了
         List<AiTraderDecision> rows = decisionMapper.selectList(new LambdaQueryWrapper<AiTraderDecision>()
@@ -397,6 +397,11 @@ public class ReviewMaterialAssembler {
                 skipped++;
                 continue;
             }
+            // stale 治理：被忽略交易的旧格式轮整行剔（唤醒轮数仍按原始行统计），新格式剔段后继续
+            String reasoning = staleFiltered(d, plans);
+            if (reasoning == null) {
+                continue;
+            }
             String acts = actionSummary(d.getActionsJson(), lang);
             String tag = AiTraderDecision.KIND_ALERT.equals(d.getKind())
                     ? prompts.get(lang, "reviewer.label.alertTag") + " " : "";
@@ -407,13 +412,13 @@ public class ReviewMaterialAssembler {
                 opens += countOccurrences(acts, "open_position(");
                 entries.add(new TimelineEntry("- " + TIME_FMT.format(Instant.ofEpochMilli(d.getWakeTime()))
                         + " " + tag + prompts.get(lang, "reviewer.label.actionRow", Map.of(
-                                "actions", acts, "conclusion", conclusion(d.getReasoning(), lang))), true));
+                                "actions", acts, "conclusion", conclusion(reasoning, lang))), true));
                 continue;
             }
             // 观望轮只留等待条件：它有对账物（价格路径能验证到没到），"判断"那段指标读数没有。
             // 警报轮与例行观望不混段：同样条件下被警报叫醒仍按兵不动，这件事本身就是复盘证据
             String kindPrefix = tag.isEmpty() ? "N|" : "A|";
-            for (Map.Entry<String, String> w : waitsBySymbol(d.getReasoning(), lang).entrySet()) {
+            for (Map.Entry<String, String> w : waitsBySymbol(reasoning, lang).entrySet()) {
                 String key = kindPrefix + waitKey(w.getValue());
                 Hold h = holds.get(w.getKey());
                 if (h != null && h.key.equals(key)) {
@@ -627,6 +632,107 @@ public class ReviewMaterialAssembler {
             out.put(s.symbol(), extractWait(s.body(), c.lang()));
         }
         return out;
+    }
+
+    // ==================== stale 教材过滤 ====================
+
+    /**
+     * 一行决策在 stale 治理（主人标记忽略）下的教材产出，时间线/唤醒最近决策/chat 共用：
+     * 新格式剔掉属于被忽略交易的 [SYMBOL] 段；旧格式无段可剔，退化为按轮剔——
+     * stale 计划的开仓轮（wake_time 相等）或 actionsJson 里 positionId 命中即整行剔除，返回 null。
+     * 其余返回（可能剔过段的）reasoning，null 正规化为空串。无 stale 计划时零改动。
+     */
+    public String staleFiltered(AiTraderDecision d, List<AiTraderPlan> plans) {
+        String reasoning = d.getReasoning() == null ? "" : d.getReasoning();
+        if (plans.stream().noneMatch(p -> Boolean.TRUE.equals(p.getStale()))) {
+            return reasoning;
+        }
+        // 起点语言随便给：locateConclusion 两门语言的标记都会尝试
+        Conclusion c = reasoning.isBlank() ? null : locateConclusion(reasoning, AgentLang.ZH);
+        if (c != null && SEGMENT_TAG.matcher(c.body(reasoning)).find()) {
+            return scrubStaleSegments(reasoning, c, d.getWakeTime(), plans);
+        }
+        return staleLegacyRow(d, plans) ? null : reasoning;
+    }
+
+    /** 新格式剔段：结论块里被忽略交易的 [SYMBOL] 段连段头一起剔，引子（总评）与其余段保留 */
+    private String scrubStaleSegments(String reasoning, Conclusion c, long wakeTime, List<AiTraderPlan> plans) {
+        int bodyStart = c.index() + c.markLength();
+        String body = reasoning.substring(bodyStart);
+        Matcher m = SEGMENT_TAG.matcher(body);
+        StringBuilder out = new StringBuilder(reasoning.substring(0, bodyStart));
+        String symbol = null;
+        int segStart = 0;
+        while (m.find()) {
+            if (symbol == null) {
+                out.append(body, 0, m.start());
+            } else if (!staleSegment(symbol, wakeTime, plans)) {
+                out.append(body, segStart, m.start());
+            }
+            symbol = m.group(1);
+            segStart = m.start();
+        }
+        if (!staleSegment(symbol, wakeTime, plans)) {
+            out.append(body, segStart, body.length());
+        }
+        return out.toString();
+    }
+
+    /**
+     * 该轮该币的分段是否属于被忽略交易：wake 落在某 stale 计划生命期内，且覆盖该时刻的
+     * 该币计划<b>全部</b> stale——双开粒度=币，任一方向没被忽略这段就得留。
+     */
+    private static boolean staleSegment(String symbol, long wakeTime, List<AiTraderPlan> plans) {
+        boolean hasStale = false;
+        for (AiTraderPlan p : plans) {
+            if (symbol.equals(p.getSymbol()) && covers(p, wakeTime)) {
+                if (!Boolean.TRUE.equals(p.getStale())) {
+                    return false;
+                }
+                hasStale = true;
+            }
+        }
+        return hasStale;
+    }
+
+    private static boolean covers(AiTraderPlan p, long wakeTime) {
+        return p.getOpenedWakeTime() != null && p.getOpenedWakeTime() <= wakeTime
+                && wakeTime <= (p.getClosedWakeTime() == null ? Long.MAX_VALUE : p.getClosedWakeTime());
+    }
+
+    /** 旧格式按轮剔：stale 计划的开仓轮，或动作轨迹里 positionId 命中 stale 仓位（平仓/调止损止盈轮） */
+    private static boolean staleLegacyRow(AiTraderDecision d, List<AiTraderPlan> plans) {
+        for (AiTraderPlan p : plans) {
+            if (!Boolean.TRUE.equals(p.getStale())) {
+                continue;
+            }
+            if (java.util.Objects.equals(p.getOpenedWakeTime(), d.getWakeTime())) {
+                return true;
+            }
+            if (p.getPositionId() != null && actionsHitPosition(d.getActionsJson(), p.getPositionId())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean actionsHitPosition(String actionsJson, long positionId) {
+        if (actionsJson == null || actionsJson.isBlank()) {
+            return false;
+        }
+        try {
+            JSONArray arr = JSON.parseArray(actionsJson);
+            for (int i = 0; i < arr.size(); i++) {
+                JSONObject args = arr.getJSONObject(i).getJSONObject("args");
+                Long id = args == null ? null : args.getLong("positionId");
+                if (id != null && id == positionId) {
+                    return true;
+                }
+            }
+        } catch (Exception e) {
+            // 轨迹坏行当无命中：教材过滤缺一轮不挡组装
+        }
+        return false;
     }
 
     /**
