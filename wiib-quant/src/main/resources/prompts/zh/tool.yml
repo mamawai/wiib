@@ -28,6 +28,135 @@ tool:
     will show a confirmation card; after they approve, call this tool again to execute.
     Returns: narrative, bull/range/bear scenario distribution, invalidation condition, noDirection flag.
 
+  # ---- 行情/指标数据工具（chat 的 market 专家与 trader 唤醒共用）----
+  market_snapshot: |-
+    获取加密永续合约标的的实时行情快照：价格、涨跌幅、资金费偏离、持仓量变化、多空比、
+    大户偏向、taker 压力、清算压力、盘口失衡、恐惧贪婪指数、市场状态。
+    除特别说明外，信号字段都是归一化到 [-1,1] 的分值。
+
+  option_iv: |-
+    获取标的在 Deribit 的期权隐含波动率上下文：DVOL 指数与 ATM IV 摘要。
+    用于判断期权市场定价的波动预期是否大于已实现波动率。
+
+  funding_history: |-
+    获取永续合约最近的资金费率历史（最近 30 次结算，每 8 小时一次），外加下次结算时间与
+    当前标记价。用于 carry 判断：资金费持续为正=多头付费给空头（多头拥挤），为负则相反。
+
+  orderbook_depth: |-
+    获取合约盘口前 10 档买卖挂单（价格、数量）。用于观察大额挂单墙相对现价的位置——
+    选限价单挂单位、判断近端支撑/阻力时用。
+
+  klines: |-
+    获取 Binance 合约的原始 OHLCV K 线。固定返回 192 行 [openTime(毫秒), open, high, low, close, volume]，
+    从旧到新；最后一行是尚未走完的当前 K 线（其 close 即最新价，volume 只是部分量）。
+    interval：5m/15m/1h/4h/1d——192 根分别覆盖 16小时 / 2天 / 8天 / 32天 / 192天。
+    当你的方法需要逐根读 K 线时才调它：验证 K 线形态、套用你自己的摆动/结构定义、
+    或细看 `kline_structure` 指给你的某一段。这是唯一给全每一根的工具——`kline_structure`
+    也带原始 K 线，但只有最近的和各关键点附近的。
+    同一 symbol+interval 若同时调 `kline_structure`，那边传 includeBars=false，
+    免得它的 focus_bars 与这里的行重复。
+
+  indicators: |-
+    获取标的的全套经典技术指标，按指定周期（5m/15m/1h/4h/1d）用最近 192 根计算。字段：
+    ma7/ma25/ma99 + ema12/ema20/ema26（均线；ma_alignment=bullish/bearish 排列），
+    rsi14 + rsi14_trend（>70 超买，<30 超卖），
+    macd_dif/dea/hist + macd_cross(golden/death) + macd_hist_trend（动量），
+    boll_upper/mid/lower + boll_pb + boll_bandwidth（带宽收窄=挤压，扩张=趋势中），
+    atr14（波动率；常用的止损距离单位），
+    kdj_k/d/j，adx + plus_di/minus_di（adx>25 趋势，<15 震荡），
+    obv/obv_ma20/obv_trend + volume_ma20/volume_ratio（量能确认），
+    close_trend（rising_5=连续 5 根收涨）。最后一根尚未走完。
+
+  kline_structure: |-
+    与 `klines` 同一份 192 根 K 线的结构摘要——路径、分段、量价分布与关键价位，都替你算好。
+    只给中性事实：不下趋势/反转结论，判断是你的事。
+    用数字前先读这几条：
+    - atr14 是 Wilder RMA——与 `indicators` 工具报的完全同值。avg_tr_* 是 True Range 的
+      简单算术平均：记忆更短、更贴当前波动，但它不是 ATR，两者绝不能混用。
+    - swings 是 ±swingWindow 根内的局部极值。最后 swingWindow 根永远不可能入选
+      （右侧尚未确认），刚发生的转折不在里面。
+    - segments_swing 按摆动点切段，相邻段共享边界那一根，各段成交量相加会大于
+      volume.total，不要求和。
+    - 所有 idx 都指向与 `klines` 同一 symbol+interval 的同一行序。
+    给到你的是算好的路径加 focus_bars——最近 N 根与各关键点附近的原始 K 线；
+    要每一根原始 K 线请用 `klines`。
+
+  # ---- trader 专家的只读档案工具（chat 侧，userId 建叶子时烤死）----
+  trader_overview: |-
+    获取当前用户 AI 交易员的概况：状态（RUNNING/PAUSED/LIQUIDATED 及原因）、权益与初始资金、
+    轮次、交易标的、唤醒周期、仓位规格，以及完整的复盘笔记（它至今学到了什么）。
+    用户还没创建交易员时返回 hasTrader=false。
+
+  trader_positions: |-
+    获取当前用户 AI 交易员的在场持仓：标的、方向、数量、开仓价、杠杆、未实现盈亏，
+    以及当前生效的止损/止盈单。用户还没创建交易员时返回 hasTrader=false。
+
+  trader_decisions: |-
+    获取当前用户 AI 交易员最近的决策时间线，新的在前。每条含 kind（TRADE=例行唤醒 /
+    ALERT=波动警报唤醒 / REVIEW=每日复盘）、状态、权益、调过的工具，以及完整的推理全文。
+    回答"它那笔为什么这么做"就用它——推理全文就是答案。
+
+  trader_plans: |-
+    获取当前用户 AI 交易员的交易计划：全部在场计划外加最近归档的几条。每条计划带论点
+    （playType）、引用的数据（signalsUsed）、失效条件、开仓/止损/目标价，以及止损移动的修订史。
+
+  # ---- 对 trader 动手的三个表单工具（chat 汇总者持有；只弹表单，执行权在用户手指上）----
+  wake_trader: |-
+    为用户打开「立即唤醒交易员」表单。重要：这不会唤醒交易员——只是弹一张卡片，
+    上面有它上次/下次唤醒时间和一个由用户自己按的按钮。
+    唤醒真实且昂贵（烧用户的模型额度，可能真开仓/平仓）——正因如此触发权在用户不在你。
+    绝不能说交易员已被唤醒；要说表单已打开、等用户确认。
+
+  review_trader_now: |-
+    为用户打开「立即复盘」表单。重要：这不会执行复盘——只是弹一张卡片，
+    上面有上次复盘时间、有没有新素材和一个由用户自己按的按钮。执行一次要烧一次深模型调用。
+    绝不能说复盘已经跑完，更不能假装知道复盘说了什么；要说表单已打开。
+
+  leave_note_to_trader: |-
+    打开「给交易员留言」表单，把你按用户原话起草的留言预填进去。
+    重要：这不会保存留言——用户要审你的草稿、设定它随几轮唤醒生效，然后自己按保存。
+    留言是随后 N 轮唤醒注入后即抹掉的临时话；长期规则该写进交易员配置页的自定义提示词，不在这。
+    绝不能说留言已保存；要说表单已打开、草稿在里面。
+
+  # ---- 唤醒交易工具（trader 醒来时挂的动作工具；护栏由服务端强制，描述只是说明书）----
+  get_account: |-
+    获取你的完整账户状态：可用余额、在场持仓（含 id、方向、数量、开仓价、杠杆、未实现盈亏、
+    强平价、当前止损/止盈）与未成交限价单。这份状态每轮已注入你的提示词，通常不用调它；
+    只在需要重读 positionId、或本轮自己动过手后核对账户时用。
+
+  open_position: |-
+    在你的模拟账户开合约仓位。硬规则（违反即拒，拒因可修正、并附带确切的允许区间）：
+    杠杆必须落在主人配置的区间内——那是区间不是上限，选太低同样被拒；开新仓时保证金
+    （=数量×价格/杠杆）必须落在配置的权益占比区间内（加仓豁免）；同一标的的杠杆必须与
+    已有持仓或挂单一致；LIMIT 价须在标记价 ±5% 内；stopLossPrice 必填且方向正确。
+    playType 是论点标签：BREAKOUT/PULLBACK/REVERSAL/TREND_FOLLOW/RANGE/NEWS/FUNDING/OTHER。
+    signalsUsed：一句话，引用论点所依据的具体数据字段。
+    invalidationCondition：能证明论点错了的市场条件（不是盈亏数字）——它进入该仓位的计划，
+    是你主动平仓的唯一依据。
+
+  close_position: |-
+    按 positionId（从 get_account 取）市价平掉持仓的全部或一部分。
+    quantity：要平的币数；传持仓全量即全平。reason：一句话说明为什么现在平。
+
+  set_stop_loss: |-
+    替换持仓的止损（positionId 从 get_account 取）。新止损始终覆盖整个仓位——不传数量。
+    只许收紧：LONG 的止损只能上移、SHORT 的只能下移（相对当前止损）——放宽止损说明论点
+    已经动摇，去核对失效条件。不许把止损贴到现价旁边逼它秒触发——那是亏损中的恐慌平仓
+    换了个马甲；论点若已失效，就明说并用 close_position。reason 必填，进入该仓位公开的
+    计划修订史。
+
+  set_take_profit: |-
+    替换持仓的止盈（positionId 从 get_account 取）。新止盈始终覆盖整个仓位——不传数量。
+    只许远离：LONG 的目标只能上移、SHORT 的只能下移——把 LONG 目标下调到现价附近
+    就是变相的恐慌平仓；想提前离场，就引用失效条件并用 close_position。
+    reason 必填（进入公开的计划修订史）。
+
+  write_plan: |-
+    给一个没有计划记录的在场持仓补立交易计划（positionId 从 get_account 取）。
+    已有计划的仓位会被拒——计划不可改，改论点的合法途径只有加仓或平掉重开。
+
+  cancel_order: 按 orderId（从 get_account 的 pendingOrders 取）撤掉一张未成交限价单。
+
   # 行为分析：一次调用＝10 个内部端点 + 一次大 prompt 的深模型调用。同 run_deep_analysis，
   # 描述保持英文只换触发词——描述给模型读，触发词要匹配用户真会说的话。
   # 报告整份走 SSE 渲染成卡片，回模型的是裁剪版，所以描述里要交代"别复述数字，去谈它"

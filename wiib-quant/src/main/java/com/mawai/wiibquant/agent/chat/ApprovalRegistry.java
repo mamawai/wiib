@@ -35,15 +35,14 @@ public class ApprovalRegistry {
     };
 
     /**
-     * @param requestId  这张卡的唯一标识，前端原样回传用于比对"点的是哪张卡"
-     * @param requestedAt 登记时刻。<b>不能当标识用</b>——两次登记之间是微秒级，同一毫秒内
-     *                    比对恒成立，等于没有比对；那件事归 requestId。
-     *                    它的用处是"新旧"：ChatTurnStreamer 据此只发本轮新登记的确认卡
-     *                    （见 {@code ChatTurnStreamer.Turn.sendHitlCardIfAny}），不然用户不点卡、
-     *                    接着问下一句，每轮结束都会再弹一遍同一张
+     * @param requestId 这张卡的唯一标识，前端原样回传用于比对"点的是哪张卡"
+     * @param seq       登记序号（单调递增，不用墙钟——Windows 时钟粒度 ~15ms，两轮挤进同一跳
+     *                  时按时间比"新旧"会误判）。ChatTurnStreamer 据此只发本轮新登记的确认卡
+     *                  （见 {@code ChatTurnStreamer.Turn.sendHitlCardIfAny}），不然用户不点卡、
+     *                  接着问下一句，每轮结束都会再弹一遍同一张
      */
     public record PendingRequest(String requestId, String toolName, String symbol,
-                                 String reason, long requestedAt) {
+                                 String reason, long seq) {
     }
 
     private record ApprovalKey(String sessionId, String toolName, String symbol) {
@@ -54,10 +53,18 @@ public class ApprovalRegistry {
     /** 一次性拒绝标记：让模型知道"用户拒了"，否则它下一轮会再弹一次卡 */
     private final Map<String, PendingRequest> rejected = new ConcurrentHashMap<>();
 
+    /** 登记序号发生器：只比"先后"，跨会话共用一个计数器无妨 */
+    private final java.util.concurrent.atomic.AtomicLong requestSeq = new java.util.concurrent.atomic.AtomicLong();
+
+    /** 流侧轮开始时取水位：本轮结束只发 seq 大于它的确认卡（即本轮新登记的） */
+    public long currentSeq() {
+        return requestSeq.get();
+    }
+
     /** 闸门侧：登记待确认请求（同 session 重复登记覆盖，一个会话同时只有一条待确认）。 */
     public void requestApproval(String sessionId, String toolName, String symbol, String reason) {
         pending.put(sessionId, new PendingRequest(UUID.randomUUID().toString(),
-                toolName, symbol, reason, nowMs.getAsLong()));
+                toolName, symbol, reason, requestSeq.incrementAndGet()));
     }
 
     /**

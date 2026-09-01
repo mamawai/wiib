@@ -56,7 +56,7 @@ class ApprovalRegistryTest {
      * 用户无视旧卡片先问了新问题、再回头点旧卡片：此刻 pending 已被新请求覆盖，
      * 若不比对标识，用户看着"深研判 BTC"点的同意会授权给 ETH。
      * <p>
-     * 标识必须是 UUID 不能是 requestedAt：两次 requestApproval 之间是微秒级，
+     * 标识必须是 UUID 不能是时间戳：两次 requestApproval 之间是微秒级，
      * JDK 25 实测 200/200 落在同一毫秒，用时间戳比对恒成立、这条防线等于不存在
      */
     @Test
@@ -70,7 +70,7 @@ class ApprovalRegistryTest {
         assertThat(registry.peekPending("s1")).isPresent();
     }
 
-    /** 同一毫秒内连发两次也必须拿到不同标识——这正是 requestedAt 做不到的那件事 */
+    /** 同一毫秒内连发两次也必须拿到不同标识——这正是时间戳做不到的那件事 */
     @Test
     void 同一毫秒内两次登记的标识不同() {
         registry.nowMs = () -> 42L;   // 时间钉死，模拟"同一毫秒"

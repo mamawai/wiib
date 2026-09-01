@@ -1,6 +1,7 @@
 package com.mawai.wiibquant.agent.chat;
 
 import com.mawai.wiibcommon.entity.WorkbenchChatMessage;
+import com.mawai.wiibcommon.i18n.MessageCatalog;
 import com.mawai.wiibquant.mapper.WorkbenchChatMessageMapper;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -38,7 +39,7 @@ class ChatHistoryMetaTest {
     @Test
     void 带读数的追加把六列都写下去() {
         WorkbenchChatMessageMapper mapper = mock(WorkbenchChatMessageMapper.class);
-        ChatHistoryService service = new ChatHistoryService(mapper, ChatTestEndpoints.PROMPTS);
+        ChatHistoryService service = new ChatHistoryService(mapper, ChatTestEndpoints.PROMPTS, new MessageCatalog());
 
         service.append(SESSION, 1L, "assistant", "答案",
                 new ChatHistoryService.TurnMeta("我的端点 · gpt-5", 3, 160L, 30L, 190L, 4200));
@@ -67,7 +68,7 @@ class ChatHistoryMetaTest {
         WorkbenchChatMessageMapper mapper = mock(WorkbenchChatMessageMapper.class);
         when(mapper.selectList(any())).thenReturn(List.of(user, legacy, fresh));
 
-        List<ChatHistoryService.ChatMessage> messages = new ChatHistoryService(mapper, ChatTestEndpoints.PROMPTS).messages(SESSION);
+        List<ChatHistoryService.ChatMessage> messages = new ChatHistoryService(mapper, ChatTestEndpoints.PROMPTS, new MessageCatalog()).messages(SESSION);
 
         assertThat(messages).hasSize(3);
         assertThat(messages.get(0).id()).isEqualTo(1L);

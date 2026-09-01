@@ -2,6 +2,7 @@ package com.mawai.wiibquant.agent.chat;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.mawai.wiibcommon.entity.WorkbenchChatMessage;
+import com.mawai.wiibcommon.i18n.MessageCatalog;
 import com.mawai.wiibquant.agent.i18n.PromptCatalog;
 import com.mawai.wiibquant.agent.llm.UsageTrackingChatModel;
 import com.mawai.wiibquant.mapper.WorkbenchChatMessageMapper;
@@ -28,6 +29,8 @@ public class ChatHistoryService {
     private final WorkbenchChatMessageMapper messageMapper;
     /** 只为认出补答行与续跑指令：它们的正文是词表文案，判定见 {@link ChatRowKind} */
     private final PromptCatalog prompts;
+    /** 会话列表的标题兜底文案（跟当次请求的界面语言） */
+    private final MessageCatalog messages;
 
     /** 会话摘要：标题=首条用户消息截断。 */
     public record SessionSummary(String sessionId, String title, int messageCount, long lastAt) {}
@@ -131,8 +134,8 @@ public class ChatHistoryService {
                 row.getCompletionTokens(), row.getTotalTokens(), row.getLatencyMs());
     }
 
-    private static String truncate(String s) {
-        if (s == null || s.isBlank()) return "（无标题）";
+    private String truncate(String s) {
+        if (s == null || s.isBlank()) return messages.get("quant.chat.untitled");
         return s.length() > TITLE_MAX ? s.substring(0, TITLE_MAX) + "…" : s;
     }
 

@@ -80,6 +80,8 @@ public class ChatTurnStreamer {
         private final ChatTurnRunner.ExpertBatch deferred;
 
         private final long startedAt = System.currentTimeMillis();
+        /** 轮开始时的确认卡登记水位：只发本轮新登记的卡。序号不是墙钟，毫秒粒度挤不出误判 */
+        private final long approvalSeqAtStart = approvalRegistry.currentSeq();
         // 答案流/过程流分离：专家的结论是"工作过程"（前端折叠展示、不落历史），只有 summarizer 的汇总才是答案
         private final StringBuilder answer = new StringBuilder();
         private final StringBuilder expertLog = new StringBuilder();
@@ -234,7 +236,7 @@ public class ChatTurnStreamer {
          */
         private void sendHitlCardIfAny() {
             approvalRegistry.peekPending(sessionId)
-                    .filter(pendingRequest -> pendingRequest.requestedAt() >= startedAt)
+                    .filter(pendingRequest -> pendingRequest.seq() > approvalSeqAtStart)
                     .ifPresent(pendingRequest -> channel.send("hitl_request", new JSONObject()
                             .fluentPut("sessionId", sessionId)
                             .fluentPut("symbol", pendingRequest.symbol())

@@ -99,18 +99,18 @@ class TraderToolI18nTest {
     }
 
     /**
-     * 唯一允许静默回落的地方：还没搬进词表的工具保留注解原描述。
-     * 15 个工具里只有 news_search 搬了词表，其余全靠这条回落活着——它失守就是 14 个描述一起变味。
+     * 全部唤醒工具都已搬进词表：中文侧取的是词表译文，不再是注解英文兜底。
+     * 静默回落的机制本身由 LocalizedToolCallbacksTest 钉；这里钉"一个都没漏搬"——
+     * 谁删掉一条 yml，中文 trader 的这只工具就悄悄变回英文描述。
      */
     @Test
-    void 词表没这条就原样用注解描述() {
+    void 唤醒工具全部走词表描述() {
         Map<String, String> zh = descriptions(AgentLang.ZH);
-        Map<String, String> annotated = annotated();
         for (String name : List.of("get_account", "open_position", "close_position", "set_stop_loss",
                 "set_take_profit", "write_plan", "cancel_order", "klines", "indicators",
                 "kline_structure", "market_snapshot", "option_iv", "funding_history", "orderbook_depth")) {
-            assertThat(zh.get(name)).as("%s 词表里没有，应原样用注解描述", name)
-                    .isEqualTo(annotated.get(name));
+            assertThat(zh.get(name)).as("%s 应取词表中文描述", name)
+                    .isEqualTo(prompts.get(AgentLang.ZH, "tool." + name));
         }
     }
 

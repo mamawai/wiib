@@ -1,5 +1,6 @@
 package com.mawai.wiibquant.agent.trader;
 
+import com.mawai.wiibcommon.i18n.MessageCatalog;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -10,7 +11,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 class BaseUrlGuardTest {
 
-    private final BaseUrlGuard guard = new BaseUrlGuard("");
+    private final BaseUrlGuard guard = new BaseUrlGuard("", new MessageCatalog());
 
     @Test
     void publicLiteralIpAllowed() {
@@ -95,7 +96,7 @@ class BaseUrlGuardTest {
     /** 运维白名单主机先于 DNS 短路放行：docker 网络主机名在开发机上解析不了也要能过 */
     @Test
     void allowlistedHostBypassesResolution() {
-        BaseUrlGuard g = new BaseUrlGuard("cliproxyapi, ollama-box");
+        BaseUrlGuard g = new BaseUrlGuard("cliproxyapi, ollama-box", new MessageCatalog());
         assertThat(g.check("http://cliproxyapi:8317")).isNull();
         assertThat(g.check("http://OLLAMA-BOX:11434")).isNull();
         // 白名单不影响其他主机照常拒绝

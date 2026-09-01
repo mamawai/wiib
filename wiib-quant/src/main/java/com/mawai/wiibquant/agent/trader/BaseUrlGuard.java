@@ -1,5 +1,6 @@
 package com.mawai.wiibquant.agent.trader;
 
+import com.mawai.wiibcommon.i18n.MessageCatalog;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -23,8 +24,11 @@ import java.util.stream.Collectors;
 public class BaseUrlGuard {
 
     private final Set<String> allowlist;
+    private final MessageCatalog messages;
 
-    public BaseUrlGuard(@Value("${WIIB_TRADER_BASEURL_ALLOWLIST:}") String allowlistCsv) {
+    public BaseUrlGuard(@Value("${WIIB_TRADER_BASEURL_ALLOWLIST:}") String allowlistCsv,
+                        MessageCatalog messages) {
+        this.messages = messages;
         this.allowlist = allowlistCsv == null || allowlistCsv.isBlank()
                 ? Set.of()
                 : Arrays.stream(allowlistCsv.split(","))
@@ -33,21 +37,21 @@ public class BaseUrlGuard {
                         .collect(Collectors.toSet());
     }
 
-    /** 校验 baseUrl；返回给用户看的错误文案，通过返回 null。 */
+    /** 校验 baseUrl；返回给用户看的错误文案（跟当次请求的界面语言），通过返回 null。 */
     public String check(String baseUrl) {
         URI uri;
         try {
             uri = new URI(baseUrl.trim());
         } catch (Exception e) {
-            return "baseUrl 不是合法 URL";
+            return messages.get("quant.endpoint.baseUrl.malformed");
         }
         String scheme = uri.getScheme();
         if (scheme == null || !("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme))) {
-            return "baseUrl 仅支持 http/https";
+            return messages.get("quant.endpoint.baseUrl.schemeUnsupported");
         }
         String host = uri.getHost();
         if (host == null || host.isBlank()) {
-            return "baseUrl 缺少主机名";
+            return messages.get("quant.endpoint.baseUrl.hostMissing");
         }
         if (allowlist.contains(host.toLowerCase(Locale.ROOT))) {
             return null;
@@ -56,13 +60,13 @@ public class BaseUrlGuard {
         try {
             addrs = InetAddress.getAllByName(host);
         } catch (UnknownHostException e) {
-            return "baseUrl 主机名无法解析";
+            return messages.get("quant.endpoint.baseUrl.hostUnresolvable");
         }
         for (InetAddress a : addrs) {
             // 原地址与嵌入其中的 v4 双重受检：::1 这类原生 v6 属性只在原地址上，
             // 而 NAT64 嵌着的 169.254.169.254 只在抠出来的 v4 上——判一头必漏另一头
             if (isBlocked(a) || isBlocked(unwrapEmbeddedV4(a))) {
-                return "baseUrl 不允许指向内网/本机地址";
+                return messages.get("quant.endpoint.baseUrl.privateBlocked");
             }
         }
         return null;

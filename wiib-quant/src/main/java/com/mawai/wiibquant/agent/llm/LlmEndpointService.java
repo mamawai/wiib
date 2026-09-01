@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.mawai.wiibcommon.constant.AiProtocols;
 import com.mawai.wiibcommon.entity.UserLlmBinding;
 import com.mawai.wiibcommon.entity.UserLlmEndpoint;
+import com.mawai.wiibcommon.i18n.MessageCatalog;
 import com.mawai.wiibquant.agent.trader.ApiKeyCrypto;
 import com.mawai.wiibquant.agent.trader.BaseUrlGuard;
 import com.mawai.wiibquant.mapper.UserLlmBindingMapper;
@@ -31,7 +32,7 @@ import java.util.Set;
  *   <li>绑定行永远指向活着的端点：删端点连带删它的绑定，受影响的用途回落默认；</li>
  *   <li>保存不发上游请求（探测是独立按钮）；测什么就是接下来真跑什么——探测走 {@link ByokModelBuilder} 的生产建模路径。</li>
  * </ul>
- * 错误约定与 TraderService 一致：返回 String 错误消息，成功返回 null。
+ * 错误约定与 TraderService 一致：返回 String 错误消息（跟当次请求的界面语言），成功返回 null。
  */
 @Slf4j
 @Service
@@ -59,6 +60,7 @@ public class LlmEndpointService {
     private final ApiKeyCrypto apiKeyCrypto;
     private final BaseUrlGuard baseUrlGuard;
     private final ByokModelBuilder modelBuilder;
+    private final MessageCatalog messages;
 
     // ==================== 读 ====================
 
@@ -168,7 +170,7 @@ public class LlmEndpointService {
         }
         List<UserLlmEndpoint> existing = list(userId);
         if (existing.size() >= MAX_PER_USER) {
-            return "端点数量已达上限 " + MAX_PER_USER;
+            return messages.get("quant.endpoint.limitReached", Map.of("max", MAX_PER_USER));
         }
         UserLlmEndpoint row = toRow(req, null);
         row.setUserId(userId);
@@ -182,7 +184,7 @@ public class LlmEndpointService {
     public String update(long userId, long id, SaveReq req) {
         UserLlmEndpoint cur = get(userId, id);
         if (cur == null) {
-            return "端点不存在";
+            return messages.get("quant.endpoint.notFound");
         }
         boolean keyChanged = req.apiKey() != null && !req.apiKey().isBlank();
         String err = validate(req, false);
@@ -200,7 +202,7 @@ public class LlmEndpointService {
     public String delete(long userId, long id) {
         UserLlmEndpoint cur = get(userId, id);
         if (cur == null) {
-            return "端点不存在";
+            return messages.get("quant.endpoint.notFound");
         }
         endpointMapper.deleteById(id);
         bindingMapper.delete(new LambdaQueryWrapper<UserLlmBinding>()
@@ -217,7 +219,7 @@ public class LlmEndpointService {
 
     public String setDefault(long userId, long id) {
         if (get(userId, id) == null) {
-            return "端点不存在";
+            return messages.get("quant.endpoint.notFound");
         }
         markDefault(userId, id);
         return null;
@@ -226,7 +228,7 @@ public class LlmEndpointService {
     /** 绑定用途；endpointId 传 null = 解绑（跟随默认） */
     public String bind(long userId, String purpose, Long endpointId) {
         if (purpose == null || !PURPOSES.contains(purpose)) {
-            return "未知用途";
+            return messages.get("quant.endpoint.unknownPurpose");
         }
         if (endpointId == null) {
             bindingMapper.delete(new LambdaQueryWrapper<UserLlmBinding>()
@@ -234,7 +236,7 @@ public class LlmEndpointService {
             return null;
         }
         if (get(userId, endpointId) == null) {
-            return "端点不存在";
+            return messages.get("quant.endpoint.notFound");
         }
         UserLlmBinding b = binding(userId, purpose);
         if (b == null) {
@@ -255,7 +257,7 @@ public class LlmEndpointService {
     /** 拉模型清单。id 非空且 apiKey 传空=用该端点已存的 key（编辑已有端点时不用重填） */
     public ListModelsResult listModels(long userId, Long id, SaveReq req) {
         if (req.baseUrl() == null || req.baseUrl().isBlank()) {
-            return new ListModelsResult("baseUrl不能为空", List.of());
+            return new ListModelsResult(messages.get("quant.endpoint.baseUrlRequired"), List.of());
         }
         String ssrf = baseUrlGuard.check(req.baseUrl());
         if (ssrf != null) {
@@ -263,7 +265,7 @@ public class LlmEndpointService {
         }
         String keyEnc = keyEncFor(userId, id, req.apiKey());
         if (keyEnc == null) {
-            return new ListModelsResult("apiKey不能为空", List.of());
+            return new ListModelsResult(messages.get("quant.endpoint.apiKeyRequired"), List.of());
         }
         try {
             return new ListModelsResult(null, modelBuilder.listModels(stripTrailingSlash(req.baseUrl().trim()), keyEnc));
@@ -283,13 +285,13 @@ public class LlmEndpointService {
         }
         String keyEnc = keyEncFor(userId, id, req.apiKey());
         if (keyEnc == null) {
-            return "apiKey不能为空";
+            return messages.get("quant.endpoint.apiKeyRequired");
         }
         try {
             modelBuilder.build(toRow(req, keyEnc)).call(new Prompt(new UserMessage("ping")));
             return null;
         } catch (Exception e) {
-            return "模型连通性测试失败：" + truncate(e);
+            return messages.get("quant.endpoint.connectFailed", Map.of("reason", truncate(e)));
         }
     }
 
@@ -347,32 +349,32 @@ public class LlmEndpointService {
 
     private String validate(SaveReq req, boolean requireKey) {
         if (req.name() == null || req.name().isBlank() || req.name().trim().length() > 32) {
-            return "名称必填且不超过 32 字";
+            return messages.get("quant.endpoint.nameInvalid");
         }
         if (req.baseUrl() == null || req.baseUrl().isBlank()) {
-            return "baseUrl不能为空";
+            return messages.get("quant.endpoint.baseUrlRequired");
         }
         String ssrf = baseUrlGuard.check(req.baseUrl());
         if (ssrf != null) {
             return ssrf;
         }
         if (req.model() == null || req.model().isBlank()) {
-            return "model不能为空";
+            return messages.get("quant.endpoint.modelRequired");
         }
         // 前端是 select，传空说明请求本身不对，响亮拒绝比默默兜底好查
         if (req.apiProtocol() == null || req.apiProtocol().isBlank()) {
-            return "apiProtocol不能为空";
+            return messages.get("quant.endpoint.protocolRequired");
         }
         if (!AiProtocols.isValid(normalizeProtocol(req.apiProtocol()))) {
-            return "协议仅支持 openai / responses";
+            return messages.get("quant.endpoint.protocolInvalid");
         }
         // 不限白名单：各家档位名字自己定（xhigh/minimal…），认不认只有上游知道。只挡列宽（VARCHAR(16)）免得存的时候炸 SQL
         String effort = normalizeEffort(req.reasoningEffort());
         if (effort != null && effort.length() > MAX_EFFORT_LEN) {
-            return "思考档位最长 " + MAX_EFFORT_LEN + " 字符，留空=不传";
+            return messages.get("quant.endpoint.effortTooLong", Map.of("max", MAX_EFFORT_LEN));
         }
         if (requireKey && (req.apiKey() == null || req.apiKey().isBlank())) {
-            return "apiKey不能为空";
+            return messages.get("quant.endpoint.apiKeyRequired");
         }
         return null;
     }

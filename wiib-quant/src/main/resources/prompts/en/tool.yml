@@ -31,6 +31,166 @@ tool:
     will show a confirmation card; after they approve, call this tool again to execute.
     Returns: narrative, bull/range/bear scenario distribution, invalidation condition, noDirection flag.
 
+  # ---- Market/indicator data tools (shared by the chat market expert and trader wake-ups) ----
+  # English entries are the annotation text verbatim; the annotation stays as the last-resort fallback.
+  market_snapshot: |-
+    Get real-time market snapshot for a crypto perpetual symbol: price, price changes,
+    funding deviation, open-interest change, long/short ratios, top-trader bias, taker pressure,
+    liquidation pressure, orderbook imbalance, fear&greed index, regime.
+    All signal fields are normalized scores in [-1,1] unless stated otherwise.
+
+  option_iv: |-
+    Get option implied-volatility context for a crypto symbol from Deribit:
+    DVOL index and ATM IV summary. Useful for judging whether the options market
+    is pricing in larger moves than realized volatility suggests.
+
+  funding_history: |-
+    Get recent funding rate history (last 30 settlements, 8h apart) plus the next funding
+    time and current mark price for a crypto perpetual symbol. Useful for carry judgment:
+    persistently positive funding = longs paying shorts (crowded long), negative = the opposite.
+
+  orderbook_depth: |-
+    Get the top 10 bid/ask levels (price, quantity) of the futures orderbook for a crypto
+    perpetual symbol. Useful for seeing where large resting orders (walls) sit relative to
+    current price when choosing limit order placement or judging near support/resistance.
+
+  klines: |-
+    Get raw OHLCV candlesticks for a crypto perpetual symbol from Binance futures.
+    Returns a fixed 192 rows [openTime(ms), open, high, low, close, volume], oldest first;
+    the last row is the current still-forming candle (its close is the live price,
+    its volume is only partial).
+    interval: 5m/15m/1h/4h/1d — 192 bars span 16h / 2d / 8d / 32d / 192d respectively.
+    Call it when your method requires reading the candles bar by bar: verifying candle
+    patterns, applying your own swing or structure definition, or inspecting a stretch
+    that `kline_structure` pointed you at. This is the only tool that gives you every
+    bar — `kline_structure` carries raw candles too, but only the recent ones and those
+    around each key point.
+    If you also call `kline_structure` on the same symbol+interval, pass
+    includeBars=false there so its focus_bars don't repeat these rows.
+
+  indicators: |-
+    Get the full classic technical indicator set for a crypto perpetual symbol, computed
+    on the requested interval (5m/15m/1h/4h/1d) over the last 192 candles. Fields:
+    ma7/ma25/ma99 + ema12/ema20/ema26 (moving averages; ma_alignment=bullish/bearish stacking),
+    rsi14 + rsi14_trend (>70 overbought, <30 oversold),
+    macd_dif/dea/hist + macd_cross(golden/death) + macd_hist_trend (momentum),
+    boll_upper/mid/lower + boll_pb + boll_bandwidth (bandwidth shrinking = squeeze, expanding = trending),
+    atr14 (volatility; common stop-distance unit),
+    kdj_k/d/j, adx + plus_di/minus_di (adx>25 trending, <15 ranging),
+    obv/obv_ma20/obv_trend + volume_ma20/volume_ratio (volume confirmation),
+    close_trend (rising_5 = 5 consecutive up closes). The last candle is still forming.
+
+  kline_structure: |-
+    Structural summary of the same 192 candles that `klines` returns — path, segments,
+    volume-by-price and key levels, computed for you. Neutral facts only: no trend or
+    reversal calls, that judgement is yours.
+    Read these before using the numbers:
+    - atr14 is Wilder RMA — the exact same value the `indicators` tool reports. avg_tr_* is a
+      plain arithmetic mean of True Range: shorter memory, tracks current volatility, and is
+      NOT ATR. Never mix the two.
+    - swings are local extremes over ±swingWindow bars. The last swingWindow bars can never
+      qualify (their right side isn't confirmed yet), so a turn that just happened is missing.
+    - segments_swing cuts at swing points and adjacent segments SHARE their boundary bar, so
+      their volumes add up to more than volume.total. Do not sum them.
+    - every idx refers to the same row order as `klines` on this symbol+interval.
+    What you get is the computed path plus focus_bars — the last N candles and the ones
+    around each key point; `klines` is the tool that hands you every raw bar instead.
+
+  # ---- The trader expert's read-only profile tools (chat side; userId baked in at leaf build) ----
+  trader_overview: |-
+    Get the current user's AI trader profile: status (RUNNING/PAUSED/LIQUIDATED and why),
+    equity vs initial balance, round number, traded symbols, wake interval, risk spec,
+    and the FULL review memory notes (what it has learned so far).
+    Returns hasTrader=false when the user has not created a trader yet.
+
+  trader_positions: |-
+    Get the current open positions of the user's AI trader: symbol, side, quantity,
+    entry price, leverage, unrealized PnL and the currently active stop-loss/take-profit orders.
+    Returns hasTrader=false when the user has not created a trader yet.
+
+  trader_decisions: |-
+    Get the recent decision timeline of the user's AI trader, newest first. Each entry has
+    kind (TRADE=scheduled wake / ALERT=volatility wake / REVIEW=daily retrospective),
+    status, equity, the tools it called, and its FULL reasoning text.
+    Use this to answer "why did it do that trade" - the reasoning text is the answer.
+
+  trader_plans: |-
+    Get the trading plans of the user's AI trader: all live plans plus the recently closed ones.
+    Each plan carries the thesis (playType), the data it cited (signalsUsed), the invalidation
+    condition, entry/stop/target prices and the revision history of stop-loss moves.
+
+  # ---- The three form tools that act on the trader (held by the chat summarizer; they only open a form) ----
+  wake_trader: |-
+    Open the "wake trader now" form for the user. IMPORTANT: this does NOT wake the trader.
+    It only shows a card with when it last woke, when it wakes next, and a button the user presses themselves.
+    Waking is EXPENSIVE AND REAL (burns their model budget, MAY OPEN OR CLOSE POSITIONS) - that is exactly
+    why the trigger belongs to the user, not to you.
+    Never say the trader has been woken; say the form is open and waiting for them to confirm.
+
+  review_trader_now: |-
+    Open the "run retrospective now" form for the user. IMPORTANT: this does NOT run the retrospective.
+    It only shows a card with the last retrospective time, whether there is new material, and a button
+    the user presses themselves. Running it costs one deep-model call.
+    Never say the retrospective has run or claim to know what it says; say the form is open.
+
+  leave_note_to_trader: |-
+    Open the "leave a note" form, pre-filled with the note you drafted from the user's own words.
+    IMPORTANT: this does NOT save the note - the user reviews your draft, sets how many wake-ups it
+    should last, and presses save themselves.
+    A note is a passing remark carried by the next N wake-ups then erased; standing rules belong in the
+    trader's custom prompt on its config page, not here.
+    Never say the note has been saved; say the form is open with your draft in it.
+
+  # ---- Wake-up trading tools (the trader's action tools; guards are enforced server-side, the description is the manual) ----
+  get_account: |-
+    Get your full account state: available balance, open positions (with id, side, quantity,
+    entry price, leverage, unrealized PnL, liquidation price, current stop-loss/take-profit)
+    and pending limit orders. This same state is already injected into your prompt every
+    round, so you normally do not need to call this; use it only to re-read positionIds or
+    to confirm the account after your own trades within this round.
+
+  open_position: |-
+    Open a futures position on your sim account. Hard rules (violations are rejected with a
+    reason you can fix, and the rejection tells you the exact allowed range): leverage must land
+    INSIDE the range your owner configured — it is a range, not a ceiling, so picking too low is
+    rejected too; when opening a NEW position the margin (=quantity*price/leverage) must land
+    inside the configured percent-of-equity band (adds are exempt); same-symbol leverage must
+    match any position or pending order already on that symbol;
+    LIMIT price within 5% of mark, stopLossPrice REQUIRED and on the correct side.
+    playType is your thesis label: BREAKOUT/PULLBACK/REVERSAL/TREND_FOLLOW/RANGE/NEWS/FUNDING/OTHER.
+    signalsUsed: one sentence citing the concrete data fields your thesis rests on.
+    invalidationCondition: the market condition that would prove your thesis wrong (NOT a PnL
+    number) — it becomes part of your position's plan and is your only ground for manual exit.
+
+  close_position: |-
+    Close (part of) an open position by positionId (get it from get_account), at market price.
+    quantity: coins to close; pass the full position quantity to close it entirely.
+    reason: one sentence on why you are closing now.
+
+  set_stop_loss: |-
+    Replace the stop-loss of an open position (positionId from get_account). The new stop
+    always covers the WHOLE position — you do not pass a quantity. TIGHTEN ONLY:
+    LONG stops may only move UP, SHORT stops only DOWN (relative to the current stop) —
+    widening a stop means your thesis is shaken; check your invalidation condition instead.
+    Do NOT slam the stop right next to the current price to force an instant trigger while
+    in loss — that is a panic exit in disguise; if the thesis is invalidated, say so and use
+    close_position instead. reason is REQUIRED and becomes part of the position's public
+    plan revision history.
+
+  set_take_profit: |-
+    Replace the take-profit of an open position (positionId from get_account). The new target
+    always covers the WHOLE position — you do not pass a quantity. AWAY ONLY:
+    LONG targets may only move UP, SHORT targets only DOWN — lowering a LONG target toward
+    price would be a disguised panic exit; to leave early, cite your invalidation condition
+    and use close_position instead. reason is REQUIRED (public plan revision history).
+
+  write_plan: |-
+    Backfill a trading plan for an open position that has NO plan record (positionId from
+    get_account). Rejected if the position already has a plan — plans are immutable; the only
+    legal ways to change a thesis are adding to the position or closing and reopening.
+
+  cancel_order: Cancel a pending limit order by orderId (from get_account pendingOrders).
+
   # Behaviour analysis: one call = 10 internal data endpoints + one large deep-model call. Same shape
   # as run_deep_analysis; only the trigger phrases follow the language.
   # The full report goes to the UI as a card over SSE and the model gets a trimmed copy, which is why

@@ -153,7 +153,14 @@ class PromptI18nTest {
                 "chat.traderQuery.learningNotesNote", "chat.traderQuery.kindNote",
                 "chat.traderQuery.planNote", "chat.traderQuery.noTrader",
                 "llm.callLimit.notExecuted",
-                "tool.route", "tool.run_deep_analysis")) {
+                "tool.route", "tool.run_deep_analysis",
+                // 已搬进词表的工具描述：英文侧不许混中文
+                "tool.market_snapshot", "tool.option_iv", "tool.funding_history", "tool.orderbook_depth",
+                "tool.klines", "tool.indicators", "tool.kline_structure",
+                "tool.trader_overview", "tool.trader_positions", "tool.trader_decisions", "tool.trader_plans",
+                "tool.wake_trader", "tool.review_trader_now", "tool.leave_note_to_trader",
+                "tool.get_account", "tool.open_position", "tool.close_position",
+                "tool.set_stop_loss", "tool.set_take_profit", "tool.write_plan", "tool.cancel_order")) {
             assertNoCjk("英文 " + key, prompts.get(AgentLang.EN, key));
         }
         // 带占位符的那些：真填一遍再扫，模板里的中文标点藏在占位符两边。
@@ -307,6 +314,13 @@ class PromptI18nTest {
                 "news.tagging", "news.flashLine",
                 // 轮起始标记与 trader 查询说明字段：全是喂模型的，回落成中文就混语
                 "chat.turn.timeMark", "chat.traderQuery.kindNote", "llm.callLimit.notExecuted",
+                // 已搬进词表的工具描述：中文侧真有译文而不是英文原样两份
+                "tool.market_snapshot", "tool.option_iv", "tool.funding_history", "tool.orderbook_depth",
+                "tool.klines", "tool.indicators", "tool.kline_structure",
+                "tool.trader_overview", "tool.trader_positions", "tool.trader_decisions", "tool.trader_plans",
+                "tool.wake_trader", "tool.review_trader_now", "tool.leave_note_to_trader",
+                "tool.get_account", "tool.open_position", "tool.close_position",
+                "tool.set_stop_loss", "tool.set_take_profit", "tool.write_plan", "tool.cancel_order",
                 // 任务 5 的两条缓解：回落成中文＝英文用户被一行中文指令要求"输出中文"，正好反了
                 "trader.label.ownerWritten", "trader.label.outputLanguage",
                 "reviewer.label.outputLanguage", "learning.label.outputLanguage",

@@ -3,6 +3,7 @@ package com.mawai.wiibquant.agent.llm;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.mawai.wiibcommon.entity.UserLlmBinding;
+import com.mawai.wiibcommon.i18n.MessageCatalog;
 import com.mawai.wiibcommon.entity.UserLlmEndpoint;
 import com.mawai.wiibquant.agent.trader.ApiKeyCrypto;
 import com.mawai.wiibquant.agent.trader.BaseUrlGuard;
@@ -41,7 +42,7 @@ class LlmEndpointServiceTest {
     private final ApiKeyCrypto crypto = mock(ApiKeyCrypto.class);
     private final ByokModelBuilder builder = mock(ByokModelBuilder.class);
     private final LlmEndpointService service =
-            new LlmEndpointService(endpointMapper, bindingMapper, crypto, new BaseUrlGuard(""), builder);
+            new LlmEndpointService(endpointMapper, bindingMapper, crypto, new BaseUrlGuard("", new MessageCatalog()), builder, new MessageCatalog());
 
     private static UserLlmEndpoint ep(long id, boolean dft) {
         UserLlmEndpoint e = new UserLlmEndpoint();

@@ -31,6 +31,28 @@ quant:
     sessionNotFound: That session does not exist or is not yours
     sessionRunning: This session is still running or has a follow-up pending - delete it once it finishes
     approvalExpired: That approval request has expired - start it again
+    untitled: (untitled)
+
+  # BYOK endpoint library (the /ai model-config page): validation and probe wording. {{reason}} is the upstream error verbatim, untranslated
+  endpoint:
+    limitReached: "Endpoint limit reached ({{max}} max)"
+    notFound: No such endpoint
+    unknownPurpose: Unknown purpose
+    nameInvalid: A name is required, at most 32 characters
+    baseUrlRequired: baseUrl is required
+    modelRequired: model is required
+    protocolRequired: apiProtocol is required
+    protocolInvalid: The protocol must be openai or responses
+    effortTooLong: "The reasoning level is at most {{max}} characters; leave it blank to omit it"
+    apiKeyRequired: apiKey is required
+    connectFailed: "Model connectivity test failed: {{reason}}"
+    # Rejections from the SSRF guard (BaseUrlGuard)
+    baseUrl:
+      malformed: baseUrl is not a valid URL
+      schemeUnsupported: baseUrl must use http or https
+      hostMissing: baseUrl is missing a host name
+      hostUnresolvable: baseUrl host name cannot be resolved
+      privateBlocked: baseUrl must not point at a private or local address
 
   # Admin: LLM configs and feature-slot assignment
   admin:
