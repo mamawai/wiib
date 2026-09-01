@@ -52,7 +52,7 @@ Binance and OKX already have demo accounts: virtual funds, a familiar trading UI
 The main act here is backtesting, quant strategy simulation, and AI Trader:
 
 - **Backtesting**: strategy and portfolio backtests, walk-forward evaluation, manual replay (hints mid-session, a grade after). Live prices, not an isolated book.
-- **Quant strategies**: FIBO / LIQFADE / SQZMOM / TURTLE run on a sim sub-account or Binance Testnet, on the same ledger rules as humans and AI, so you can reconcile them.
+- **Quant strategies**: FIBO / SQZMOM / TURTLE run on a sim sub-account or Binance Testnet, on the same ledger rules as humans and AI, so you can reconcile them.
 - **AI Trader**: your model and key; it trades on its own and reviews daily. Reasoning, tool traces, theses, and invalidation are public.
 - Fills follow live Binance / Polymarket prices and funding rates. We do not plug into the live order book; we fill at the print. For retail-sized longs and shorts, that size would fill at the same print on the real venue. Perps use the real 1-150x tiers, real funding, and auto-liquidation.
 - Tokenized equities, crypto spot and perps, commodities, and BTC prediction share one unified margin account. The ledger and the agent harness are open source. Models and keys are yours.
@@ -66,7 +66,7 @@ The main act here is backtesting, quant strategy simulation, and AI Trader:
 - **Unified margin and a complete ledger**: borrow-to-buy through the unified margin account, with interest accrual and liquidation checks on trading days; every balance change passes through the `@Ledger` aspect into the ledger table across 44 labeled business types; statements paginate by cursor and filter by type, and position history shows one row per position, expandable into partial-close detail.
 - **AI Trader Arena**: one trader per user, BYOK with your own model and key, woken on your chosen candle interval to make decisions; you set the leverage range and margin budget, and orders outside them are rejected rather than silently clamped. Daily self-review plus learning from peers, with the decision timeline and equity curve public site-wide.
 - **Research Workbench**: BYOK chat open to everyone over SSE streaming; a router issues a structured tool_call to decide which sub-agents (market / news / trader) to dispatch in parallel for data, then the main model writes the answer. Sessions resume after interruption, and expensive operations ask for confirmation first.
-- **Four live strategies**: FIBO (Fibonacci retracement limit orders), LIQFADE (liquidation-cascade fade), SQZMOM (squeeze-release shorts), and TURTLE (channel breakout), all driven by 5m candle closes, executing into a dedicated sim sub-account or Binance USDT-M Testnet. Includes a strategy monitor, backtest engine, and walk-forward evaluation.
+- **Three live strategies**: FIBO (Fibonacci retracement limit orders), SQZMOM (squeeze-release shorts), and TURTLE (channel breakout), all driven by 5m candle closes, executing into a dedicated sim sub-account or Binance USDT-M Testnet. Includes a strategy monitor, backtest engine, and walk-forward evaluation.
 - **Leaderboard and community**: leaderboard with two sort dimensions (total assets / trading profit) backed by daily asset snapshots and 30-day curves, user profiles, an anonymized site-wide trade feed, and a two-level comment board with notification push.
 - **Instrument-style frontend**: no UI kit, light and dark themes, English and Chinese; lightweight-charts candlesticks (drawings, indicators, position lines, historical B/S markers, fullscreen); home cockpit and PWA.
 
@@ -184,7 +184,7 @@ What works today:
 
 - Simulated trading across every asset class — tokenized equities, crypto spot, perpetuals, commodities — on a unified margin ledger with complete transaction history.
 - BTC 5-minute prediction, settled on Polymarket open/close prices.
-- The FIBO / LIQFADE / SQZMOM / TURTLE strategies running live on both the sim sub-account and Binance Testnet tracks, with a strategy monitor page and a testnet dashboard.
+- The FIBO / SQZMOM / TURTLE strategies running live on both the sim sub-account and Binance Testnet tracks, with a strategy monitor page and a testnet dashboard.
 - AI Trader Arena: autonomous trading, daily review, peer learning, with public decision timelines and equity curves.
 - Research Workbench: parallel multi-expert analysis, strategy and portfolio backtests, walk-forward evaluation, manual replay with mid-session hints and a post-session grade.
 - Leaderboard, user profiles, site-wide trade feed, comment board with notifications, and self-service account reset.
@@ -197,7 +197,7 @@ Current instruments:
 | bStock tokenized US equities | 10: NVDA · TSLA · MU · SNDK · CRCL · MSTR · AMD · SPCX · QQQ · SOXL |
 | Commodities | Gold `XAUUSDT` · crude oil `CLUSDT` |
 | TradFi contracts | `SNDK` · `SOXL` · `SKHYNIX` · `MU` · `KORU` · `SPCX` (equity / ETF perpetuals, no spot) |
-| Live strategy baskets | FIBO: `BTC/ETH` · LIQFADE: `BTC/ETH/DOGE` · SQZMOM: `SOL/DOGE/XRP` · TURTLE: `SOL/ETH/DOGE/BNB` |
+| Live strategy baskets | FIBO: `BTC/ETH` · SQZMOM: `SOL/DOGE/XRP` · TURTLE: `SOL/ETH/DOGE/BNB` |
 
 Still open:
 

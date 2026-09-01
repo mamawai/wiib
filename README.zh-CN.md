@@ -52,7 +52,7 @@ Binance、OKX 的模拟盘已经能练下单：虚拟资金、熟悉交易界面
 WhatIfIBought 的重头戏是回测练习、量化策略模拟和 AI Trader：
 
 - **回测练习**：策略与组合回测、walk-forward 样本外评估、手动复盘（局中提示、结算后评估）。吃的是真实行情，不是独立簿。
-- **量化策略模拟**：FIBO / LIQFADE / SQZMOM / TURTLE 在 sim 子账户或 Binance Testnet 跑，和真人、AI 同一套账本规则，成绩可以对账。
+- **量化策略模拟**：FIBO / SQZMOM / TURTLE 在 sim 子账户或 Binance Testnet 跑，和真人、AI 同一套账本规则，成绩可以对账。
 - **AI Trader**：自己的模型和 key，自主交易、每日复盘。推理、工具轨迹、开仓论点、失效条件公开。
 - 撮合吃 Binance / Polymarket 的实时价和资金费率。没接实盘订单簿，按成交价吃单；散户小额多空这个量级，实盘同样能在这个价上成交。永续对齐真实档位（1-150x）、真实资金费、自动强平。
 - 代币化美股、加密现货 / 永续、大宗商品、BTC 预测挂同一套统一保证金。账本和 agent harness 开源，模型和 key 是自己的。
@@ -66,7 +66,7 @@ WhatIfIBought 的重头戏是回测练习、量化策略模拟和 AI Trader：
 - **统一保证金与全量账本**：借款买入统一保证金账户，交易日计息与爆仓检查；所有资金变动经 `@Ledger` 切面写入流水表，44 种业务类型各带说明；账单页游标翻页可按类型筛选，合约仓位历史一行一笔、展开看分批平仓明细。
 - **AI Trader 竞技场**：每用户一个 trader，BYOK 接自己的模型和 key，按选定 K 线级别定时唤醒决策，杠杆区间与保证金占比由主人设定、越界下单直接拒绝；每日复盘 + 向同侪学习，决策时间线与净值曲线全站公开。
 - **研判工作台**：全员开放的 BYOK 对话，SSE 流式；路由用结构化 tool_call 决定派哪些子 agent（market / news / trader）并行取数，再由主模型汇总作答，支持断点续聊，贵操作要用户确认。
-- **四策略实盘**：FIBO（斐波回撤限价挂单）/ LIQFADE（强平瀑布 fade）/ SQZMOM（压缩释放做空）/ TURTLE（通道突破），全部由 5m K 线收盘驱动，执行目标为 sim 独立子账户或 Binance USDT-M Testnet 二选一；配套策略监控页、回测引擎与 walk-forward 样本外评估。
+- **三策略实盘**：FIBO（斐波回撤限价挂单）/ SQZMOM（压缩释放做空）/ TURTLE（通道突破），全部由 5m K 线收盘驱动，执行目标为 sim 独立子账户或 Binance USDT-M Testnet 二选一；配套策略监控页、回测引擎与 walk-forward 样本外评估。
 - **排行榜与社区**：双维排序排行榜（总资产 / 交易盈利）+ 每日资产快照与 30 天曲线、用户主页、全站匿名成交流水、两层留言板与通知推送。
 - **「精密终端」自研前端**：无 UI 框架依赖的仪器风设计系统，亮 / 暗双主题，中英双语；lightweight-charts 自绘专业 K 线（画线工具、指标叠加、仓位参考线、历史成交 B/S 角标、全屏模式）；首页驾驶舱与 PWA。
 
@@ -125,7 +125,7 @@ WhatIfIBought 的重头戏是回测练习、量化策略模拟和 AI Trader：
 |---|:---:|---|:---:|
 | **wiib-feed** | `8081` | 行情接入：Binance / Polymarket → Redis，K 线落库 | 否，上游进程 |
 | **wiib-sim** | `8080` | 真人模拟交易 + BTC 预测，REST / WebSocket | 是，前端连它 |
-| **wiib-quant** | `8082` | agent harness + 四策略，下单走 sim 子账户 | 否，内部 |
+| **wiib-quant** | `8082` | agent harness + 三策略，下单走 sim 子账户 | 否，内部 |
 
 三个进程加一个 `wiib-common` 共享层，只通过 Redis 行情总线和共享 PostgreSQL 协作，互不直接调用，一个挂了不影响其他两个。
 
@@ -174,7 +174,7 @@ BYOK 流式对话，路由派 market / news / trader 三个专家并行取数后
 
 ### 策略监控
 
-四策略账户全景（余额 / 权益 / 盈亏 / 持仓 / 已平仓历史）与各策略 × 币种实时信号快照；testnet 轨另有独立看板。
+三策略账户全景（余额 / 权益 / 盈亏 / 持仓 / 已平仓历史）与各策略 × 币种实时信号快照；testnet 轨另有独立看板。
 
 <img src="docs/images/readme/strategies.png" width="80%" alt="策略监控" />
 
@@ -184,7 +184,7 @@ BYOK 流式对话，路由派 market / news / trader 三个专家并行取数后
 
 - 代币化美股、加密现货、永续合约、大宗商品的全品类模拟交易，统一保证金账本与全量流水。
 - BTC 5 分钟涨跌预测，Polymarket 开 / 收盘价结算。
-- FIBO / LIQFADE / SQZMOM / TURTLE 四策略实盘，sim 子账户与 Binance Testnet 双轨，配套策略监控页与 testnet 看板。
+- FIBO / SQZMOM / TURTLE 三策略实盘，sim 子账户与 Binance Testnet 双轨，配套策略监控页与 testnet 看板。
 - AI Trader 竞技场：自主交易、每日复盘、同侪学习，决策时间线与净值曲线公开。
 - 研判工作台与研究工具：多专家并行研判、策略与组合回测、walk-forward 评估、手动复盘（AI 教练可在局中提示、结算后评估）。
 - 排行榜、用户主页、全站成交、留言板与通知、自助重置账户。
@@ -197,7 +197,7 @@ BYOK 流式对话，路由派 market / news / trader 三个专家并行取数后
 | bStock 代币化美股 | 10 只：NVDA · TSLA · MU · SNDK · CRCL · MSTR · AMD · SPCX · QQQ · SOXL |
 | 大宗商品 | 黄金 `XAUUSDT` · 原油 `CLUSDT` |
 | TradFi 合约 | `SNDK` · `SOXL` · `SKHYNIX` · `MU` · `KORU` · `SPCX`（美股 / ETF 永续，无现货） |
-| 策略实盘篮子 | FIBO: `BTC/ETH` · LIQFADE: `BTC/ETH/DOGE` · SQZMOM: `SOL/DOGE/XRP` · TURTLE: `SOL/ETH/DOGE/BNB` |
+| 策略实盘篮子 | FIBO: `BTC/ETH` · SQZMOM: `SOL/DOGE/XRP` · TURTLE: `SOL/ETH/DOGE/BNB` |
 
 仍在持续打磨：
 

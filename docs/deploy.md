@@ -51,17 +51,17 @@ cp .env.example .env.local    # 填 PG_USER / PG_PASSWORD / INTERNAL_API_TOKEN�
       model: { chat: none, embedding: none, image: none, moderation: none, audio: { speech: none, transcription: none } }
   ```
 
-- 策略实盘执行（`wiib-quant`，仓库默认即四策略全启、跑 sim 轨）：
+- 策略实盘执行（`wiib-quant`，仓库默认即三策略全启、跑 sim 轨）：
 
   ```yaml
   strategy:
-    runtime:   { enabled: true, enabled-ids: FIBO,LIQFADE,SQZMOM,TURTLE }
+    runtime:   { enabled: true, enabled-ids: FIBO,SQZMOM,TURTLE }
     execution: { enabled: true, target: sim,
                  symbols: BTCUSDT,ETHUSDT,DOGEUSDT,SOLUSDT,XRPUSDT,BNBUSDT }
   ```
 
   > 策略由 K 线收盘驱动：`wiib-feed` 的 `binance.symbols` 必须覆盖上面全部标的（缺谁谁永不触发）。
-  > `symbols` 是四策略部署篮子的并集；TURTLE 的触价单是 quant 内存态，由 feed 的 futures tick 触发。
+  > `symbols` 是三策略部署篮子的并集；TURTLE 的触价单是 quant 内存态，由 feed 的 futures tick 触发。
 
 ## 4. 构建后端
 

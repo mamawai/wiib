@@ -70,10 +70,9 @@ class ApprovalRegistryTest {
         assertThat(registry.peekPending("s1")).isPresent();
     }
 
-    /** 同一毫秒内连发两次也必须拿到不同标识——这正是时间戳做不到的那件事 */
+    /** 连发两次也必须拿到不同标识——标识是 UUID，不是时间戳/序号这类可撞可推的值 */
     @Test
-    void 同一毫秒内两次登记的标识不同() {
-        registry.nowMs = () -> 42L;   // 时间钉死，模拟"同一毫秒"
+    void 连续两次登记的标识不同() {
         registry.requestApproval("s1", TOOL, "BTCUSDT", "贵操作");
         String first = registry.peekPending("s1").orElseThrow().requestId();
         registry.requestApproval("s1", TOOL, "ETHUSDT", "贵操作");

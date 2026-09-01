@@ -47,7 +47,7 @@ wiib-feed（上游进程）  交易所 WS → Redis
 
 wiib-sim / wiib-quant（消费进程）  从 Redis 消费 feed 写入的行情
   sim:   撮合/强平 + 预测回合消费
-  quant: K线驱动预测/策略 + 波动哨兵 + LIQFADE 拉 premium/taker KV
+  quant: K线驱动预测/策略 + 波动哨兵
 ```
 
 sim 订阅 `feed:price` 后做撮合（feed 本身不撮合）：价格更新触发现货限价单、永续强平、止损、止盈检查。
@@ -103,7 +103,7 @@ whatifibought/                        # Maven 多 module 聚合 reactor
 │   ├── market/                       # 行情数据链路：领域事件 / 采集→特征快照 / 取数缓存
 │   │                                 # + 指标·结构计算器 + 期权/资金面/跨市场服务 + 收盘流消费
 │   ├── research/                     # 量化研究库：因子/预测/标注/评估/风险指标
-│   ├── strategy/                     # FIBO/LIQFADE/SQZMOM/TURTLE + 回测引擎
+│   ├── strategy/                     # FIBO/SQZMOM/TURTLE + 回测引擎
 │   │                                 # + 执行层(testnet|sim) + 账户监控
 │   ├── external/                     # 进程外客户端：binance testnet / blockbeats / deribit
 │   │                                 # / ETF 流爬取 / sim internal（行为数据 + 合约下单）
