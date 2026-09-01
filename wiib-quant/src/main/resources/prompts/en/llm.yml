@@ -18,3 +18,9 @@ llm:
     unreachable: The endpoint is not responding - check that the Base URL is correct
     # type is the class name of the deepest cause, language-independent; it is how unclassified shapes get spotted
     unknown: Something went wrong ({{type}}), please try again later
+
+  callLimit:
+    # The placeholder receipt for tool_calls the fuse skipped (ModelCallLimiter): says plainly "not
+    # executed" rather than faking a success - the model and the retrospective both read it, and it is
+    # persisted with the conversation context
+    notExecuted: "Not executed: the model-call limit for this run was reached and the tool was skipped."

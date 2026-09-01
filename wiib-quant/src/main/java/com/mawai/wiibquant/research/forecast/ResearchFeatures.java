@@ -26,16 +26,6 @@ public record ResearchFeatures(List<KlineBar> barsUpToNow, double fundingRate, i
         }
     }
 
-    /** 纯价格场景便捷构造：链下/链上全取中性默认（基线、单测用）。 */
-    public static ResearchFeatures ofBars(List<KlineBar> barsUpToNow) {
-        return new ResearchFeatures(barsUpToNow, 0.0, 50, 0.0, 0.0);
-    }
-
-    /** 三因子(趋势+资金费+恐惧贪婪)场景便捷构造：链上 ETF/稳定币取中性 0。 */
-    public static ResearchFeatures of(List<KlineBar> barsUpToNow, double fundingRate, int fearGreed) {
-        return new ResearchFeatures(barsUpToNow, fundingRate, fearGreed, 0.0, 0.0);
-    }
-
     /** 由最近两根 bar 的 openTime 推断特征周期；测试桩时间缺失时返回 0，由调用方按“不缩放”处理。 */
     public long inferredBarMillis() {
         if (barsUpToNow == null || barsUpToNow.size() < 2) return 0L;

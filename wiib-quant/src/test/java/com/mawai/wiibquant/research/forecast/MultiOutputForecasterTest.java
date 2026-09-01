@@ -10,7 +10,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 /** A1 多输出预测器：asDirectionForecaster 把方向腿适配成现有 Forecaster（方向腿提取 + fit 转发 + 命名）。 */
 class MultiOutputForecasterTest {
 
-    private static final ResearchFeatures FEAT = ResearchFeatures.ofBars(List.of());
+    private static final ResearchFeatures FEAT = TestFeatures.ofBars(List.of());
 
     @Test
     void directionForecasterReturnsDirectionLeg() {

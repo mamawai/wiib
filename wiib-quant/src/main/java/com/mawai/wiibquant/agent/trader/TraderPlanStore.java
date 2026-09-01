@@ -6,6 +6,8 @@ import com.alibaba.fastjson2.JSONObject;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.mawai.wiibcommon.entity.AiTraderPlan;
+import com.mawai.wiibcommon.enums.AgentLang;
+import com.mawai.wiibquant.agent.i18n.PromptCatalog;
 import com.mawai.wiibquant.mapper.AiTraderPlanMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -29,6 +31,8 @@ import java.util.Set;
 public class TraderPlanStore {
 
     private final AiTraderPlanMapper mapper;
+    /** 加仓覆盖的修订留痕按 trader 主人语言写（trader.revise.*），与 TradeTools 的其余修订同源 */
+    private final PromptCatalog prompts;
 
     public static String key(String symbol, String side) {
         return symbol + "|" + side;
@@ -59,7 +63,7 @@ public class TraderPlanStore {
      * isAddOn=false 但同键旧计划还在＝同轮内平掉后重开（懒清理只在唤醒开头跑）：这是独立新仓
      * 不是加仓——旧计划归档，仓龄从新仓起算，修订史不继承（仓龄诚实）。
      */
-    public void upsert(AiTraderPlan plan, boolean isAddOn) {
+    public void upsert(AiTraderPlan plan, boolean isAddOn, AgentLang lang) {
         plan.setStatus(AiTraderPlan.STATUS_LIVE);
         AiTraderPlan old = find(plan.getTraderId(), plan.getRoundNo(), plan.getSymbol(), plan.getSide());
         if (old == null) {
@@ -81,8 +85,10 @@ public class TraderPlanStore {
         if (plan.getPositionId() == null) {
             plan.setPositionId(old.getPositionId());
         }
-        appendRevision(plan, revisedAt, "加仓",
-                "旧论点[" + old.getPlayType() + " / " + old.getInvalidationCondition() + "]被新论点覆盖",
+        appendRevision(plan, revisedAt, prompts.get(lang, "trader.revise.addOn"),
+                prompts.get(lang, "trader.revise.addOnNote", Map.of(
+                        "playType", String.valueOf(old.getPlayType()),
+                        "invalidation", String.valueOf(old.getInvalidationCondition()))),
                 plan.getSignalsUsed());
         mapper.updateById(plan);
     }

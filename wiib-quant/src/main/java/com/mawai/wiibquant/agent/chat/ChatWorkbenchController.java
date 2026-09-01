@@ -2,6 +2,7 @@ package com.mawai.wiibquant.agent.chat;
 
 import com.alibaba.fastjson2.JSONObject;
 import com.mawai.wiibcommon.annotation.CurrentUserId;
+import com.mawai.wiibcommon.enums.AgentLang;
 import com.mawai.wiibcommon.enums.ErrorCode;
 import com.mawai.wiibcommon.exception.BizException;
 import com.mawai.wiibcommon.i18n.MessageCatalog;
@@ -31,7 +32,6 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.List;
-import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.*;
 
@@ -255,23 +255,31 @@ public class ChatWorkbenchController {
         return new Rollback(question, answer.id());
     }
 
-    private static int getCut(List<Message> context, String question) {
-        int cut = -1;
+    /**
+     * 从尾部找本轮提问那条（带轮起始标记的 user 消息）。标记按语言取自词表（chat.turn.*），
+     * 认的时候遍历全部语言：切语言后旧轮的标记仍是旧语言。核对用命中那门语言的问题前缀——
+     * enriched 是一门语言一次拼成的，不存在跨语言混拼。
+     */
+    private int getCut(List<Message> context, String question) {
         for (int i = context.size() - 1; i >= 0; i--) {
             Message message = context.get(i);
-            if (message instanceof UserMessage && message.getText() != null
-                    && message.getText().startsWith(ChatTurnStreamer.TURN_MARKER)) {
-                cut = i;
-                break;
+            if (!(message instanceof UserMessage) || message.getText() == null) {
+                continue;
+            }
+            String text = message.getText();
+            for (AgentLang lang : AgentLang.values()) {
+                if (!text.startsWith(prompts.get(lang, "chat.turn.timePrefix"))) {
+                    continue;
+                }
+                // 核对的是 enriched 的尾巴（拼法见 ChatTurnStreamer.Turn.run），对不上就是压缩把本轮提问
+                // 吃掉了，此时命中的那条是压缩留下的首问——照它切会把中间好几轮连同摘要一起抹掉
+                if (!text.endsWith(prompts.get(lang, "chat.turn.questionPrefix") + question)) {
+                    throw new BizException(ErrorCode.CHAT_REGENERATE_UNAVAILABLE);
+                }
+                return i;
             }
         }
-        // 核对的是 enriched 的尾巴（拼法见 ChatTurnStreamer.Turn.run 里那两行），对不上就是压缩把本轮提问吃掉了，
-        // 此时命中的那条是压缩留下的首问——照它切会把中间好几轮连同摘要一起抹掉
-        if (cut < 0 || !Objects.requireNonNull(context.get(cut).getText())
-                .endsWith(ChatTurnStreamer.QUESTION_MARKER + question)) {
-            throw new BizException(ErrorCode.CHAT_REGENERATE_UNAVAILABLE);
-        }
-        return cut;
+        throw new BizException(ErrorCode.CHAT_REGENERATE_UNAVAILABLE);
     }
 
     /**

@@ -144,7 +144,7 @@ public class DeepAnalysisService {
                 s.bidAskImbalance(), s.tradeDelta(), s.largeTradeBias(), s.oiChangeRate(), s.fundingDeviation(),
                 s.lsrExtreme(), s.liquidationPressure(), s.liquidationVolumeUsdt(),
                 s.topTraderBias(), s.takerBuySellPressure(), s.fearGreedIndex(), s.fearGreedLabel());
-        String iv = s.toIvSummary();
+        String iv = s.toIvSummary(prompts.get(lang, "chat.deepAnalysis.noIv"));
         return prompts.get(lang, "chat.deepAnalysis.dataContext", Map.of(
                 "symbol", s.symbol(), "price", s.lastPrice(),
                 "micro", micro, "iv", iv, "news", newsContext));

@@ -52,7 +52,7 @@ class TraderToolI18nTest {
             new MarketToolkit(mock(MarketDataService.class)),
             new NewsToolkit(mock(NewsCache.class), mock(NewsFlashLocalizer.class)),
             mock(AiTraderMapper.class), mock(AiTraderDecisionMapper.class),
-            new TraderPlanStore(mock(AiTraderPlanMapper.class)),
+            new TraderPlanStore(mock(AiTraderPlanMapper.class), prompts),
             mock(TraderRequestService.class), mock(UserLangResolver.class), prompts,
             new MessageCatalog(),
             new LocalizedToolCallbacks(prompts),
@@ -63,7 +63,7 @@ class TraderToolI18nTest {
     private final TradeTools tradeTools = new TradeTools(
             mock(SimTradeClient.class), 1L, Set.of("BTCUSDT"), BigDecimal.TEN,
             sym -> BigDecimal.ONE,
-            new TraderPlanStore(mock(AiTraderPlanMapper.class)), mock(TraderRequestService.class),
+            new TraderPlanStore(mock(AiTraderPlanMapper.class), prompts), mock(TraderRequestService.class),
             new TradeTools.WakeCtx(1L, 1, 0L, Long.MAX_VALUE, null, AgentLang.ZH), prompts, new MessageCatalog());
 
     private Map<String, String> descriptions(AgentLang lang) {

@@ -267,7 +267,8 @@ public class TraderWakeupRunner {
         ToolCallTraceHook trace = new ToolCallTraceHook();
         CompiledGraph<MessagesState<Message>> graph = AgentGraphs.reactAgent(model, prompt)
                 .tools(wakeTools(lang, tradeTools))
-                .addExecuteToolsHook(new ModelCallLimiter(MAX_MODEL_CALLS))
+                .addExecuteToolsHook(new ModelCallLimiter(MAX_MODEL_CALLS,
+                        prompts.get(lang, "llm.callLimit.notExecuted")))
                 .addExecuteToolsHook(trace)
                 // 首轮强制调工具：不看数据不许决策；弱模型不支持 tool_choice 会以 ERROR 落库并最终自动暂停
                 .build(ResilientChatService.builder().model(model).forceFirstToolChoice("required").asFactory())

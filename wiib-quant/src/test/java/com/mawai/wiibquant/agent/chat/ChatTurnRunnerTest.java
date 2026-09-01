@@ -263,7 +263,7 @@ class ChatTurnRunnerTest {
      */
     @Test
     void trader专家被派发且工具只读自己那份() {
-        when(traderChatService.overview(1L)).thenReturn("{\"hasTrader\":true,\"status\":\"RUNNING\"}");
+        when(traderChatService.overview(1L, AgentLang.ZH)).thenReturn("{\"hasTrader\":true,\"status\":\"RUNNING\"}");
         AtomicInteger traderTurns = new AtomicInteger();
         when(light.call(any(Prompt.class))).thenAnswer(inv -> {
             Prompt prompt = inv.getArgument(0);
@@ -281,7 +281,7 @@ class ChatTurnRunnerTest {
         turn("我的 trader 怎么样");
 
         assertThat(starts("trader_agent")).isEqualTo(1);
-        verify(traderChatService).overview(1L);
+        verify(traderChatService).overview(1L, AgentLang.ZH);
         // 专家结论进了上下文，汇总者才写得出答案
         assertThat(summarizerInput()).contains("你的 trader 正在运行");
     }

@@ -78,7 +78,7 @@ public class MarketToolkit {
         out.put("available", true);
         out.put("symbol", a.snapshot().symbol());
         out.put("dvolIndex", a.snapshot().dvolIndex());
-        out.put("ivSummary", a.snapshot().toIvSummary());
+        out.put("ivSummary", a.snapshot().toIvSummary("no data"));
         return out.toJSONString();
     }
 

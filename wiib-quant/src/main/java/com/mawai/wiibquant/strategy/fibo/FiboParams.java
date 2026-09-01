@@ -36,12 +36,4 @@ public record FiboParams(
                 true,                 // trendFilterOn=true：只做与 1h SMA200 同向的腿(四币消融验证为改善)
                 true);                // trendAlignOn=true：T1 均线多头排列门(四币样本外+毛收益一致改善，已采纳)
     }
-
-    /** 消融：止盈从斐波延伸位切到 R 倍(entry±r×risk)；r=0 回退延伸位。 */
-    public FiboParams withTpRMultiple(double r) {
-        return new FiboParams(swingTfMillis, atrPeriod, reversalAtrMult, minLegAtrMult,
-                entryFib, invalidationRatio, slFibRatio, slBufferAtrMult, tpExtensionRatio,
-                orderTimeoutBars, swingLookbackBars,
-                r, trendFilterOn, trendAlignOn);
-    }
 }

@@ -24,12 +24,7 @@ public class PromptCatalog {
 
     public PromptCatalog() {
         // classpath*: 与 mybatis mapper-locations 同款——打成 Boot fat jar 后照样枚举得到目录里的条目
-        this("classpath*:prompts/*/*.yml");
-    }
-
-    /** 单测用：换个目录装一套词表，不碰生产那份 */
-    public PromptCatalog(String locationPattern) {
-        this.bundle = new LangBundle("提示词", locationPattern);
+        this.bundle = new LangBundle("提示词", "classpath*:prompts/*/*.yml");
     }
 
     /** 取一条提示词。缺 key 只会回落或抛，不会给空串 */

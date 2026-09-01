@@ -17,6 +17,7 @@ import com.mawai.wiibcommon.util.SpringUtils;
 import com.mawai.wiibsim.controller.InternalFuturesTradeController;
 import com.mawai.wiibsim.mapper.CryptoOrderMapper;
 import com.mawai.wiibsim.mapper.FuturesPositionMapper;
+import com.mawai.wiibsim.mapper.LedgerProbeMapper;
 import com.mawai.wiibsim.mapper.UserLedgerMapper;
 import com.mawai.wiibsim.mapper.UserMapper;
 import com.mawai.wiibsim.service.UserService;
@@ -67,6 +68,8 @@ class LedgerProxyRealRunTest {
 
     @Autowired
     private UserLedgerMapper ledgerMapper;
+    @Autowired
+    private LedgerProbeMapper ledgerProbe;
 
     @Autowired
     private UserService userService;
@@ -528,7 +531,7 @@ class LedgerProxyRealRunTest {
     }
 
     private void assertWallet(Long uid, LedgerWallet wallet, BigDecimal expected) {
-        assertThat(ledgerMapper.sumDeltaByWallet(uid, wallet.name()))
+        assertThat(ledgerProbe.sumDeltaByWallet(uid, wallet.name()))
                 .as("钱包 %s 的 SUM(delta) 必须等于 user 表当列值", wallet)
                 .isEqualByComparingTo(expected == null ? BigDecimal.ZERO : expected);
     }

@@ -174,11 +174,6 @@ public class ChatAgentFactory {
         this.mergedTag = "[BlockBeats+" + source + "]";
     }
 
-    /** 合并标签（[BlockBeats+源名]）：提示词与真跑断言共用一处，改了源名断言自动跟上 */
-    public String mergedTag() {
-        return mergedTag;
-    }
-
     /**
      * 取这份配置的叶子，按指纹缓存：配置一变指纹就变、自然拿到新叶子，不需要任何显式失效。
      * <p>
@@ -241,7 +236,7 @@ public class ChatAgentFactory {
                 prompts.get(lang, "chat.expert.news")), () -> newsToolkit.newsSearch(lang)));
         // trader 专家只读这个用户自己的 trader
         experts.put(TRADER_AGENT, new Expert(expertGraph(lang, light,
-                new TraderQueryToolkit(traderChatService, eps.userId()), "required",
+                new TraderQueryToolkit(traderChatService, eps.userId(), lang), "required",
                 prompts.get(lang, "chat.expert.trader")), null));
 
         return new Leaves(modelLabel(eps.deep()), deep, light, experts,
@@ -292,7 +287,8 @@ public class ChatAgentFactory {
      */
     static List<EdgeHook.WrapCall<MessagesState<Message>>> summarizerToolHooks(
             ApprovalRegistry registry, PromptCatalog prompts, AgentLang lang, int limit) {
-        return List.of(new ApprovalGate(registry, prompts, lang), new ModelCallLimiter(limit));  // 内层 → 外层
+        return List.of(new ApprovalGate(registry, prompts, lang),
+                new ModelCallLimiter(limit, prompts.get(lang, "llm.callLimit.notExecuted")));  // 内层 → 外层
     }
 
     /**
@@ -313,7 +309,8 @@ public class ChatAgentFactory {
             builder.tools(localizedTools.of(lang, toolkit));
             // 有工具才有 ReAct 循环，没保险丝就一路顶到框架 25 次迭代硬顶抛异常；而 market 的工具
             // 每调一次就打一次真实上游，是行情配额账里唯一没封顶的一项
-            builder.addExecuteToolsHook(new ModelCallLimiter(runModelCallLimit));
+            builder.addExecuteToolsHook(new ModelCallLimiter(runModelCallLimit,
+                    prompts.get(lang, "llm.callLimit.notExecuted")));
         }
         // 专家的立身之本是"用工具拿真实数据"：不强制的话模型可能用自带的内置搜索直接答，
         // 工具一次都不调，数据源就失控了（本系统的行情/预测战绩全被绕过去）
@@ -358,8 +355,6 @@ public class ChatAgentFactory {
             builder.addExecuteToolsHook(hook);
         }
         return builder.build(ResilientChatService.builder()
-                        // 不给兜底模型：BYOK 只有一个端点，切到同端点的另一个模型没意义
-                        //（端点挂了两个一起挂）。ResilientChatService 支持兜底为空，退避重试照旧
                         .model(deep)
                         // 搜索许可（双闸门的调用方那半）：ResponsesChatModel 还要再对端点配置那半
                         .webSearch(webSearch)

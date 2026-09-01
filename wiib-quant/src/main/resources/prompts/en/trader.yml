@@ -308,6 +308,8 @@ trader:
   # Action names in the public plan revision history, plus the "there was none" placeholder
   revise:
     addOn: added to position
+    # the audit note left when an add-on supersedes the old thesis (TraderPlanStore.upsert)
+    addOnNote: "old thesis [{{playType}} / {{invalidation}}] superseded by the new one"
     reduce: reduced position
     ownerApproved: "approved by owner: {{reason}}"
     fileNew: plan filed

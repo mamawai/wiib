@@ -32,13 +32,15 @@ public class ModelCallLimiter implements EdgeHook.WrapCall<MessagesState<Message
     private static final String GOTO_END = "end";
     /** 最终 state 里可读到本轮模型调用数——调用方据此判断是否被保险丝提前收束 */
     public static final String CALL_COUNT_KEY = "model_call_count";
-    /** 占位回执正文：说清"没执行"，不是伪造的成功结果——模型和复盘都要看得懂 */
-    private static final String NOT_EXECUTED = "未执行：本轮模型调用已达上限，工具被跳过。";
 
     private final int runLimit;
+    /** 占位回执正文（llm.callLimit.notExecuted）：说清"没执行"，不是伪造的成功结果——
+     * 模型和复盘都要看得懂。按语言在建图时由调用方取词表传入 */
+    private final String notExecuted;
 
-    public ModelCallLimiter(int runLimit) {
+    public ModelCallLimiter(int runLimit, String notExecuted) {
         this.runLimit = runLimit;
+        this.notExecuted = notExecuted;
     }
 
     @Override
@@ -60,7 +62,7 @@ public class ModelCallLimiter implements EdgeHook.WrapCall<MessagesState<Message
     }
 
     /** 最后一条助手消息里待执行的 tool_call → 一条标记未执行的 ToolResponseMessage（没有就不补，空回执本身也是孤儿） */
-    private static Optional<ToolResponseMessage> placeholderResponses(MessagesState<Message> state) {
+    private Optional<ToolResponseMessage> placeholderResponses(MessagesState<Message> state) {
         return state.lastMessage()
                 .filter(AssistantMessage.class::isInstance)
                 .map(AssistantMessage.class::cast)
@@ -68,7 +70,7 @@ public class ModelCallLimiter implements EdgeHook.WrapCall<MessagesState<Message
                 .map(assistant -> {
                     List<ToolResponseMessage.ToolResponse> responses = new ArrayList<>();
                     for (AssistantMessage.ToolCall call : assistant.getToolCalls()) {
-                        responses.add(new ToolResponseMessage.ToolResponse(call.id(), call.name(), NOT_EXECUTED));
+                        responses.add(new ToolResponseMessage.ToolResponse(call.id(), call.name(), notExecuted));
                     }
                     return ToolResponseMessage.builder().responses(responses).build();
                 });

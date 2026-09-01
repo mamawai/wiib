@@ -42,13 +42,13 @@ public final class LangBundle {
     /** {{name}} 占位符，与前端 i18next 同款写法；两边留白容忍 */
     private static final Pattern PLACEHOLDER = Pattern.compile("\\{\\{\\s*([\\w.]+)\\s*}}");
 
-    /** 这份词表的用途名（"提示词"/"界面文案"），只用于日志与报错 */
+    /** 这份词表的用途名（"提示词"/"界面文案"）：两份词表共用引擎，日志与报错靠它分清是哪份出的问题 */
     private final String what;
     private final Map<AgentLang, Map<String, String>> byLang;
 
     public LangBundle(String what, String locationPattern) {
         this.what = what;
-        this.byLang = load(what, locationPattern);
+        this.byLang = load(locationPattern);
     }
 
     /** 取一条。缺 key 见类注释——只会回落或抛，不会给空串 */
@@ -63,16 +63,7 @@ public final class LangBundle {
             throw new IllegalStateException(
                     what + "缺 key [" + key + "]：" + FALLBACK.code() + " 是回落语言，这条必须有");
         }
-        return render(what, key, template, vars);
-    }
-
-    /**
-     * 某门语言实际装到的那一份（不回落，装配后不可变）。给对齐检查用：
-     * 缺 key 只会回落 + 记 WARN，日志里没人看，界面上就是英文里冒出一行中文，
-     * 得有个地方能把"回落"看成红。
-     */
-    public Map<String, String> texts(AgentLang lang) {
-        return byLang.getOrDefault(lang, Map.of());
+        return render(key, template, vars);
     }
 
     /**
@@ -95,7 +86,7 @@ public final class LangBundle {
         return fallback;
     }
 
-    private static String render(String what, String key, String template, Map<String, Object> vars) {
+    private String render(String key, String template, Map<String, Object> vars) {
         Matcher matcher = PLACEHOLDER.matcher(template);
         StringBuilder out = new StringBuilder();
         while (matcher.find()) {
@@ -110,7 +101,7 @@ public final class LangBundle {
         return out.toString();
     }
 
-    private static Map<AgentLang, Map<String, String>> load(String what, String locationPattern) {
+    private Map<AgentLang, Map<String, String>> load(String locationPattern) {
         Resource[] files;
         try {
             files = new PathMatchingResourcePatternResolver().getResources(locationPattern);
@@ -120,11 +111,11 @@ public final class LangBundle {
 
         Map<AgentLang, Map<String, String>> result = new EnumMap<>(AgentLang.class);
         for (Resource file : files) {
-            String code = langDir(what, file);
+            String code = langDir(file);
             AgentLang lang = AgentLang.find(code).orElseThrow(() -> new IllegalStateException(
                     what + "语言目录 " + code + " 没有对应的 AgentLang 常量：加语言要连枚举一起加"));
-            Map<String, String> domain = flatten(what, file);
-            merge(what, result.computeIfAbsent(lang, k -> new HashMap<>()), domain, file, code);
+            Map<String, String> domain = flatten(file);
+            merge(result.computeIfAbsent(lang, k -> new HashMap<>()), domain, file, code);
             log.info("{}装配 {}/{}：{} 条", what, code, file.getFilename(), domain.size());
         }
 
@@ -138,7 +129,7 @@ public final class LangBundle {
     }
 
     /** 语言码取自父目录名（prompts/zh/trader.yml → zh）；jar 里的 URL 同样是斜杠分段，一套解析走到底 */
-    private static String langDir(String what, Resource file) {
+    private String langDir(Resource file) {
         String path;
         try {
             path = file.getURL().getPath();
@@ -156,8 +147,8 @@ public final class LangBundle {
      * 同一门语言的多个域文件压进同一张表。撞 key 当场炸：两个文件写了同一条，
      * 静默留一条丢一条＝上线后拿到的是另一个域的文案，从结果里看不出来。
      */
-    private static void merge(String what, Map<String, String> texts, Map<String, String> domain,
-                              Resource file, String code) {
+    private void merge(Map<String, String> texts, Map<String, String> domain,
+                       Resource file, String code) {
         domain.forEach((key, value) -> {
             String old = texts.putIfAbsent(key, value);
             if (old != null) {
@@ -168,7 +159,7 @@ public final class LangBundle {
     }
 
     /** YAML 的嵌套层级压成点分 key（trader: systemTemplate: → trader.systemTemplate），与前端 ns.key 对齐 */
-    private static Map<String, String> flatten(String what, Resource file) {
+    private Map<String, String> flatten(Resource file) {
         YamlPropertiesFactoryBean yaml = new YamlPropertiesFactoryBean();
         yaml.setResources(file);
         Properties flat = Objects.requireNonNull(yaml.getObject(), () -> what + "解析为空：" + file.getFilename());

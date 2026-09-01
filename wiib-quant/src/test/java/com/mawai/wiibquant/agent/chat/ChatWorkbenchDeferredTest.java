@@ -149,9 +149,9 @@ class ChatWorkbenchDeferredTest {
         verify(turnRunner).run(any(), anyLong(), eq(SESSION), enriched.capture(), any(), any(), any(), any(),
                 argThat(b -> b != null && b.names().equals(List.of("market_agent"))));
         assertThat(enriched.getValue())
-                .startsWith(ChatTurnStreamer.TURN_MARKER)
+                .startsWith(ChatTestEndpoints.PROMPTS.get(AgentLang.ZH, "chat.turn.timePrefix"))
                 .contains("此前问题「看看行情」")
-                .doesNotContain(ChatTurnStreamer.QUESTION_MARKER);
+                .doesNotContain(ChatTestEndpoints.PROMPTS.get(AgentLang.ZH, "chat.turn.questionPrefix"));
     }
 
     /**

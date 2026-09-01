@@ -157,9 +157,4 @@ public class ApprovalRegistry {
     public Optional<PendingRequest> consumeRejected(String sessionId) {
         return Optional.ofNullable(rejected.remove(sessionId));
     }
-
-    /** 测试用：确认过期条目真被清掉了 */
-    int approvedCount() {
-        return approvedUntil.size();
-    }
 }

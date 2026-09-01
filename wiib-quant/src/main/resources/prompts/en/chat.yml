@@ -160,6 +160,27 @@ chat:
   # never translated, so their question may well be in another language
   outputLanguage: "[SYSTEM] The user's question is in their own words and may be written in another language; answer what they mean, and output language: English."
 
+  # ---- Turn-start markers (the head of the enriched message; model-facing, never shown) ----
+  # The mark and its prefix must stay in sync: written in ChatTurnStreamer.Turn.run, recognised in
+  # ChatWorkbenchController.getCut - regenerate finds the turn by timePrefix from the tail and verifies
+  # questionPrefix + the original question. Change one, change the other. The recogniser walks every
+  # language (after a language switch old turns keep their old markers).
+  turn:
+    timeMark: "[Current time {{time}}]"
+    timePrefix: "[Current time "
+    questionPrefix: "User question: "
+
+  # ---- Explanatory fields inside the trader expert's tool results (model-facing JSON values, see TraderChatService) ----
+  traderQuery:
+    wakeWindowAllDay: all day
+    wakeWindowNote: "{{window}} (Beijing time; outside the window there are no scheduled wake-ups and no alerts)"
+    leverage: "{{min}}~{{max}}x"
+    memoryNote: "Full review notes: written by the reviewer at the daily retrospective; the trader sees them on every wake-up"
+    learningNotesNote: "Full learning notes: written by the learning agent studying its peers; the trader sees them on every wake-up"
+    kindNote: "TRADE=candle-close wake-up ALERT=volatility-alert wake-up MANUAL=owner's manual wake-up REVIEW=daily retrospective (reasoning is the full review text) LEARN=peer learning (reasoning is the full learning text)"
+    planNote: "invalidationCondition is the invalidation clause set when the position was opened - only when it triggers may the position be closed proactively; revisions is the audit trail of stop-loss/take-profit moves"
+    noTrader: "This user has not created an AI Trader yet; one can be created on the \"My Trader\" page"
+
   # ---- Text shown to the user (saved to the display history or pushed over SSE) ----
   cancelledNote: (stopped)
   cancelledEmpty: (this turn was stopped by the user, no answer given)
@@ -223,6 +244,7 @@ chat:
   # ---- Deep analysis (Bull vs Bear debate + Judge verdict) ----
   deepAnalysis:
     noNews: no news context
+    noIv: no data
     bullStance: |-
       You are the long-side debater (Bull) of a crypto research system. From the data below, build the
       strongest possible case for "leaning long over the next 6-24 hours", and hold that line strictly.

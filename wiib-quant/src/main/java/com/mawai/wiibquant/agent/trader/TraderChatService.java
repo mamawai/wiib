@@ -10,6 +10,8 @@ import com.mawai.wiibcommon.entity.AiTraderPlan;
 import com.mawai.wiibcommon.entity.FuturesStopLoss;
 import com.mawai.wiibcommon.entity.FuturesTakeProfit;
 import com.mawai.wiibcommon.entity.UserLlmEndpoint;
+import com.mawai.wiibcommon.enums.AgentLang;
+import com.mawai.wiibquant.agent.i18n.PromptCatalog;
 import com.mawai.wiibquant.agent.learning.ReviewMaterialAssembler;
 import com.mawai.wiibquant.external.sim.SimTradeClient;
 import lombok.RequiredArgsConstructor;
@@ -19,6 +21,7 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 对话轨读 trader 的唯一入口：只查询、不动手，动作归 {@link TraderActionService}。
@@ -49,14 +52,16 @@ public class TraderChatService {
     private final SimTradeClient simTradeClient;
     /** stale 教材过滤的共用入口（与复盘时间线/唤醒回注同一套识别逻辑） */
     private final ReviewMaterialAssembler materialAssembler;
+    /** 返回 JSON 里的说明字段（chat.traderQuery.*）按 lang 取：这些字段是喂给 chat 模型看的 */
+    private final PromptCatalog prompts;
 
     // ===== 查询（纯读库） =====
 
     /** 概况：状态/权益/轮次/配置 + 复盘与学习两份笔记全文（笔记是"它学到了什么"的唯一载体，必须给全）。 */
-    public String overview(long userId) {
+    public String overview(long userId, AgentLang lang) {
         AiTrader t = traderService.mine(userId);
         if (t == null) {
-            return noTrader();
+            return noTrader(lang);
         }
         UserLlmEndpoint endpoint = modelFactory.endpointFor(t);   // 模型名从端点库现解析，ai_trader 已没有 model 列
         return new JSONObject()
@@ -74,14 +79,16 @@ public class TraderChatService {
                 .fluentPut("reviewEnabled", t.getReviewEnabled())
                 .fluentPut("learningEnabled", t.getLearningEnabled())
                 .fluentPut("alertEnabled", t.getAlertEnabled())
-                .fluentPut("wakeWindow", t.getWakeWindow() == null ? "全天"
-                        : t.getWakeWindow() + "（北京时间，时段外不例行唤醒也不警报）")
-                .fluentPut("leverageRange", t.getLeverageMin() + "~" + t.getLeverageMax() + "倍")
+                .fluentPut("wakeWindow", t.getWakeWindow() == null
+                        ? prompts.get(lang, "chat.traderQuery.wakeWindowAllDay")
+                        : prompts.get(lang, "chat.traderQuery.wakeWindowNote", Map.of("window", t.getWakeWindow())))
+                .fluentPut("leverageRange", prompts.get(lang, "chat.traderQuery.leverage",
+                        Map.of("min", t.getLeverageMin(), "max", t.getLeverageMax())))
                 .fluentPut("marginPctRange", plain(t.getMarginPctMin()) + "~" + plain(t.getMarginPctMax()) + "%")
                 .fluentPut("memory", t.getMemory())
-                .fluentPut("memoryNote", "复盘笔记全文：reviewer 每日复盘写的，trader 每次唤醒都会看到")
+                .fluentPut("memoryNote", prompts.get(lang, "chat.traderQuery.memoryNote"))
                 .fluentPut("learningNotes", t.getLearningNotes())
-                .fluentPut("learningNotesNote", "学习笔记全文：learning agent 向同侪学习写的，trader 每次唤醒都会看到")
+                .fluentPut("learningNotesNote", prompts.get(lang, "chat.traderQuery.learningNotesNote"))
                 .fluentPut("customPrompt", t.getCustomPrompt())
                 .fluentPut("pendingOwnerNote", t.getOwnerNote())
                 // 剩余轮次一并给：模型答"我刚留的话还剩几次"只能靠库里这个数，卡片本身不进对话历史
@@ -90,10 +97,10 @@ public class TraderChatService {
     }
 
     /** 当前持仓：口径与唤醒时注入给 trader 的账户状态一致，免得两处说法对不上。 */
-    public String positions(long userId) {
+    public String positions(long userId, AgentLang lang) {
         AiTrader t = traderService.mine(userId);
         if (t == null) {
-            return noTrader();
+            return noTrader(lang);
         }
         JSONArray arr = new JSONArray();
         for (FuturesPositionDTO p : simTradeClient.getAllPositions(t.getSimUserId())) {
@@ -125,10 +132,10 @@ public class TraderChatService {
      * 决策时间线。<b>reasoning 给全文</b>：用户质询"你那笔为什么开多"靠的就是它，
      * 截断了正好把收尾的【本轮结论】切掉，剩一堆行情铺垫等于没给。
      */
-    public String decisions(long userId, Integer limit) {
+    public String decisions(long userId, Integer limit, AgentLang lang) {
         AiTrader t = traderService.mine(userId);
         if (t == null) {
-            return noTrader();
+            return noTrader(lang);
         }
         int n = limit == null ? DEFAULT_DECISIONS : Math.clamp(limit, 1, MAX_DECISIONS);
         // stale 教材过滤（口径3：chat 跟随忽略）：新格式剔段、旧格式整轮剔，与复盘时间线同一套识别
@@ -160,15 +167,15 @@ public class TraderChatService {
                 .fluentPut("hasTrader", true)
                 .fluentPut("roundNo", t.getRoundNo())
                 .fluentPut("decisions", arr)
-                .fluentPut("kindNote", "TRADE=K线收盘唤醒 ALERT=波动警报唤醒 MANUAL=主人手动唤醒 REVIEW=每日复盘（reasoning是复盘全文） LEARN=向同侪学习（reasoning是学习全文）")
+                .fluentPut("kindNote", prompts.get(lang, "chat.traderQuery.kindNote"))
                 .toJSONString();
     }
 
     /** 交易计划：存活的全给，另附最近归档的几条——"上一笔为什么平了"只看 LIVE 是答不了的。 */
-    public String plans(long userId) {
+    public String plans(long userId, AgentLang lang) {
         AiTrader t = traderService.mine(userId);
         if (t == null) {
-            return noTrader();
+            return noTrader(lang);
         }
         JSONArray live = new JSONArray();
         planStore.list(t.getId(), t.getRoundNo()).forEach(p -> live.add(planJson(p)));
@@ -181,8 +188,7 @@ public class TraderChatService {
                 .fluentPut("hasTrader", true)
                 .fluentPut("livePlans", live)
                 .fluentPut("recentClosedPlans", closed)
-                .fluentPut("planNote", "invalidationCondition 是开仓时立的失效条件——它被触发才允许主动平仓；"
-                        + "revisions 是止损止盈的修订留痕")
+                .fluentPut("planNote", prompts.get(lang, "chat.traderQuery.planNote"))
                 .toJSONString();
     }
 
@@ -228,10 +234,10 @@ public class TraderChatService {
         return v == null ? "" : v.stripTrailingZeros().toPlainString();
     }
 
-    private static String noTrader() {
+    private String noTrader(AgentLang lang) {
         return new JSONObject()
                 .fluentPut("hasTrader", false)
-                .fluentPut("message", "这位用户还没有创建 AI Trader，可以去「我的 Trader」页创建一个")
+                .fluentPut("message", prompts.get(lang, "chat.traderQuery.noTrader"))
                 .toJSONString();
     }
 

@@ -35,16 +35,10 @@ public final class TradeGuard {
     public record PosSnap(String symbol, String side, Integer leverage, boolean filled) {
     }
 
-    /** 开仓请求（工具参数的结构化镜像）；with* 是测试构造变体用的，只留真被用到的那几个。 */
+    /** 开仓请求（工具参数的结构化镜像）。变体构造归测试侧（TradeGuardTest 的 with* 助手）。 */
     public record OpenReq(String symbol, String side, String orderType, BigDecimal quantity, Integer leverage,
                           BigDecimal limitPrice, BigDecimal stopLossPrice, BigDecimal takeProfitPrice,
                           String playType, String signalsUsed, String invalidationCondition) {
-        public OpenReq withOrderType(String v) { return new OpenReq(symbol, side, v, quantity, leverage, limitPrice, stopLossPrice, takeProfitPrice, playType, signalsUsed, invalidationCondition); }
-        public OpenReq withQuantity(BigDecimal v) { return new OpenReq(symbol, side, orderType, v, leverage, limitPrice, stopLossPrice, takeProfitPrice, playType, signalsUsed, invalidationCondition); }
-        public OpenReq withLeverage(Integer v) { return new OpenReq(symbol, side, orderType, quantity, v, limitPrice, stopLossPrice, takeProfitPrice, playType, signalsUsed, invalidationCondition); }
-        public OpenReq withLimitPrice(BigDecimal v) { return new OpenReq(symbol, side, orderType, quantity, leverage, v, stopLossPrice, takeProfitPrice, playType, signalsUsed, invalidationCondition); }
-        public OpenReq withStopLossPrice(BigDecimal v) { return new OpenReq(symbol, side, orderType, quantity, leverage, limitPrice, v, takeProfitPrice, playType, signalsUsed, invalidationCondition); }
-        public OpenReq withInvalidationCondition(String v) { return new OpenReq(symbol, side, orderType, quantity, leverage, limitPrice, stopLossPrice, takeProfitPrice, playType, signalsUsed, v); }
     }
 
     private TradeGuard() {

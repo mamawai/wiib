@@ -6,6 +6,7 @@ import com.alibaba.fastjson2.JSONObject;
 import com.mawai.wiibcommon.entity.AiTrader;
 import com.mawai.wiibcommon.entity.AiTraderDecision;
 import com.mawai.wiibcommon.entity.AiTraderPlan;
+import com.mawai.wiibcommon.enums.AgentLang;
 import com.mawai.wiibcommon.market.KlineHistoryStore;
 import com.mawai.wiibquant.agent.i18n.PromptCatalog;
 import com.mawai.wiibquant.agent.learning.ReviewMaterialAssembler;
@@ -47,7 +48,8 @@ class TraderChatServiceTest {
             simTradeClient, mock(KlineHistoryStore.class), new PromptCatalog());
 
     private final TraderChatService service =
-            new TraderChatService(traderService, modelFactory, planStore, simTradeClient, assembler);
+            new TraderChatService(traderService, modelFactory, planStore, simTradeClient, assembler,
+                    new PromptCatalog());
 
     private AiTrader running() {
         AiTrader t = new AiTrader();
@@ -89,10 +91,10 @@ class TraderChatServiceTest {
 
     private String call(String which, long userId) {
         return switch (which) {
-            case "overview" -> service.overview(userId);
-            case "positions" -> service.positions(userId);
-            case "decisions" -> service.decisions(userId, null);
-            default -> service.plans(userId);
+            case "overview" -> service.overview(userId, AgentLang.ZH);
+            case "positions" -> service.positions(userId, AgentLang.ZH);
+            case "decisions" -> service.decisions(userId, null, AgentLang.ZH);
+            default -> service.plans(userId, AgentLang.ZH);
         };
     }
 
@@ -131,7 +133,7 @@ class TraderChatServiceTest {
         when(traderService.decisions(eq(7L), anyInt(), any(), any(), any(), any()))
                 .thenReturn(List.of(segmented, legacyClose));
 
-        JSONArray out = parse(service.decisions(ME, null)).getJSONArray("decisions");
+        JSONArray out = parse(service.decisions(ME, null, AgentLang.ZH)).getJSONArray("decisions");
 
         assertThat(out).hasSize(1);
         String reasoning = out.getJSONObject(0).getString("reasoning");
@@ -156,7 +158,7 @@ class TraderChatServiceTest {
         kept.setOpenedWakeTime(2000L);
         when(planStore.recentClosed(7L, 1, 5)).thenReturn(List.of(ignored, kept));
 
-        JSONArray closed = parse(service.plans(ME)).getJSONArray("recentClosedPlans");
+        JSONArray closed = parse(service.plans(ME, AgentLang.ZH)).getJSONArray("recentClosedPlans");
 
         assertThat(closed).hasSize(1);
         assertThat(closed.getJSONObject(0).getString("symbol")).isEqualTo("ETHUSDT");

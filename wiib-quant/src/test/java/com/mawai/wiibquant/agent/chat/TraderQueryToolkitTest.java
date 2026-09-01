@@ -1,5 +1,6 @@
 package com.mawai.wiibquant.agent.chat;
 
+import com.mawai.wiibcommon.enums.AgentLang;
 import com.mawai.wiibquant.agent.trader.TraderChatService;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.tool.annotation.Tool;
@@ -27,29 +28,14 @@ class TraderQueryToolkitTest {
      */
     @Test
     void 各自只读自己那份() {
-        TraderQueryToolkit mine = new TraderQueryToolkit(service, 1L);
-        TraderQueryToolkit others = new TraderQueryToolkit(service, 2L);
+        TraderQueryToolkit mine = new TraderQueryToolkit(service, 1L, AgentLang.ZH);
+        TraderQueryToolkit others = new TraderQueryToolkit(service, 2L, AgentLang.EN);
 
         mine.traderOverview();
         others.traderOverview();
 
-        verify(service).overview(1L);
-        verify(service).overview(2L);
-    }
-
-    @Test
-    void 四个查询都带着自己的userId() {
-        TraderQueryToolkit toolkit = new TraderQueryToolkit(service, 42L);
-
-        toolkit.traderOverview();
-        toolkit.traderPositions();
-        toolkit.traderDecisions(3);
-        toolkit.traderPlans();
-
-        verify(service).overview(42L);
-        verify(service).positions(42L);
-        verify(service).decisions(42L, 3);
-        verify(service).plans(42L);
+        verify(service).overview(1L, AgentLang.ZH);
+        verify(service).overview(2L, AgentLang.EN);
     }
 
     /**

@@ -262,6 +262,8 @@ trader:
   # 计划修订历史里的动作名与"原本没有"的占位，同样公开展示
   revise:
     addOn: 加仓
+    # 加仓覆盖时旧论点进修订历史的留痕（TraderPlanStore.upsert）
+    addOnNote: "旧论点[{{playType}} / {{invalidation}}]被新论点覆盖"
     reduce: 减仓
     ownerApproved: "主人确认：{{reason}}"
     fileNew: 补立

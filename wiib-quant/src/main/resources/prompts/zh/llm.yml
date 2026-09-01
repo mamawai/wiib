@@ -14,3 +14,8 @@ llm:
     unreachable: 端点无响应，请检查 Base URL 是否正确
     # type 是最深层 cause 的类名，语言无关；归类不到的形态靠它被发现
     unknown: 处理失败（{{type}}），请稍后重试
+
+  callLimit:
+    # 保险丝跳过的 tool_call 补的占位回执（ModelCallLimiter）：说清"没执行"，不是伪造的成功结果——
+    # 模型和复盘都要看得懂，且会随会话上下文落库
+    notExecuted: 未执行：本轮模型调用已达上限，工具被跳过。

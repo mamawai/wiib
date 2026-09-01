@@ -25,28 +25,26 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
  * 韧性分层的契约：阻塞路径的重试归模型层（ResponsesChatModel 自带 / OpenAI SDK），
- * 本服务只负责兜底切换——两层都重试会叠乘成 3×3=9 次，白白放大尾延迟。
+ * 本层不再来一轮——两层都重试会叠乘成 3×3=9 次，白白放大尾延迟。
  * 另钉两条 options 契约：首轮强制逐次落地、options 类型跟着模型走（openai 协议硬转 OpenAiChatOptions）。
  */
 class ResilientChatServiceTest {
 
     private final ChatModel primary = mock(ChatModel.class);
-    private final ChatModel fallback = mock(ChatModel.class);
 
-    private ReactAgent.ChatService service(ChatModel fallbackModel) {
+    private ReactAgent.ChatService service() {
         ReactAgentBuilder<?, ?> agentBuilder = mock(ReactAgentBuilder.class);
         when(agentBuilder.tools()).thenReturn(List.of());
         when(agentBuilder.systemMessage()).thenReturn(Optional.of("你是助手"));
         when(primary.getOptions()).thenReturn(ToolCallingChatOptions.builder().build());
         return ResilientChatService.builder()
-                .model(primary).fallbackModel(fallbackModel)
+                .model(primary)
                 .asFactory().apply(agentBuilder);
     }
 
@@ -56,23 +54,12 @@ class ResilientChatServiceTest {
 
     private static final List<Message> ASK = List.of(new UserMessage("BTC 现在怎么样"));
 
+    /** 重试是模型层的事：本层只调一次，失败原样抛给上层归类（LlmErrorMessages） */
     @Test
-    void 阻塞路径只调一次主模型失败即切兜底() {
-        when(primary.call(any(Prompt.class))).thenThrow(new TransientAiException("429 限流"));
-        when(fallback.call(any(Prompt.class))).thenReturn(responseOf("兜底回答"));
-
-        ChatResponse result = service(fallback).execute(ASK);
-
-        // 重试是模型层的事，这里绝不能再来一轮
-        verify(primary, times(1)).call(any(Prompt.class));
-        assertThat(result.getResult().getOutput().getText()).isEqualTo("兜底回答");
-    }
-
-    @Test
-    void 没有兜底模型时原样抛出() {
+    void 阻塞路径失败只调一次且原样抛出() {
         when(primary.call(any(Prompt.class))).thenThrow(new TransientAiException("502"));
 
-        assertThatThrownBy(() -> service(null).execute(ASK))
+        assertThatThrownBy(() -> service().execute(ASK))
                 .isInstanceOf(TransientAiException.class);
         verify(primary, times(1)).call(any(Prompt.class));
     }
@@ -194,19 +181,9 @@ class ResilientChatServiceTest {
                         new java.io.IOException("stream was reset: CANCEL")))
                 .thenReturn(responseOf("重试成功"));
 
-        ChatResponse result = service(null).execute(ASK);
+        ChatResponse result = service().execute(ASK);
 
         verify(primary, times(2)).call(any(Prompt.class));
         assertThat(result.getResult().getOutput().getText()).isEqualTo("重试成功");
-    }
-
-    @Test
-    void 主模型正常时不碰兜底() {
-        when(primary.call(any(Prompt.class))).thenReturn(responseOf("主模型回答"));
-
-        ChatResponse result = service(fallback).execute(ASK);
-
-        assertThat(result.getResult().getOutput().getText()).isEqualTo("主模型回答");
-        verify(fallback, never()).call(any(Prompt.class));
     }
 }

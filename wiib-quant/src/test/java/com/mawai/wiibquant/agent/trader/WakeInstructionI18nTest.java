@@ -50,7 +50,7 @@ class WakeInstructionI18nTest {
             new MarketToolkit(mock(MarketDataService.class)),
             new NewsToolkit(mock(NewsCache.class), mock(NewsFlashLocalizer.class)),
             traderMapper, mock(AiTraderDecisionMapper.class),
-            new TraderPlanStore(mock(AiTraderPlanMapper.class)),
+            new TraderPlanStore(mock(AiTraderPlanMapper.class), prompts),
             mock(TraderRequestService.class), mock(UserLangResolver.class), prompts,
             new MessageCatalog(),
             new LocalizedToolCallbacks(prompts),

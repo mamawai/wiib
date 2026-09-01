@@ -248,7 +248,7 @@ public class TradeTools {
             plan.setOpenedWakeTime(ctx.boundaryTime());
             // 市价单/市价加仓响应即带仓位id；限价挂单为null，成交后唤醒懒清理趟补绑
             plan.setPositionId(resp.getPositionId());
-            planStore.upsert(plan, isAddOn);
+            planStore.upsert(plan, isAddOn, ctx.lang());
         } catch (Exception e) {
             log.warn("[TradeTools] 计划落库失败 traderId={} {} msg={}", ctx.traderId(), req.symbol(), e.getMessage());
         }
@@ -484,7 +484,7 @@ public class TradeTools {
             TraderPlanStore.appendRevision(plan, ctx.boundaryTime(), prompts.get(ctx.lang(), "trader.revise.fileNew"),
                     prompts.get(ctx.lang(), "trader.revise.fileNewNote"), signalsUsed);
             // 前置校验已确认无计划，走 insert 路径；isAddOn=false 语义上也对——补立不是加仓
-            planStore.upsert(plan, false);
+            planStore.upsert(plan, false, ctx.lang());
             return ok("write_plan", args, "{\"ok\":true}");
         } catch (Exception e) {
             return fail("write_plan", args, e);

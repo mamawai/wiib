@@ -173,9 +173,9 @@ class ApprovalRegistryTest {
                 .get().satisfies(p -> assertThat(p.symbol()).isEqualTo("ETHUSDT"));
     }
 
-    /** 过期授权不能永久留在内存里——用户批了但后续没触发工具的记录会一直累积 */
+    /** 探测路径也要自己判 TTL：过了期的授权探测不到（顺手清理是内部行为，这里只钉对外口径） */
     @Test
-    void 探测时顺手清理过期授权() {
+    void 过期授权探测不到() {
         registry.nowMs = () -> 0L;
         registry.requestApproval("s1", TOOL, "BTCUSDT", "贵操作");
         registry.approve("s1", registry.peekPending("s1").orElseThrow().requestId());
@@ -183,7 +183,6 @@ class ApprovalRegistryTest {
         registry.nowMs = () -> ApprovalRegistry.APPROVAL_TTL_MS + 1;
 
         assertThat(registry.hasApproval("s1")).isFalse();
-        assertThat(registry.approvedCount()).isZero();
     }
 
     /**

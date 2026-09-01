@@ -58,10 +58,15 @@ class ChatRegenerateTest {
                 ChatRowKind.of(role, content, ChatTestEndpoints.PROMPTS));
     }
 
-    /** 上下文里一条轮起始提问，形状与 run() 拼的 enriched 一致 */
+    /** 上下文里一条轮起始提问，形状与 run() 拼的 enriched 一致（标记按语言取词表，同生产） */
     private static Message turnStart(String question) {
-        return new UserMessage(ChatTurnStreamer.TURN_MARKER + "2026-08-18 14:32】\n"
-                + ChatTurnStreamer.QUESTION_MARKER + question);
+        return turnStart(AgentLang.ZH, question);
+    }
+
+    private static Message turnStart(AgentLang lang, String question) {
+        return new UserMessage(ChatTestEndpoints.PROMPTS.get(lang, "chat.turn.timeMark",
+                Map.of("time", "2026-08-18 14:32")) + "\n"
+                + ChatTestEndpoints.PROMPTS.get(lang, "chat.turn.questionPrefix") + question);
     }
 
     private record Harness(ChatWorkbenchController controller, ChatHistoryService history,
@@ -143,13 +148,28 @@ class ChatRegenerateTest {
         ArgumentCaptor<String> enriched = ArgumentCaptor.captor();
         verify(h.turnRunner(), timeout(5_000))
                 .run(any(), anyLong(), eq(SESSION), enriched.capture(), any(), any(), any(), any(), any());
-        assertThat(enriched.getValue()).endsWith(ChatTurnStreamer.QUESTION_MARKER + "BTC 怎么样");
+        assertThat(enriched.getValue()).endsWith(
+                ChatTestEndpoints.PROMPTS.get(AgentLang.ZH, "chat.turn.questionPrefix") + "BTC 怎么样");
         // 提问行已经在库里，再落一遍历史里就成了连问两遍
         verify(h.history(), never()).append(any(), anyLong(), eq("user"), any());
         // 新答案落库之后旧答案才被顶掉；提问行一直留着（前端气泡不闪、时间戳不变）
         verify(h.history(), timeout(5_000)).append(eq(SESSION), eq(1L), eq("assistant"), eq("新答案"), any());
         verify(h.history(), timeout(5_000)).deleteMessage(2L);
         verify(h.history(), never()).deleteMessage(1L);
+    }
+
+    /** 切过语言的会话：末轮标记是英文、当次请求语言是中文——getCut 按语言遍历才认得出边界 */
+    @Test
+    void 英文轮起始标记同样认得() {
+        Harness h = harness(
+                List.of(msg(1, "user", "how is BTC"), msg(2, "assistant", "old answer")),
+                List.of(turnStart(AgentLang.EN, "how is BTC"), new AssistantMessage("old answer")));
+
+        regenerate(h);
+
+        ArgumentCaptor<List<Message>> ctx = ArgumentCaptor.captor();
+        verify(h.contextStore()).save(eq(SESSION), eq(1L), ctx.capture());
+        assertThat(ctx.getValue()).isEmpty();
     }
 
     /**

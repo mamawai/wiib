@@ -64,7 +64,7 @@ class TradeToolsTest {
     /** 本类只验工具本身：自主加/减仓都开着，不走审批分流 */
     private final TradeTools tools = new TradeTools(simTradeClient, 99L, Set.of("BTCUSDT"),
             new BigDecimal("10000"), sym -> new BigDecimal("100000"),
-            new TraderPlanStore(planMapper), requestService,
+            new TraderPlanStore(planMapper, PROMPTS), requestService,
             new TradeTools.WakeCtx(7L, 1, 1785171600000L, DEADLINE,
                     new TraderRiskConfig(1, 20, new BigDecimal("1"), new BigDecimal("50"),
                             true, true, true, true), AgentLang.ZH), PROMPTS, MESSAGES);
@@ -410,7 +410,7 @@ class TradeToolsTest {
     void expiredRoundRejectsAllWriteTools() {
         TradeTools late = new TradeTools(simTradeClient, 99L, Set.of("BTCUSDT"),
                 new BigDecimal("10000"), sym -> new BigDecimal("100000"),
-                new TraderPlanStore(planMapper), requestService,
+                new TraderPlanStore(planMapper, PROMPTS), requestService,
                 new TradeTools.WakeCtx(7L, 1, 1785171600000L, System.currentTimeMillis() - 1,
                         new TraderRiskConfig(1, 20, new BigDecimal("1"), new BigDecimal("50"),
                                 true, true, true, true), AgentLang.ZH), PROMPTS, MESSAGES);
@@ -433,7 +433,7 @@ class TradeToolsTest {
         TradeTools strict = new TradeTools(simTradeClient, 99L, Set.of("BTCUSDT"),
                 new BigDecimal("10000"),
                 sym -> { throw new IllegalStateException("不该发起行情查询"); },
-                new TraderPlanStore(planMapper), requestService,
+                new TraderPlanStore(planMapper, PROMPTS), requestService,
                 new TradeTools.WakeCtx(7L, 1, 1785171600000L, DEADLINE,
                         new TraderRiskConfig(1, 20, new BigDecimal("1"), new BigDecimal("50"),
                                 true, true, true, true), AgentLang.ZH), PROMPTS, MESSAGES);
@@ -470,7 +470,7 @@ class TradeToolsTest {
                 .thenReturn("减仓请求已提交给主人确认，本轮不会成交。你的止损单仍在生效，风险有保护");
         TradeTools noSelfReduce = new TradeTools(simTradeClient, 99L, Set.of("BTCUSDT"),
                 new BigDecimal("10000"), sym -> new BigDecimal("100000"),
-                new TraderPlanStore(planMapper), requestService,
+                new TraderPlanStore(planMapper, PROMPTS), requestService,
                 new TradeTools.WakeCtx(7L, 1, 1785171600000L, DEADLINE,
                         new TraderRiskConfig(1, 20, new BigDecimal("1"), new BigDecimal("50"),
                                 true, true, true, false), AgentLang.ZH), PROMPTS, MESSAGES);
@@ -491,7 +491,7 @@ class TradeToolsTest {
                 .thenReturn("加仓请求已提交给主人确认，本轮不会成交。继续做你该做的其余判断，结果下一轮揭晓");
         TradeTools noSelfAdd = new TradeTools(simTradeClient, 99L, Set.of("BTCUSDT"),
                 new BigDecimal("10000"), sym -> new BigDecimal("100000"),
-                new TraderPlanStore(planMapper), requestService,
+                new TraderPlanStore(planMapper, PROMPTS), requestService,
                 new TradeTools.WakeCtx(7L, 1, 1785171600000L, DEADLINE,
                         new TraderRiskConfig(1, 20, new BigDecimal("1"), new BigDecimal("50"),
                                 true, true, false, true), AgentLang.ZH), PROMPTS, MESSAGES);
@@ -519,7 +519,7 @@ class TradeToolsTest {
         // 限价加仓挂单响应不带仓位 id：覆盖不能把已有绑定抹掉
         neu.setPositionId(null);
 
-        new TraderPlanStore(planMapper).upsert(neu, true);
+        new TraderPlanStore(planMapper, PROMPTS).upsert(neu, true, AgentLang.ZH);
 
         ArgumentCaptor<AiTraderPlan> cap = ArgumentCaptor.forClass(AiTraderPlan.class);
         verify(planMapper).updateById(cap.capture());
@@ -540,7 +540,7 @@ class TradeToolsTest {
         neu.setSignalsUsed("重新突破，独立新仓");
         neu.setOpenedWakeTime(1785171600000L);
 
-        new TraderPlanStore(planMapper).upsert(neu, false);
+        new TraderPlanStore(planMapper, PROMPTS).upsert(neu, false, AgentLang.ZH);
 
         // 归档不删：论点→结局配对是 reviewer 的复盘原料
         ArgumentCaptor<AiTraderPlan> archived = ArgumentCaptor.forClass(AiTraderPlan.class);

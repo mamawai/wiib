@@ -3,6 +3,7 @@ package com.mawai.wiibquant.agent.trader;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.mawai.wiibcommon.entity.AiTraderPlan;
+import com.mawai.wiibquant.agent.i18n.PromptCatalog;
 import com.mawai.wiibquant.mapper.AiTraderPlanMapper;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.BeforeAll;
@@ -34,7 +35,7 @@ class TraderPlanStoreTest {
     }
 
     private final AiTraderPlanMapper mapper = mock(AiTraderPlanMapper.class);
-    private final TraderPlanStore store = new TraderPlanStore(mapper);
+    private final TraderPlanStore store = new TraderPlanStore(mapper, new PromptCatalog());
 
     private static AiTraderPlan livePlan(String symbol, String side, Long positionId) {
         AiTraderPlan p = new AiTraderPlan();

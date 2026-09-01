@@ -198,7 +198,8 @@ public class LearningRunner {
                 // 工具描述也得跟语言走：@Tool 的 description 是编译期常量，这一层替它换
                 .tools(localizedTools.of(lang,
                         new PeerInsightToolkit(peerInsightService, trader.getId(), lang)))
-                .addExecuteToolsHook(new ModelCallLimiter(MAX_MODEL_CALLS))
+                .addExecuteToolsHook(new ModelCallLimiter(MAX_MODEL_CALLS,
+                        prompts.get(lang, "llm.callLimit.notExecuted")))
                 .addExecuteToolsHook(trace)
                 // 不强制首轮调工具：排行榜已随开场白注入，首轮该做的正是"挑谁值得深看"这步推理
                 .build(ResilientChatService.builder().model(model).asFactory())

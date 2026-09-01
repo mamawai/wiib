@@ -9,6 +9,7 @@ import com.mawai.wiibcommon.enums.LedgerWallet;
 import com.mawai.wiibsim.controller.LedgerController;
 import com.mawai.wiibsim.mapper.FuturesPositionMapper;
 import com.mawai.wiibsim.mapper.ReturningRecordProbeMapper;
+import com.mawai.wiibsim.mapper.LedgerProbeMapper;
 import com.mawai.wiibsim.mapper.UserLedgerMapper;
 import com.mawai.wiibsim.mapper.UserMapper;
 import com.mawai.wiibsim.service.FuturesTradingService;
@@ -65,6 +66,8 @@ class UserLedgerRealRunTest {
 
     @Autowired
     private UserLedgerMapper ledgerMapper;
+    @Autowired
+    private LedgerProbeMapper ledgerProbe;
 
     @Autowired
     private UserService userService;
@@ -328,7 +331,7 @@ class UserLedgerRealRunTest {
 
         // 账本累加 == 当前余额减建号余额。本类的测试用户是直接 INSERT 造的、没走建号入口，
         // 所以没有那条 INITIAL_GRANT（真建号路径的不变量由 LedgerProxyRealRunTest 验）
-        BigDecimal sum = ledgerMapper.sumDeltaByWallet(uid, "BALANCE");
+        BigDecimal sum = ledgerProbe.sumDeltaByWallet(uid, "BALANCE");
         assertThat(sum).isEqualByComparingTo("-250.00");
         assertThat(userMapper.selectById(uid).getBalance()).isEqualByComparingTo("750.00");
 
@@ -395,14 +398,14 @@ class UserLedgerRealRunTest {
 
         User u = userMapper.selectById(uid);
         // BALANCE 起始是 1000 不是 0（本类用户直接 INSERT 造的，没有 INITIAL_GRANT），所以减掉起始值再比
-        assertThat(ledgerMapper.sumDeltaByWallet(uid, "BALANCE"))
+        assertThat(ledgerProbe.sumDeltaByWallet(uid, "BALANCE"))
                 .isEqualByComparingTo(u.getBalance().subtract(new BigDecimal("1000.00")));
         // 另外四个钱包起始都是 0，账本累加应当直接等于 user 表当前值
-        assertThat(ledgerMapper.sumDeltaByWallet(uid, "FROZEN")).isEqualByComparingTo(u.getFrozenBalance());
-        assertThat(ledgerMapper.sumDeltaByWallet(uid, "GAME")).isEqualByComparingTo(u.getGameBalance());
-        assertThat(ledgerMapper.sumDeltaByWallet(uid, "LOAN_PRINCIPAL"))
+        assertThat(ledgerProbe.sumDeltaByWallet(uid, "FROZEN")).isEqualByComparingTo(u.getFrozenBalance());
+        assertThat(ledgerProbe.sumDeltaByWallet(uid, "GAME")).isEqualByComparingTo(u.getGameBalance());
+        assertThat(ledgerProbe.sumDeltaByWallet(uid, "LOAN_PRINCIPAL"))
                 .isEqualByComparingTo(u.getMarginLoanPrincipal());
-        assertThat(ledgerMapper.sumDeltaByWallet(uid, "LOAN_INTEREST"))
+        assertThat(ledgerProbe.sumDeltaByWallet(uid, "LOAN_INTEREST"))
                 .isEqualByComparingTo(u.getMarginInterestAccrued());
 
         // 每个钱包最后一行的 balance_after 必须等于 user 表当前值。
@@ -516,7 +519,7 @@ class UserLedgerRealRunTest {
         // 而这个钱包一行流水都没有——那 100 已经在 BALANCE 侧记过，再记一遍就是重复。
         // 谁把 POSITION_MARGIN 加进 assertInvariant，这两行就是反例。
         assertThat(positionMapper.selectById(posId).getMargin()).isEqualByComparingTo("300.00");
-        assertThat(ledgerMapper.sumDeltaByWallet(uid, LedgerWallet.POSITION_MARGIN.name()))
+        assertThat(ledgerProbe.sumDeltaByWallet(uid, LedgerWallet.POSITION_MARGIN.name()))
                 .as("保证金搬家不该在 POSITION_MARGIN 留行")
                 .isEqualByComparingTo("0");
     }
@@ -610,7 +613,7 @@ class UserLedgerRealRunTest {
     }
 
     private void assertWalletInvariant(Long uid, LedgerWallet wallet, BigDecimal actual, String stage) {
-        assertThat(ledgerMapper.sumDeltaByWallet(uid, wallet.name()))
+        assertThat(ledgerProbe.sumDeltaByWallet(uid, wallet.name()))
                 .as("[%s] 钱包 %s 账实不符：账本累加 ≠ user 表当列值（映射表漏记或多记，回 LedgerRowMapping 查）",
                         stage, wallet)
                 .isEqualByComparingTo(actual == null ? BigDecimal.ZERO : actual);

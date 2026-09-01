@@ -24,38 +24,33 @@ import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * 带韧性的 ChatService：退避重试 + 可选兜底模型，装配进 langgraph4j 的 ReactAgent。
+ * 带韧性的 ChatService：退避重试，装配进 langgraph4j 的 ReactAgent。
  * <p>
  * 落点选择：langgraph4j 的模型调用全部经 {@link ReactAgent.ChatService}，
- * {@code ReactAgent.builder().build(chatServiceFactory)} 允许换实现——重试/兜底放这一层，
+ * {@code ReactAgent.builder().build(chatServiceFactory)} 允许换实现——重试放这一层，
  * 对图与节点完全透明。（原 spring-ai-alibaba 版本是 ModelInterceptor，同一套逻辑换了个挂载点。）
  * <p>
  * 韧性分层（两条路径职责不同，别再往回加）：
  * <ul>
- *   <li><b>阻塞 execute</b>：只兜底不重试。重试归模型层——ResponsesChatModel 自带退避、
+ *   <li><b>阻塞 execute</b>：不重试。重试归模型层——ResponsesChatModel 自带退避、
  *       OpenAI 走 SDK 的 maxRetries；这里再来一轮就是 3×3=9 次，纯放大尾延迟。
  *       唯一豁免：{@link OpenAIInvalidDataException}（响应体读到一半被掐，HTTP/2 stream reset 等）
  *       是 SDK 重试的盲区——maxRetries 只管请求层（连接失败/429/5xx），读响应失败它不管，
  *       这一类单次重试，不与 SDK 叠乘（真跑一晚实测：一次 reset 废掉整轮唤醒还计入连败）</li>
  *   <li><b>流式 streamingExecute</b>：重试在这一层。模型层的流式路径不做重试，
- *       错误发生在订阅期只能在流水线上处理</li>
+ *       错误发生在订阅期只能在流水线上处理。冷流重订阅=重新发起请求；仅在尚未向下游吐出
+ *       任何帧时重试（吐过帧再重订阅会让下游聚合器拼出重复文本），NonTransient（4xx 配置类
+ *       错误）不重试；耗尽则错误透传，交上层 SSE error，用户重发</li>
  * </ul>
  * 两条路径共有的一层是 <b>tool_choice 降级</b>（{@link #toolChoiceRejected}）：上游拒收强制时
  * 去掉强制重发。它不是重试——换的是请求本身，原样再发多少次都一样。
- * 流式的两个细节：
- * <ul>
- *   <li>重试：冷流重订阅=重新发起请求；仅在尚未向下游吐出任何帧时重试（吐过帧再重订阅
- *       会让下游聚合器拼出重复文本），NonTransient（4xx 配置类错误）不重试</li>
- *   <li>兜底：重试耗尽且未吐帧 → 无缝接兜底模型的流（token 流不断）；
- *       已吐帧则错误透传，交上层 SSE error，用户重发</li>
- * </ul>
+ * <p>
+ * 不做兜底模型：BYOK 只有用户自己那一个端点，切"同端点另一个模型"没意义（端点挂了两个一起挂）。
  */
 @Slf4j
 public class ResilientChatService implements ReactAgent.ChatService {
 
     private final ChatModel primaryModel;
-    /** 可空：null=纯重试，非空=重试耗尽后切兜底。生产侧现在一律 null——没有一处调 builder 的 fallbackModel，只有测试在覆盖切兜底这条路 */
-    private final ChatModel fallbackModel;
     private final int maxAttempts;
     private final long initialDelayMs;
     private final long maxDelayMs;
@@ -66,7 +61,6 @@ public class ResilientChatService implements ReactAgent.ChatService {
 
     private ResilientChatService(Builder builder, ReactAgentBuilder<?, ?> agentBuilder) {
         this.primaryModel = builder.primaryModel;
-        this.fallbackModel = builder.fallbackModel;
         this.maxAttempts = builder.maxAttempts;
         this.initialDelayMs = builder.initialDelayMs;
         this.maxDelayMs = builder.maxDelayMs;
@@ -148,31 +142,18 @@ public class ResilientChatService implements ReactAgent.ChatService {
                         log.warn("上游拒收 tool_choice 强制，本次降级为不强制重发: {}", e.toString());
                         return primaryModel.stream(promptOf(primaryModel, withSystem, chatOptions));
                     }
-                    if (fallbackModel == null || emitted.get()) {
-                        return Flux.error(e);
-                    }
-                    log.warn("主模型流式调用失败（已重试），切换兜底模型: {}", e.toString());
-                    return fallbackModel.stream(promptOf(fallbackModel, withSystem, fallbackOptions(withSystem)));
+                    return Flux.error(e);
                 });
     }
 
     /**
-     * 阻塞路径只做兜底，不重试——重试是模型层的职责（ResponsesChatModel 自带退避、
+     * 阻塞路径不重试——重试是模型层的职责（ResponsesChatModel 自带退避、
      * OpenAI 走 SDK 的 maxRetries）。这里再来一轮会叠乘成 3×3=9 次，纯粹放大尾延迟。
-     * 流式路径相反：模型层不重试，重试全在下面的 streamingExecute 里。
+     * 流式路径相反：模型层不重试，重试全在上面的 streamingExecute 里。
      */
     @Override
     public ChatResponse execute(List<Message> messages) {
-        List<Message> withSystem = withSystem(messages);
-        try {
-            return callPrimary(withSystem);
-        } catch (RuntimeException e) {
-            if (fallbackModel == null) {
-                throw e;
-            }
-            log.warn("主模型调用失败（模型层已重试过），切换兜底模型: {}", e.toString());
-            return fallbackModel.call(promptOf(fallbackModel, withSystem, fallbackOptions(withSystem)));
-        }
+        return callPrimary(withSystem(messages));
     }
 
     /**
@@ -225,33 +206,16 @@ public class ResilientChatService implements ReactAgent.ChatService {
         return withSystem;
     }
 
-    /** options 为空（无工具的 agent）时走该模型自己的默认——主/兜底各归各的，别把主模型的 options 打到兜底端点上 */
+    /** options 为空（无工具的 agent）时走该模型自己的默认 */
     private static Prompt promptOf(ChatModel model, List<Message> messages, ChatOptions options) {
         return Prompt.builder().messages(messages)
                 .chatOptions(options != null ? options : model.getOptions())
                 .build();
     }
 
-    /**
-     * 兜底调用的 options：从兜底模型自己的 options 派生、只搬工具语义——model/temperature 等生成参数
-     * 必须归兜底模型自己的默认，原样透传会把主模型的 model 名打到兜底端点上；首轮强制照旧。
-     * 搜索许可（{@link ResponsesChatModel#WEB_SEARCH_KEY}）有意不搬：搜索是端点级能力，
-     * 兜底是另一条端点、按它自己的配置算；生产兜底恒 null（见字段注释），真启用时再议。
-     */
-    private ChatOptions fallbackOptions(List<Message> messages) {
-        if (!(chatOptions instanceof ToolCallingChatOptions source)
-                || !(fallbackModel.getOptions() instanceof ToolCallingChatOptions)) {
-            return null;
-        }
-        ChatOptions options = ToolChoice.withTools(fallbackModel, source.getToolCallbacks());
-        return forceFirstToolChoice != null && ToolChoice.isFirstTurn(messages)
-                ? ToolChoice.apply(options, forceFirstToolChoice) : options;
-    }
-
     public static class Builder {
 
         private ChatModel primaryModel;
-        private ChatModel fallbackModel;
         private int maxAttempts = 3;
         private long initialDelayMs = 500;
         private long maxDelayMs = 4000;
@@ -279,11 +243,6 @@ public class ResilientChatService implements ReactAgent.ChatService {
 
         public Builder model(ChatModel primaryModel) {
             this.primaryModel = primaryModel;
-            return this;
-        }
-
-        public Builder fallbackModel(ChatModel fallbackModel) {
-            this.fallbackModel = fallbackModel;
             return this;
         }
 

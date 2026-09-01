@@ -36,6 +36,9 @@ import static org.mockito.Mockito.when;
  */
 class ModelCallLimiterTest {
 
+    /** 占位回执文案生产上按语言取词表传入（llm.callLimit.notExecuted）；这里只验"传进去的原样落到回执上" */
+    private static final String NOT_EXECUTED = "未执行：本轮模型调用已达上限，工具被跳过。";
+
     /** 一条带 toolCalls 的助手消息 + 已有调用计数 = 保险丝触发那一刻的 state */
     private static MessagesState<Message> stateAtToolEdge(int alreadyCalled, String... toolCallIds) {
         AssistantMessage.Builder builder = AssistantMessage.builder().content("");
@@ -57,7 +60,7 @@ class ModelCallLimiterTest {
     void 达上限跳END时给未执行的工具调用补齐占位回执() {
         AtomicBoolean toolsRan = new AtomicBoolean();
 
-        Command command = new ModelCallLimiter(3).applyWrap("tools", stateAtToolEdge(2, "call_a", "call_b"),
+        Command command = new ModelCallLimiter(3, NOT_EXECUTED).applyWrap("tools", stateAtToolEdge(2, "call_a", "call_b"),
                 null, (s, c) -> {
                     toolsRan.set(true);
                     return CompletableFuture.completedFuture(Command.emptyCommand());
@@ -73,9 +76,9 @@ class ModelCallLimiterTest {
         ToolResponseMessage placeholder = (ToolResponseMessage) appended.getFirst();
         assertThat(placeholder.getResponses()).extracting(ToolResponseMessage.ToolResponse::id)
                 .containsExactly("call_a", "call_b");
-        // 占位内容要说清"没执行"，模型/复盘看得懂，不是伪造的成功结果
+        // 占位内容要说清"没执行"，模型/复盘看得懂，不是伪造的成功结果——传进去的文案原样落回执
         assertThat(placeholder.getResponses()).allSatisfy(r ->
-                assertThat(r.responseData()).contains("上限").contains("未执行"));
+                assertThat(r.responseData()).isEqualTo(NOT_EXECUTED));
     }
 
     @Test
@@ -85,7 +88,7 @@ class ModelCallLimiterTest {
                 "messages", List.of(new UserMessage("你好"), new AssistantMessage("好的")),
                 ModelCallLimiter.CALL_COUNT_KEY, 2));
 
-        Command command = new ModelCallLimiter(3).applyWrap("tools", state, null,
+        Command command = new ModelCallLimiter(3, NOT_EXECUTED).applyWrap("tools", state, null,
                 (s, c) -> CompletableFuture.completedFuture(Command.emptyCommand())).join();
 
         assertThat(command.gotoNode()).isEqualTo("end");
@@ -118,7 +121,7 @@ class ModelCallLimiterTest {
                 .chatModel(model)
                 .stateSerializer(new SpringAIJacksonStateSerializer<>(MessagesState::new))
                 .toolsFromObject(new EchoTools())
-                .addExecuteToolsHook(new ModelCallLimiter(3))
+                .addExecuteToolsHook(new ModelCallLimiter(3, NOT_EXECUTED))
                 .build()
                 .compile();
 
@@ -142,7 +145,7 @@ class ModelCallLimiterTest {
     void 未到上限照常执行工具并累加计数() {
         AtomicBoolean toolsRan = new AtomicBoolean();
 
-        Command command = new ModelCallLimiter(8).applyWrap("tools", stateAtToolEdge(2, "call_a"),
+        Command command = new ModelCallLimiter(8, NOT_EXECUTED).applyWrap("tools", stateAtToolEdge(2, "call_a"),
                 null, (s, c) -> {
                     toolsRan.set(true);
                     return CompletableFuture.completedFuture(Command.emptyCommand());

@@ -91,7 +91,7 @@ class TraderWakeupLoopTest {
             new IndicatorToolkit(new KlineFetcher(binanceRestClient, 60_000)),
             new MarketToolkit(mock(MarketDataService.class)),
             new NewsToolkit(mock(NewsCache.class), mock(NewsFlashLocalizer.class)),
-            traderMapper, decisionMapper, new TraderPlanStore(planMapper), requestService, langResolver,
+            traderMapper, decisionMapper, new TraderPlanStore(planMapper, prompts), requestService, langResolver,
             prompts, new MessageCatalog(), new LocalizedToolCallbacks(prompts),
             new ReviewMaterialAssembler(decisionMapper, planMapper, simTradeClient,
                     mock(KlineHistoryStore.class), prompts),

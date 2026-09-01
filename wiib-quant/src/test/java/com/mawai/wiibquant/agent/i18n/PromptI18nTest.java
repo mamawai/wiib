@@ -143,10 +143,16 @@ class PromptI18nTest {
                 "chat.hitl.resumeMessage", "chat.form.wake", "chat.form.review", "chat.form.note",
                 "chat.compress.summaryPrefix", "chat.compress.role.user", "chat.compress.role.assistant",
                 "chat.compress.role.system", "chat.compress.role.tool", "chat.compress.role.other",
-                "chat.compress.clipped", "chat.deepAnalysis.noNews", "chat.deepAnalysis.bullStance",
+                "chat.compress.clipped", "chat.deepAnalysis.noNews", "chat.deepAnalysis.noIv",
+                "chat.deepAnalysis.bullStance",
                 "chat.deepAnalysis.bearStance", "chat.deepAnalysis.judgeFailed",
                 "chat.deepAnalysis.progress.bullDone", "chat.deepAnalysis.progress.judging",
                 "chat.deepAnalysis.progress.judged", "chat.outputLanguage",
+                "chat.turn.timePrefix", "chat.turn.questionPrefix",
+                "chat.traderQuery.wakeWindowAllDay", "chat.traderQuery.memoryNote",
+                "chat.traderQuery.learningNotesNote", "chat.traderQuery.kindNote",
+                "chat.traderQuery.planNote", "chat.traderQuery.noTrader",
+                "llm.callLimit.notExecuted",
                 "tool.route", "tool.run_deep_analysis")) {
             assertNoCjk("英文 " + key, prompts.get(AgentLang.EN, key));
         }
@@ -177,6 +183,14 @@ class PromptI18nTest {
                 Map.of("data", "d", "bull", "b", "bear", "b", "format", "{}")));
         assertNoCjk("英文深研判数据块", prompts.get(AgentLang.EN, "chat.deepAnalysis.dataContext",
                 Map.of("symbol", "BTCUSDT", "price", "1", "micro", "m", "iv", "i", "news", "n")));
+        assertNoCjk("英文轮起始标记", prompts.get(AgentLang.EN, "chat.turn.timeMark",
+                Map.of("time", "2026-08-18 14:32")));
+        assertNoCjk("英文唤醒时段说明", prompts.get(AgentLang.EN, "chat.traderQuery.wakeWindowNote",
+                Map.of("window", "21:00-08:30")));
+        assertNoCjk("英文杠杆区间", prompts.get(AgentLang.EN, "chat.traderQuery.leverage",
+                Map.of("min", 3, "max", 20)));
+        assertNoCjk("英文加仓覆盖留痕", prompts.get(AgentLang.EN, "trader.revise.addOnNote",
+                Map.of("playType", "BREAKOUT", "invalidation", "loses 99000")));
     }
 
     /** 打标是平台后台任务（没有"当前用户"）：提示词整篇取英文，混一个中文字都可能把译文带回中文 */
@@ -289,7 +303,10 @@ class PromptI18nTest {
                 "trader.guard.leverageRange", "trader.guard.stopLossRequired", "trader.guard.marginOutOfRange",
                 "trader.reject.stopOnlyTighter", "trader.reject.expired", "trader.reject.planAlreadyExists",
                 "trader.receipt.duplicate", "trader.receipt.filled", "trader.revise.moveStop",
+                "trader.revise.addOnNote",
                 "news.tagging", "news.flashLine",
+                // 轮起始标记与 trader 查询说明字段：全是喂模型的，回落成中文就混语
+                "chat.turn.timeMark", "chat.traderQuery.kindNote", "llm.callLimit.notExecuted",
                 // 任务 5 的两条缓解：回落成中文＝英文用户被一行中文指令要求"输出中文"，正好反了
                 "trader.label.ownerWritten", "trader.label.outputLanguage",
                 "reviewer.label.outputLanguage", "learning.label.outputLanguage",

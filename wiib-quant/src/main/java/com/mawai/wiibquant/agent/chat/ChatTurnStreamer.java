@@ -33,17 +33,6 @@ import java.util.concurrent.TimeUnit;
 @RequiredArgsConstructor
 public class ChatTurnStreamer {
 
-    /**
-     * 上下文里每轮用户消息的起始标记。重新生成靠它从尾部找到"本轮提问"那条——
-     * 一轮的尾巴不止"一问一答"，中间还夹着专家结论、交接指令和 tool_call 配对，
-     * 只有这个标记认得出边界（交接指令与补答指令都以【系统】开头，不会撞）。
-     * 拼法在 {@link Turn#run}，核对在 {@code ChatWorkbenchController.getCut}，两边要一起改。
-     */
-    static final String TURN_MARKER = "【当前时间 ";
-
-    /** 紧挨提问原文的前缀：重新生成靠"以它+提问结尾"认出上下文里那条确实是本轮的提问 */
-    static final String QUESTION_MARKER = "用户问题：";
-
     /** 注入用户消息的当前时间。带年份不随仓里 MM-dd 惯例：模型没有时钟，年份是它最容易错的一位 */
     private static final DateTimeFormatter TIME_FMT =
             DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm").withZone(ZoneId.systemDefault());
@@ -118,10 +107,12 @@ public class ChatTurnStreamer {
                     chatHistoryService.append(sessionId, userId, "user", message);
                 }
 
-                // 补充时间信息
-                String enriched = TURN_MARKER + TIME_FMT.format(Instant.now()) + "】\n"
+                // 补充时间信息。轮起始标记按语言取自词表（chat.turn.*）：重新生成靠它从尾部找到
+                // "本轮提问"那条，认的一侧在 ChatWorkbenchController.getCut，遍历全部语言
+                String enriched = prompts.get(leaves.lang(), "chat.turn.timeMark",
+                        Map.of("time", TIME_FMT.format(Instant.now()))) + "\n"
                         + (deferred == null
-                        ? QUESTION_MARKER + message
+                        ? prompts.get(leaves.lang(), "chat.turn.questionPrefix") + message
                         : prompts.get(leaves.lang(), "chat.deferred.instruction", Map.of("question", message)));
 
                 if (deferred != null) {

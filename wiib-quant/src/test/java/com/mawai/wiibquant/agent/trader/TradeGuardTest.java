@@ -49,6 +49,38 @@ class TradeGuardTest {
                 null, new BigDecimal("105000"), null, "BREAKOUT", "跌破前低", "1h收盘站回102000上方");
     }
 
+    // ---------- 造数变体：生产 OpenReq 不带 wither（无生产调用），变体构造属于测试侧 ----------
+
+    private static TradeGuard.OpenReq withOrderType(TradeGuard.OpenReq r, String v) {
+        return new TradeGuard.OpenReq(r.symbol(), r.side(), v, r.quantity(), r.leverage(),
+                r.limitPrice(), r.stopLossPrice(), r.takeProfitPrice(), r.playType(), r.signalsUsed(), r.invalidationCondition());
+    }
+
+    private static TradeGuard.OpenReq withQuantity(TradeGuard.OpenReq r, BigDecimal v) {
+        return new TradeGuard.OpenReq(r.symbol(), r.side(), r.orderType(), v, r.leverage(),
+                r.limitPrice(), r.stopLossPrice(), r.takeProfitPrice(), r.playType(), r.signalsUsed(), r.invalidationCondition());
+    }
+
+    private static TradeGuard.OpenReq withLeverage(TradeGuard.OpenReq r, Integer v) {
+        return new TradeGuard.OpenReq(r.symbol(), r.side(), r.orderType(), r.quantity(), v,
+                r.limitPrice(), r.stopLossPrice(), r.takeProfitPrice(), r.playType(), r.signalsUsed(), r.invalidationCondition());
+    }
+
+    private static TradeGuard.OpenReq withLimitPrice(TradeGuard.OpenReq r, BigDecimal v) {
+        return new TradeGuard.OpenReq(r.symbol(), r.side(), r.orderType(), r.quantity(), r.leverage(),
+                v, r.stopLossPrice(), r.takeProfitPrice(), r.playType(), r.signalsUsed(), r.invalidationCondition());
+    }
+
+    private static TradeGuard.OpenReq withStopLossPrice(TradeGuard.OpenReq r, BigDecimal v) {
+        return new TradeGuard.OpenReq(r.symbol(), r.side(), r.orderType(), r.quantity(), r.leverage(),
+                r.limitPrice(), v, r.takeProfitPrice(), r.playType(), r.signalsUsed(), r.invalidationCondition());
+    }
+
+    private static TradeGuard.OpenReq withInvalidationCondition(TradeGuard.OpenReq r, String v) {
+        return new TradeGuard.OpenReq(r.symbol(), r.side(), r.orderType(), r.quantity(), r.leverage(),
+                r.limitPrice(), r.stopLossPrice(), r.takeProfitPrice(), r.playType(), r.signalsUsed(), v);
+    }
+
     @Test
     void validOpenPasses() {
         assertThat(validateOpen(base(), EQUITY, MARK, WL, cfg(), List.of())).isNull();
@@ -59,13 +91,13 @@ class TradeGuardTest {
     /** 配 5~20 时选 3 也不行——低于下界同样拒，这是"必须从区间里选"的核心语义 */
     @Test
     void leverageBelowMinRejected() {
-        String r = validateOpen(base().withLeverage(3), EQUITY, MARK, WL, cfg(), List.of());
+        String r = validateOpen(withLeverage(base(), 3), EQUITY, MARK, WL, cfg(), List.of());
         assertThat(r).contains("5~20").contains("你给了3");
     }
 
     @Test
     void leverageAboveMaxRejected() {
-        assertThat(validateOpen(base().withLeverage(50), EQUITY, MARK, WL, cfg(), List.of()))
+        assertThat(validateOpen(withLeverage(base(), 50), EQUITY, MARK, WL, cfg(), List.of()))
                 .contains("5~20");
     }
 
@@ -80,15 +112,15 @@ class TradeGuardTest {
         // 0.05×100000/10=500=5%，低于 cfg 里改设的 10~15 下界 → 拒并给建议数量
         TraderRiskConfig tight = new TraderRiskConfig(5, 20, new BigDecimal("10"), new BigDecimal("15"),
                 true, false, true, false);
-        String reject = validateOpen(base().withQuantity(new BigDecimal("0.05")),
+        String reject = validateOpen(withQuantity(base(), new BigDecimal("0.05")),
                 EQUITY, MARK, WL, tight, List.of());
         java.util.regex.Matcher m = java.util.regex.Pattern
                 .compile("数量应在 (\\S+) ~ (\\S+) 之间").matcher(reject);
         assertThat(m.find()).isTrue();
 
-        assertThat(validateOpen(base().withQuantity(new BigDecimal(m.group(1))),
+        assertThat(validateOpen(withQuantity(base(), new BigDecimal(m.group(1))),
                 EQUITY, MARK, WL, tight, List.of())).isNull();
-        assertThat(validateOpen(base().withQuantity(new BigDecimal(m.group(2))),
+        assertThat(validateOpen(withQuantity(base(), new BigDecimal(m.group(2))),
                 EQUITY, MARK, WL, tight, List.of())).isNull();
     }
 
@@ -98,7 +130,7 @@ class TradeGuardTest {
         TraderRiskConfig tight = new TraderRiskConfig(5, 20, new BigDecimal("10"), new BigDecimal("15"),
                 true, false, true, false);
         // 0.09995×100000/10=999.5 → 9.995%，贴着下界差一丝
-        String r = validateOpen(base().withQuantity(new BigDecimal("0.09995")),
+        String r = validateOpen(withQuantity(base(), new BigDecimal("0.09995")),
                 EQUITY, MARK, WL, tight, List.of());
         assertThat(r).contains("9.995%").doesNotContain("10%，超出");
     }
@@ -106,28 +138,28 @@ class TradeGuardTest {
     /** 0.02×100000/10=200=权益2% < 下界5% → 拒，且把该配的数量算给模型 */
     @Test
     void marginBelowMinRejected() {
-        String r = validateOpen(base().withQuantity(new BigDecimal("0.02")), EQUITY, MARK, WL, cfg(), List.of());
+        String r = validateOpen(withQuantity(base(), new BigDecimal("0.02")), EQUITY, MARK, WL, cfg(), List.of());
         assertThat(r).contains("占权益2%").contains("数量应在");
     }
 
     /** 0.3×100000/10=3000=30% > 上界20% → 拒 */
     @Test
     void marginAboveMaxRejected() {
-        assertThat(validateOpen(base().withQuantity(new BigDecimal("0.3")), EQUITY, MARK, WL, cfg(), List.of()))
+        assertThat(validateOpen(withQuantity(base(), new BigDecimal("0.3")), EQUITY, MARK, WL, cfg(), List.of()))
                 .contains("占权益30%");
     }
 
     /** 边界含端点：0.05×100000/10=500=正好5% → 放行 */
     @Test
     void marginExactlyAtMinPasses() {
-        assertThat(validateOpen(base().withQuantity(new BigDecimal("0.05")), EQUITY, MARK, WL, cfg(), List.of()))
+        assertThat(validateOpen(withQuantity(base(), new BigDecimal("0.05")), EQUITY, MARK, WL, cfg(), List.of()))
                 .isNull();
     }
 
     /** 限价单按限价算保证金：0.1×96000/10=960=9.6%，仍在区间内 */
     @Test
     void limitOrderMarginUsesLimitPrice() {
-        TradeGuard.OpenReq req = base().withOrderType("LIMIT").withLimitPrice(new BigDecimal("96000"));
+        TradeGuard.OpenReq req = withLimitPrice(withOrderType(base(), "LIMIT"), new BigDecimal("96000"));
         assertThat(validateOpen(req, EQUITY, MARK, WL, cfg(), List.of())).isNull();
     }
 
@@ -174,7 +206,7 @@ class TradeGuardTest {
     @Test
     void addOnMustMatchSymbolLeverage() {
         List<TradeGuard.PosSnap> held = List.of(new TradeGuard.PosSnap("BTCUSDT", "LONG", 10, true));
-        assertThat(validateOpen(base().withLeverage(15), EQUITY, MARK, WL, cfg(), held))
+        assertThat(validateOpen(withLeverage(base(), 15), EQUITY, MARK, WL, cfg(), held))
                 .contains("杠杆必须一致").contains("10倍");
     }
 
@@ -182,7 +214,7 @@ class TradeGuardTest {
     @Test
     void addOnSkipsMarginRange() {
         List<TradeGuard.PosSnap> held = List.of(new TradeGuard.PosSnap("BTCUSDT", "LONG", 10, true));
-        assertThat(validateOpen(base().withQuantity(new BigDecimal("0.5")), EQUITY, MARK, WL, cfg(), held))
+        assertThat(validateOpen(withQuantity(base(), new BigDecimal("0.5")), EQUITY, MARK, WL, cfg(), held))
                 .isNull();
     }
 
@@ -193,7 +225,7 @@ class TradeGuardTest {
     @Test
     void sameSidePendingOrderIsNotAnAddOn() {
         List<TradeGuard.PosSnap> pending = List.of(new TradeGuard.PosSnap("BTCUSDT", "LONG", 10, false));
-        assertThat(validateOpen(base().withQuantity(new BigDecimal("0.5")), EQUITY, MARK, WL, cfg(), pending))
+        assertThat(validateOpen(withQuantity(base(), new BigDecimal("0.5")), EQUITY, MARK, WL, cfg(), pending))
                 .contains("占权益50%");
     }
 
@@ -201,15 +233,15 @@ class TradeGuardTest {
 
     @Test
     void blankInvalidationConditionRejected() {
-        assertThat(validateOpen(base().withInvalidationCondition(" "), EQUITY, MARK, WL, cfg(), List.of()))
+        assertThat(validateOpen(withInvalidationCondition(base(), " "), EQUITY, MARK, WL, cfg(), List.of()))
                 .contains("失效条件");
-        assertThat(validateOpen(base().withInvalidationCondition(null), EQUITY, MARK, WL, cfg(), List.of()))
+        assertThat(validateOpen(withInvalidationCondition(base(), null), EQUITY, MARK, WL, cfg(), List.of()))
                 .contains("失效条件");
     }
 
     @Test
     void stopLossOnWrongSideRejected() {
-        assertThat(validateOpen(base().withStopLossPrice(new BigDecimal("105000")),
+        assertThat(validateOpen(withStopLossPrice(base(), new BigDecimal("105000")),
                 EQUITY, MARK, WL, cfg(), List.of())).contains("止损价方向错误");
     }
 
@@ -221,18 +253,18 @@ class TradeGuardTest {
      */
     @Test
     void nonPositiveStopLossRejectedForLong() {
-        String zero = validateOpen(base().withStopLossPrice(BigDecimal.ZERO),
+        String zero = validateOpen(withStopLossPrice(base(), BigDecimal.ZERO),
                 EQUITY, MARK, WL, cfg(), List.of());
         // 拒因要能让模型自行修正：说清必须为正数，并给出合法区间
         assertThat(zero).contains("止损价必须为正数").contains("100000");
-        assertThat(validateOpen(base().withStopLossPrice(new BigDecimal("-1")),
+        assertThat(validateOpen(withStopLossPrice(base(), new BigDecimal("-1")),
                 EQUITY, MARK, WL, cfg(), List.of())).contains("止损价必须为正数");
     }
 
     /** SHORT 侥幸被方向校验挡下，但拒因说"方向错误"会误导模型去调价，实际是参数漏传 */
     @Test
     void nonPositiveStopLossRejectedForShort() {
-        assertThat(validateOpen(baseShort().withStopLossPrice(BigDecimal.ZERO),
+        assertThat(validateOpen(withStopLossPrice(baseShort(), BigDecimal.ZERO),
                 EQUITY, MARK, WL, cfg(), List.of()))
                 .contains("止损价必须为正数").contains("100000");
     }
@@ -240,9 +272,9 @@ class TradeGuardTest {
     /** 缺失止损（工具层 Double 为 null）：修好 primitive 后这条路径才真正可达 */
     @Test
     void missingStopLossRejected() {
-        assertThat(validateOpen(base().withStopLossPrice(null), EQUITY, MARK, WL, cfg(), List.of()))
+        assertThat(validateOpen(withStopLossPrice(base(), null), EQUITY, MARK, WL, cfg(), List.of()))
                 .contains("必须设置止损价");
-        assertThat(validateOpen(baseShort().withStopLossPrice(null), EQUITY, MARK, WL, cfg(), List.of()))
+        assertThat(validateOpen(withStopLossPrice(baseShort(), null), EQUITY, MARK, WL, cfg(), List.of()))
                 .contains("必须设置止损价");
     }
 }

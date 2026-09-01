@@ -92,7 +92,8 @@ class ChatWorkbenchRealRunTest {
         assertThat(starts).allSatisfy((agent, count) -> assertThat(count).isLessThanOrEqualTo(1L));
         // 输出契约：news_agent 的 BlockBeats 条目必须存活在最终回答里（标可因联网佐证升级为
         // 合并标）——只剩补充源的标即 summarizer 丢弃专家清单自己重写了，正是要防的回归
-        assertThat(answer.toString()).containsAnyOf("[BlockBeats]", chatAgentFactory.mergedTag());
+        // 合并标是 [BlockBeats+源名]（源名可配），按前缀认不依赖具体源名
+        assertThat(answer.toString()).containsAnyOf("[BlockBeats]", "[BlockBeats+");
     }
 
     /**
@@ -108,7 +109,7 @@ class ChatWorkbenchRealRunTest {
         ChatEndpoints llmConfig = endpointService.chatEndpoints(ADMIN_USER_ID);
         assertThat(llmConfig).as("先用管理员账号在 AI 页「模型配置」加一条 BYOK 端点再跑").isNotNull();
         // 期望值取自库里那份真数据，不在测试里另造一份：造了就变成"自己写的自己验"
-        String overview = traderChatService.overview(ADMIN_USER_ID);
+        String overview = traderChatService.overview(ADMIN_USER_ID, AgentLang.ZH);
         assertThat(overview).as("这一跑要有一个真 trader 才有意义").contains("\"hasTrader\":true");
         String equityBefore = equityDigits(overview);
 
@@ -140,7 +141,7 @@ class ChatWorkbenchRealRunTest {
         // 库里那个权益数字出现在回答里，才算数据真穿过了汇总这一跳。
         // 不锚 status：库里存 RUNNING、模型多半写"运行中"，锚它是在考措辞不是考链路。
         // 前后各读一次取并集：权益随唤醒（5m 一次）落库刷新，单值会偶发红
-        String equityAfter = equityDigits(traderChatService.overview(ADMIN_USER_ID));
+        String equityAfter = equityDigits(traderChatService.overview(ADMIN_USER_ID, AgentLang.ZH));
         assertThat(answer.toString().replace(",", ""))
                 .as("汇总否认了专家数据")
                 .containsAnyOf(equityBefore, equityAfter);

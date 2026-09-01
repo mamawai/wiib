@@ -18,7 +18,7 @@ class VolForecasterTest {
         List<KlineBar> bars = bars(60);
         EwmaVolForecaster fc = new EwmaVolForecaster(0.94);
 
-        assertThat(fc.forecastSigma(ResearchFeatures.ofBars(bars)))
+        assertThat(fc.forecastSigma(TestFeatures.ofBars(bars)))
                 .isEqualTo(VolatilityEstimator.ewmaVolatility(bars, 0.94));
     }
 
@@ -27,7 +27,7 @@ class VolForecasterTest {
         VolForecaster fallback = new ConstantVolForecaster(0.123);
         HarRvVolForecaster fc = new HarRvVolForecaster(1, 3, 5, 8, fallback);
 
-        assertThat(fc.forecastSigma(ResearchFeatures.ofBars(bars(8))))
+        assertThat(fc.forecastSigma(TestFeatures.ofBars(bars(8))))
                 .isCloseTo(0.123, within(1e-12));
     }
 
@@ -35,7 +35,7 @@ class VolForecasterTest {
     void harRvReturnsFinitePositiveSigmaWithEnoughHistory() {
         HarRvVolForecaster fc = new HarRvVolForecaster(1, 3, 5, 8, new ConstantVolForecaster(0.123));
 
-        double sigma = fc.forecastSigma(ResearchFeatures.ofBars(bars(80)));
+        double sigma = fc.forecastSigma(TestFeatures.ofBars(bars(80)));
 
         assertThat(sigma).isGreaterThan(0.0);
         assertThat(Double.isFinite(sigma)).isTrue();
@@ -45,7 +45,7 @@ class VolForecasterTest {
     void harRvUsesHistoryAtMinimumObservationBoundary() {
         HarRvVolForecaster fc = new HarRvVolForecaster(1, 3, 5, 8, new ConstantVolForecaster(-1.0));
 
-        double sigma = fc.forecastSigma(ResearchFeatures.ofBars(bars(14)));
+        double sigma = fc.forecastSigma(TestFeatures.ofBars(bars(14)));
 
         assertThat(sigma).isGreaterThan(0.0);
         assertThat(Double.isFinite(sigma)).isTrue();

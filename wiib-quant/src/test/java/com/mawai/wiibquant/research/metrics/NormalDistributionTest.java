@@ -5,7 +5,7 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
 
-/** 标准正态 Φ / Φ⁻¹ 数值近似对拍已知值（DSR 全靠这两个函数）。 */
+/** 标准正态 Φ 数值近似对拍已知值（DM 检验的 p 值靠它）。 */
 class NormalDistributionTest {
 
     @Test
@@ -21,20 +21,5 @@ class NormalDistributionTest {
     void cdfSaturatesAtTails() {
         assertThat(NormalDistribution.cdf(-40.0)).isCloseTo(0.0, within(1e-9));
         assertThat(NormalDistribution.cdf(40.0)).isCloseTo(1.0, within(1e-9));
-    }
-
-    @Test
-    void invCdfMatchesKnownQuantiles() {
-        assertThat(NormalDistribution.invCdf(0.5)).isCloseTo(0.0, within(1e-9));
-        assertThat(NormalDistribution.invCdf(0.975)).isCloseTo(1.959963984540054, within(1e-5));
-        assertThat(NormalDistribution.invCdf(0.95)).isCloseTo(1.6448536269514722, within(1e-5));
-        assertThat(NormalDistribution.invCdf(0.025)).isCloseTo(-1.959963984540054, within(1e-5));
-    }
-
-    @Test
-    void invCdfIsInverseOfCdf() {
-        for (double x : new double[]{-2.5, -1.0, -0.3, 0.0, 0.7, 1.5, 2.8}) {
-            assertThat(NormalDistribution.invCdf(NormalDistribution.cdf(x))).isCloseTo(x, within(1e-6));
-        }
     }
 }

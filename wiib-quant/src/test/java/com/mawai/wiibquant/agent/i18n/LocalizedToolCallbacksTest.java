@@ -12,11 +12,14 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 /**
  * 工具描述按语言换：@Tool 的 description 是编译期常量换不掉，这一层就是替它换。
  * <p>三条底线：名字与 inputSchema 必须还是注解自动推导那份（schema 零手写）、
  * 没搬进词表的工具保留原描述照常工作、方法照样能被调起来。
+ * <p>词表三态（有/只中文/完全没有）用桩造：find 的回落语义本身归 LangBundleTest 钉。
  */
 class LocalizedToolCallbacksTest {
 
@@ -39,8 +42,17 @@ class LocalizedToolCallbacksTest {
         }
     }
 
-    private final LocalizedToolCallbacks localized =
-            new LocalizedToolCallbacks(new PromptCatalog("classpath*:catalog-test/*/*.yml"));
+    private final PromptCatalog prompts = mock(PromptCatalog.class);
+    private final LocalizedToolCallbacks localized = new LocalizedToolCallbacks(prompts);
+
+    {
+        when(prompts.find(AgentLang.ZH, "tool.echo_tool")).thenReturn("回声工具（词表中文描述）");
+        when(prompts.find(AgentLang.EN, "tool.echo_tool")).thenReturn("Echo tool (catalog English description)");
+        // zh_only：find 对缺英文的 key 回落中文（回落行为见 LangBundleTest），这里桩出回落后的结果
+        when(prompts.find(AgentLang.ZH, "tool.zh_only_tool")).thenReturn("只有中文词表有它");
+        when(prompts.find(AgentLang.EN, "tool.zh_only_tool")).thenReturn("只有中文词表有它");
+        // untouched：词表完全没有 → find 两门语言都 null（mock 默认），走注解回落
+    }
 
     private Map<String, ToolCallback> callbacks(AgentLang lang) {
         return localized.of(lang, new DemoTools()).stream()

@@ -1,5 +1,6 @@
 package com.mawai.wiibquant.agent.chat;
 
+import com.mawai.wiibcommon.enums.AgentLang;
 import com.mawai.wiibquant.agent.trader.TraderChatService;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
@@ -16,10 +17,13 @@ public class TraderQueryToolkit {
 
     private final TraderChatService traderChatService;
     private final long userId;
+    /** 返回 JSON 里的说明字段按它取词表；与叶子同语言（建叶子时烤入，见缓存键） */
+    private final AgentLang lang;
 
-    public TraderQueryToolkit(TraderChatService traderChatService, long userId) {
+    public TraderQueryToolkit(TraderChatService traderChatService, long userId, AgentLang lang) {
         this.traderChatService = traderChatService;
         this.userId = userId;
+        this.lang = lang;
     }
 
     @Tool(name = "trader_overview", description = """
@@ -28,7 +32,7 @@ public class TraderQueryToolkit {
             and the FULL review memory notes (what it has learned so far).
             Returns hasTrader=false when the user has not created a trader yet.""")
     public String traderOverview() {
-        return traderChatService.overview(userId);
+        return traderChatService.overview(userId, lang);
     }
 
     @Tool(name = "trader_positions", description = """
@@ -36,7 +40,7 @@ public class TraderQueryToolkit {
             entry price, leverage, unrealized PnL and the currently active stop-loss/take-profit orders.
             Returns hasTrader=false when the user has not created a trader yet.""")
     public String traderPositions() {
-        return traderChatService.positions(userId);
+        return traderChatService.positions(userId, lang);
     }
 
     @Tool(name = "trader_decisions", description = """
@@ -46,7 +50,7 @@ public class TraderQueryToolkit {
             Use this to answer "why did it do that trade" - the reasoning text is the answer.""")
     public String traderDecisions(@ToolParam(required = false,
             description = "How many decisions to return, 1-20, default 5") Integer limit) {
-        return traderChatService.decisions(userId, limit);
+        return traderChatService.decisions(userId, limit, lang);
     }
 
     @Tool(name = "trader_plans", description = """
@@ -54,6 +58,6 @@ public class TraderQueryToolkit {
             Each plan carries the thesis (playType), the data it cited (signalsUsed), the invalidation
             condition, entry/stop/target prices and the revision history of stop-loss moves.""")
     public String traderPlans() {
-        return traderChatService.plans(userId);
+        return traderChatService.plans(userId, lang);
     }
 }
