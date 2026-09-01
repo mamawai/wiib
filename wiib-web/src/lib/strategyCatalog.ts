@@ -1,5 +1,5 @@
 /**
- * 四个量化策略的展示口径：名字、说明、点缀色。
+ * 量化策略的展示口径：名字、说明、点缀色。
  * <p>
  * 后端只认 id（回测提交、策略账户、信号快照都按它走），给人看的字一律在这儿按词表现查——
  * 策略账户页与回测配置台共用同一份，同一个策略不会在两处叫两个名字。
@@ -17,11 +17,9 @@ export interface StrategyDisplay {
   descKey: string;
   /** 机制说明（回测配置台） */
   mechKey: string;
-  /** 额外提示（数据依赖之类），只有个别策略有 */
-  noteKey?: string;
 }
 
-/** 数组顺序即回测配置台四选一的排布顺序 */
+/** 数组顺序即回测配置台的排布顺序 */
 export const STRATEGIES: StrategyDisplay[] = [
   {
     id: 'FIBO', accent: '#F97316',
@@ -34,11 +32,6 @@ export const STRATEGIES: StrategyDisplay[] = [
   {
     id: 'SQZMOM', accent: '#a855f7',
     nameKey: 'strategies.name.sqzmom', descKey: 'strategies.desc.sqzmom', mechKey: 'backtest.strategy.sqzmom',
-  },
-  {
-    id: 'LIQFADE', accent: '#3b82f6',
-    nameKey: 'strategies.name.liqfade', descKey: 'strategies.desc.liqfade', mechKey: 'backtest.strategy.liqfade',
-    noteKey: 'backtest.strategy.note.liqfade',
   },
 ];
 

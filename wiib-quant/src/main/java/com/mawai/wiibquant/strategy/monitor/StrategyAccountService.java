@@ -14,7 +14,7 @@ import java.math.BigDecimal;
 import java.util.List;
 
 /**
- * 多策略独立模拟盘账户监控（quant-FIBO / quant-LIQFADE / quant-SQZMOM / quant-TURTLE）。
+ * 多策略独立模拟盘账户监控（quant-FIBO / quant-SQZMOM / quant-TURTLE）。
  *
  * <p>账户体系与 {@link com.mawai.wiibquant.strategy.execution.SimExecutionService} 同源：
  * 共用 {@link StrategyAccountRegistry}（启动预建 + quant-&lt;ID&gt; 幂等解析 userId）。

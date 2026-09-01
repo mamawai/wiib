@@ -20,7 +20,6 @@ quant:
     runFailed: "回测执行异常: {{reason}}"
     noKlineInRange: "本地 kline_history 没有该区间的 5m K线: {{symbol}}"
     klineGap: "本地 5m K线不连续，需先回填: {{symbol}} {{gap}}"
-    liqCoverageLow: "该窗口 liq side data 覆盖率仅 {{pct}}%（需≥60%），跑 LiqDataBackfillRun 回填后再试"
 
   strategy:
     positionIdRequired: positionId 不能为空

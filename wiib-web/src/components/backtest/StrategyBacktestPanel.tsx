@@ -446,12 +446,6 @@ export function StrategyBacktestPanel() {
                   <span className="text-xs font-black truncate">{t(m.nameKey)}</span>
                 </div>
                 <div className="text-[10px] text-muted-foreground mt-1.5 leading-snug line-clamp-2">{t(m.mechKey)}</div>
-                {m.noteKey && (
-                  <div className="text-[9px] text-warning mt-1 leading-snug line-clamp-2 flex items-start gap-1">
-                    <AlertTriangle className="w-2.5 h-2.5 mt-[3px] shrink-0" />
-                    <span className="min-w-0">{t(m.noteKey)}</span>
-                  </div>
-                )}
               </button>
             );
           })}

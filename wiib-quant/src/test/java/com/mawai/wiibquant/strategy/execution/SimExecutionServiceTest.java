@@ -360,7 +360,7 @@ class SimExecutionServiceTest {
         assertThat(strategy.openedPositionId).isEqualTo(8L);
     }
 
-    /** 时间出场桩：按 LiqFade 同款公式（createdAt 按 UTC 解释）持满 holdMs 即市价平。 */
+    /** 时间出场桩：持满 holdMs 即市价平（createdAt 按 UTC 解释）。 */
     private static final class HookStrategy implements TradingStrategySpi {
         FuturesPositionDTO seen;
         long nowMs;

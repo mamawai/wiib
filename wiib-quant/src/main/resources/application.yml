@@ -102,13 +102,13 @@ news:
 strategy:
   runtime:
     enabled: true
-    enabled-ids: FIBO,LIQFADE,SQZMOM,TURTLE   # 四策略全启
+    enabled-ids: FIBO,SQZMOM,TURTLE   # 三策略全启
     liquidation-window-minutes: 30
     liquidation-threshold-usdt: 500000
   execution:
     enabled: true            # 真下单总开关，当前=开(代码 @Value 默认 false)
     target: sim              # sim=本平台模拟盘(每策略独立账户 quant-<ID>) | testnet=Binance Testnet
-    # 四策略部署篮子并集(FIBO:BTC/ETH · LIQFADE:BTC/ETH/DOGE · SQZMOM:SOL/DOGE/XRP · TURTLE:SOL/ETH/DOGE/BNB)
+    # 三策略部署篮子并集(FIBO:BTC/ETH · SQZMOM:SOL/DOGE/XRP · TURTLE:SOL/ETH/DOGE/BNB)
     symbols: BTCUSDT,ETHUSDT,DOGEUSDT,SOLUSDT,XRPUSDT,BNBUSDT
     fixed-margin-usdt: 50    # 每仓固定保证金 USDT(testnet 轨用；sim 轨为风险定量)
     leverage: 20             # testnet 轨请求杠杆

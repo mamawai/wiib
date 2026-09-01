@@ -7,8 +7,6 @@ import com.mawai.wiibquant.strategy.core.TradingStrategySpi;
 import com.mawai.wiibquant.strategy.core.WindowedMarketView;
 import com.mawai.wiibquant.strategy.fibo.FiboParams;
 import com.mawai.wiibquant.strategy.fibo.FiboRetracementStrategy;
-import com.mawai.wiibquant.strategy.liq.LiqFadeParams;
-import com.mawai.wiibquant.strategy.liq.LiqFadeStrategy;
 import com.mawai.wiibquant.strategy.sqzmom.SqueezeMomentumStrategy;
 import com.mawai.wiibquant.strategy.sqzmom.SqzMomParams;
 import com.mawai.wiibquant.strategy.turtle.TurtleParams;
@@ -32,7 +30,7 @@ public class BacktestOrchestrator {
      * 可回测的策略 id，与 {@link #warmupMs} / {@link #prepare} 两个 switch 同一批。
      * 展示用的名字与说明全在前端词表里（见 wiib-web 的 lib/strategyCatalog），这一层只认 id。
      */
-    private static final Set<String> STRATEGY_IDS = Set.of("FIBO", "TURTLE", "SQZMOM", "LIQFADE");
+    private static final Set<String> STRATEGY_IDS = Set.of("FIBO", "TURTLE", "SQZMOM");
 
     /** 引擎开跑所需的全部输入。bars 含预热段，任务服务直接持有同一份供 K 线接口切片。 */
     public record Prepared(TradingStrategySpi strategy, List<KlineBar> bars, int warmupBars) {
@@ -67,7 +65,6 @@ public class BacktestOrchestrator {
     }
 
     private final KlineHistoryStore klineHistoryStore;
-    private final DbLiqSideData dbLiqSideData;
 
     public boolean knownStrategy(String strategyId) {
         return STRATEGY_IDS.contains(strategyId);
@@ -90,7 +87,6 @@ public class BacktestOrchestrator {
                 SqzMomParams p = SqzMomParams.defaults();
                 yield (2L * p.length() + p.squeezeMinBars() + 40) * p.decisionTfMillis();
             }
-            case "LIQFADE" -> 6 * 3_600_000L;   // 策略仅需4根bar，6h 富余
             default -> throw new BacktestSetupException("quant.backtest.unknownStrategy",
                     Map.of("id", String.valueOf(strategyId)));
         };
@@ -98,7 +94,7 @@ public class BacktestOrchestrator {
 
     /**
      * 装载数据并构建策略实例。[tradingStartMs, tradingEndMs) 为交易窗（含/不含口径同引擎），
-     * 预热段自动前推。数据缺口 / LIQ 覆盖不足 → BacktestSetupException fail-fast。
+     * 预热段自动前推。数据缺口 → BacktestSetupException fail-fast。
      */
     public Prepared prepare(String strategyId, String symbol, long tradingStartMs, long tradingEndMs) {
         List<KlineBar> bars = klineHistoryStore.load(
@@ -115,15 +111,6 @@ public class BacktestOrchestrator {
             case "FIBO" -> new FiboRetracementStrategy(FiboParams.defaults(), List.of(symbol));
             case "TURTLE" -> new TurtleStrategy(TurtleParams.defaults(), List.of(symbol));
             case "SQZMOM" -> new SqueezeMomentumStrategy(SqzMomParams.defaults(), List.of(symbol));
-            case "LIQFADE" -> {
-                DbLiqSideData.Loaded side = dbLiqSideData.load(symbol);
-                double coverage = side.takerCoverage(tradingStartMs, tradingEndMs);
-                if (coverage < 0.6) {
-                    throw new BacktestSetupException("quant.backtest.liqCoverageLow",
-                            Map.of("pct", String.format("%.0f", coverage * 100)));
-                }
-                yield new LiqFadeStrategy(LiqFadeParams.defaults(), List.of(symbol), side);
-            }
             default -> throw new BacktestSetupException("quant.backtest.unknownStrategy",
                     Map.of("id", String.valueOf(strategyId)));
         };

@@ -25,7 +25,7 @@ public class BacktestResult {
             LocalDateTime openTime,
             LocalDateTime closeTime,
             String side,            // "LONG" / "SHORT"
-            String strategy,        // "FIBO" / "LIQFADE" / "SQZMOM"
+            String strategy,        // "FIBO" / "TURTLE" / "SQZMOM"
             BigDecimal entryPrice,
             BigDecimal exitPrice,
             BigDecimal quantity,
