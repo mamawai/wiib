@@ -27,7 +27,7 @@ public class ChatConcurrencyGate {
     private final Semaphore slots;
     private final Set<Long> activeUsers = ConcurrentHashMap.newKeySet();
 
-    public ChatConcurrencyGate(@Value("${quant.workbench.max-concurrent-chats:10}") int globalLimit) {
+    public ChatConcurrencyGate(@Value("${agent.workbench.max-concurrent-chats:10}") int globalLimit) {
         this.slots = new Semaphore(globalLimit);
     }
 

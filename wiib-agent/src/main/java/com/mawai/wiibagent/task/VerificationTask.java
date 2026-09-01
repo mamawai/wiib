@@ -26,7 +26,7 @@ public class VerificationTask {
     private final NarrativeVerificationService narrativeVerificationService;
 
     /** 关掉后自动对账停跑。 */
-    @Value("${quant.analysis.enabled:true}")
+    @Value("${agent.analysis.enabled:true}")
     private boolean analysisEnabled;
 
     /** 叙事扫描是全局的（不分 symbol），防抖免得多 symbol 同刻收盘时重复扫。 */

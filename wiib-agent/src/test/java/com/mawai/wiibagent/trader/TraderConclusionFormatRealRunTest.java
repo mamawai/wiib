@@ -40,7 +40,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 @SpringBootTest(properties = {
         "strategy.runtime.enabled=false",
         "strategy.execution.enabled=false",
-        "quant.analysis.enabled=false"
+        "agent.analysis.enabled=false"
 })
 @EnabledIfEnvironmentVariable(named = "WIIB_REAL_RUN", matches = "1")
 class TraderConclusionFormatRealRunTest {

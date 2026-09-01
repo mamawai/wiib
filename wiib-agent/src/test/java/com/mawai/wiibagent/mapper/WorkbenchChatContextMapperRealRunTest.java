@@ -29,7 +29,7 @@ import static org.assertj.core.api.Assertions.assertThat;
         // 只验一张表的存取：策略信号/实盘执行/AI 分析轨全关，别让背景任务在测试期间下单写库
         "strategy.runtime.enabled=false",
         "strategy.execution.enabled=false",
-        "quant.analysis.enabled=false"
+        "agent.analysis.enabled=false"
 })
 @EnabledIfEnvironmentVariable(named = "WIIB_REAL_RUN", matches = "1")
 class WorkbenchChatContextMapperRealRunTest {

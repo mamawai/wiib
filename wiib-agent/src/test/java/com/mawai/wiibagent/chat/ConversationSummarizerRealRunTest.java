@@ -88,11 +88,11 @@ import static org.assertj.core.api.Assertions.assertThat;
         // 只验对话链路：策略信号/实盘执行/AI 分析轨全关，测试期间不许背景任务下单写库
         "strategy.runtime.enabled=false",
         "strategy.execution.enabled=false",
-        "quant.analysis.enabled=false",
+        "agent.analysis.enabled=false",
         // 压缩阈值与保留条数用 properties 覆写，不动 application.yml（改 yml 跑完再改回来=污染工作区，
         // 忘了改回来就带上线）。取值理由见 THRESHOLD_TOKENS / KEEP_MESSAGES 的注释
-        "quant.workbench.summarize-threshold-tokens=" + ConversationSummarizerRealRunTest.THRESHOLD_TOKENS,
-        "quant.workbench.summarize-keep-messages=" + ConversationSummarizerRealRunTest.KEEP_MESSAGES
+        "agent.workbench.summarize-threshold-tokens=" + ConversationSummarizerRealRunTest.THRESHOLD_TOKENS,
+        "agent.workbench.summarize-keep-messages=" + ConversationSummarizerRealRunTest.KEEP_MESSAGES
 })
 @EnabledIfEnvironmentVariable(named = "WIIB_REAL_RUN", matches = "1")
 class ConversationSummarizerRealRunTest {

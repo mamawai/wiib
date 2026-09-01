@@ -37,7 +37,7 @@ import static org.assertj.core.api.Assertions.assertThat;
         // 只验对话链路：策略信号/实盘执行/AI 分析轨全关，测试期间不许背景任务下单写库
         "strategy.runtime.enabled=false",
         "strategy.execution.enabled=false",
-        "quant.analysis.enabled=false"
+        "agent.analysis.enabled=false"
 })
 @EnabledIfEnvironmentVariable(named = "WIIB_REAL_RUN", matches = "1")
 class ChatWorkbenchRealRunTest {

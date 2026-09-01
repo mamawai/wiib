@@ -151,10 +151,10 @@ public class ChatAgentFactory {
                             ApprovalRegistry approvalRegistry,
                             PromptCatalog prompts,
                             LocalizedToolCallbacks localizedTools,
-                            @Value("${quant.workbench.run-model-call-limit:8}") int runModelCallLimit,
-                            @Value("${quant.workbench.summarize-threshold-tokens:32000}") int summarizeThresholdTokens,
-                            @Value("${quant.workbench.summarize-keep-messages:6}") int summarizeKeepMessages,
-                            @Value("${quant.workbench.news-supplement-source:}") String supplementSource) {
+                            @Value("${agent.workbench.run-model-call-limit:8}") int runModelCallLimit,
+                            @Value("${agent.workbench.summarize-threshold-tokens:32000}") int summarizeThresholdTokens,
+                            @Value("${agent.workbench.summarize-keep-messages:6}") int summarizeKeepMessages,
+                            @Value("${agent.workbench.news-supplement-source:}") String supplementSource) {
         this.chatModelFactory = chatModelFactory;
         this.marketToolkit = marketToolkit;
         this.newsToolkit = newsToolkit;

@@ -56,7 +56,7 @@ import static org.mockito.Mockito.when;
 class ChatWorkbenchHitlTest {
 
     private static final String SESSION = "wb-1-hitl";
-    /** 生产口径的调用上限（application.yml 的 quant.workbench.run-model-call-limit） */
+    /** 生产口径的调用上限（application.yml 的 agent.workbench.run-model-call-limit） */
     private static final int PRODUCTION_LIMIT = 8;
     /** 阈值给足 = 这几跑都不碰历史压缩，别让它掺进来 */
     private static final int NO_COMPRESSION = 999_999;
