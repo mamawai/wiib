@@ -1,0 +1,46 @@
+# Agent-side wording: workbench session ownership, the BYOK endpoint library, admin panels.
+# The admin section is admin-only, but still follows the interface language - admins switch to English too.
+agent:
+  chat:
+    sessionNotFound: That session does not exist or is not yours
+    sessionRunning: This session is still running or has a follow-up pending - delete it once it finishes
+    approvalExpired: That approval request has expired - start it again
+    untitled: (untitled)
+
+  # BYOK endpoint library (the /ai model-config page): validation and probe wording. {{reason}} is the upstream error verbatim, untranslated
+  endpoint:
+    limitReached: "Endpoint limit reached ({{max}} max)"
+    notFound: No such endpoint
+    unknownPurpose: Unknown purpose
+    nameInvalid: A name is required, at most 32 characters
+    baseUrlRequired: baseUrl is required
+    modelRequired: model is required
+    protocolRequired: apiProtocol is required
+    protocolInvalid: The protocol must be openai or responses
+    effortTooLong: "The reasoning level is at most {{max}} characters; leave it blank to omit it"
+    apiKeyRequired: apiKey is required
+    connectFailed: "Model connectivity test failed: {{reason}}"
+    # Rejections from the SSRF guard (BaseUrlGuard)
+    baseUrl:
+      malformed: baseUrl is not a valid URL
+      schemeUnsupported: baseUrl must use http or https
+      hostMissing: baseUrl is missing a host name
+      hostUnresolvable: baseUrl host name cannot be resolved
+      privateBlocked: baseUrl must not point at a private or local address
+
+  # Admin: LLM configs and feature-slot assignment
+  admin:
+    apiKeyRequired: apiKey is required
+    baseUrlRequired: baseUrl is required
+    nameRequired: A name is required
+    modelRequired: model is required
+    effortTooLong: The reasoning level is at most {{max}} characters; leave it blank to omit it
+    protocolUnsupported: The protocol must be openai or responses
+    configNotFound: No such config
+    configInUse: This LLM config is referenced by a feature slot and cannot be deleted
+    savedButRefreshFailed: Saved, but the AI runtime failed to reload (see the server log) - it is still running the previous model
+    deletedButRefreshFailed: Deleted, but the AI runtime failed to reload (see the server log) - it is still running the previous model
+    assignedButRefreshFailed: Assignment saved, but the AI runtime failed to reload (see the server log) - it is still running the previous model
+    paramsIncomplete: "Incomplete parameters: {{what}}"
+    llmConfigNotFound: "No such LLM config (id={{id}})"
+    llmConfigNoModel: "The LLM config '{{name}}' has no model name - fill it in under Configure LLM first"

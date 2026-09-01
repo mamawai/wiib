@@ -125,7 +125,7 @@ WhatIfIBought 的重头戏是回测练习、量化策略模拟和 AI Trader：
 |---|:---:|---|:---:|
 | **wiib-feed** | `8081` | 行情接入：Binance / Polymarket → Redis，K 线落库 | 否，上游进程 |
 | **wiib-sim** | `8080` | 真人模拟交易 + BTC 预测，REST / WebSocket | 是，前端连它 |
-| **wiib-quant** | `8082` | agent harness + 三策略，下单走 sim 子账户 | 否，内部 |
+| **wiib-agent** | `8082` | agent harness + 三策略（策略代码在 wiib-quant 库），下单走 sim 子账户 | 否，内部 |
 
 三个进程加一个 `wiib-common` 共享层，只通过 Redis 行情总线和共享 PostgreSQL 协作，互不直接调用，一个挂了不影响其他两个。
 

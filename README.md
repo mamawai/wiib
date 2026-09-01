@@ -125,7 +125,7 @@ For full deployment — strategy configuration, BYOK secrets, reverse-proxy topo
 |---|:---:|---|:---:|
 | **wiib-feed** | `8081` | Market data ingest: Binance / Polymarket → Redis, candles persisted | No, upstream process |
 | **wiib-sim** | `8080` | Human simulated trading + BTC prediction, REST / WebSocket | Yes, the frontend talks to it |
-| **wiib-quant** | `8082` | Agent harness + four strategies, orders routed to sim sub-accounts | No, internal |
+| **wiib-agent** | `8082` | Agent harness + strategies (strategy code lives in the wiib-quant library), orders routed to sim sub-accounts | No, internal |
 
 The three processes plus a shared `wiib-common` layer only share the Redis bus and PostgreSQL. No direct RPC; one crash does not take the others down.
 

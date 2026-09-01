@@ -1,7 +1,8 @@
 # ============================================================
-# WhatIfIBought 三进程部署 (feed / sim / quant)
+# WhatIfIBought 三进程部署 (feed / sim / agent)
 #   1. 建 .env（cp .env.example 填值，HOST 填法见 .env.example 注释）
-#   2. mvn clean package -pl wiib-feed,wiib-quant,wiib-sim -am -DskipTests
+#   2. mvn clean package -pl wiib-feed,wiib-agent,wiib-sim -am -DskipTests
+#      wiib-quant 是 agent 依赖的库，-am 会带上，不用单列
 #   3. docker compose up -d --build
 #
 # 配置只改 .env，本文件不含任何环境私有值，直接入库。
@@ -57,16 +58,16 @@ services:
     mem_reservation: 2g
     cpus: "3"
 
-  wiib-quant:
+  wiib-agent:
     <<: *svc-base
-    build: { context: ./wiib-quant, dockerfile: Dockerfile }
-    container_name: wiib-quant
+    build: { context: ./wiib-agent, dockerfile: Dockerfile }
+    container_name: wiib-agent
     ports:
-      # 宿主 8082 已被占用，宿主侧映射 18082（nginx 反代 quant 路径用它；容器间仍走 wiib-quant:8082 可自行调整）
+      # 宿主 8082 已被占用，宿主侧映射 18082（nginx 反代 agent 路径用它；容器间仍走 wiib-agent:8082 可自行调整）
       - "127.0.0.1:18082:8082"
 #      - "127.0.0.1:8082:8082"
     volumes:
-      - ./dumps/quant:/dumps
+      - ./dumps/agent:/dumps
     environment:
       <<: *shared-env
       SIM_INTERNAL_BASE_URL: http://wiib-sim:8080

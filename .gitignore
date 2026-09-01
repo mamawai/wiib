@@ -54,7 +54,6 @@ docs/superpowers/plans/*.md
 docs/superpowers/specs/*.md
 ###
 export-md
-wiib-quant/AGENT_REFACTOR_PLAN.md
 
 # 可视化头脑风暴临时会话
 .superpowers/

@@ -266,10 +266,10 @@ langgraph4j 有几处行为跟直觉相反，而且**错了不报错**。这几�
 
 ```bash
 # 后端全模块（-am 不能省，根 pom 有 skipTests=true）
-mvn -o test -pl wiib-quant -am -DskipTests=false -Dsurefire.failIfNoSpecifiedTests=false
+mvn -o test -pl wiib-agent -am -DskipTests=false -Dsurefire.failIfNoSpecifiedTests=false
 
 # 单个/多个测试类（逗号分隔，不是 +）
-mvn -o test -pl wiib-quant -am -DskipTests=false -Dsurefire.failIfNoSpecifiedTests=false \
+mvn -o test -pl wiib-agent -am -DskipTests=false -Dsurefire.failIfNoSpecifiedTests=false \
     -Dtest=ApprovalGateOrderTest,SummarizerHookMountTest
 
 # 前端

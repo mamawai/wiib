@@ -51,7 +51,7 @@ cp .env.example .env.local    # 填 PG_USER / PG_PASSWORD / INTERNAL_API_TOKEN�
       model: { chat: none, embedding: none, image: none, moderation: none, audio: { speech: none, transcription: none } }
   ```
 
-- 策略实盘执行（`wiib-quant`，仓库默认即三策略全启、跑 sim 轨）：
+- 策略实盘执行（配在 `wiib-agent` 的 yml，代码在 `wiib-quant` 库；仓库默认即三策略全启、跑 sim 轨）：
 
   ```yaml
   strategy:
@@ -69,7 +69,7 @@ cp .env.example .env.local    # 填 PG_USER / PG_PASSWORD / INTERNAL_API_TOKEN�
 mvn clean package -DskipTests
 # 产物：
 #   wiib-feed/target/wiib-feed-0.0.1-SNAPSHOT.jar     :8081 数据上游
-#   wiib-quant/target/wiib-quant-0.0.1-SNAPSHOT.jar   :8082 量化策略
+#   wiib-agent/target/wiib-agent-0.0.1-SNAPSHOT.jar   :8082 AI 交易员 + 策略
 #   wiib-sim/target/wiib-sim-0.0.1-SNAPSHOT.jar       :8080 模拟交易（对外）
 ```
 
@@ -94,7 +94,7 @@ npm run build      # 开发：npm run dev（Vite 默认 3000，/api、/ws 代理
 
 ```bash
 java -jar wiib-feed/target/wiib-feed-0.0.1-SNAPSHOT.jar    # :8081 交易所 WS → Redis
-java -jar wiib-quant/target/wiib-quant-0.0.1-SNAPSHOT.jar  # :8082 量化研判 + 策略
+java -jar wiib-agent/target/wiib-agent-0.0.1-SNAPSHOT.jar  # :8082 AI 交易员 + 策略
 java -jar wiib-sim/target/wiib-sim-0.0.1-SNAPSHOT.jar      # :8080 模拟交易（对外，前端连它）
 ```
 
