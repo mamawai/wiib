@@ -1,5 +1,7 @@
 package com.mawai.wiibagent.trader;
 
+import com.baomidou.mybatisplus.core.MybatisConfiguration;
+import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.mawai.wiibagent.i18n.PromptI18nAssertions;
 import com.mawai.wiibcommon.entity.AiTrader;
 import com.mawai.wiibcommon.enums.AgentLang;
@@ -19,6 +21,8 @@ import com.mawai.wiibquant.market.service.KlineFetcher;
 import com.mawai.wiibquant.market.service.MarketDataService;
 import com.mawai.wiibquant.market.service.NewsCache;
 import com.mawai.wiibquant.market.service.NewsFlashLocalizer;
+import org.apache.ibatis.builder.MapperBuilderAssistant;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
@@ -61,6 +65,20 @@ class WakeInstructionI18nTest {
         runner.nowMs = () -> BOUNDARY + 1_000L;
     }
 
+    /** 留言消费走 Lambda 条件构造器，要查 TableInfo；不预热的话本类单独跑会炸 */
+    @BeforeAll
+    static void initTableInfoCache() {
+        TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""), AiTrader.class);
+    }
+
+    /** 带一条待读留言的开场白段：注入即消费，每次现造 trader */
+    private String noteBlock(AgentLang lang, String note) {
+        AiTrader t = trader();
+        t.setOwnerNote(note);
+        t.setOwnerNoteRounds(2);
+        return new TraderPromptAssembler(traderMapper, prompts, mock(PlayStatsAssembler.class)).ownerNoteBlock(t, lang);
+    }
+
     private static AiTrader trader() {
         AiTrader t = new AiTrader();
         t.setId(7L);
@@ -82,7 +100,7 @@ class WakeInstructionI18nTest {
             String mark = prompts.get(lang, "trader.mark.conclusion");
             String template = new TraderPromptAssembler(traderMapper, prompts, mock(PlayStatsAssembler.class))
                     .platformTemplate(lang, "1h", "BTCUSDT", TraderRiskConfig.of(new AiTrader()), null);
-            String opening = runner.routineInstruction(trader(), BOUNDARY, "", null, lang, false);
+            String opening = runner.routineInstruction(trader(), BOUNDARY, "", null, lang, "");
 
             assertThat(template).as("%s 系统提示词要带收尾标记", lang.code()).contains(mark);
             assertThat(opening).as("%s 开场白的收尾标记要与系统提示词同源", lang.code()).contains(mark);
@@ -100,7 +118,7 @@ class WakeInstructionI18nTest {
     @Test
     void 警报开场白的收尾标记与系统提示词同源() {
         for (AgentLang lang : AgentLang.values()) {
-            String opening = runner.alertInstruction(trader(), alert(), List.of(), null, lang, false);
+            String opening = runner.alertInstruction(trader(), alert(), List.of(), null, lang, "");
             assertThat(opening).as("%s 警报开场白的收尾标记", lang.code())
                     .contains(prompts.get(lang, "trader.mark.conclusion"));
             for (AgentLang other : AgentLang.values()) {
@@ -115,49 +133,47 @@ class WakeInstructionI18nTest {
     @Test
     void 英文唤醒开场白全文无中文() {
         PromptI18nAssertions.assertNoCjk("英文例行开场白",
-                runner.routineInstruction(trader(), BOUNDARY, "", null, AgentLang.EN, false));
+                runner.routineInstruction(trader(), BOUNDARY, "", null, AgentLang.EN, ""));
         AiTrader windowed = trader();
         windowed.setWakeWindow("21:00-08:00");
         PromptI18nAssertions.assertNoCjk("英文例行开场白（带休眠提示）",
-                runner.routineInstruction(windowed, BOUNDARY, "", null, AgentLang.EN, false));
+                runner.routineInstruction(windowed, BOUNDARY, "", null, AgentLang.EN, ""));
         PromptI18nAssertions.assertNoCjk("英文警报开场白",
-                runner.alertInstruction(trader(), alert(), List.of(), null, AgentLang.EN, false));
-        PromptI18nAssertions.assertNoCjk("英文例行开场白（有留言提示）",
-                runner.routineInstruction(trader(), BOUNDARY, "", null, AgentLang.EN, true));
-        PromptI18nAssertions.assertNoCjk("英文警报开场白（有留言提示）",
-                runner.alertInstruction(trader(), alert(), List.of(), null, AgentLang.EN, true));
+                runner.alertInstruction(trader(), alert(), List.of(), null, AgentLang.EN, ""));
+        // 留言段的段头/亲笔提示/footer 都是平台文案，英文用户一个中文字都不许见；正文是主人亲笔，拿英文造
+        PromptI18nAssertions.assertNoCjk("英文例行开场白（带留言段）",
+                runner.routineInstruction(trader(), BOUNDARY, "", null, AgentLang.EN, noteBlock(AgentLang.EN, "Take profit on ETH now.")));
+        PromptI18nAssertions.assertNoCjk("英文警报开场白（带留言段）",
+                runner.alertInstruction(trader(), alert(), List.of(), null, AgentLang.EN, noteBlock(AgentLang.EN, "Take profit on ETH now.")));
     }
 
     /**
-     * 有待读留言：开场白末尾催履行，同一句里带反重放（这个位置最近因，只催履行会把多轮留言催成重复执行）；
+     * 有待读留言：留言段整段压在开场白最末（user 消息最近因位置——留言在这儿才是"本轮要回答的问题之一"，
+     * 放 system 里跟纪律同层必被压过），例行/警报同款；反重放跟正文同位置。
      * 没有留言则一个字不加（逐字钉死那两条已经覆盖无留言路径）。
      */
     @Test
-    void 有留言时开场白末尾提示尽量履行且不重放() {
-        String hint = prompts.get(AgentLang.ZH, "trader.wake.ownerNoteHint");
-        assertThat(runner.routineInstruction(trader(), BOUNDARY, "", null, AgentLang.ZH, true))
-                .endsWith(hint)
-                .contains("尽量考虑履行")
-                .contains("不可以忽视")
-                .contains("观点不成立")
-                .as("催履行的位置必须同时带反重放").contains("一次性动作做过就不要再做");
-        assertThat(runner.alertInstruction(trader(), alert(), List.of(), null, AgentLang.ZH, true))
-                .endsWith(hint);
-        assertThat(runner.routineInstruction(trader(), BOUNDARY, "", null, AgentLang.ZH, false))
-                .doesNotContain("主人本轮有留言");
+    void 有留言时留言段压在开场白最末() {
+        String block = noteBlock(AgentLang.ZH, "ETH 提前止盈");
+        assertThat(block)
+                .startsWith("\n")
+                .contains("主人的留言").contains("ETH 提前止盈")
+                .as("留言段自带反重放").contains("一次性动作做过不要再做");
+        assertThat(runner.routineInstruction(trader(), BOUNDARY, "", null, AgentLang.ZH, block)).endsWith(block);
+        assertThat(runner.alertInstruction(trader(), alert(), List.of(), null, AgentLang.ZH, block)).endsWith(block);
 
-        assertThat(runner.routineInstruction(trader(), BOUNDARY, "", null, AgentLang.EN, true))
-                .contains("try to act on it")
-                .contains("do not ignore it")
-                .as("催履行的位置必须同时带反重放").contains("Do not repeat a one-shot action");
+        String en = noteBlock(AgentLang.EN, "Take profit on ETH now.");
+        assertThat(runner.routineInstruction(trader(), BOUNDARY, "", null, AgentLang.EN, en))
+                .endsWith(en)
+                .contains("Do not repeat a one-shot action");
     }
 
     /** 财经日历块在事实区注入（例行/警报同享）；null 时一个字不加（逐字钉死用例覆盖无日历路径） */
     @Test
     void 财经日历块注入例行与警报开场白() {
         String calendar = "【财经日历】宏观事件时刻表\n- 09-04 20:30 [High] USD Non-Farm Employment Change\n";
-        String routine = runner.routineInstruction(trader(), BOUNDARY, "", calendar, AgentLang.ZH, false);
-        String alert = runner.alertInstruction(trader(), alert(), List.of(), calendar, AgentLang.ZH, false);
+        String routine = runner.routineInstruction(trader(), BOUNDARY, "", calendar, AgentLang.ZH, "");
+        String alert = runner.alertInstruction(trader(), alert(), List.of(), calendar, AgentLang.ZH, "");
 
         assertThat(routine).contains(calendar);
         assertThat(alert).contains(calendar);
@@ -169,7 +185,7 @@ class WakeInstructionI18nTest {
     /** 中文侧成文逐字钉死：外置只搬位置，成文一个字不变 */
     @Test
     void 中文例行开场白逐字不变() {
-        assertThat(runner.routineInstruction(trader(), BOUNDARY, "", null, AgentLang.ZH, false))
+        assertThat(runner.routineInstruction(trader(), BOUNDARY, "", null, AgentLang.ZH, ""))
                 .isEqualTo("新一根 1h K线已收盘（"
                         + java.time.format.DateTimeFormatter.ofPattern("MM-dd HH:mm")
                                 .withZone(java.time.ZoneId.systemDefault())
@@ -183,7 +199,7 @@ class WakeInstructionI18nTest {
     /** 中文警报开场白逐字不变 */
     @Test
     void 中文警报开场白逐字不变() {
-        assertThat(runner.alertInstruction(trader(), alert(), List.of(), null, AgentLang.ZH, false))
+        assertThat(runner.alertInstruction(trader(), alert(), List.of(), null, AgentLang.ZH, ""))
                 .isEqualTo("⚠️ 行情波动警报（非例行唤醒）：BTCUSDT 5分钟内波动 5.2%（方向：上涨，现价 100000）。\n"
                         + "你上次唤醒本局还没有过唤醒，距下一次例行唤醒还有约 60 分钟。\n"
                         + "注意：当前 1h K线尚未收盘——你的收盘制失效条件此刻不作数，"

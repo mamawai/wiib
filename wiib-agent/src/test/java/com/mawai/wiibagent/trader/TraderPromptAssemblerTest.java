@@ -56,7 +56,7 @@ class TraderPromptAssemblerTest {
         return d;
     }
 
-    // ---------- 主人留言：按轮次递减 ----------
+    // ---------- 主人留言：进开场白不进 system，按轮次递减 ----------
 
     /**
      * 注入与递减必须是同一件事：注了没减，一句交代会每轮重念、被模型当成长期规则；
@@ -69,11 +69,26 @@ class TraderPromptAssemblerTest {
         t.setOwnerNote("今晚有 CPI 数据，仓位放轻一点");
         t.setOwnerNoteRounds(1);
 
-        String prompt = assembler.assemble(t, "{}", List.of(), AgentLang.ZH);
+        String block = assembler.ownerNoteBlock(t, AgentLang.ZH);
 
-        assertThat(prompt).contains("今晚有 CPI 数据，仓位放轻一点").contains("主人的留言");
+        assertThat(block).contains("今晚有 CPI 数据，仓位放轻一点").contains("主人的留言");
         verify(traderMapper).update(isNull(), any(LambdaUpdateWrapper.class));   // 注了就一定减了
         assertThat(t.getOwnerNote()).isNull();  // 同一轮里别处再读到它就会重复露面
+    }
+
+    /** 留言不进系统提示词：system 里的字跟纪律同层必被纪律压过，正文只走开场白段；assemble 不碰它也就不消费 */
+    @Test
+    void 系统提示词不含留言() {
+        AiTrader t = trader();
+        t.setId(7L);
+        t.setOwnerNote("今晚有 CPI 数据");
+        t.setOwnerNoteRounds(3);
+
+        String prompt = assembler.assemble(t, "{}", List.of(), AgentLang.ZH);
+
+        assertThat(prompt).doesNotContain("今晚有 CPI 数据").doesNotContain("————— 主人的留言");
+        verify(traderMapper, never()).update(any(), any());
+        assertThat(t.getOwnerNoteRounds()).isEqualTo(3);
     }
 
     /** 默认模板：节奏行按时段说真话；退出模板：单独注入事实行；全天：两处都不提 */
@@ -96,18 +111,18 @@ class TraderPromptAssemblerTest {
         assertThat(assembler.assemble(t, "{}", List.of(), AgentLang.ZH)).contains("节奏：每根 1h K线收盘唤醒你一次");
     }
 
-    /** 单轮留言消费完再组一次提示词：不该复活，也不该再写一次库 */
+    /** 单轮留言消费完再取一次：不该复活，也不该再写一次库 */
     @Test
     void 单轮留言只出现一次() {
         AiTrader t = trader();
         t.setId(7L);
         t.setOwnerNote("今晚有 CPI 数据");
         t.setOwnerNoteRounds(1);
-        assembler.assemble(t, "{}", List.of(), AgentLang.ZH);
+        assembler.ownerNoteBlock(t, AgentLang.ZH);
 
-        String second = assembler.assemble(t, "{}", List.of(), AgentLang.ZH);
+        String second = assembler.ownerNoteBlock(t, AgentLang.ZH);
 
-        assertThat(second).doesNotContain("今晚有 CPI 数据").doesNotContain("主人的留言");
+        assertThat(second).isEmpty();
         verify(traderMapper, times(1)).update(isNull(), any(LambdaUpdateWrapper.class));
     }
 
@@ -122,7 +137,7 @@ class TraderPromptAssemblerTest {
         t.setOwnerNote("今晚有 CPI 数据");
         t.setOwnerNoteRounds(3);
 
-        String first = assembler.assemble(t, "{}", List.of(), AgentLang.ZH);
+        String first = assembler.ownerNoteBlock(t, AgentLang.ZH);
 
         assertThat(first).contains("今晚有 CPI 数据").contains("本次之后还会出现 2 次");
         assertThat(t.getOwnerNote()).isNotNull();
@@ -137,47 +152,52 @@ class TraderPromptAssemblerTest {
         t.setOwnerNote("今晚有 CPI 数据");
         t.setOwnerNoteRounds(1);
 
-        String prompt = assembler.assemble(t, "{}", List.of(), AgentLang.ZH);
+        String block = assembler.ownerNoteBlock(t, AgentLang.ZH);
 
-        assertThat(prompt).contains("只在本次唤醒出现").doesNotContain("还会出现");
+        assertThat(block).contains("只在本次唤醒出现").doesNotContain("还会出现");
         assertThat(t.getOwnerNote()).isNull();
         assertThat(t.getOwnerNoteRounds()).isZero();
     }
 
     /**
-     * 留言权重：情况允许且内容合理就尽量履行，不可以忽视；
-     * 内容不合理或观点不成立才可以不履行。旧「不是常驻规则」等于允许当没看见，必须绝迹。
+     * 举证责任倒置：执行不需要理由，否决只认撞硬规则或引数字的独立判断，纪律条文不是否决依据；
+     * 结论里必须单起一行对账。旧「尽量考虑履行／观点不成立才可不听」等于给了万能借口，必须绝迹。
      */
     @Test
-    void 留言合理则履行观点不成立可不听() {
+    void 留言否决只认数字不认纪律() {
         AiTrader t = trader();
         t.setId(7L);
-        t.setOwnerNote("今晚仓位放轻");
+        t.setOwnerNote("ETH 提前止盈");
         t.setOwnerNoteRounds(1);
 
-        String prompt = assembler.assemble(t, "{}", List.of(), AgentLang.ZH);
+        String block = assembler.ownerNoteBlock(t, AgentLang.ZH);
 
-        assertThat(prompt)
-                .contains("今晚仓位放轻")
-                .contains("尽量考虑履行")
-                .contains("不可以忽视")
-                .contains("观点不成立")
-                .doesNotContain("不是常驻规则");
+        assertThat(block)
+                .contains("ETH 提前止盈")
+                .contains("执行不需要理由")
+                .contains("不引数字的反对视为没有反对")
+                .contains("主人留言：已执行")
+                .as("收尾标记与系统提示词同源").contains("【本轮结论】")
+                .as("开仓类留言：硬性字段自己补齐，不是拒绝理由").contains("止损、失效条件、论点标签由你自己补齐")
+                .as("反重放跟正文同位置").contains("一次性动作做过不要再做")
+                .doesNotContain("尽量考虑履行").doesNotContain("观点不成立").doesNotContain("不是常驻规则");
 
         AiTrader en = trader();
         en.setId(8L);
-        en.setOwnerNote("keep size light");
+        en.setOwnerNote("take profit on ETH now");
         en.setOwnerNoteRounds(1);
-        assertThat(assembler.assemble(en, "{}", List.of(), AgentLang.EN))
-                .contains("try to act on it")
-                .contains("do not ignore")
-                .contains("does not hold")
-                .doesNotContain("not a standing rule");
+        assertThat(assembler.ownerNoteBlock(en, AgentLang.EN))
+                .contains("Acting needs no reason")
+                .contains("an objection citing no number counts as no objection")
+                .contains("Owner's message: acted")
+                .contains("[ROUND CONCLUSION]")
+                .contains("Do not repeat a one-shot action")
+                .doesNotContain("try to act on it").doesNotContain("does not hold").doesNotContain("not a standing rule");
     }
 
     /**
      * 迁移半途的存量行：ALTER 跑了、回填 UPDATE 漏跑，库里就是"有正文、轮次 0/null"。
-     * 必须退化成一次性留言——拆箱 NPE 会让 assemble 抛异常，每轮唤醒写一条 ERROR 行、
+     * 必须退化成一次性留言——拆箱 NPE 会让唤醒抛异常，每轮唤醒写一条 ERROR 行、
      * 连败 5 次后 trader 被自动暂停，用户看到的是"它莫名其妙停了"。
      */
     @Test
@@ -187,18 +207,18 @@ class TraderPromptAssemblerTest {
         t.setOwnerNote("存量留言");
         t.setOwnerNoteRounds(null);
 
-        String prompt = assembler.assemble(t, "{}", List.of(), AgentLang.ZH);
+        String block = assembler.ownerNoteBlock(t, AgentLang.ZH);
 
-        assertThat(prompt).contains("存量留言").contains("只在本次唤醒出现");
+        assertThat(block).contains("存量留言").contains("只在本次唤醒出现");
         assertThat(t.getOwnerNote()).isNull();
     }
 
     /** 没留言就别去动库：每轮唤醒都白写一次 UPDATE 是纯浪费 */
     @Test
     void 没有留言时不写库() {
-        String prompt = assembler.assemble(trader(), "{}", List.of(), AgentLang.ZH);
+        String block = assembler.ownerNoteBlock(trader(), AgentLang.ZH);
 
-        assertThat(prompt).doesNotContain("主人的留言");
+        assertThat(block).isEmpty();
         verify(traderMapper, never()).update(any(), any());
     }
 
@@ -209,9 +229,9 @@ class TraderPromptAssemblerTest {
         t.setId(7L);
         t.setOwnerNote("   ");
 
-        String prompt = assembler.assemble(t, "{}", List.of(), AgentLang.ZH);
+        String block = assembler.ownerNoteBlock(t, AgentLang.ZH);
 
-        assertThat(prompt).doesNotContain("主人的留言");
+        assertThat(block).isEmpty();
         verify(traderMapper, never()).update(any(), any());
     }
 

@@ -31,10 +31,12 @@ import java.util.Map;
  * ④ 检验先于发明——先对上一轮的承诺（等待条件/失效条件）做检验，再考虑新机会，治翻烙饼；
  * ⑤ 固定收尾格式——结论块既是公开展示单元，也是下一轮回注后的检验基准；
  * ⑥ 用户风格指令放最后（近因权重最高）且明示优先级：风格冲突听主人的，硬规格不可覆盖；
- * ⑦ 主人留言压轴：阶段性交代，比常驻风格更近因；情况允许且合理则尽量履行、不许忽视，观点不成立可以不听但要写理由，按剩余轮次逐轮注入、减到 0 清空。
+ * ⑦ 主人留言不进系统提示词，进唤醒开场白末尾（{@link #ownerNoteBlock}）：system 里的字是"背景规则"，
+ *   跟纪律同层必被纪律压过；进了 user 消息它才是"本轮要回答的问题之一"。举证责任倒置——执行不需要理由，
+ *   否决只认两种：撞系统硬规则、引用具体数字的独立判断；纪律条文不是否决依据。按剩余轮次逐轮注入、减到 0 清空。
  * 这七条是 agent 行为的决定因素，不是文案——加语言时逐条对照着写，不是逐字翻译。
  * <p>
- * ⑧ 输出语言硬收尾排在⑦之后：⑥⑦是主人亲笔、不翻译，可能与平台模板不同语言，且近因权重最高。
+ * ⑧ 输出语言硬收尾排在⑥之后：⑥是主人亲笔、不翻译，可能与平台模板不同语言，且近因权重最高。
  * 语言指令因此说两次——模板正文一次，整篇最末一行再一次。
  */
 @Component
@@ -112,27 +114,38 @@ public class TraderPromptAssembler {
                     .append(trader.getCustomPrompt()).append('\n');
         }
 
-        String note = trader.getOwnerNote();
-        if (note != null && !note.isBlank()) {
-            // 正文非空才叫"有待读留言"，轮次异常一律当 1 轮：迁移时 ALTER 跑了而回填 UPDATE 漏跑，
-            // 库里就会出现"有正文、轮次是 0/null"。当 1 处理最坏只是退化回一次性留言，不炸也不吞
-            Integer raw = trader.getOwnerNoteRounds();
-            int rounds = raw == null || raw <= 0 ? 1 : raw;
-            int left = rounds - 1;
-            String roundsText = left == 0 ? prompts.get(lang, "trader.label.ownerNoteOnce")
-                    : prompts.get(lang, "trader.label.ownerNoteMore", Map.of("left", left));
-            sb.append('\n').append(prompts.get(lang, "trader.label.ownerNote", Map.of("rounds", roundsText)))
-                    .append('\n').append(prompts.get(lang, "trader.label.ownerWritten")).append('\n')
-                    .append(note).append('\n')
-                    // 明说还剩几次：持续叮嘱，不是"现在就执行一次"。footer 另管两件事——
-                    // 合理则履行、观点不成立可不听；一次性动作做过不要再做（防"平 ETH"念三次平三次）
-                    .append(prompts.get(lang, "trader.label.ownerNoteFooter")).append('\n');
-            consumeOwnerNote(trader, note, left);
-        }
-        // 输出语言硬收尾：整篇最末一行，排在自定义指令与主人留言之后。
+        // 输出语言硬收尾：整篇最末一行，排在自定义指令之后。
         // 退出平台模板时模板正文那次不在了，只剩这一行
         sb.append('\n').append(prompts.get(lang, "trader.label.outputLanguage")).append('\n');
         return sb.toString();
+    }
+
+    /**
+     * 主人留言段：拼进唤醒开场白末尾（user 消息，最近因位置），不进系统提示词。
+     * 段头报剩余次数 + 亲笔提示 + 正文原样 + footer（举证责任倒置、结论里必须单起一行对账、反重放）。
+     * 无待读留言返回空串。<b>注入即消费</b>：返回非空就已经递减一轮，见 {@link #consumeOwnerNote}。
+     */
+    public String ownerNoteBlock(AiTrader trader, AgentLang lang) {
+        String note = trader.getOwnerNote();
+        if (note == null || note.isBlank()) {
+            return "";
+        }
+        // 正文非空才叫"有待读留言"，轮次异常一律当 1 轮：迁移时 ALTER 跑了而回填 UPDATE 漏跑，
+        // 库里就会出现"有正文、轮次是 0/null"。当 1 处理最坏只是退化回一次性留言，不炸也不吞
+        Integer raw = trader.getOwnerNoteRounds();
+        int rounds = raw == null || raw <= 0 ? 1 : raw;
+        int left = rounds - 1;
+        String roundsText = left == 0 ? prompts.get(lang, "trader.label.ownerNoteOnce")
+                : prompts.get(lang, "trader.label.ownerNoteMore", Map.of("left", left));
+        // 明说还剩几次：持续叮嘱，不是"现在就执行一次"；footer 里的反重放防"平 ETH"念三次平三次。
+        // 收尾标记走 {{mark}} 与系统提示词同源
+        String block = "\n" + prompts.get(lang, "trader.label.ownerNote", Map.of("rounds", roundsText))
+                + "\n" + prompts.get(lang, "trader.label.ownerWritten")
+                + "\n" + note
+                + "\n" + prompts.get(lang, "trader.label.ownerNoteFooter",
+                        Map.of("mark", prompts.get(lang, "trader.mark.conclusion")));
+        consumeOwnerNote(trader, note, left);
+        return block;
     }
 
     /**

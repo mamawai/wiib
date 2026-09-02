@@ -259,9 +259,9 @@ public class TraderWakeupRunner {
         // 挂单一次拉取两用：计划补绑的判活依据 + 账户状态注入
         List<FuturesOrderResponse> pendingOrders = simTradeClient.getPendingOrders(trader.getSimUserId(), null);
         List<AiTraderPlan> plans = cleanupAndRebindPlans(trader, positions, pendingOrders, boundaryTime);
-        // wakePrompt 里的 assemble 会立刻消费留言（最后一轮还会把内存里的正文清掉），开场白要不要加指针必须先记下
-        boolean hasOwnerNote = trader.getOwnerNote() != null && !trader.getOwnerNote().isBlank();
         String prompt = wakePrompt(trader, equity, positions, pendingOrders, plans, boundaryTime, recent, lang);
+        // 留言进开场白不进 system；取一次就消费一轮，例行/警报两种开场白共用这一份
+        String ownerNote = promptAssembler.ownerNoteBlock(trader, lang);
 
         // 全量工具轨迹（含数据工具）：收集器在本方法手里，超时 cancel 也保得住已发生的记录
         ToolCallTraceHook trace = new ToolCallTraceHook();
@@ -276,8 +276,8 @@ public class TraderWakeupRunner {
 
         String calendar = econCalendar.assemble(nowMs.getAsLong(), lang);
         String instruction = trigger != null
-                ? alertInstruction(trader, trigger, recent, calendar, lang, hasOwnerNote)
-                : routineInstruction(trader, boundaryTime, marketSnapshot(whitelist, lang), calendar, lang, hasOwnerNote);
+                ? alertInstruction(trader, trigger, recent, calendar, lang, ownerNote)
+                : routineInstruction(trader, boundaryTime, marketSnapshot(whitelist, lang), calendar, lang, ownerNote);
         RunnableConfig config = RunnableConfig.builder()
                 .threadId("trader-" + trader.getId() + "-" + boundaryTime).build();
 
@@ -421,12 +421,13 @@ public class TraderWakeupRunner {
      * <p>
      * 包私有非 private：标记同源那条钉子（{@code WakeInstructionI18nTest}）要拿它的成文比对。
      *
-     * @param calendar     财经日历块（{@link EconCalendarAssembler}），null=整块缺席。
-     *                     与快照同属事实区，排在快照之后、休眠提示与单问题框架之前
-     * @param hasOwnerNote 本轮有待读留言——末尾追加指针，见 {@link #ownerNoteHint}
+     * @param calendar  财经日历块（{@link EconCalendarAssembler}），null=整块缺席。
+     *                  与快照同属事实区，排在快照之后、休眠提示与单问题框架之前
+     * @param ownerNote 主人留言段（{@link TraderPromptAssembler#ownerNoteBlock}），空串=无待读留言。
+     *                  压在整段开场白最末：user 消息末尾是最近因位置，留言在这儿才是"本轮要回答的问题之一"
      */
     String routineInstruction(AiTrader trader, long boundaryTime, String snapshot, String calendar,
-                              AgentLang lang, boolean hasOwnerNote) {
+                              AgentLang lang, String ownerNote) {
         return prompts.get(lang, "trader.wake.routineHeader", Map.of(
                 "interval", trader.getIntervalCode(),
                 "time", TIME_FMT.format(Instant.ofEpochMilli(boundaryTime))))
@@ -438,7 +439,7 @@ public class TraderWakeupRunner {
                         TraderScheduler.INTERVAL_MS.getOrDefault(trader.getIntervalCode(), 300_000L), nowMs.getAsLong())
                 + prompts.get(lang, "trader.wake.routineQuestion",
                         Map.of("mark", prompts.get(lang, "trader.mark.conclusion")))
-                + ownerNoteHint(lang, hasOwnerNote);
+                + ownerNote;
     }
 
     /**
@@ -468,11 +469,11 @@ public class TraderWakeupRunner {
      * 反锚定是灵魂——被波动惊醒正是恐慌平仓的高发场景，必须明说"未收盘不作数、
      * 止损在岗、不因被叫醒而必须动作"。
      *
-     * @param calendar     财经日历块，null=整块缺席——被波动惊醒时"刚才是否有数据公布/讲话"正是归因的关键事实
-     * @param hasOwnerNote 本轮有待读留言——末尾追加指针，见 {@link #ownerNoteHint}
+     * @param calendar  财经日历块，null=整块缺席——被波动惊醒时"刚才是否有数据公布/讲话"正是归因的关键事实
+     * @param ownerNote 主人留言段，空串=无待读留言；位置同例行开场白，压在最末
      */
     String alertInstruction(AiTrader trader, AlertTrigger trig, List<AiTraderDecision> recent,
-                            String calendar, AgentLang lang, boolean hasOwnerNote) {
+                            String calendar, AgentLang lang, String ownerNote) {
         long intervalMs = TraderScheduler.INTERVAL_MS.getOrDefault(trader.getIntervalCode(), 3_600_000L);
         long toNextMin = Math.max(1, (intervalMs - Math.floorMod(trig.triggeredAt(), intervalMs)) / 60_000);
         String lastWake = recent.isEmpty() ? prompts.get(lang, "trader.wake.alertNoWake")
@@ -492,16 +493,7 @@ public class TraderWakeupRunner {
                         Map.of("interval", trader.getIntervalCode())) + "\n"
                 + prompts.get(lang, "trader.wake.alertQuestion",
                         Map.of("mark", prompts.get(lang, "trader.mark.conclusion")))
-                + ownerNoteHint(lang, hasOwnerNote);
-    }
-
-    /**
-     * 有待读留言才加：开场白是 user 消息，比 system 末尾更近因，提留言权重要打在这儿。
-     * 指针与反重放一起给——只喊"尽量履行"而把"做过的一次性动作别再做"留在 system 里，
-     * 多轮留言就会被最近因位置一路催着重放。assemble 已消费留言，调用方必须事先记下。
-     */
-    private String ownerNoteHint(AgentLang lang, boolean hasOwnerNote) {
-        return hasOwnerNote ? "\n" + prompts.get(lang, "trader.wake.ownerNoteHint") : "";
+                + ownerNote;
     }
 
     /**

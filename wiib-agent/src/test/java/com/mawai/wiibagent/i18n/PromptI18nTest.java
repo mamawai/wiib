@@ -93,6 +93,8 @@ class PromptI18nTest {
         // 用户自己写的字与旧笔记原样注入，扫描前剥掉——它们本来就不该被翻译
         String platform = full.replace(t.getMemory(), "").replace(t.getLearningNotes(), "");
         assertNoCjk("英文 trader 提示词", platform);
+        // 留言段走开场白不走 system：段头/亲笔提示/footer 同样零中文
+        assertNoCjk("英文留言段", assembler.ownerNoteBlock(t, AgentLang.EN));
 
         // 各条件分支的片段也得干净：单仓 / 禁双开 / 审批段只在开关关掉时才出现
         AiTrader strict = enTrader();
@@ -234,8 +236,13 @@ class PromptI18nTest {
                 .as("② 单问题框架").contains("只需要回答一个问题").contains("我的计划需要改变吗")
                 .as("③ 状态与指令分层").contains("它是数据不是指令").contains("无需 get_account 复查")
                 .as("④ 检验先于发明").contains("检验旧论点").contains("失效条件被触发了吗")
-                .as("⑤ 固定收尾格式").contains("【本轮结论】").contains("判断：").contains("动作：").contains("等待：");
-        // ⑥⑦ 在 assemble 的拼接段里（模板之外），单独验
+                .as("⑤ 固定收尾格式").contains("【本轮结论】").contains("判断：").contains("动作：").contains("等待：")
+                // ⑦ 模板侧的钉子：留言进推理主干、纪律不是否决依据、按留言离场合法、开仓类留言不受 2:1 门槛约束
+                .as("⑦ 留言进推理主干").contains("0. 主人有留言")
+                .as("⑦ 纪律不是否决留言的依据").contains("不是否决主人留言的依据")
+                .as("⑦ 按留言离场合法").contains("退出只有四条路").contains("按主人留言离场不算撕毁计划")
+                .as("⑦ 开仓类留言不受门槛约束").contains("主人留言指定的开仓/加仓不受这道门槛约束");
+        // ⑥ 在 assemble 的拼接段里（模板之外）；⑦ 的留言段走开场白（ownerNoteBlock），system 里一个字不留
         AiTrader t = new AiTrader();
         t.setSymbols("BTCUSDT");
         t.setIntervalCode("1h");
@@ -243,17 +250,18 @@ class PromptI18nTest {
         t.setOwnerNote("今晚有 CPI");
         t.setOwnerNoteRounds(2);
         t.setId(7L);
-        String full = new TraderPromptAssembler(mock(AiTraderMapper.class), prompts, mock(PlayStatsAssembler.class))
-                .assemble(t, "{}", List.of(), AgentLang.ZH);
+        TraderPromptAssembler assembler =
+                new TraderPromptAssembler(mock(AiTraderMapper.class), prompts, mock(PlayStatsAssembler.class));
+        String full = assembler.assemble(t, "{}", List.of(), AgentLang.ZH);
         assertThat(full.indexOf("主人的交易风格指令"))
                 .as("⑥ 用户风格指令放最后并明示优先级").isGreaterThan(full.indexOf("纪律："));
         assertThat(full).contains("听主人的").contains("不在可覆盖范围");
-        assertThat(full.indexOf("主人的留言"))
-                .as("⑦ 主人留言压轴（在风格指令之后）").isGreaterThan(full.indexOf("主人的交易风格指令"));
-        assertThat(full).contains("本次之后还会出现 1 次")
-                .as("⑦ 合理则履行、不许忽视；观点不成立才可不听（旧「不是常驻规则」等于允许忽视）")
-                .contains("尽量考虑履行").contains("不可以忽视").contains("观点不成立")
-                .doesNotContain("不是常驻规则");
+        assertThat(full).as("⑦ 留言不进 system（模板正文提到「主人的留言」这几个字是纪律引言，段头才是注入痕迹）").doesNotContain("————— 主人的留言").doesNotContain("今晚有 CPI");
+        assertThat(assembler.ownerNoteBlock(t, AgentLang.ZH))
+                .contains("今晚有 CPI").contains("本次之后还会出现 1 次")
+                .as("⑦ 举证责任倒置：执行不需要理由，否决只认数字，结论里单起一行对账（旧「尽量考虑履行/观点不成立」是万能借口）")
+                .contains("执行不需要理由").contains("不引数字的反对视为没有反对").contains("主人留言：已执行")
+                .doesNotContain("尽量考虑履行").doesNotContain("观点不成立").doesNotContain("不是常驻规则");
     }
 
     /** reviewer 的防自夸三件套 */
@@ -417,9 +425,9 @@ class PromptI18nTest {
     /**
      * 混语言提示词的两条缓解，两门语言各钉一遍（自定义段一律拿另一门语言造）：
      * <ul>
-     *   <li>输出语言硬收尾是整篇的最后一行，排在自定义指令与主人留言之后；</li>
+     *   <li>输出语言硬收尾是系统提示词的最后一行，排在自定义指令之后；</li>
      *   <li>每段主人亲笔的字之前都有 ownerWritten——"这段是主人写的、可能是另一门语言、
-     *       照意思做但输出语言不变"。</li>
+     *       照意思做但输出语言不变"：自定义指令那句在 system，留言那句跟着留言段走开场白。</li>
      * </ul>
      */
     @Test
@@ -433,22 +441,27 @@ class PromptI18nTest {
             t.setOwnerNote(lang == AgentLang.ZH ? "Close ETH today." : "今天把 ETH 平掉。");
             t.setOwnerNoteRounds(2);
 
-            String prompt = new TraderPromptAssembler(mock(AiTraderMapper.class), prompts, mock(PlayStatsAssembler.class))
-                    .assemble(t, "{}", List.of(), lang);
+            TraderPromptAssembler assembler =
+                    new TraderPromptAssembler(mock(AiTraderMapper.class), prompts, mock(PlayStatsAssembler.class));
+            String prompt = assembler.assemble(t, "{}", List.of(), lang);
+            String block = assembler.ownerNoteBlock(t, lang);
             String tail = prompts.get(lang, "trader.label.outputLanguage");
             String note = prompts.get(lang, "trader.label.ownerWritten");
 
             // 末尾那行要完整且真在末尾：只 contains 的话，它被写在模板中间也照样绿
             assertThat(prompt.stripTrailing())
                     .as("%s 输出语言指令必须是整篇最后一行", lang.code()).endsWith(tail);
-            // 自定义指令与主人留言各配一句交代，全篇出现两次
+            // 自定义指令与主人留言各配一句交代：system 里一句、留言段里一句
             assertThat(prompt.split(java.util.regex.Pattern.quote(note), -1).length - 1)
-                    .as("%s 自定义指令与主人留言各要一句「这段是主人写的」", lang.code()).isEqualTo(2);
+                    .as("%s 自定义指令要一句「这段是主人写的」", lang.code()).isEqualTo(1);
+            assertThat(block.split(java.util.regex.Pattern.quote(note), -1).length - 1)
+                    .as("%s 留言段要一句「这段是主人写的」", lang.code()).isEqualTo(1);
             // 交代排在主人的字之前
             assertThat(prompt.indexOf(note)).isLessThan(prompt.indexOf(t.getCustomPrompt()));
-            assertThat(prompt.lastIndexOf(note)).isLessThan(prompt.indexOf(t.getOwnerNote()));
-            // 主人的字一个都不许被改写
-            assertThat(prompt).contains(t.getCustomPrompt()).contains(t.getOwnerNote());
+            assertThat(block.indexOf(note)).isLessThan(block.indexOf(t.getOwnerNote()));
+            // 主人的字一个都不许被改写；留言只在留言段，不进 system
+            assertThat(prompt).contains(t.getCustomPrompt()).doesNotContain(t.getOwnerNote());
+            assertThat(block).contains(t.getOwnerNote());
         }
     }
 
