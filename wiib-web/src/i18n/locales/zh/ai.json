@@ -92,8 +92,6 @@
     "flat": "空仓观望中",
     "qty": "数量",
     "entry": "开仓",
-    "curSl": "当前止损",
-    "curTp": "当前止盈",
     "limitOrder": "限价挂单",
     "openLong": "开多",
     "openShort": "开空",
@@ -122,6 +120,11 @@
     "closedCount": "已了结",
     "tradesN_other": "{{count}} 笔",
     "winRate": "胜率",
+    "maxDd": "最大回撤",
+    "tokensOf": "{{scope}} TOKEN",
+    "colSymbol": "币种",
+    "colSlTp": "止损 / 止盈",
+    "colUpnl": "浮盈",
     "lookedAt": "看了"
   },
   "tool": {

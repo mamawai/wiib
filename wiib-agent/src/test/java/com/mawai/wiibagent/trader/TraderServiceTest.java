@@ -1,6 +1,7 @@
 package com.mawai.wiibagent.trader;
 
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.mawai.wiibcommon.config.BinanceProperties;
@@ -23,7 +24,10 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.math.BigDecimal;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -455,5 +459,68 @@ class TraderServiceTest {
         verify(traderMapper).update(isNull(), captor.capture());
         assertThat(captor.getValue().getParamNameValuePairs().values())
                 .contains(new PromptCatalog().get(AgentLang.EN, "trader.pause.manual"));
+    }
+
+    // ---- token 合计（竞技场详情页那格仪表） ----
+
+    private AiTrader traderOnRound(int roundNo) {
+        AiTrader t = new AiTrader();
+        t.setId(7L);
+        t.setUserId(1L);
+        t.setRoundNo(roundNo);
+        return t;
+    }
+
+    /** PG 的 SUM(bigint) 回 numeric，JDBC 给的是 BigDecimal，得能收下 */
+    @Test
+    void sumTokensTakesBigDecimalFromSum() {
+        when(traderMapper.selectById(7L)).thenReturn(traderOnRound(3));
+        when(decisionMapper.selectMaps(any())).thenReturn(List.of(Map.of("total", new BigDecimal("123456"))));
+
+        assertThat(service.sumTokens(7L, null, null, null)).isEqualTo(123456L);
+    }
+
+    /** 整段都没 usage 时 SUM 本身就是 null，原样返回——补成 0 会被读成"这段没花 token" */
+    @Test
+    void sumTokensNullWhenNoUsageReported() {
+        when(traderMapper.selectById(7L)).thenReturn(traderOnRound(1));
+        Map<String, Object> row = new HashMap<>();
+        row.put("total", null);
+        when(decisionMapper.selectMaps(any())).thenReturn(List.of(row));
+
+        assertThat(service.sumTokens(7L, null, null, null)).isNull();
+    }
+
+    @Test
+    void sumTokensNullWhenNoRows() {
+        when(traderMapper.selectById(7L)).thenReturn(traderOnRound(1));
+        when(decisionMapper.selectMaps(any())).thenReturn(List.of());
+
+        assertThat(service.sumTokens(7L, null, null, null)).isNull();
+    }
+
+    /** trader 不在就别去查库 */
+    @Test
+    void sumTokensNullWhenTraderMissing() {
+        when(traderMapper.selectById(9L)).thenReturn(null);
+
+        assertThat(service.sumTokens(9L, null, null, null)).isNull();
+        verify(decisionMapper, never()).selectMaps(any());
+    }
+
+    /** round 不传就落到当前局，跟 decisions() 同一个规矩；from/to 给了就进条件 */
+    @Test
+    void sumTokensFallsBackToCurrentRoundAndKeepsBounds() {
+        when(traderMapper.selectById(7L)).thenReturn(traderOnRound(5));
+        when(decisionMapper.selectMaps(any())).thenReturn(List.of());
+
+        service.sumTokens(7L, null, 1000L, 2000L);
+
+        ArgumentCaptor<QueryWrapper<AiTraderDecision>> cap = ArgumentCaptor.forClass(QueryWrapper.class);
+        verify(decisionMapper).selectMaps(cap.capture());
+        QueryWrapper<AiTraderDecision> q = cap.getValue();
+        // 条件值要 getSqlSegment() 拼过之后才会落进 paramNameValuePairs，顺序反了读到的是空表
+        assertThat(q.getSqlSegment()).contains("round_no", "wake_time >=", "wake_time <");
+        assertThat(q.getParamNameValuePairs().values()).contains(5, 1000L, 2000L);
     }
 }

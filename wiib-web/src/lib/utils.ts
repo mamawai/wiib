@@ -88,8 +88,12 @@ export function fmtDuration(from: number | string | Date, to: number | string | 
   return i18n.t('duration.s', { s: sec });
 }
 
-/** token 数缩写：12480 → 12.5k。一行小字里放得下，不带尾随空格，拼接由调用方管。 */
+/**
+ * token 数缩写：12480 → 12.5k，2345678 → 2.35M。一行小字里放得下，不带尾随空格，拼接由调用方管。
+ * 单轮决策基本停在 k，整局/整天合计才会上 M（k/M 大小写按 SI 来）。
+ */
 export function fmtTokens(n: number): string {
+  if (n >= 1e6) return `${(n / 1e6).toFixed(2)}M`;
   return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
 }
 

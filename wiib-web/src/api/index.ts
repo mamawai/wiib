@@ -557,6 +557,9 @@ export const traderApi = {
    */
   decisions: (id: number, limit = 50, before?: number, round?: number, from?: number, to?: number) =>
     api.get<unknown, AiTraderDecisionView[]>(`/ai/trader/${id}/decisions`, { params: { limit, before, round, from, to } }),
+  /** 决策 token 合计；三参数与 decisions 同义（round 空=当前局），整段都没 usage 时返回 null */
+  tokenUsage: (id: number, round?: number, from?: number, to?: number) =>
+    api.get<unknown, number | null>(`/ai/trader/${id}/token-usage`, { params: { round, from, to } }),
   equityCurve: (id: number, round?: number) =>
     api.get<unknown, TraderEquityPoint[]>(`/ai/trader/${id}/equity-curve`, { params: { round } }),
   /** 已了结交易（只有当前局：每局独立子账户，历史局的子账户查不回来） */

@@ -1,6 +1,7 @@
 package com.mawai.wiibagent.trader;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.mawai.wiibcommon.config.BinanceProperties;
 import com.mawai.wiibcommon.entity.AiTrader;
@@ -337,6 +338,32 @@ public class TraderService {
             q.lt(AiTraderDecision::getWakeTime, to);
         }
         return decisionMapper.selectList(q);
+    }
+
+    /**
+     * 决策 token 合计，三个参数的语义与 {@link #decisions} 一致：round 缺省=当前局，[from, to) 是 wakeTime 区间。
+     * 页面翻到哪天就统计哪天，切到哪局就统计哪局。
+     * <p>整段都没有 usage（BYOK 网关不一定回）时 SUM 本身就是 null，原样返回让前端显示"—"，不补 0。
+     */
+    public Long sumTokens(long traderId, Integer round, Long from, Long to) {
+        AiTrader t = traderMapper.selectById(traderId);
+        if (t == null) {
+            return null;
+        }
+        QueryWrapper<AiTraderDecision> q = new QueryWrapper<AiTraderDecision>()
+                .select("SUM(total_tokens) AS total")
+                .eq("trader_id", traderId)
+                .eq("round_no", round != null ? round : t.getRoundNo());
+        if (from != null) {
+            q.ge("wake_time", from);
+        }
+        if (to != null) {
+            q.lt("wake_time", to);
+        }
+        List<Map<String, Object>> rows = decisionMapper.selectMaps(q);
+        // PG 的 SUM(bigint) 回 numeric，JDBC 给的是 BigDecimal，按 Number 收
+        Object v = rows.isEmpty() ? null : rows.getFirst().get("total");
+        return v instanceof Number n ? n.longValue() : null;
     }
 
     /**

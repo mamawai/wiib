@@ -341,6 +341,16 @@ public class TraderController {
         return Result.ok(traderService.decisions(id, limit, before, round, from, to));
     }
 
+    @GetMapping("/{id}/token-usage")
+    @Operation(summary = "决策token合计（三参数语义同 /decisions：round缺省=当前局，[from,to) 为 wakeTime 区间）")
+    public Result<Long> tokenUsage(@PathVariable long id,
+                                   @RequestParam(required = false) Integer round,
+                                   @RequestParam(required = false) Long from,
+                                   @RequestParam(required = false) Long to) {
+        StpUtil.checkLogin();
+        return Result.ok(traderService.sumTokens(id, round, from, to));
+    }
+
     @GetMapping("/{id}/trades")
     @Operation(summary = "已了结交易（当前局；论点→结局配对 + 开/平仓那一轮的决策全文）")
     public Result<List<TradeRecordService.TradeRecord>> trades(@PathVariable long id) {

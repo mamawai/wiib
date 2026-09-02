@@ -95,8 +95,6 @@
     "flat": "Flat, watching",
     "qty": "Qty",
     "entry": "Entry",
-    "curSl": "Stop loss",
-    "curTp": "Take profit",
     "limitOrder": "Limit order",
     "openLong": "Open long",
     "openShort": "Open short",
@@ -126,6 +124,11 @@
     "tradesN_one": "{{count}} trade",
     "tradesN_other": "{{count}} trades",
     "winRate": "Win rate",
+    "maxDd": "Max drawdown",
+    "tokensOf": "{{scope}} tokens",
+    "colSymbol": "Symbol",
+    "colSlTp": "SL / TP",
+    "colUpnl": "uPnL",
     "lookedAt": "Read"
   },
   "tool": {
