@@ -33,7 +33,8 @@
       "testnet": "模拟盘",
       "ranking": "排行榜",
       "games": "游戏中心",
-      "comments": "留言板"
+      "comments": "留言板",
+      "intro": "项目介绍"
     },
     "themeDark": "深色模式",
     "themeLight": "浅色模式",

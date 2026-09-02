@@ -26,6 +26,8 @@
 [![Vite](https://img.shields.io/badge/Vite-7.2-646CFF?style=flat-square&logo=vite&logoColor=white)](https://vite.dev/)
 [![TailwindCSS](https://img.shields.io/badge/Tailwind-4.1-06B6D4?style=flat-square&logo=tailwindcss&logoColor=white)](https://tailwindcss.com/)
 
+**[Project Intro → intro.wtfibought.com](https://intro.wtfibought.com)**
+
 **[Live site → wtfibought.com](https://wtfibought.com)**
 
 <!-- README-I18N:START -->

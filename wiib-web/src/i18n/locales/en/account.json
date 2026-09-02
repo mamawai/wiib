@@ -33,7 +33,8 @@
       "testnet": "Testnet",
       "ranking": "Leaderboard",
       "games": "Games",
-      "comments": "Comments"
+      "comments": "Comments",
+      "intro": "Project Intro"
     },
     "themeDark": "Dark mode",
     "themeLight": "Light mode",

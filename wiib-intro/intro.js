@@ -155,7 +155,11 @@ function fillCopy() {
     const c = COPY[n.getAttribute('data-t')];
     if (c) n.innerHTML = T(c);
   });
-  document.getElementById('btn-lang').textContent = LANG === 'zh' ? 'EN' : '中文';
+  // 按钮是个固定图标，点了切到哪种语言靠 title/aria 说，别拿 textContent 把 svg 冲掉
+  const langBtn = document.getElementById('btn-lang');
+  const next = LANG === 'zh' ? 'English' : '中文';
+  langBtn.title = next;
+  langBtn.setAttribute('aria-label', next);
 }
 function renderStrip() {
   const host = document.getElementById('strip');

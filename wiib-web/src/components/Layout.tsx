@@ -17,7 +17,7 @@ import {
   Home, Briefcase, LogOut, LogIn, Sun, Moon,
   BarChart3, User, ChevronDown, List, DollarSign,
   Settings2, Gem, Globe,
-  LineChart, FlaskConical, MessageSquare,
+  LineChart, FlaskConical, MessageSquare, Info, ExternalLink,
 } from 'lucide-react';
 
 interface Props { children: React.ReactNode }
@@ -29,13 +29,19 @@ const MARKET_PATHS = ['/bstock', '/coin', '/commodity', '/tradfi'];
  * 两种形态共用这一份，加入口只改这里。存 key 不存文案，理由同 LED_LABEL_KEY。
  * <p>断点卡 2xl 是量出来的：11 项平铺英文顶栏要 1321px（含两侧固定开销 534px），
  * 1280 差 41px、1366 才够；收着 More 只要 1055px，1024 都装得下。
+ * <p>后来加的 Intro 是第 12 项（外链，尾巴带个小箭头），按同样字宽估算约 +70px，1536 仍有富余——
+ * 这一项是估的不是量的，再往里加项之前重新量一遍。
  */
-const MORE_ITEMS = [
+type MoreItem = { to: string; icon: React.ReactNode; labelKey: string; external?: boolean };
+const MORE_ITEMS: MoreItem[] = [
   { to: '/strategies', icon: <LineChart className="w-4 h-4" />, labelKey: 'nav.strategies' },
   { to: '/backtest', icon: <FlaskConical className="w-4 h-4" />, labelKey: 'nav.backtest' },
   { to: '/comments', icon: <MessageSquare className="w-4 h-4" />, labelKey: 'nav.comments' },
+  // 介绍站是单独部署的静态站，不是本应用的路由，只能走外链
+  { to: 'https://intro.wtfibought.com', icon: <Info className="w-4 h-4" />, labelKey: 'nav.intro', external: true },
 ];
-const MORE_PATHS = MORE_ITEMS.map(i => i.to);
+/** 激活态只认站内路由：外链永远等不上 pathname，放进来白比一遍 */
+const MORE_PATHS = MORE_ITEMS.filter(i => !i.external).map(i => i.to);
 
 /** 当前路由是否落在这组前缀里——下拉自身要跟着亮激活态，不然进了子页顶栏就没了着落 */
 const matchPaths = (pathname: string, paths: string[]) =>
@@ -126,15 +132,15 @@ export function Layout({ children }: Props) {
             {/* 低频四项两种形态，同一份 MORE_ITEMS：宽屏摊开、窄屏收进下拉。
                 display:none 的那一份不参与 flex gap，两边间距都对 */}
             <div className="hidden 2xl:flex items-center gap-3 h-full">
-              {MORE_ITEMS.map(({ to, labelKey }) => (
-                <HeaderNavItem key={to} to={to} label={t(labelKey)} />
+              {MORE_ITEMS.map(({ to, labelKey, external }) => (
+                <HeaderNavItem key={to} to={to} label={t(labelKey)} external={external} />
               ))}
             </div>
             <NavDropdown
               className="2xl:hidden"
               label={t('nav.more')}
               isActive={isMoreActive}
-              items={MORE_ITEMS.map(({ to, icon, labelKey }) => ({ to, icon, label: t(labelKey) }))}
+              items={MORE_ITEMS.map(({ to, icon, labelKey, external }) => ({ to, icon, label: t(labelKey), external }))}
             />
           </nav>
 
@@ -216,14 +222,26 @@ export function Layout({ children }: Props) {
   );
 }
 
+const HEADER_NAV_BASE = "flex items-center h-12 px-1 text-[13px] transition-colors";
+
 /** 顶栏导航项：激活 = 文字加重 + 底部 2px 橙色指示线（贴顶栏底边） */
-function HeaderNavItem({ to, label }: { to: string; label: string }) {
+function HeaderNavItem({ to, label, external }: { to: string; label: string; external?: boolean }) {
+  // 外链没有激活态可言，直接一个 a：末尾的小箭头告诉用户这一下会跳出站
+  if (external) {
+    return (
+      <a href={to} target="_blank" rel="noopener noreferrer"
+         className={cn(HEADER_NAV_BASE, "gap-1 text-muted-foreground font-medium hover:text-foreground")}>
+        {label}
+        <ExternalLink className="w-3 h-3" />
+      </a>
+    );
+  }
   return (
     <NavLink
       to={to}
       className={({ isActive }) =>
         cn(
-          "flex items-center h-12 px-1 text-[13px] transition-colors",
+          HEADER_NAV_BASE,
           isActive
             ? "text-foreground font-semibold shadow-[inset_0_-2px_0_var(--color-primary)]"
             : "text-muted-foreground font-medium hover:text-foreground"
@@ -235,7 +253,7 @@ function HeaderNavItem({ to, label }: { to: string; label: string }) {
   );
 }
 
-interface NavDropdownItem { to: string; icon: React.ReactNode; label: string }
+interface NavDropdownItem { to: string; icon: React.ReactNode; label: string; external?: boolean }
 
 /**
  * 顶栏下拉壳子：市场与 More 共用一份，面板宽度/激活态/指示线逐字同款，别再复制一遍。
@@ -268,7 +286,20 @@ function NavDropdown({ label, isActive, items, className }:
       {open && (
         // z-50 不能省：NumberFlow 的 transform 会创建层叠上下文，副条数字会盖到面板上
         <div className="absolute top-full left-0 mt-1 w-44 rounded-lg pt-card shadow-lg py-1 z-50 animate-in fade-in slide-in-from-top-2">
-          {items.map(({ to, icon, label: itemLabel }) => (
+          {items.map(({ to, icon, label: itemLabel, external }) => external ? (
+            <a
+              key={to}
+              href={to}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={() => setOpen(false)}
+              className="flex items-center gap-2.5 px-3.5 py-2 text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-surface-hover transition-colors"
+            >
+              {icon}
+              {itemLabel}
+              <ExternalLink className="w-3 h-3 ml-auto opacity-60" />
+            </a>
+          ) : (
             <NavLink
               key={to}
               to={to}
