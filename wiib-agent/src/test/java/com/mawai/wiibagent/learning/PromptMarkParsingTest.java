@@ -100,7 +100,7 @@ class PromptMarkParsingTest {
     // ==================== 历史决策的结论块：两套都认 ====================
 
     private static final String ZH_CONCLUSION =
-            "行情铺垫一大段\n【本轮结论】\n判断：突破确认\n动作：HOLD\n等待：回踩 99000 站稳";
+            "行情铺垫一大段\n[本轮结论]\n判断：突破确认\n动作：HOLD\n等待：回踩 99000 站稳";
     private static final String EN_CONCLUSION =
             "some market context\n[ROUND CONCLUSION]\nJudgement: breakout confirmed\nAction: HOLD\nWaiting: retest 99000 holds";
 
@@ -125,7 +125,7 @@ class PromptMarkParsingTest {
     /** "等待条件："全称与"等待："都得认（中文侧原有的容忍不许在搬家时丢） */
     @Test
     void 结论块_等待条件全称也认() {
-        assertThat(wholeWait("【本轮结论】\n判断：观望\n等待条件：站稳 99000", AgentLang.ZH))
+        assertThat(wholeWait("[本轮结论]\n判断：观望\n等待条件：站稳 99000", AgentLang.ZH))
                 .isEqualTo("站稳 99000");
         assertThat(wholeWait("[ROUND CONCLUSION]\nAction: HOLD\nWaiting for: 99000 holds", AgentLang.EN))
                 .isEqualTo("99000 holds");

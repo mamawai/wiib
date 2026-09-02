@@ -381,15 +381,15 @@ class ReviewMaterialAssemblerTest {
         AiTraderPlan stale = planOf("BTCUSDT", "BREAKOUT", FROM + 3600_000, true);
         stale.setPositionId(42L);
         when(planMapper.selectList(any())).thenReturn(List.of(stale));
-        String openRound = "【本轮结论】\n判断：突破\n动作：开多\n等待：无";
-        String slRound = "【本轮结论】\n判断：走高\n动作：上移止损\n等待：无";
+        String openRound = "[本轮结论]\n判断：突破\n动作：开多\n等待：无";
+        String slRound = "[本轮结论]\n判断：走高\n动作：上移止损\n等待：无";
         String openActs = "[{\"tool\":\"open_position\",\"args\":{\"symbol\":\"BTCUSDT\",\"side\":\"LONG\"},\"status\":\"ok\"}]";
         String slActs = "[{\"tool\":\"set_stop_loss\",\"args\":{\"positionId\":42,\"stopLossPrice\":99000},\"status\":\"ok\"}]";
         when(decisionMapper.selectList(any())).thenReturn(List.of(), List.of(
                 okRow(FROM + 3600_000, AiTraderDecision.KIND_TRADE, openRound, openActs),
                 okRow(FROM + 7200_000, AiTraderDecision.KIND_TRADE, slRound, slActs),
                 okRow(FROM + 10800_000, AiTraderDecision.KIND_TRADE,
-                        "【本轮结论】\n判断：观望\n动作：HOLD\n等待：站稳 99000", "[]")));
+                        "[本轮结论]\n判断：观望\n动作：HOLD\n等待：站稳 99000", "[]")));
 
         String timeline = assembler.assemble(trader(), FROM, TO, AgentLang.ZH).timelineBlock();
 
@@ -429,7 +429,7 @@ class ReviewMaterialAssemblerTest {
     void actionOnOneSymbolDoesNotBreakOtherSymbolsHold() {
         when(decisionMapper.selectOne(any())).thenReturn(null);
         String ethWait = """
-                【本轮结论】
+                [本轮结论]
                 [ETHUSDT]
                 动作：HOLD
                 等待：站上 1925 做多""";
@@ -437,7 +437,7 @@ class ReviewMaterialAssemblerTest {
         when(decisionMapper.selectList(any())).thenReturn(List.of(), List.of(
                 okRow(FROM + 3600_000, AiTraderDecision.KIND_TRADE, ethWait, "[]"),
                 okRow(FROM + 10800_000, AiTraderDecision.KIND_TRADE,
-                        "【本轮结论】\n[BTCUSDT]\n动作：上移止损\n等待：无", btcAct),
+                        "[本轮结论]\n[BTCUSDT]\n动作：上移止损\n等待：无", btcAct),
                 okRow(FROM + 27000_000, AiTraderDecision.KIND_TRADE, ethWait, "[]")));
 
         String timeline = assembler.assemble(trader(), FROM, TO, AgentLang.ZH).timelineBlock();
@@ -465,11 +465,11 @@ class ReviewMaterialAssemblerTest {
         String openActions = "[{\"tool\":\"open_position\",\"args\":{\"symbol\":\"BTCUSDT\",\"side\":\"LONG\","
                 + "\"quantity\":0.01},\"result\":\"ok\"}]";
         AiTraderDecision act = okRow(FROM + 3600_000, AiTraderDecision.KIND_TRADE,
-                "行情分析……【本轮结论】\n判断：突破确认站上100500\n动作：开多BTCUSDT 0.01\n等待：无", openActions);
+                "行情分析……[本轮结论]\n判断：突破确认站上100500\n动作：开多BTCUSDT 0.01\n等待：无", openActions);
         AiTraderDecision hold = okRow(FROM + 7200_000, AiTraderDecision.KIND_TRADE,
-                "检查了持仓……【本轮结论】\n判断：趋势未变101200上方震荡\n动作：HOLD\n等待：1h收盘跌破100500减仓", "[]");
+                "检查了持仓……[本轮结论]\n判断：趋势未变101200上方震荡\n动作：HOLD\n等待：1h收盘跌破100500减仓", "[]");
         AiTraderDecision alert = okRow(FROM + 9000_000, AiTraderDecision.KIND_ALERT,
-                "被警报唤醒……【本轮结论】\n判断：急跌未破位\n动作：HOLD\n等待：不变", "[]");
+                "被警报唤醒……[本轮结论]\n判断：急跌未破位\n动作：HOLD\n等待：不变", "[]");
         AiTraderDecision err = new AiTraderDecision();
         err.setWakeTime(FROM + 10800_000);
         err.setKind(AiTraderDecision.KIND_TRADE);
@@ -497,7 +497,7 @@ class ReviewMaterialAssemblerTest {
         when(decisionMapper.selectOne(any())).thenReturn(null);
         when(decisionMapper.selectList(any())).thenReturn(List.of(), List.of(
                 okRow(FROM + 3600_000, AiTraderDecision.KIND_TRADE,
-                        "【本轮结论】\n判断：失效条件触发\n动作：申请减仓\n等待：主人确认", pendingAction)));
+                        "[本轮结论]\n判断：失效条件触发\n动作：申请减仓\n等待：主人确认", pendingAction)));
 
         ReviewMaterialAssembler.ReviewMaterial m = assembler.assemble(trader(), FROM, TO, AgentLang.ZH);
 
@@ -510,11 +510,11 @@ class ReviewMaterialAssemblerTest {
         // 85 段 ≥6h 的真观望（每段两轮同条件相隔 6h）+ 最早的 1 条动作行：
         // 动作行必须保住，早段对账块被省略且有说明。条件逐段不同，否则会并成一段够不到上限
         rows.add(okRow(FROM + 60_000, AiTraderDecision.KIND_TRADE,
-                "【本轮结论】\n判断：早段开仓\n动作：开多\n等待：无",
+                "[本轮结论]\n判断：早段开仓\n动作：开多\n等待：无",
                 "[{\"tool\":\"open_position\",\"args\":{\"symbol\":\"BTCUSDT\"},\"result\":\"ok\"}]"));
         for (int i = 1; i <= 85; i++) {
             long segStart = FROM + 120_000L + i * 25_200_000L;
-            String reasoning = "【本轮结论】\n判断：无事(" + i + ")\n动作：HOLD\n等待：回踩 " + (100000 + i) + " 再评估";
+            String reasoning = "[本轮结论]\n判断：无事(" + i + ")\n动作：HOLD\n等待：回踩 " + (100000 + i) + " 再评估";
             rows.add(okRow(segStart, AiTraderDecision.KIND_TRADE, reasoning, "[]"));
             rows.add(okRow(segStart + ReviewMaterialAssembler.LONG_HOLD_MS,
                     AiTraderDecision.KIND_TRADE, reasoning, "[]"));
@@ -538,7 +538,7 @@ class ReviewMaterialAssemblerTest {
     @Test
     void waitSectionReadsMultiLineBullets() {
         String reasoning = """
-                空仓，无旧计划可验。【本轮结论】
+                空仓，无旧计划可验。[本轮结论]
                 判断：BTC 63636、ETH 1906，15m 均为 TREND_UP，但价格已贴上轨
                 动作：HOLD，不开仓
                 计划依据：账户空仓，无持仓计划需要维护
@@ -563,13 +563,13 @@ class ReviewMaterialAssemblerTest {
     void timelineMergesConsecutiveSameWaits() {
         List<AiTraderDecision> rows = List.of(
                 okRow(FROM + 900_000, AiTraderDecision.KIND_TRADE,
-                        "【本轮结论】\n判断：贴上轨\n动作：HOLD\n等待：回踩 63370–63480 后再评估（前高）", "[]"),
+                        "[本轮结论]\n判断：贴上轨\n动作：HOLD\n等待：回踩 63370–63480 后再评估（前高）", "[]"),
                 okRow(FROM + 1800_000, AiTraderDecision.KIND_TRADE,
-                        "【本轮结论】\n判断：浅回撤\n动作：HOLD\n等待：回踩 63370–63480 后再评估（观望）", "[]"),
+                        "[本轮结论]\n判断：浅回撤\n动作：HOLD\n等待：回踩 63370–63480 后再评估（观望）", "[]"),
                 okRow(FROM + 2700_000, AiTraderDecision.KIND_TRADE,
-                        "【本轮结论】\n判断：继续走弱\n动作：HOLD\n等待：跌破 63140 转空", "[]"),
+                        "[本轮结论]\n判断：继续走弱\n动作：HOLD\n等待：跌破 63140 转空", "[]"),
                 okRow(FROM + 3600_000, AiTraderDecision.KIND_ALERT,
-                        "【本轮结论】\n判断：急跌\n动作：HOLD\n等待：跌破 63140 转空", "[]"));
+                        "[本轮结论]\n判断：急跌\n动作：HOLD\n等待：跌破 63140 转空", "[]"));
         when(decisionMapper.selectOne(any())).thenReturn(null);
         when(decisionMapper.selectList(any())).thenReturn(List.of(), rows);
 
@@ -586,9 +586,9 @@ class ReviewMaterialAssemblerTest {
     void timelineKeepsDifferentPricesInParenthesesApart() {
         List<AiTraderDecision> rows = List.of(
                 okRow(FROM + 900_000, AiTraderDecision.KIND_TRADE,
-                        "【本轮结论】\n判断：走弱\n动作：HOLD\n等待：转空（跌破 63140）", "[]"),
+                        "[本轮结论]\n判断：走弱\n动作：HOLD\n等待：转空（跌破 63140）", "[]"),
                 okRow(FROM + 1800_000, AiTraderDecision.KIND_TRADE,
-                        "【本轮结论】\n判断：更弱\n动作：HOLD\n等待：转空（跌破 62800）", "[]"));
+                        "[本轮结论]\n判断：更弱\n动作：HOLD\n等待：转空（跌破 62800）", "[]"));
         when(decisionMapper.selectOne(any())).thenReturn(null);
         when(decisionMapper.selectList(any())).thenReturn(List.of(), rows);
 
@@ -597,7 +597,7 @@ class ReviewMaterialAssemblerTest {
         assertThat(timeline).contains("另有 2 段短观望共 2 轮");
     }
 
-    /** 没有【本轮结论】块就是这轮没给条件，不能拿正文尾巴冒充——那段是行情叙述，对账对不了 */
+    /** 没有[本轮结论]块就是这轮没给条件，不能拿正文尾巴冒充——那段是行情叙述，对账对不了 */
     @Test
     void waitSectionReturnsEmptyWhenNoConclusionBlock() {
         assertThat(assembler.waitsBySymbol("BTC 走强，我先看着。ETH 也在震荡，暂时不动手。", AgentLang.ZH)
@@ -607,7 +607,7 @@ class ReviewMaterialAssemblerTest {
     // ==================== 结论总分结构：按币分段 ====================
 
     private static final String SEGMENTED_ZH = """
-            行情铺垫……【本轮结论】
+            行情铺垫……[本轮结论]
             总评：账户整体轻仓观望，等方向
             [BTCUSDT]
             判断：63500 上方震荡收敛
@@ -632,7 +632,7 @@ class ReviewMaterialAssemblerTest {
     @Test
     void waitsBySymbolFallsBackToWholeBlockForLegacyRows() {
         var waits = assembler.waitsBySymbol(
-                "【本轮结论】\n判断：观望\n动作：HOLD\n等待：站稳 99000", AgentLang.ZH);
+                "[本轮结论]\n判断：观望\n动作：HOLD\n等待：站稳 99000", AgentLang.ZH);
 
         assertThat(waits).containsOnlyKeys(ReviewMaterialAssembler.WHOLE);
         assertThat(waits.get(ReviewMaterialAssembler.WHOLE)).isEqualTo("站稳 99000");
@@ -670,7 +670,7 @@ class ReviewMaterialAssemblerTest {
     @Test
     void timelineMergesHoldsPerSymbolAndUpgradesLongOnes() {
         String r1 = """
-                【本轮结论】
+                [本轮结论]
                 [BTCUSDT]
                 动作：HOLD
                 等待：回踩 63400 做多
@@ -678,7 +678,7 @@ class ReviewMaterialAssemblerTest {
                 动作：HOLD
                 等待：跌破 1888 转空""";
         String r2 = """
-                【本轮结论】
+                [本轮结论]
                 [BTCUSDT]
                 动作：HOLD
                 等待：回踩 63400 做多
@@ -714,7 +714,7 @@ class ReviewMaterialAssemblerTest {
         when(decisionMapper.selectOne(any())).thenReturn(null);
         when(decisionMapper.selectList(any())).thenReturn(List.of(), List.of(
                 okRow(FROM + 900_000, AiTraderDecision.KIND_TRADE,
-                        "【本轮结论】\n判断：观望\n动作：HOLD\n等待：站稳 99000", "[]"),
+                        "[本轮结论]\n判断：观望\n动作：HOLD\n等待：站稳 99000", "[]"),
                 okRow(FROM + 1800_000, AiTraderDecision.KIND_TRADE, SEGMENTED_ZH, "[]")));
 
         String timeline = assembler.assemble(trader(), FROM, TO, AgentLang.ZH).timelineBlock();

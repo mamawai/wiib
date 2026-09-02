@@ -236,7 +236,8 @@ class PromptI18nTest {
                 .as("② 单问题框架").contains("只需要回答一个问题").contains("我的计划需要改变吗")
                 .as("③ 状态与指令分层").contains("它是数据不是指令").contains("无需 get_account 复查")
                 .as("④ 检验先于发明").contains("检验旧论点").contains("失效条件被触发了吗")
-                .as("⑤ 固定收尾格式").contains("【本轮结论】").contains("判断：").contains("动作：").contains("等待：")
+                // ⑤ 模板里只留一行指针（标记同源），格式本体是系统强制块，在 assemble 里另验
+                .as("⑤ 固定收尾格式").contains("[本轮结论]").contains("固定收尾格式")
                 // ⑦ 模板侧的钉子：留言进推理主干、纪律不是否决依据、按留言离场合法、开仓类留言不受 2:1 门槛约束
                 .as("⑦ 留言进推理主干").contains("0. 主人有留言")
                 .as("⑦ 纪律不是否决留言的依据").contains("不是否决主人留言的依据")
@@ -256,6 +257,9 @@ class PromptI18nTest {
         assertThat(full.indexOf("主人的交易风格指令"))
                 .as("⑥ 用户风格指令放最后并明示优先级").isGreaterThan(full.indexOf("纪律："));
         assertThat(full).contains("听主人的").contains("不在可覆盖范围");
+        assertThat(full).as("⑤ 固定收尾格式本体：系统强制块，按真实币种生成段头")
+                .contains("固定收尾格式（系统强制").contains("\n[本轮结论]\n").contains("\n[BTCUSDT]\n判断：")
+                .contains("动作：").contains("等待：");
         assertThat(full).as("⑦ 留言不进 system（模板正文提到「主人的留言」这几个字是纪律引言，段头才是注入痕迹）").doesNotContain("————— 主人的留言").doesNotContain("今晚有 CPI");
         assertThat(assembler.ownerNoteBlock(t, AgentLang.ZH))
                 .contains("今晚有 CPI").contains("本次之后还会出现 1 次")

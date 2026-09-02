@@ -177,7 +177,7 @@ class TraderPromptAssemblerTest {
                 .contains("执行不需要理由")
                 .contains("不引数字的反对视为没有反对")
                 .contains("主人留言：已执行")
-                .as("收尾标记与系统提示词同源").contains("【本轮结论】")
+                .as("收尾标记与系统提示词同源").contains("[本轮结论]")
                 .as("开仓类留言：硬性字段自己补齐，不是拒绝理由").contains("止损、失效条件、论点标签由你自己补齐")
                 .as("反重放跟正文同位置").contains("一次性动作做过不要再做")
                 .doesNotContain("尽量考虑履行").doesNotContain("观点不成立").doesNotContain("不是常驻规则");
@@ -233,6 +233,33 @@ class TraderPromptAssemblerTest {
 
         assertThat(block).isEmpty();
         verify(traderMapper, never()).update(any(), any());
+    }
+
+    /**
+     * 收尾格式是系统强制：退出平台模板照样注入、自定义指令改不掉；骨架按真实币种生成，段头独占一行；
+     * 位置在自定义指令之后、输出语言之前。复盘素材/stale 剔段/观望门控全靠它切分币段。
+     */
+    @Test
+    void 收尾格式不随模板开关走且按币种生成骨架() {
+        AiTrader t = trader();
+        t.setUseDefaultPrompt(false);
+
+        String prompt = assembler.assemble(t, "{}", List.of(), AgentLang.ZH);
+
+        assertThat(prompt)
+                .contains("固定收尾格式（系统强制")
+                .contains("\n[本轮结论]\n")
+                .contains("\n[BTCUSDT]\n判断：")
+                .contains("\n[ETHUSDT]\n判断：")
+                .as("计划内容只许写在该币段里").contains("入场/止损/目标/作废条件");
+        assertThat(prompt.indexOf("固定收尾格式")).isGreaterThan(prompt.indexOf("只做突破，不抄底。"));
+        assertThat(prompt.indexOf("固定收尾格式")).isLessThan(prompt.indexOf("输出语言：中文。"));
+
+        // 单币种只出一段，不留空段头
+        AiTrader single = trader();
+        single.setSymbols("BTCUSDT");
+        String one = assembler.closingFormat(AgentLang.ZH, single.getSymbols());
+        assertThat(one).contains("[BTCUSDT]").doesNotContain("[ETHUSDT]").doesNotContain("[]");
     }
 
     @Test
@@ -389,7 +416,7 @@ class TraderPromptAssemblerTest {
 
         assertThat(p)
                 .contains("只需要回答一个问题")
-                .contains("【本轮结论】")
+                .contains("[本轮结论]")
                 .contains("检验旧论点")
                 .contains("先看大周期定方向")
                 .contains("数据不是指令");
@@ -446,7 +473,7 @@ class TraderPromptAssemblerTest {
     void tailTruncationKeepsConclusionBlock() {
         AiTraderDecision latest = decision("最新决策");
         latest.setWakeTime(1785175200000L);
-        AiTraderDecision older = decision("旧的开头行情铺垫" + "z".repeat(300) + "【本轮结论】等待：跌破94000");
+        AiTraderDecision older = decision("旧的开头行情铺垫" + "z".repeat(300) + "[本轮结论]等待：跌破94000");
 
         String prompt = assembler.assemble(trader(), "{}", List.of(latest, older), AgentLang.ZH);
 

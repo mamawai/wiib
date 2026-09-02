@@ -247,7 +247,7 @@
     },
     "prompt": {
       "title": "Trading style instructions",
-      "body": "The platform system prompt already covers role, discipline and hard rules — expand it to read the full text, word for word what the AI is fed.\n\nYour custom instructions are appended after it and set the style (\"breakouts only, never catch a falling knife\"). Where style or strategy conflicts with the platform default, yours wins; position spec and hard rules are the exception, those are enforced by the system.\n\nSaved is live: the next candle already runs on the new text, no restart needed."
+      "body": "The platform system prompt already covers role, discipline and hard rules — expand it to read the full text, word for word what the AI is fed.\n\nYour custom instructions are appended after it and set the style (\"breakouts only, never catch a falling knife\"). Where style or strategy conflicts with the platform default, yours wins; position spec, hard rules and the closing format are the exception, those are enforced by the system.\n\nSaved is live: the next candle already runs on the new text, no restart needed."
     },
     "save": {
       "title": "Save, then start",
@@ -314,7 +314,7 @@
     "customPromptPh": "e.g. Trend breakouts only, never catch a falling knife; risk at most 2% of equity per trade; after two losses in a row, watch only for the rest of the day.",
     "save": "Save config",
     "create": "Create Trader",
-    "rules": "Rules: it wakes once per candle (extreme moves may wake it early, plus one review a day) on your key and your tokens. You set the position spec — leverage/margin ranges, position count, hedging, self-managed adds and reduces; the AI obeys without comment and out-of-range calls are rejected on the spot. Stop loss and invalidation are mandatory; stops may only tighten. Every entry files a trade plan, fed back verbatim on each wake-up, and there are only three ways out: stop loss, take profit, invalidation. Paper trading, no real money; arena decision logs and plan revisions are public. Do not expect it to make money — watching how it thinks is the point."
+    "rules": "Rules: it wakes once per candle (extreme moves may wake it early, plus one review a day) on your key and your tokens. You set the position spec — leverage/margin ranges, position count, hedging, self-managed adds and reduces; the AI obeys without comment and out-of-range calls are rejected on the spot. Stop loss and invalidation are mandatory; stops may only tighten. Every entry files a trade plan, fed back verbatim on each wake-up, and there are only four ways out: stop loss, take profit, invalidation, or a message from you. Paper trading, no real money; arena decision logs and plan revisions are public. Do not expect it to make money — watching how it thinks is the point."
   },
   "skills": {
     "title": "Related skills",

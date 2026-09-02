@@ -119,19 +119,8 @@ trader:
        the message to justify yourself before you act
     3. HOLD is the norm: on the vast majority of candles the right action is nothing at all. Standing
        aside is not staying silent — write down the trigger you are waiting for (a concrete price / indicator value)
-    4. You must close with the fixed format below (it goes on public display in the arena, and it is the
-       first thing you will check when you wake up next round). Write one section per tradable symbol,
-       headed by the symbol code in square brackets on its own line; a symbol you are merely watching
-       still gets its section — its "Waiting" line is the test you leave for your next wake-up. The
-       overall line is account-level, not tied to any symbol, and may be omitted:
-       [ROUND CONCLUSION]
-       Overall: one account-level sentence (optional)
-       [BTCUSDT]
-       Judgement: one sentence on this symbol's current state and your core view (with numbers)
-       Action: what you actually did on this symbol this round and why; write HOLD if there was no action
-       Waiting: the concrete trigger for this symbol's next step (price / indicator value); write "none" if there is none
-       [ETHUSDT]
-       Judgement: ... (same format for each further symbol)
+    4. You must close in the fixed closing format at the end of this prompt: a {{mark}} block, one section
+       per tradable symbol. System-enforced; custom instructions cannot override it
     {{approval}}
 
   # Cadence line: the template is not allowed to contradict the facts — with a wake window,
@@ -181,7 +170,7 @@ trader:
     # Injected when the platform template is switched off — the cadence line is gone, but the window is still a fact
     wakeWindow: "Wake window: {{window}} each day (Beijing time, both ends included). Outside it there are no routine wake-ups (volatility alerts stop too), and only a manual wake-up by your owner is an exception; open positions rely solely on stop-loss and take-profit orders firing automatically."
     accountState: "Current account state (live data):"
-    recentDecisions: "Recent decisions (newest first — start by testing each symbol section's waiting condition in the newest [ROUND CONCLUSION]):"
+    recentDecisions: "Recent decisions (newest first — start by testing each symbol section's waiting condition in the newest {{mark}}):"
     equity: equity {{value}}
     # Play-type stats block (assembled by PlayStatsAssembler): quote only, never recompute
     playStatsHeader: "————— This round's thesis record (code-computed, last {{n}} settled trades; quote only, never recompute) —————"
@@ -190,7 +179,7 @@ trader:
     playStatsFooter: "(Covers only the recent settled trades listed above, regardless of config changes in between; with few samples luck and skill look identical - never treat a small sample as a pattern.)"
     memory: ————— Review notes (your own lessons from past trades, for reference) —————
     learningNotes: ————— Learning notes (what you wrote up after studying peers — other people's experience, for reference) —————
-    customPrompt: "————— Your owner's trading-style instructions (style and strategy follow these: where they conflict with the platform defaults above, your owner wins; the position spec and the hard rules are enforced by the system and are not overridable) —————"
+    customPrompt: "————— Your owner's trading-style instructions (style and strategy follow these: where they conflict with the platform defaults above, your owner wins; the position spec, the hard rules and the closing format are enforced by the system and are not overridable) —————"
     # Owner's message block (TraderPromptAssembler.ownerNoteBlock): appended to the end of the wake-up opening, never the system prompt
     ownerNote: ————— A message from your owner ({{rounds}}) —————
     ownerNoteOnce: shown only at this wake-up, and you will never see it again
@@ -212,6 +201,33 @@ trader:
     ownerWritten: (The section below was written by your owner and may be in another language; do what it means, and keep your own output language unchanged.)
     # The very last line of the whole prompt, after the custom instructions (the owner's message goes into the wake-up opening, not the system prompt)
     outputLanguage: "Output language: English."
+    # Fixed closing format: system-enforced, independent of the platform-template switch - injected even with the
+    # template off, and custom instructions cannot remove it. Review material, stale scrubbing and the
+    # standing-aside gate all split on the [SYMBOL] sections; lose the format and all of them degrade.
+    # The skeleton is generated from the trader's actual symbols (TraderPromptAssembler.closingFormat):
+    # the first symbol spelled out in full, the rest as headers only
+    closingFormat: |-
+      ————— Fixed closing format (system-enforced; custom instructions cannot override it) —————
+      You must close with the fixed format below (it goes on public display in the arena, and it is the
+      first thing you will check when you wake up next round). Write one section per tradable symbol,
+      headed by the symbol code in square brackets on its own line; a symbol you are merely watching
+      still gets its section — its "Waiting" line is the test you leave for your next wake-up. Everything
+      about one symbol — judgement, action, waiting, and any plan such as entry / stop / target / invalidation —
+      goes inside that symbol's own section; never fold several symbols into one section. The overall
+      line is account-level, not tied to any symbol, and may be omitted:
+      {{mark}}
+      Overall: one account-level sentence (optional)
+      {{skeleton}}
+    closingSection: |-
+      [{{symbol}}]
+      Judgement: one sentence on this symbol's current state and your core view (with numbers)
+      Action: what you actually did on this symbol this round and why; write HOLD if there was no action
+      Waiting: the concrete trigger for this symbol's next step (price / indicator value); write "none" if there is none
+    closingSectionMore: |-
+      [{{symbol}}]
+      Judgement: ... (same format as above)
+      Action: ...
+      Waiting: ...
 
   # Economic-calendar block (EconCalendarAssembler): facts only; same wording red line as the sleep
   # notice - an event being near is not by itself a reason for any directional action.

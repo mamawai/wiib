@@ -9,6 +9,7 @@ import com.mawai.wiibcommon.entity.AiTraderDecision;
 import com.mawai.wiibcommon.entity.AiTraderPlan;
 import com.mawai.wiibcommon.entity.UserLlmBinding;
 import com.mawai.wiibcommon.entity.UserLlmEndpoint;
+import com.mawai.wiibcommon.enums.AgentLang;
 import com.mawai.wiibcommon.enums.ErrorCode;
 import com.mawai.wiibcommon.i18n.MessageCatalog;
 import com.mawai.wiibcommon.util.Result;
@@ -127,9 +128,11 @@ public class TraderController {
         } catch (IllegalArgumentException e) {
             windowText = null; // 预览只是看文本，时段还没填对就按全天预览，保存时才真校验
         }
-        // 预览也按当前用户语言出：MyTrader 页展示的就是这份文本，英文用户不该看到中文模板
-        return Result.ok(promptAssembler.platformTemplate(
-                userLangResolver.of(userId), interval, symbols, cfg, windowText));
+        // 预览也按当前用户语言出：MyTrader 页展示的就是这份文本，英文用户不该看到中文模板。
+        // 收尾格式块一并带上：它不随模板开关走，预览里不露面用户就不知道自己被强制了什么
+        AgentLang lang = userLangResolver.of(userId);
+        return Result.ok(promptAssembler.platformTemplate(lang, interval, symbols, cfg, windowText)
+                + "\n\n" + promptAssembler.closingFormat(lang, symbols));
     }
 
     /** llmEndpointId：端点库里的一条，空=跟随用户默认端点 */

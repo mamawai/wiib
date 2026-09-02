@@ -227,7 +227,7 @@ class TraderWakeupLoopTest {
         prev.setWakeTime(prevWake);
         prev.setKind(AiTraderDecision.KIND_TRADE);
         prev.setStatus(AiTraderDecision.STATUS_OK);
-        prev.setReasoning("【本轮结论】\n[BTCUSDT]\n动作：HOLD\n等待：回踩 63400 做多"
+        prev.setReasoning("[本轮结论]\n[BTCUSDT]\n动作：HOLD\n等待：回踩 63400 做多"
                 + "\n[ETHUSDT]\n动作：HOLD\n等待：站上 1925 做多");
         when(decisionMapper.selectList(any())).thenReturn(List.of(prev));
         AiTraderPlan stale = new AiTraderPlan();

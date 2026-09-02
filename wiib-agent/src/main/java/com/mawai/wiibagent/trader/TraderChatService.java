@@ -130,7 +130,7 @@ public class TraderChatService {
 
     /**
      * 决策时间线。<b>reasoning 给全文</b>：用户质询"你那笔为什么开多"靠的就是它，
-     * 截断了正好把收尾的【本轮结论】切掉，剩一堆行情铺垫等于没给。
+     * 截断了正好把收尾的[本轮结论]切掉，剩一堆行情铺垫等于没给。
      */
     public String decisions(long userId, Integer limit, AgentLang lang) {
         AiTrader t = traderService.mine(userId);

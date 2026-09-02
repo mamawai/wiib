@@ -196,7 +196,7 @@ class ResponsesChatModelTest {
     void 阻塞路径_正常SSE流_拼接增量并带usage收尾() {
         events = new String[]{
                 """
-                {"type":"response.output_text.delta","delta":"【本轮结论】"}""",
+                {"type":"response.output_text.delta","delta":"[本轮结论]"}""",
                 """
                 {"type":"response.output_text.delta","delta":"HOLD，等待突破确认。"}""",
                 """
@@ -206,7 +206,7 @@ class ResponsesChatModelTest {
         };
         ChatResponse response = model().call(new Prompt("问题"));
 
-        assertThat(response.getResult().getOutput().getText()).isEqualTo("【本轮结论】HOLD，等待突破确认。");
+        assertThat(response.getResult().getOutput().getText()).isEqualTo("[本轮结论]HOLD，等待突破确认。");
         assertThat(response.getResult().getMetadata().getFinishReason()).isEqualTo("STOP");
         assertThat(response.getMetadata().getUsage().getTotalTokens()).isEqualTo(15);
     }
@@ -259,7 +259,7 @@ class ResponsesChatModelTest {
                 {"type":"response.completed","response":{"id":"resp_6","status":"incomplete",
                  "model":"grok-test","incomplete_details":{"reason":"max_output_tokens"},
                  "output":[{"type":"message","content":[
-                     {"type":"output_text","text":"【本轮结论】方向：做多 BTC，止损放在"}]}]}}"""
+                     {"type":"output_text","text":"[本轮结论]方向：做多 BTC，止损放在"}]}]}}"""
         };
         assertThatThrownBy(() -> model().call(new Prompt("问题")))
                 .isInstanceOf(NonTransientAiException.class)
@@ -273,22 +273,22 @@ class ResponsesChatModelTest {
                 """
                 {"type":"response.completed","response":{"id":"resp_3","status":"completed",
                  "model":"grok-test","output":[{"type":"message","content":[
-                     {"type":"output_text","text":"【本轮结论】HOLD，等待突破确认。"}]}]}}"""
+                     {"type":"output_text","text":"[本轮结论]HOLD，等待突破确认。"}]}]}}"""
         };
         assertThat(model().call(new Prompt("问题")).getResult().getOutput().getText())
-                .isEqualTo("【本轮结论】HOLD，等待突破确认。");
+                .isEqualTo("[本轮结论]HOLD，等待突破确认。");
     }
 
     /**
      * Responses 除了 failed 还有 incomplete（含 max_output_tokens 截断），它照常带着半截 output。
-     * 阻塞路径当正常收尾发 STOP 的话，被截断的【本轮结论】会以 status=OK 落库，
+     * 阻塞路径当正常收尾发 STOP 的话，被截断的[本轮结论]会以 status=OK 落库，
      * 下一轮还被当"上一轮的承诺"回注给模型做检验基准。
      */
     @Test
     void 阻塞路径_incomplete事件_判截断失败() {
         events = new String[]{
                 """
-                {"type":"response.output_text.delta","delta":"【本轮结论】方向：做多 BTC，止损放在"}""",
+                {"type":"response.output_text.delta","delta":"[本轮结论]方向：做多 BTC，止损放在"}""",
                 """
                 {"type":"response.incomplete","response":{"status":"incomplete",
                  "incomplete_details":{"reason":"max_output_tokens"}}}"""

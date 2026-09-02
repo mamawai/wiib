@@ -69,7 +69,8 @@ public class TraderPromptAssembler {
                 .append(accountStateJson).append('\n');
 
         if (recent != null && !recent.isEmpty()) {
-            sb.append('\n').append(prompts.get(lang, "trader.label.recentDecisions")).append('\n');
+            sb.append('\n').append(prompts.get(lang, "trader.label.recentDecisions",
+                    Map.of("mark", prompts.get(lang, "trader.mark.conclusion")))).append('\n');
             for (int i = 0; i < recent.size(); i++) {
                 AiTraderDecision d = recent.get(i);
                 sb.append("- ").append(TIME_FMT.format(Instant.ofEpochMilli(d.getWakeTime())))
@@ -114,10 +115,36 @@ public class TraderPromptAssembler {
                     .append(trader.getCustomPrompt()).append('\n');
         }
 
+        // 固定收尾格式：不看模板开关永远注入——退出模板/自定义指令都改不掉它；排在自定义指令之后压近因
+        sb.append('\n').append(closingFormat(lang, trader.getSymbols())).append('\n');
         // 输出语言硬收尾：整篇最末一行，排在自定义指令之后。
         // 退出平台模板时模板正文那次不在了，只剩这一行
         sb.append('\n').append(prompts.get(lang, "trader.label.outputLanguage")).append('\n');
         return sb.toString();
+    }
+
+    /**
+     * 固定收尾格式块：系统强制，不随平台模板开关走。复盘素材、stale 剔段、观望门控全靠 [SYMBOL] 段切分，
+     * 格式丢了下游全退化。骨架按 trader 真实币种生成：首币写全三行，其余只列段头——模型照着填，不用自己猜币码。
+     * 预览接口也用它，MyTrader 页看到的与真喂的一致
+     */
+    public String closingFormat(AgentLang lang, String symbols) {
+        StringBuilder skeleton = new StringBuilder();
+        for (String s : symbols.split(",")) {
+            String symbol = s.strip();
+            if (symbol.isEmpty()) {
+                continue;
+            }
+            if (!skeleton.isEmpty()) {
+                skeleton.append('\n');
+            }
+            skeleton.append(prompts.get(lang,
+                    skeleton.isEmpty() ? "trader.label.closingSection" : "trader.label.closingSectionMore",
+                    Map.of("symbol", symbol)));
+        }
+        return prompts.get(lang, "trader.label.closingFormat", Map.of(
+                "mark", prompts.get(lang, "trader.mark.conclusion"),
+                "skeleton", skeleton.toString()));
     }
 
     /**
@@ -189,6 +216,8 @@ public class TraderPromptAssembler {
         return prompts.get(lang, "trader.template", Map.of(
                 "rhythm", rhythmText(lang, intervalCode, wakeWindowText),
                 "symbols", symbols,
+                // 纪律 4 只留一行指针指向文末收尾块，标记同源
+                "mark", prompts.get(lang, "trader.mark.conclusion"),
                 "leverageMin", risk.leverageMin(),
                 "leverageMax", risk.leverageMax(),
                 "marginPctMin", plain(risk.marginPctMin()),

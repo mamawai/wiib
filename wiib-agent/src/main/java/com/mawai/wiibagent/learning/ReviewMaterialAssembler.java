@@ -650,7 +650,7 @@ public class ReviewMaterialAssembler {
 
     /**
      * 结论块内的币种分段标记：方括号币码独占一行（[BTCUSDT]）。语言无关——两门语言的模板同一形状。
-     * 只在结论块正文里匹配，[ROUND CONCLUSION] 带空格够不到，[警报] 非拉丁字母也够不到。
+     * 只在结论块正文里匹配，[ROUND CONCLUSION] 带空格够不到，[本轮结论]、[警报] 非拉丁字母也够不到。
      */
     private static final Pattern SEGMENT_TAG = Pattern.compile("(?m)^\\s*\\[([A-Z0-9]{2,20})\\]\\s*$");
 

@@ -331,7 +331,7 @@ public class ResponsesChatModel implements ChatModel {
                 JSONObject response = event.getJSONObject("response");
                 // 简易网关会把非流式响应原样包成 completed 事件发出，payload 里的 status 可能
                 // 仍是 failed/incomplete——事件类型说完成、payload 说截断时信 payload，
-                // 别让半截【本轮结论】带着 STOP 落库（与独立 failed/incomplete 事件同口径）
+                // 别让半截[本轮结论]带着 STOP 落库（与独立 failed/incomplete 事件同口径）
                 String status = response == null ? null : response.getString("status");
                 if ("failed".equals(status) || "incomplete".equals(status)) {
                     return Flux.error(new NonTransientAiException(

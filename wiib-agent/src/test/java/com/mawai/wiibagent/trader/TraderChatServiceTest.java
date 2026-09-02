@@ -124,11 +124,11 @@ class TraderChatServiceTest {
         stale.setPositionId(42L);
         when(planStore.listAll(7L, 1)).thenReturn(List.of(stale));
         AiTraderDecision segmented = decision(2000L,
-                "【本轮结论】\n[BTCUSDT]\n动作：HOLD\n等待：回踩再看\n[ETHUSDT]\n动作：HOLD\n等待：跌破 1888 转空",
+                "[本轮结论]\n[BTCUSDT]\n动作：HOLD\n等待：回踩再看\n[ETHUSDT]\n动作：HOLD\n等待：跌破 1888 转空",
                 // 同轮给 stale 仓位调过止损：工具名也得剔，数据工具照常
                 "[{\"tool\":\"set_stop_loss\",\"args\":{\"positionId\":42,\"stopLossPrice\":99000},\"status\":\"ok\"},"
                         + "{\"tool\":\"klines\"}]");
-        AiTraderDecision legacyClose = decision(9000L, "【本轮结论】\n动作：平仓\n等待：无",
+        AiTraderDecision legacyClose = decision(9000L, "[本轮结论]\n动作：平仓\n等待：无",
                 "[{\"tool\":\"close_position\",\"args\":{\"positionId\":42},\"status\":\"ok\"}]");
         when(traderService.decisions(eq(7L), anyInt(), any(), any(), any(), any()))
                 .thenReturn(List.of(segmented, legacyClose));
