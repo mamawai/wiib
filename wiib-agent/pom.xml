@@ -26,7 +26,7 @@
             <artifactId>wiib-quant</artifactId>
         </dependency>
 
-        <!-- langgraph4j：图引擎（spring-ai-alibaba 的上游，那两个并行 bug 在这儿不存在） -->
+        <!-- langgraph4j：图引擎 -->
         <dependency>
             <groupId>org.bsc.langgraph4j</groupId>
             <artifactId>langgraph4j-core</artifactId>
