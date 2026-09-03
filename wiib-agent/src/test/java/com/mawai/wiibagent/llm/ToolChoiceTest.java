@@ -19,7 +19,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 /**
- * 两条协议的 tool_choice 落点各不相同，这里钉死：openai 协议落 OpenAiChatOptions.toolChoice 且类型不变
+ * 各协议的 tool_choice 落点各不相同，这里钉死：openai 协议落 OpenAiChatOptions.toolChoice 且类型不变
  *（Spring AI 2.0 的 OpenAiChatModel 硬转这个类型），responses 协议落 toolContext 信号；首轮判定只看最后一条用户消息之后。
  */
 class ToolChoiceTest {

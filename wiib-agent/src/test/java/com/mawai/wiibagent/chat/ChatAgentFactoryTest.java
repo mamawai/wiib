@@ -4,7 +4,7 @@ import com.mawai.wiibcommon.entity.UserLlmEndpoint;
 import com.mawai.wiibcommon.enums.AgentLang;
 import com.mawai.wiibagent.llm.AgentGraphs;
 import com.mawai.wiibagent.llm.ChatEndpoints;
-import com.mawai.wiibagent.llm.ResponsesChatModel;
+import com.mawai.wiibagent.llm.SseChatModel;
 import com.mawai.wiibagent.analysis.DeepAnalysisService;
 import com.mawai.wiibagent.behavior.BehaviorAnalysisService;
 import com.mawai.wiibagent.toolkit.MarketToolkit;
@@ -148,7 +148,7 @@ class ChatAgentFactoryTest {
 
     /**
      * 许可的投放面：端点声明了搜索时，summarizer 的每次模型调用都捎
-     * {@link com.mawai.wiibagent.llm.ResponsesChatModel#WEB_SEARCH_KEY}，
+     * {@link com.mawai.wiibagent.llm.SseChatModel#WEB_SEARCH_KEY}，
      * 专家（数据源必须可控）一个都不捎——双闸门里"调用方授权"这一半就是这里发的。
      */
     @Test
@@ -181,11 +181,11 @@ class ChatAgentFactoryTest {
         assertThat(summarizerPrompts).isNotEmpty();
         assertThat(summarizerPrompts).allMatch(p ->
                 p.getOptions() instanceof ToolCallingChatOptions t && t.getToolContext() != null
-                        && Boolean.TRUE.equals(t.getToolContext().get(ResponsesChatModel.WEB_SEARCH_KEY)));
+                        && Boolean.TRUE.equals(t.getToolContext().get(SseChatModel.WEB_SEARCH_KEY)));
         assertThat(expertPrompts).isNotEmpty();
         assertThat(expertPrompts).allMatch(p ->
                 !(p.getOptions() instanceof ToolCallingChatOptions t) || t.getToolContext() == null
-                        || t.getToolContext().get(ResponsesChatModel.WEB_SEARCH_KEY) == null);
+                        || t.getToolContext().get(SseChatModel.WEB_SEARCH_KEY) == null);
     }
 
     // ===== 序列化：叶子与会话上下文表共用的序列化器必须是 Jackson 版，默认的 Java 对象流存不下 Spring AI Message =====

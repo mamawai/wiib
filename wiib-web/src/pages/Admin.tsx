@@ -186,6 +186,8 @@ export function Admin() {
   };
 
 
+  /** 配置行上的协议徽标 */
+  const PROTO_BADGE: Record<string, string> = { openai: 'ChatCompletions', responses: 'Responses', anthropic: 'Anthropic', gemini: 'Gemini' };
   const maskKey = (key: string) => {
     if (key.length <= 8) return '****';
     return key.slice(0, 4) + '****' + key.slice(-4);
@@ -356,7 +358,7 @@ export function Admin() {
                       <span className="text-sm font-bold">{key.configName}</span>
                       <Badge variant="outline" className="text-[10px]">{maskKey(key.apiKey)}</Badge>
                       {key.model && <Badge variant="secondary" className="text-[10px]">{key.model}</Badge>}
-                      <Badge variant="outline" className="text-[10px]">{key.apiProtocol === 'responses' ? 'Responses' : 'ChatCompletions'}</Badge>
+                      <Badge variant="outline" className="text-[10px]">{PROTO_BADGE[key.apiProtocol || 'openai'] ?? key.apiProtocol}</Badge>
                       {key.reasoningEffort && <Badge variant="secondary" className="text-[10px]">{t('admin.llm.effortBadge', { value: key.reasoningEffort })}</Badge>}
                     </div>
                     <div className="text-xs text-muted-foreground mt-0.5 truncate">{key.baseUrl}</div>
@@ -401,6 +403,8 @@ export function Admin() {
                   >
                     <option value="openai">{t('admin.llm.protoChat')}</option>
                     <option value="responses">{t('admin.llm.protoResponses')}</option>
+                    <option value="anthropic">{t('admin.llm.protoAnthropic')}</option>
+                    <option value="gemini">{t('admin.llm.protoGemini')}</option>
                   </select>
                   {/* 档位不写死选项：各家名字自己定（xhigh/minimal…）。输入框是真值，芯片只管往里填 */}
                   <div className="space-y-1.5">

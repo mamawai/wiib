@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
+import com.mawai.wiibcommon.handler.JsonbStringTypeHandler;
 import lombok.Data;
 
 import java.time.LocalDateTime;
@@ -16,7 +17,7 @@ import java.time.LocalDateTime;
  * 本表只为前端展示，所以 agent 调度/HITL 过程事件不存。
  */
 @Data
-@TableName("workbench_chat_message")
+@TableName(value = "workbench_chat_message", autoResultMap = true)
 public class WorkbenchChatMessage {
 
     @TableId(type = IdType.AUTO)
@@ -47,6 +48,10 @@ public class WorkbenchChatMessage {
     private Long totalTokens;
 
     private Integer latencyMs;
+
+    /** 这一轮联网搜索的来源，JSON 数组 [{url,title}]；只有搜过的 assistant 行有值 */
+    @TableField(typeHandler = JsonbStringTypeHandler.class)
+    private String sources;
 
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdAt;

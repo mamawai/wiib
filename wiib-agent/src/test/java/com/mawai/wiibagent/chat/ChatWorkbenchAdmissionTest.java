@@ -37,7 +37,7 @@ class ChatWorkbenchAdmissionTest {
 
     private ChatWorkbenchController controller(ChatConcurrencyGate gate) {
         // mock runner 默认返回 null，streamer 会在 result.cancelled() 上 NPE——真跑到 run 的用例要正常收尾
-        when(turnRunner.run(any(), anyLong(), any(), any(), any(), any(), any(), any(), any()))
+        when(turnRunner.run(any(), anyLong(), any(), any(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(ChatTurnRunner.TurnResult.COMPLETED);
         ChatHistoryService history = mock(ChatHistoryService.class);
         WorkbenchRunRegistry runRegistry = mock(WorkbenchRunRegistry.class);

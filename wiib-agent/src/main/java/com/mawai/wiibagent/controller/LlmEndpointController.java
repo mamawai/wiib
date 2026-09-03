@@ -37,7 +37,7 @@ public class LlmEndpointController {
                                String reasoningEffort, boolean webSearch, String apiKeyTail, boolean isDefault) {
     }
 
-    /** reasoningEffort 留空=不传给上游走模型默认；apiKey 更新时留空=不换；webSearch 仅 responses 协议生效 */
+    /** reasoningEffort 留空=不传给上游走模型默认；apiKey 更新时留空=不换；webSearch 只在能声明服务端搜索的协议下入库 */
     public record SaveRequest(String name, String apiProtocol, String baseUrl, String model,
                               String reasoningEffort, String apiKey, Boolean webSearch) {
         LlmEndpointService.SaveReq toReq() {

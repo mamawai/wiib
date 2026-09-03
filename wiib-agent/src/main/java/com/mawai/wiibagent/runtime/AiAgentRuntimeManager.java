@@ -1,24 +1,14 @@
 package com.mawai.wiibagent.runtime;
 
 import com.mawai.wiibcommon.constant.AiFunctions;
-import com.mawai.wiibcommon.constant.AiProtocols;
 import com.mawai.wiibcommon.entity.AiModelAssignment;
 import com.mawai.wiibcommon.entity.AiRuntimeConfig;
 import com.mawai.wiibcommon.mapper.AiModelAssignmentMapper;
 import com.mawai.wiibcommon.mapper.AiRuntimeConfigMapper;
-import com.mawai.wiibagent.llm.OpenAiBaseUrl;
-import com.mawai.wiibagent.llm.ResponsesChatModel;
-import io.micrometer.observation.ObservationRegistry;
+import com.mawai.wiibagent.llm.ByokModelBuilder;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.model.ChatModel;
-import org.springframework.ai.model.tool.ToolCallingManager;
-import com.openai.client.OpenAIClient;
-import com.openai.client.OpenAIClientAsync;
-import org.springframework.ai.openai.OpenAiChatModel;
-import org.springframework.ai.openai.OpenAiChatOptions;
-import org.springframework.ai.openai.setup.OpenAiSetup;
-import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDateTime;
@@ -45,20 +35,17 @@ public class AiAgentRuntimeManager {
 
     private final AiRuntimeConfigMapper configMapper;
     private final AiModelAssignmentMapper assignmentMapper;
-    private final ToolCallingManager toolCallingManager;
-    private final ObservationRegistry observationRegistry;
+    /** 建模与 BYOK 同一份实现，只是 key 来源不同 */
+    private final ByokModelBuilder modelBuilder;
     private final AtomicReference<AiAgentRuntime> runtimeRef = new AtomicReference<>();
     private final Object graphLock = new Object();
 
     public AiAgentRuntimeManager(AiRuntimeConfigMapper configMapper,
                                  AiModelAssignmentMapper assignmentMapper,
-                                 ToolCallingManager toolCallingManager,
-                                 ObjectProvider<ObservationRegistry> observationRegistry) {
+                                 ByokModelBuilder modelBuilder) {
         this.configMapper = configMapper;
         this.assignmentMapper = assignmentMapper;
-        // 现在只有 ResponsesChatModel 用它：把 toolCallbacks 翻成发给 API 的工具声明
-        this.toolCallingManager = toolCallingManager;
-        this.observationRegistry = observationRegistry.getIfUnique(() -> ObservationRegistry.NOOP);
+        this.modelBuilder = modelBuilder;
     }
 
     @PostConstruct
@@ -169,47 +156,9 @@ public class AiAgentRuntimeManager {
         }
     }
 
-    /**
-     * 从 DB 配置手建模型，按配置行的协议分叉：
-     * responses → 自研 ResponsesChatModel（/v1/responses，思考模型原生协议）；
-     * openai → Spring AI OpenAiChatModel（/v1/chat/completions，DeepSeek 等通用）。
-     * 思考档位两条路线都注入：responses 走 reasoning.effort，openai 走 reasoning_effort 字段。
-     */
+    /** 从 DB 配置手建模型，建法与 BYOK 同一份。平台轨没有搜索配置位：webSearch 恒关（服务端搜索是对话侧的能力） */
     private ChatModel buildChatModel(AiRuntimeConfig config) {
-        // 不设置 temperature：走各模型默认值，思考模型（多数拒收或忽略温度）也安全
-        if (AiProtocols.isResponses(config.getApiProtocol())) {
-            // 平台轨没有搜索配置位：webSearch 恒关（服务端搜索是 BYOK 对话侧的能力）
-            return new ResponsesChatModel(config.getApiKey(), config.getBaseUrl(), config.getModel(),
-                    null, config.getReasoningEffort(), toolCallingManager, false);
-        }
-
-        // Spring AI 2.0 起底层换成官方 OpenAI SDK，连接参数经 OpenAiSetup 建 client（照抄官方
-        // OpenAiChatAutoConfiguration 的建法）。timeout 非空是硬约束——SDK 是 Kotlin，传 null 运行时 NPE；
-        // 超时/maxRetries=3 都取 ResponsesChatModel 同值：阻塞路径的重试超时统一归模型层，
-        // ResilientChatService 只管兜底切换，避免两层叠乘放大尾延迟
-        OpenAIClient openAiClient = OpenAiSetup.setupSyncClient(
-                OpenAiBaseUrl.forSdk(config.getBaseUrl()), config.getApiKey(), null, null, null, null,
-                false, false, config.getModel(), ResponsesChatModel.CALL_TIMEOUT, 3, null, null,
-                observationRegistry, null, List.of());
-        // async 也必须显式给：builder 见 openAiClientAsync 为空就拿 options 自建，而 options 里没 key，
-        // SDK 当场抛 "At least one credential source must be specified"（哪怕我们根本不走流式）
-        OpenAIClientAsync openAiClientAsync = OpenAiSetup.setupAsyncClient(
-                OpenAiBaseUrl.forSdk(config.getBaseUrl()), config.getApiKey(), null, null, null, null,
-                false, false, config.getModel(), ResponsesChatModel.CALL_TIMEOUT, 3, null, null,
-                observationRegistry, null, List.of());
-
-        OpenAiChatOptions.Builder options = OpenAiChatOptions.builder()
-                .model(config.getModel());
-        if (config.getReasoningEffort() != null) {
-            options.reasoningEffort(config.getReasoningEffort());
-        }
-
-        // 不传 toolCallingManager：模型层不跑工具循环（循环在 langgraph4j 图里），builder 默认的够用
-        return OpenAiChatModel.builder()
-                .openAiClient(openAiClient)
-                .openAiClientAsync(openAiClientAsync)
-                .options(options.build())
-                .observationRegistry(observationRegistry)
-                .build();
+        return modelBuilder.build(config.getApiProtocol(), config.getBaseUrl(), config.getApiKey(),
+                config.getModel(), config.getReasoningEffort(), false);
     }
 }

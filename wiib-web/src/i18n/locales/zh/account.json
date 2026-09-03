@@ -157,6 +157,8 @@
       "modelPh": "模型名，如 gpt-4o、deepseek-chat",
       "protoChat": "协议：OpenAI Chat Completions（/v1/chat/completions，DeepSeek 等通用）",
       "protoResponses": "协议：OpenAI Responses（/v1/responses，CPA/OpenAI官方/xAI）",
+      "protoAnthropic": "协议：Anthropic Messages（/v1/messages）",
+      "protoGemini": "协议：Gemini generateContent（/v1beta）",
       "effortPh": "思考档位，留空=模型默认（不传）",
       "effortDefault": "默认",
       "effortHint": "none=关思考最省 token（仅部分模型支持）；也可填模型认的其他档位如 xhigh。认不认查不到，存完自己试。",

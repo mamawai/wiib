@@ -1,10 +1,94 @@
 import { useCallback, useState } from 'react';
 import { Trans, useTranslation } from 'react-i18next';
-import { Check, ChevronRight, Copy, Loader2, RefreshCw, ShieldQuestion, X } from 'lucide-react';
+import { Check, ChevronRight, Copy, Globe, Loader2, RefreshCw, ShieldQuestion, X } from 'lucide-react';
 import { Markdown } from '../Markdown';
 import { cn, fmtTime, fmtTokens } from '../../lib/utils';
 import { type ChatItem } from './chatStore';
+import type { SearchSource } from '../../types';
 import { AGENT_LABEL_KEY, HUB_NAME, type RailStep } from './chatView';
+
+/** 来源链接的展示名：域名（去 www.），解析不了的原样给 */
+function domainOf(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, '');
+  } catch {
+    return url;
+  }
+}
+
+/** 答案底部的来源芯片：按域名去重（同站多篇算一个，链到第一篇），超过 8 个折起来 */
+function SourceChips({ sources }: { sources: SearchSource[] }) {
+  const { t } = useTranslation('ai');
+  const [all, setAll] = useState(false);
+  const byDomain = new Map<string, SearchSource>();
+  for (const s of sources) {
+    const d = domainOf(s.url);
+    if (!byDomain.has(d)) byDomain.set(d, s);
+  }
+  const entries = [...byDomain.entries()];
+  const shown = all ? entries : entries.slice(0, 8);
+  const hidden = entries.length - shown.length;
+  return (
+    <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+      <span className="microlabel inline-flex items-center gap-1"><Globe className="w-3 h-3" /> {t('chat.sources')}</span>
+      {shown.map(([domain, s]) => (
+        <a key={domain} href={s.url} target="_blank" rel="noreferrer" title={s.title || s.url}
+           className="inline-flex items-center h-5 px-1.5 rounded-md border border-border bg-card-2 text-[10px] num text-muted-foreground hover:text-primary hover:border-primary/60 transition-colors">
+          {domain}
+        </a>
+      ))}
+      {(hidden > 0 || all) && (
+        <button onClick={() => setAll(v => !v)}
+                className="h-5 px-1.5 rounded-md border border-dashed border-border text-[10px] num text-muted-foreground hover:text-foreground">
+          {all ? t('chat.lessSources') : t('chat.moreSources', { count: hidden })}
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** 过程轨里的一次联网搜索：搜着时亮点+搜索词，搜完变成"搜索了 N 个网站"可展开站点列表 */
+function SearchStep({ item }: { item: Extract<ChatItem, { kind: 'search' }> }) {
+  const { t } = useTranslation('ai');
+  const [open, setOpen] = useState(false);
+  if (item.active) {
+    return (
+      <span className="text-foreground font-bold inline-flex items-center gap-1">
+        <Globe className="w-3 h-3" /> {item.query ? t('rail.searching', { query: item.query }) : t('rail.searchingNoQuery')}
+      </span>
+    );
+  }
+  // 搜完但没报站点（上游不给 sources 的协议形态）：只说搜过了什么，别说"没命中"
+  if (item.sources.length === 0) {
+    return (
+      <span className="inline-flex items-center gap-1">
+        <Globe className="w-3 h-3" /> {t('rail.searchedNone')}
+        {item.query && <span className="text-muted-foreground/70">· {item.query}</span>}
+      </span>
+    );
+  }
+  return (
+    <>
+      <button onClick={() => setOpen(v => !v)} className="inline-flex items-center gap-1 hover:text-foreground">
+        <Globe className="w-3 h-3" />
+        {t('rail.searched', { count: item.sources.length })}
+        {item.query && <span className="text-muted-foreground/70">· {item.query}</span>}
+        <ChevronRight className={cn('w-3 h-3 transition-transform duration-200', open && 'rotate-90')} />
+      </button>
+      {open && (
+        <div className="mt-1 rounded-lg border border-border bg-card-2 px-2.5 py-1.5 text-[11px] max-h-44 overflow-y-auto space-y-0.5">
+          {item.sources.map(s => (
+            <a key={s.url} href={s.url} target="_blank" rel="noreferrer" title={s.url}
+               className="flex items-baseline gap-2 hover:text-primary min-w-0">
+              <span className="num shrink-0 text-muted-foreground/80">{domainOf(s.url)}</span>
+              <span className="truncate">{s.title || s.url}</span>
+            </a>
+          ))}
+        </div>
+      )}
+    </>
+  );
+}
 
 /** 用户提问：右侧气泡，下面挂时刻 */
 export function UserBubble({ item, onCancelQueued }: {
@@ -97,6 +181,9 @@ export function AssistantAnswer({ item, canRegenerate, onRegenerate }: {
         )}
       </div>
 
+      {/* 来源随 done 到（历史回放从库里带）：流式期间不显示，与脚注同理 */}
+      {!item.streaming && item.sources && item.sources.length > 0 && <SourceChips sources={item.sources} />}
+
       {!item.streaming && (
         <div className="mt-2 pt-1.5 border-t border-border/60 flex items-center gap-2 text-[10px] text-muted-foreground/70">
           <span className="num truncate min-w-0">{readout}</span>
@@ -150,7 +237,8 @@ export function ProcessRail({ steps, active, open, onToggle }: {
         <div className="overflow-hidden min-h-0">
           <div className="ml-[5px] mt-1.5 border-l-2 border-border pl-3.5 space-y-2.5 py-0.5">
             {steps.map(({ item, index }) => {
-              const hot = (item.kind === 'expert' && item.streaming) || (item.kind === 'progress' && item.active);
+              const hot = (item.kind === 'expert' && item.streaming) || (item.kind === 'progress' && item.active)
+                || (item.kind === 'search' && item.active);
               return (
                 <div key={index} className="relative text-[11.5px] leading-relaxed text-muted-foreground">
                   <span className={cn(
@@ -193,6 +281,7 @@ export function ProcessRail({ steps, active, open, onToggle }: {
                       {item.keyed ? t(item.text) : item.text}
                     </span>
                   )}
+                  {item.kind === 'search' && <SearchStep item={item} />}
                 </div>
               );
             })}

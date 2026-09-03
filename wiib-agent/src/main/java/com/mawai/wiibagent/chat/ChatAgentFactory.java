@@ -218,9 +218,9 @@ public class ChatAgentFactory {
 
     private Leaves build(ChatEndpoints eps, AgentLang lang) throws Exception {
         ChatModelFactory.Models models = chatModelFactory.modelsFor(eps);
-        // 服务端搜索能力 = 端点勾了 web_search 且走 responses 协议（chat-completions 没有标准的服务端搜索）。
+        // 服务端搜索能力 = 端点勾了 web_search 且协议能声明服务端搜索工具。
         // 它决定两件事：summarizer 提示词的新闻条款用哪版、summarizer 的调用捎不捎搜索许可
-        boolean webSearch = AiProtocols.isResponses(eps.deep().getApiProtocol())
+        boolean webSearch = AiProtocols.supportsServerSearch(eps.deep().getApiProtocol())
                 && Boolean.TRUE.equals(eps.deep().getWebSearch());
         // 用量装饰器进行包装
         UsageTrackingChatModel deep = new UsageTrackingChatModel(models.deep());
@@ -356,7 +356,7 @@ public class ChatAgentFactory {
         }
         return builder.build(ResilientChatService.builder()
                         .model(deep)
-                        // 搜索许可（双闸门的调用方那半）：ResponsesChatModel 还要再对端点配置那半
+                        // 搜索许可（双闸门的调用方那半）：SseChatModel 还要再对端点配置那半
                         .webSearch(webSearch)
                         .maxAttempts(3).initialDelay(500).maxDelay(4000)
                         .asFactory())

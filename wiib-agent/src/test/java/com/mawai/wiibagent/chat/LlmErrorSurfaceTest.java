@@ -92,7 +92,7 @@ class LlmErrorSurfaceTest {
         ChatContextStore contextStore = mock(ChatContextStore.class);
         List<ChatTurnRunner.ExpertProgress> progress = new CopyOnWriteArrayList<>();
         new ChatTurnRunner(contextStore, new ApprovalRegistry(), ChatTestEndpoints.PROMPTS, ChatTestEndpoints.TOOLS)
-                .run(leaves, 1L, "wb-1-expert-fail", "看看行情", null, chunk -> { }, progress::add,
+                .run(leaves, 1L, "wb-1-expert-fail", "看看行情", null, chunk -> { }, progress::add, s -> { },
                         ChatTurnRunner.TurnYield.NONE, null);
 
         String pushedToUser = progress.stream()
@@ -125,7 +125,7 @@ class LlmErrorSurfaceTest {
         };
         ChatTurnRunner turnRunner = mock(ChatTurnRunner.class);
         doThrow(new RuntimeException(RAW)).when(turnRunner)
-                .run(any(), anyLong(), any(), any(), any(), any(), any(), any(), any());
+                .run(any(), anyLong(), any(), any(), any(), any(), any(), any(), any(), any());
         ChatYieldCoordinator coordinator = new ChatYieldCoordinator();
         ChatTurnStreamer streamer = new ChatTurnStreamer(turnRunner, mock(ChatHistoryService.class),
                 mock(WorkbenchRunRegistry.class), coordinator, new ApprovalRegistry(), ChatTestEndpoints.PROMPTS);

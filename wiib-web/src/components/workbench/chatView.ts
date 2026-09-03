@@ -13,12 +13,12 @@ export const AGENT_LABEL_KEY: Record<string, string> = {
   trader_agent: 'term.trader',
 };
 
-/** 带 rid 的那三种条目就是过程条目 */
+/** 带 rid 的那几种条目就是过程条目 */
 type RailItem = Extract<ChatItem, { rid: number }>;
 
-/** 过程类条目（调度/专家/进度）归进工作过程轨；其余各自成块 */
+/** 过程类条目（调度/专家/进度/搜索）归进工作过程轨；其余各自成块 */
 const isRailKind = (it: ChatItem): it is RailItem =>
-  it.kind === 'agent' || it.kind === 'expert' || it.kind === 'progress';
+  it.kind === 'agent' || it.kind === 'expert' || it.kind === 'progress' || it.kind === 'search';
 
 export type RailStep = { item: ChatItem; index: number };
 export type Block =

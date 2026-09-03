@@ -8,7 +8,8 @@ import com.mawai.wiibagent.i18n.PromptCatalog;
 import com.mawai.wiibagent.llm.ConversationSummarizer;
 import com.mawai.wiibagent.llm.LlmErrorMessages;
 import com.mawai.wiibagent.llm.ModelCallLimiter;
-import com.mawai.wiibagent.llm.ResponsesChatModel;
+import com.mawai.wiibagent.llm.SearchEvent;
+import com.mawai.wiibagent.llm.SseChatModel;
 import com.mawai.wiibagent.llm.ToolChoice;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -20,6 +21,7 @@ import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
+import org.springframework.ai.chat.metadata.ChatResponseMetadata;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.prompt.ChatOptions;
@@ -249,6 +251,7 @@ public class ChatTurnRunner {
      * @param intent          功能按钮直发的意图，可空（用户自己打字的普通一轮就是空）
      * @param answerTokenSink summarizer 的答案增量，逐帧
      * @param progressSink    专家的开始/完成/失败事件
+     * @param searchSink      summarizer 的服务端搜索过程（模型层挂在帧 metadata 上，见 {@link SearchEvent}）
      * @param yield           让位控制面；不支持让位的调用方传 {@link TurnYield#NONE}
      * @param deferred        补答轮接回的在途专家批次（让位那轮交出去的），普通轮为 null。
      *                        这批是替 enrichedMessage 里那个问题派的，不再问路由直接接；
@@ -256,7 +259,8 @@ public class ChatTurnRunner {
      */
     public TurnResult run(ChatAgentFactory.Leaves leaves, long userId, String sessionId, String enrichedMessage,
                           ChatIntent intent, Consumer<String> answerTokenSink,
-                          Consumer<ExpertProgress> progressSink, TurnYield yield, ExpertBatch deferred) {
+                          Consumer<ExpertProgress> progressSink, Consumer<SearchEvent> searchSink,
+                          TurnYield yield, ExpertBatch deferred) {
         long startedAt = System.currentTimeMillis();
         // 语言取自叶子：它是建叶子时按用户语言写死的，已经在叶子缓存键里，不必再查一次
         AgentLang lang = leaves.lang();
@@ -334,7 +338,7 @@ public class ChatTurnRunner {
                 streamSummarizer(leaves, working, userId, sessionId, chunk -> {
                     emitted.append(chunk);
                     answerTokenSink.accept(chunk);
-                }, yield);
+                }, searchSink, yield);
         if (yield.cancelRequested()) {
             // 拉流是 break 出来的，被丢下的那条流还在跑：图生成器不支持取消（见 ChatAgentFactory
             // 的说明），模型照样吐完、入账挂在流终止上。所以这次汇总调用的 token 省不掉，
@@ -462,6 +466,7 @@ public class ChatTurnRunner {
     private NodeOutput<MessagesState<Message>> streamSummarizer(ChatAgentFactory.Leaves leaves,
                                                                 List<Message> working, long userId,
                                                                 String sessionId, Consumer<String> tokenSink,
+                                                                Consumer<SearchEvent> searchSink,
                                                                 TurnYield yield) {
         // threadId 是 ApprovalGate 取会话号的唯一来源（工具方法体看不到它），少了它 HITL 整条链断掉
         RunnableConfig config = RunnableConfig.builder().threadId(sessionId).build();
@@ -476,6 +481,11 @@ public class ChatTurnRunner {
                     if (chunk != null && !chunk.isEmpty()) {
                         tokenSink.accept(chunk);
                     }
+                    // 搜索过程帧是空文本帧，事件挂在这一帧的响应 metadata 上
+                    streaming.metadata("chatResponseMetadata")
+                            .filter(ChatResponseMetadata.class::isInstance)
+                            .map(m -> ((ChatResponseMetadata) m).<String>get(SearchEvent.KEY))
+                            .ifPresent(json -> searchSink.accept(SearchEvent.parse(json)));
                 }
                 last = output;
                 if (yield.cancelRequested()) {
@@ -576,7 +586,7 @@ public class ChatTurnRunner {
         messages.addAll(history);
         long startedAt = System.currentTimeMillis();
         try {
-            ChatOptions options = ResponsesChatModel.withCallTimeout(
+            ChatOptions options = SseChatModel.withCallTimeout(
                     ToolChoice.apply(ToolChoice.withTools(model, routerTools(lang)), ToolChoice.REQUIRED),
                     ROUTER_TIMEOUT);
             ChatResponse response = model.call(new Prompt(messages, options));

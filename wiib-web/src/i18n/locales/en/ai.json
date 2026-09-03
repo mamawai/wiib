@@ -388,7 +388,10 @@
     "generating": "Generating",
     "regen": "Regenerate",
     "regenTitle": "Regenerate this answer",
-    "copyAnswer": "Copy answer"
+    "copyAnswer": "Copy answer",
+    "sources": "Sources",
+    "moreSources": "+{{count}} more",
+    "lessSources": "Show fewer"
   },
   "rail": {
     "title_one": "Process · {{count}} step",
@@ -398,7 +401,12 @@
     "marketAgent": "Market expert",
     "newsAgent": "News expert",
     "deferredNote": "The expert is still gathering data; this answer follows automatically",
-    "hitlResume": "Resuming the deep analysis"
+    "hitlResume": "Resuming the deep analysis",
+    "searching": "Searching: {{query}}",
+    "searchingNoQuery": "Searching…",
+    "searched_one": "Searched {{count}} site",
+    "searched_other": "Searched {{count}} sites",
+    "searchedNone": "Search finished"
   },
   "hitl": {
     "title": "Deep analysis approval",
@@ -527,7 +535,7 @@
     "name": "Name",
     "namePh": "e.g. DeepSeek main / Grok light",
     "protocol": "Protocol",
-    "baseUrl": "Base URL (without the /v1 suffix)",
+    "baseUrl": "Base URL (without the version suffix)",
     "model": "Model name",
     "detect": "Detect",
     "detectTitle": "Pull the model list this endpoint offers (fill in base URL and key first)",
@@ -541,8 +549,9 @@
     "effort": "Reasoning effort",
     "effortPh": "Blank = not sent; try none / low / medium / high / xhigh…",
     "effortHint": "Blank = the parameter is not sent and the model uses its own default; you can also enter any other level it accepts (xhigh, minimal…). Not every model accepts this, and there is no way to check up front — fill it in and hit Test connection.",
-    "webSearch": "Web search (web_search)",
-    "webSearchHint": "Declares the server-side search tool in requests; it only actually searches when the upstream supports it (OpenAI and xAI do; relays depend on their backend). Only the workbench chat's final answer uses it — the trader and the data experts are unaffected. Searches count toward upstream usage.",
+    "webSearch": "Web search",
+    "webSearchHint": "Declares this protocol's server-side search tool in requests; it only searches when the upstream supports it and falls back to no search automatically when it doesn't. Only the workbench chat's final answer uses it — the trader and the data experts are unaffected. Searches count toward upstream usage.",
+    "webSearchOpenAiHint": "The openai protocol has no standard server-side search; pick responses / anthropic / gemini for web search",
     "test": "Test connection",
     "testTitle": "Send a real request with the current settings to confirm the endpoint and model work",
     "testOk": "Connection OK",

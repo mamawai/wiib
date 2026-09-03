@@ -34,7 +34,7 @@ public final class LlmErrorMessages {
 
     /**
      * 401/403 形态：{@link #classify} 的第一分支单独暴露，唤醒回路据它"key 失效立即暂停"——
-     * 按异常本身判，不按成文后的话判（两协议的 401 原文各不同：openai 路
+     * 按异常本身判，不按成文后的话判（各协议的 401 原文各不同：openai 路
      * {@code UnauthorizedException: 401: Invalid API key}，responses 路 {@code Responses API HTTP 401}）。
      */
     public static boolean unauthorized(Throwable t) {

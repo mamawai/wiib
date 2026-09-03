@@ -125,7 +125,7 @@ class ChatWorkbenchDeferredTest {
         doAnswer(inv -> {
             ((Consumer<String>) inv.getArgument(5)).accept("补上的答案");
             return ChatTurnRunner.TurnResult.COMPLETED;
-        }).when(turnRunner).run(any(), anyLong(), any(), any(), any(), any(), any(), any(), any());
+        }).when(turnRunner).run(any(), anyLong(), any(), any(), any(), any(), any(), any(), any(), any());
         ChatTurnStreamer streamer = streamer();
         RecordingEmitter emitter = new RecordingEmitter();
 
@@ -140,13 +140,13 @@ class ChatWorkbenchDeferredTest {
         assertThat(answerFrames.get(1)).contains("补上的答案");
         verify(history, never()).append(any(), anyLong(), eq("user"), any());
         ArgumentCaptor<String> saved = ArgumentCaptor.captor();
-        verify(history).append(eq(SESSION), eq(1L), eq("assistant"), saved.capture(), any());
+        verify(history).append(eq(SESSION), eq(1L), eq("assistant"), saved.capture(), any(), any());
         assertThat(saved.getValue())
                 .startsWith(ChatTestEndpoints.PROMPTS.get(AgentLang.ZH, "chat.deferred.prefix"))
                 .isEqualTo(header + "\n\n补上的答案");
         // 补答指令进的是模型侧消息，不带提问标记（它不是重新生成要定位的提问）
         ArgumentCaptor<String> enriched = ArgumentCaptor.captor();
-        verify(turnRunner).run(any(), anyLong(), eq(SESSION), enriched.capture(), any(), any(), any(), any(),
+        verify(turnRunner).run(any(), anyLong(), eq(SESSION), enriched.capture(), any(), any(), any(), any(), any(),
                 argThat(b -> b != null && b.names().equals(List.of("market_agent"))));
         assertThat(enriched.getValue())
                 .startsWith(ChatTestEndpoints.PROMPTS.get(AgentLang.ZH, "chat.turn.timePrefix"))
@@ -162,7 +162,7 @@ class ChatWorkbenchDeferredTest {
     @Test
     void 补答轮被让位时不推标头且重新排队() {
         ChatTurnRunner.ExpertBatch batch = doneBatch();
-        when(turnRunner.run(any(), anyLong(), any(), any(), any(), any(), any(), any(), any()))
+        when(turnRunner.run(any(), anyLong(), any(), any(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(new ChatTurnRunner.TurnResult(batch, false));
         ChatTurnStreamer streamer = streamer();
         RecordingEmitter emitter = new RecordingEmitter();
@@ -173,7 +173,7 @@ class ChatWorkbenchDeferredTest {
         assertThat(emitter.raw).noneMatch(s -> s.contains("\"role\":\"answer\""));
         assertThat(emitter.raw).filteredOn(s -> s.contains("\"deferred\":true")).singleElement().asString()
                 .contains("\"question\":\"看看行情\"").contains("\"pending\":true");
-        verify(history, never()).append(any(), anyLong(), any(), any(), any());
+        verify(history, never()).append(any(), anyLong(), any(), any(), any(), any());
         ChatYieldCoordinator.DeferredWork requeued = coordinator.takeDeferred(SESSION).orElseThrow();
         assertThat(requeued.question()).isEqualTo("看看行情");
         assertThat(requeued.batch()).isSameAs(batch);
@@ -183,7 +183,7 @@ class ChatWorkbenchDeferredTest {
     @Test
     void 名额到手后才出队() {
         coordinator.registerDeferred(1L, SESSION, "看看行情", doneBatch());
-        when(turnRunner.run(any(), anyLong(), any(), any(), any(), any(), any(), any(), any()))
+        when(turnRunner.run(any(), anyLong(), any(), any(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(ChatTurnRunner.TurnResult.COMPLETED);
         ChatWorkbenchController controller = controller();
 

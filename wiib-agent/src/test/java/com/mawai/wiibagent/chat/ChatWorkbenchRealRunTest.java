@@ -73,7 +73,7 @@ class ChatWorkbenchRealRunTest {
 
         // 纯新闻问题复刻实测暴露过的病：summarizer 拿到专家清单后用自己的搜索重写一遍
         chatTurnRunner.run(leaves, ADMIN_USER_ID, sessionId,
-                "最近有什么重要的加密货币新闻？", null, answer::append, events::add,
+                "最近有什么重要的加密货币新闻？", null, answer::append, events::add, s -> { },
                 ChatTurnRunner.TurnYield.NONE, null);
 
         for (ChatTurnRunner.ExpertProgress e : events) {
@@ -119,7 +119,7 @@ class ChatWorkbenchRealRunTest {
         StringBuilder answer = new StringBuilder();
 
         chatTurnRunner.run(leaves, ADMIN_USER_ID, sessionId,
-                "我的 AI 交易员最近表现如何？", null, answer::append, events::add,
+                "我的 AI 交易员最近表现如何？", null, answer::append, events::add, s -> { },
                 ChatTurnRunner.TurnYield.NONE, null);
 
         for (ChatTurnRunner.ExpertProgress e : events) {

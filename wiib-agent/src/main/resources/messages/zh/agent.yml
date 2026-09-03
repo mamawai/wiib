@@ -16,7 +16,7 @@ agent:
     baseUrlRequired: baseUrl不能为空
     modelRequired: model不能为空
     protocolRequired: apiProtocol不能为空
-    protocolInvalid: 协议仅支持 openai / responses
+    protocolInvalid: 协议仅支持 openai / responses / anthropic / gemini
     effortTooLong: "思考档位最长 {{max}} 字符，留空=不传"
     apiKeyRequired: apiKey不能为空
     connectFailed: "模型连通性测试失败：{{reason}}"
@@ -35,7 +35,7 @@ agent:
     nameRequired: 名称不能为空
     modelRequired: model不能为空
     effortTooLong: 思考档位最长 {{max}} 字符，留空=不传
-    protocolUnsupported: 协议仅支持 openai / responses
+    protocolUnsupported: 协议仅支持 openai / responses / anthropic / gemini
     configNotFound: 配置不存在
     configInUse: 该LLM配置正被功能位引用，无法删除
     savedButRefreshFailed: 配置已保存，但AI运行时刷新失败（详见服务日志），当前沿用变更前模型运行

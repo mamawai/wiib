@@ -4,6 +4,7 @@ import com.mawai.wiibcommon.entity.UserLlmEndpoint;
 import com.mawai.wiibagent.llm.ByokModelBuilder;
 import com.mawai.wiibagent.llm.ChatEndpoints;
 import com.mawai.wiibagent.llm.ResponsesChatModel;
+import com.mawai.wiibagent.llm.SseChatModel;
 import com.mawai.wiibagent.trader.ApiKeyCrypto;
 import io.micrometer.observation.ObservationRegistry;
 import org.junit.jupiter.api.Test;
@@ -111,8 +112,8 @@ class ChatModelFactoryTest {
     }
 
     /**
-     * 读出模型上真实生效的档位。openai 那侧走 options；responses 那侧只能反射——
-     * {@code ResponsesChatModel.getOptions()} 故意不带这个字段（它是请求体里的 reasoning.effort，
+     * 读出模型上真实生效的档位。openai 那侧走 options；自研协议那侧只能反射——
+     * {@code SseChatModel.getOptions()} 故意不带这个字段（它是请求体里的思考档位，
      * 不是 ChatOptions 的东西），而 agent/llm 是只读地盘，不能为了测试给它加 getter。
      * 字段改名的话这里当场 NoSuchFieldException，不会静默变绿。
      */
@@ -121,11 +122,11 @@ class ChatModelFactoryTest {
             return openAi.getOptions().getReasoningEffort();
         }
         try {
-            Field field = ResponsesChatModel.class.getDeclaredField("reasoningEffort");
+            Field field = SseChatModel.class.getDeclaredField("reasoningEffort");
             field.setAccessible(true);
             return (String) field.get(model);
         } catch (ReflectiveOperationException e) {
-            throw new IllegalStateException("读不到 ResponsesChatModel.reasoningEffort", e);
+            throw new IllegalStateException("读不到 SseChatModel.reasoningEffort", e);
         }
     }
 

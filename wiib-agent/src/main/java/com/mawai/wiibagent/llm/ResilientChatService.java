@@ -32,7 +32,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * <p>
  * 韧性分层（两条路径职责不同，别再往回加）：
  * <ul>
- *   <li><b>阻塞 execute</b>：不重试。重试归模型层——ResponsesChatModel 自带退避、
+ *   <li><b>阻塞 execute</b>：不重试。重试归模型层——SseChatModel 自带退避、
  *       OpenAI 走 SDK 的 maxRetries；这里再来一轮就是 3×3=9 次，纯放大尾延迟。
  *       唯一豁免：{@link OpenAIInvalidDataException}（响应体读到一半被掐，HTTP/2 stream reset 等）
  *       是 SDK 重试的盲区——maxRetries 只管请求层（连接失败/429/5xx），读响应失败它不管，
@@ -44,6 +44,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * </ul>
  * 两条路径共有的一层是 <b>tool_choice 降级</b>（{@link #toolChoiceRejected}）：上游拒收强制时
  * 去掉强制重发。它不是重试——换的是请求本身，原样再发多少次都一样。
+ * 流式路径还有一层同款的<b>搜索降级</b>（{@link #searchRejected}）：上游拒收服务端搜索工具时去掉许可重发
+ * （只有 summarizer 捎许可且它是流式的，阻塞路径用不上）。
  * <p>
  * 不做兜底模型：BYOK 只有用户自己那一个端点，切"同端点另一个模型"没意义（端点挂了两个一起挂）。
  */
@@ -82,7 +84,7 @@ public class ResilientChatService implements ReactAgent.ChatService {
     }
 
     /**
-     * 服务端搜索许可盖进 options 的 toolContext（{@link ResponsesChatModel#WEB_SEARCH_KEY}）。
+     * 服务端搜索许可盖进 options 的 toolContext（{@link SseChatModel#WEB_SEARCH_KEY}）。
      * 与首轮强制不同，它对本 agent 的每次调用都生效——联网补充不限于首轮，落在底稿上而非逐次现算。
      * 没挂 function 工具时（base=null）也要从模型 options 派生一份来捎：许可不许静默丢。
      */
@@ -93,7 +95,7 @@ public class ResilientChatService implements ReactAgent.ChatService {
         }
         Map<String, Object> context = tool.getToolContext() == null
                 ? new HashMap<>() : new HashMap<>(tool.getToolContext());
-        context.put(ResponsesChatModel.WEB_SEARCH_KEY, true);
+        context.put(SseChatModel.WEB_SEARCH_KEY, true);
         return tool.mutate().toolContext(context).build();
     }
 
@@ -142,12 +144,38 @@ public class ResilientChatService implements ReactAgent.ChatService {
                         log.warn("上游拒收 tool_choice 强制，本次降级为不强制重发: {}", e.toString());
                         return primaryModel.stream(promptOf(primaryModel, withSystem, chatOptions));
                     }
+                    // 搜索工具被拒同理：去掉许可重发一次，这一轮就不搜
+                    if (searchRejected(e, used)) {
+                        log.warn("上游拒收服务端搜索工具，本次降级为不搜重发: {}", e.toString());
+                        return primaryModel.stream(promptOf(primaryModel, withSystem, withoutWebSearch(used)));
+                    }
                     return Flux.error(e);
                 });
     }
 
     /**
-     * 阻塞路径不重试——重试是模型层的职责（ResponsesChatModel 自带退避、
+     * 上游是否拒了本次声明的服务端搜索工具（老模型不认、中转站不支持、搜索与 function 工具不能同请求…）。
+     * 判据：本次 options 捎了搜索许可 ∧ 报错文案提到 search——各家措辞不一（web_search / google_search /
+     * "all search tools"），只认 search 一个词，误判的代价只是多发一次请求。撞了才退、不缓存、不探测。
+     */
+    private static boolean searchRejected(Throwable e, ChatOptions used) {
+        return carriesWebSearch(used) && e.getMessage() != null
+                && e.getMessage().toLowerCase().contains("search");
+    }
+
+    private static boolean carriesWebSearch(ChatOptions options) {
+        return options instanceof ToolCallingChatOptions tool && tool.getToolContext() != null
+                && Boolean.TRUE.equals(tool.getToolContext().get(SseChatModel.WEB_SEARCH_KEY));
+    }
+
+    /** 撤销搜索许可（写成 false：builder 的 toolContext 是合并不是替换，删不掉键），工具与其余上下文照旧 */
+    private static ChatOptions withoutWebSearch(ChatOptions options) {
+        ToolCallingChatOptions tool = (ToolCallingChatOptions) options;
+        return tool.mutate().toolContext(Map.of(SseChatModel.WEB_SEARCH_KEY, false)).build();
+    }
+
+    /**
+     * 阻塞路径不重试——重试是模型层的职责（SseChatModel 自带退避、
      * OpenAI 走 SDK 的 maxRetries）。这里再来一轮会叠乘成 3×3=9 次，纯粹放大尾延迟。
      * 流式路径相反：模型层不重试，重试全在上面的 streamingExecute 里。
      */
@@ -189,8 +217,8 @@ public class ResilientChatService implements ReactAgent.ChatService {
      * <ul>
      *   <li>{@code used != chatOptions}：这次真加了强制（{@link #optionsFor} 加过料才是新对象），
      *       没加过强制的失败退无可退</li>
-     *   <li>报错文案里有 {@code tool_choice}：不按异常类型判——两协议抛的类型不同
-     *       （openai 路 BadRequestException / responses 路 NonTransientAiException），
+     *   <li>报错文案里有 {@code tool_choice}：不按异常类型判——各协议抛的类型不同
+     *       （openai 路 BadRequestException / 自研协议 NonTransientAiException），
      *       按类型判会漏。误判的代价只是多发一次请求</li>
      * </ul>
      * 不做能力探测表、不缓存端点支不支持：撞了才退，一次一次算。
@@ -234,7 +262,7 @@ public class ResilientChatService implements ReactAgent.ChatService {
 
         /**
          * 授权本 agent 使用服务端联网搜索（每次调用都生效）。只给 chat 的 summarizer 开——
-         * 真正搜不搜还要过端点那道闸（{@link ResponsesChatModel} 的 webSearch 构造参数），双闸门缺一不可。
+         * 真正搜不搜还要过端点那道闸（{@link SseChatModel} 的 webSearch 构造参数），双闸门缺一不可。
          */
         public Builder webSearch(boolean webSearch) {
             this.webSearch = webSearch;

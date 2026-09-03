@@ -123,7 +123,7 @@ class ChatCancelTest {
         AtomicBoolean cancelled = new AtomicBoolean(true);   // 一进循环就已经点了停
 
         ChatTurnRunner.TurnResult result = new ChatTurnRunner(contextStore, registry, ChatTestEndpoints.PROMPTS, ChatTestEndpoints.TOOLS)
-                .run(leaves(), 1L, SESSION, "看看行情", null, answer::append, e -> { }, yieldWith(cancelled), null);
+                .run(leaves(), 1L, SESSION, "看看行情", null, answer::append, e -> { }, s -> { }, yieldWith(cancelled), null);
 
         assertThat(result.cancelled()).isTrue();
         // 中断不是让位：不欠补答，没有在途批次要交给协调器
@@ -148,7 +148,7 @@ class ChatCancelTest {
                 .run(leaves(), 1L, SESSION, "看看行情", null, chunk -> {
                     answer.append(chunk);
                     cancelled.set(true);
-                }, e -> { }, yieldWith(cancelled), null);
+                }, e -> { }, s -> { }, yieldWith(cancelled), null);
 
         assertThat(result.cancelled()).isTrue();
         assertThat(answer.toString()).isEqualTo("前半截");
@@ -176,7 +176,7 @@ class ChatCancelTest {
         AtomicBoolean yielded = new AtomicBoolean(true);
 
         ChatTurnRunner.TurnResult result = new ChatTurnRunner(contextStore, registry, ChatTestEndpoints.PROMPTS, ChatTestEndpoints.TOOLS)
-                .run(leaves(), 1L, SESSION, "看看行情", null, answer::append, e -> { },
+                .run(leaves(), 1L, SESSION, "看看行情", null, answer::append, e -> { }, s -> { },
                         yieldWith(cancelled, yielded), null);
 
         assertThat(result.cancelled()).isTrue();

@@ -3,6 +3,7 @@ package com.mawai.wiibagent.chat;
 import com.mawai.wiibcommon.enums.AgentLang;
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONObject;
+import com.mawai.wiibagent.llm.SearchEvent;
 import com.mawai.wiibagent.llm.SseChannel;
 import com.mawai.wiibagent.llm.UsageTrackingChatModel;
 import org.junit.jupiter.api.Test;
@@ -100,14 +101,20 @@ class ChatTurnMetaTest {
      * @param burn runner 替身在这一轮里"烧模型"的动作：调几次就是几次模型调用
      */
     private static Harness harness(Runnable burn) {
+        return harness(burn, sink -> { });
+    }
+
+    /** @param search 这一轮里模型报的搜索过程：喂给 runner 的 searchSink */
+    private static Harness harness(Runnable burn, Consumer<Consumer<SearchEvent>> search) {
         ChatHistoryService history = mock(ChatHistoryService.class);
         ChatTurnRunner turnRunner = mock(ChatTurnRunner.class);
         doAnswer((Answer<ChatTurnRunner.TurnResult>) inv -> {
             burn.run();
+            search.accept(inv.getArgument(7));            // progressSink 之后是 searchSink
             Consumer<String> sink = inv.getArgument(5);   // leaves/userId/session/message/intent 之后才是答案 sink
             sink.accept("答案正文");
             return ChatTurnRunner.TurnResult.COMPLETED;
-        }).when(turnRunner).run(any(), anyLong(), any(), any(), any(), any(), any(), any(), any());
+        }).when(turnRunner).run(any(), anyLong(), any(), any(), any(), any(), any(), any(), any(), any());
 
         ChatYieldCoordinator coordinator = new ChatYieldCoordinator();
         ChatTurnStreamer streamer = new ChatTurnStreamer(turnRunner, history, mock(WorkbenchRunRegistry.class),
@@ -119,7 +126,7 @@ class ChatTurnMetaTest {
     private static ChatHistoryService.TurnMeta capturedMeta(ChatHistoryService history) {
         ArgumentCaptor<ChatHistoryService.TurnMeta> captor =
                 ArgumentCaptor.forClass(ChatHistoryService.TurnMeta.class);
-        verify(history).append(eq(SESSION), eq(1L), eq("assistant"), eq("答案正文"), captor.capture());
+        verify(history).append(eq(SESSION), eq(1L), eq("assistant"), eq("答案正文"), captor.capture(), any());
         return captor.getValue();
     }
 
@@ -153,6 +160,34 @@ class ChatTurnMetaTest {
         assertThat(done.getJSONObject("meta").getString("modelLabel")).isEqualTo(LABEL);
     }
 
+    /** 搜索过程逐条外发；来源按 url 去重后随 done 下发并落库——刷新后答案底部的来源还在 */
+    @Test
+    void 搜索事件外发且来源随done与落库() {
+        UsageTrackingChatModel shared = new UsageTrackingChatModel(modelReporting(1, 1, 2));
+        Harness h = harness(() -> { }, sink -> {
+            sink.accept(SearchEvent.searching("BTC news"));
+            sink.accept(SearchEvent.searched("BTC news", List.of(
+                    new SearchEvent.Source("https://a.com/1", "A1"), new SearchEvent.Source("https://b.com/2", "B2"))));
+            sink.accept(SearchEvent.cited(List.of(new SearchEvent.Source("https://a.com/1", "A1"))));
+        });
+
+        RecordingEmitter emitter = new RecordingEmitter();
+        h.streamer().run(new SseChannel(emitter), 1L, SESSION, "BTC 新闻",
+                leaves(shared, shared), h.coordinator().openTurn(1L), null, null, null);
+
+        JSONObject search = emitter.event("search");
+        assertThat(search).isNotNull();
+        assertThat(search.getString("phase")).isEqualTo(SearchEvent.SEARCHING);
+        assertThat(search.getString("query")).isEqualTo("BTC news");
+        JSONObject done = emitter.event("done");
+        assertThat(done.getJSONArray("sources")).extracting(s -> ((JSONObject) s).getString("url"))
+                .containsExactly("https://a.com/1", "https://b.com/2");
+        ArgumentCaptor<List<SearchEvent.Source>> sources = ArgumentCaptor.captor();
+        verify(h.history()).append(eq(SESSION), eq(1L), eq("assistant"), eq("答案正文"), any(), sources.capture());
+        assertThat(sources.getValue()).extracting(SearchEvent.Source::url)
+                .containsExactly("https://a.com/1", "https://b.com/2");
+    }
+
     @Test
     void 未绑轻模型时深浅是同一份账本不能算两遍() {
         UsageTrackingChatModel shared = new UsageTrackingChatModel(modelReporting(100, 20, 120));
@@ -184,7 +219,7 @@ class ChatTurnMetaTest {
         ArgumentCaptor<ChatHistoryService.TurnMeta> captor =
                 ArgumentCaptor.forClass(ChatHistoryService.TurnMeta.class);
         verify(h.history(), org.mockito.Mockito.times(2))
-                .append(eq(SESSION), eq(1L), eq("assistant"), eq("答案正文"), captor.capture());
+                .append(eq(SESSION), eq(1L), eq("assistant"), eq("答案正文"), captor.capture(), any());
         // 两轮各烧一次浅一次深；没清零的话第二轮会是 310
         assertThat(captor.getAllValues().get(0).totalTokens()).isEqualTo(155L);
         assertThat(captor.getAllValues().get(1).totalTokens()).isEqualTo(155L);

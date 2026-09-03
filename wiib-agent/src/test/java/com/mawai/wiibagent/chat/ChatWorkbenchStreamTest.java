@@ -56,7 +56,7 @@ class ChatWorkbenchStreamTest {
             sink.accept("前半段");
             sink.accept("后半段");
             return ChatTurnRunner.TurnResult.COMPLETED;
-        }).when(turnRunner).run(any(), anyLong(), any(), any(), any(), any(), any(), any(), any());
+        }).when(turnRunner).run(any(), anyLong(), any(), any(), any(), any(), any(), any(), any(), any());
         ChatYieldCoordinator coordinator = new ChatYieldCoordinator();
         ChatTurnStreamer streamer = new ChatTurnStreamer(turnRunner, historyService,
                 mock(WorkbenchRunRegistry.class), coordinator, new ApprovalRegistry(), ChatTestEndpoints.PROMPTS);
@@ -73,7 +73,7 @@ class ChatWorkbenchStreamTest {
         streamer.run(channel, 1L, SESSION, "看看行情", leaves, coordinator.openTurn(1L), null, null, null);
 
         // 答案完整进历史——这是断连用户唯一还拿得到东西的途径
-        verify(historyService).append(eq(SESSION), eq(1L), eq("assistant"), eq("前半段后半段"), any());
+        verify(historyService).append(eq(SESSION), eq(1L), eq("assistant"), eq("前半段后半段"), any(), any());
         // 但一帧都没往断掉的通道里写
         assertThat(emitter.raw).isEmpty();
     }

@@ -118,7 +118,7 @@ class ChatYieldCoordinatorTest {
         Thread thread = new Thread(() -> {
             try {
                 ChatTurnRunner.TurnResult result = runner.run(leaves, 1L, SESSION, "看看行情", null,
-                        chunk -> { }, event -> { }, turn, null);
+                        chunk -> { }, event -> { }, s -> { }, turn, null);
                 resultRef.set(result);
                 if (result.yielded()) {
                     coordinator.registerDeferred(1L, SESSION, "看看行情", result.deferredExperts());
@@ -195,7 +195,7 @@ class ChatYieldCoordinatorTest {
         ChatYieldCoordinator.TurnHandle deferredTurn = coordinator.openTurn(1L);
         StringBuilder answer = new StringBuilder();
         ChatTurnRunner.TurnResult deferredResult = runner.run(leaves, 1L, SESSION, "补答指令", null,
-                answer::append, event -> { }, deferredTurn, work.batch());
+                answer::append, event -> { }, s -> { }, deferredTurn, work.batch());
         gate.release(1L);
         coordinator.closeTurn(deferredTurn);
 

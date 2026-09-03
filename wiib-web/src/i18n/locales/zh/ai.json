@@ -384,7 +384,10 @@
     "generating": "生成中",
     "regen": "重新生成",
     "regenTitle": "重新生成这条回答",
-    "copyAnswer": "复制回答"
+    "copyAnswer": "复制回答",
+    "sources": "来源",
+    "moreSources": "+{{count}}",
+    "lessSources": "收起"
   },
   "rail": {
     "title_other": "工作过程 · {{count}} 步",
@@ -393,7 +396,11 @@
     "marketAgent": "市场专家",
     "newsAgent": "新闻专家",
     "deferredNote": "专家仍在取数，这个问题的答案稍后自动补上",
-    "hitlResume": "正在恢复深度研判的执行"
+    "hitlResume": "正在恢复深度研判的执行",
+    "searching": "正在搜索：{{query}}",
+    "searchingNoQuery": "正在搜索…",
+    "searched_other": "搜索了 {{count}} 个网站",
+    "searchedNone": "搜索完成"
   },
   "hitl": {
     "title": "深度研判确认",
@@ -512,7 +519,7 @@
     "name": "名称",
     "namePh": "例：DeepSeek 主力 / Grok 轻量",
     "protocol": "协议",
-    "baseUrl": "Base URL（不含 /v1 后缀）",
+    "baseUrl": "Base URL（不含版本后缀）",
     "model": "模型名",
     "detect": "检测",
     "detectTitle": "拉取该端点可用的模型清单（需先填 Base URL 和 Key）",
@@ -525,8 +532,9 @@
     "effort": "思考档位",
     "effortPh": "留空=不传；可填 none / low / medium / high / xhigh…",
     "effortHint": "留空＝不传这个参数，用模型自己的默认行为；也可以填模型认的其他档位（如 xhigh、minimal）。不是所有模型都认这个参数——认不认没法提前查出来，填完点「测试连通性」试一下最稳。",
-    "webSearch": "联网搜索（web_search）",
-    "webSearchHint": "在请求里声明服务端搜索工具，上游支持才会真搜（OpenAI 官方与 xAI 支持；中转站看后端）。只有研判对话的最终回答会用它，交易员与专家取数不受影响。搜索会计入上游用量。",
+    "webSearch": "联网搜索",
+    "webSearchHint": "在请求里声明该协议的服务端搜索工具，上游支持才会真搜，不支持会自动退回不搜。只有研判对话的最终回答会用它，交易员与专家取数不受影响。搜索会计入上游用量。",
+    "webSearchOpenAiHint": "openai 协议没有标准的服务端搜索；要联网搜索请选 responses / anthropic / gemini",
     "test": "测试连通性",
     "testTitle": "用当前填的配置真发一次请求，确认端点和模型可用",
     "testOk": "连接正常",

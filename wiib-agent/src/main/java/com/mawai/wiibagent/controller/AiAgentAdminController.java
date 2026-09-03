@@ -69,9 +69,8 @@ public class AiAgentAdminController {
         if (effort != null && effort.length() > MAX_EFFORT_LEN) {
             return Result.fail(messages.get("agent.admin.effortTooLong", Map.of("max", MAX_EFFORT_LEN)));
         }
-        // 协议留空=openai（存量兼容）；responses 需上游支持 /v1/responses（CPA/OpenAI官方/xAI）
-        String protocol = req.getApiProtocol() == null || req.getApiProtocol().isBlank()
-                ? AiProtocols.OPENAI : req.getApiProtocol().trim().toLowerCase();
+        // 协议留空=openai（存量兼容）
+        String protocol = AiProtocols.normalize(req.getApiProtocol());
         if (!AiProtocols.isValid(protocol)) {
             return Result.fail(messages.get("agent.admin.protocolUnsupported"));
         }

@@ -55,7 +55,7 @@ class ChatRegenerateTest {
     /** kind 按正文现认，与 ChatHistoryService.messages() 同一条路径 */
     private static ChatHistoryService.ChatMessage msg(long id, String role, String content) {
         return new ChatHistoryService.ChatMessage(id, role, content, 1_700_000_000_000L, null,
-                ChatRowKind.of(role, content, ChatTestEndpoints.PROMPTS));
+                ChatRowKind.of(role, content, ChatTestEndpoints.PROMPTS), null);
     }
 
     /** 上下文里一条轮起始提问，形状与 run() 拼的 enriched 一致（标记按语言取词表，同生产） */
@@ -78,7 +78,7 @@ class ChatRegenerateTest {
         ChatHistoryService history = mock(ChatHistoryService.class);
         when(history.messages(SESSION)).thenReturn(stored);
         // 默认落库成功：删旧答案的前提就是这个返回值，桩成默认的 false 整条重生成都不会走到删
-        when(history.append(any(), anyLong(), any(), any(), any())).thenReturn(true);
+        when(history.append(any(), anyLong(), any(), any(), any(), any())).thenReturn(true);
         ChatContextStore contextStore = mock(ChatContextStore.class);
         when(contextStore.load(SESSION)).thenReturn(context);
 
@@ -87,7 +87,7 @@ class ChatRegenerateTest {
             Consumer<String> sink = inv.getArgument(5);   // leaves/userId/session/message/intent 之后才是答案 sink
             sink.accept("新答案");
             return ChatTurnRunner.TurnResult.COMPLETED;
-        }).when(turnRunner).run(any(), anyLong(), any(), any(), any(), any(), any(), any(), any());
+        }).when(turnRunner).run(any(), anyLong(), any(), any(), any(), any(), any(), any(), any(), any());
 
         LlmEndpointService endpointService = mock(LlmEndpointService.class);
         when(endpointService.chatEndpoints(1L)).thenReturn(ChatTestEndpoints.eps(1L, "gpt-5"));
@@ -147,13 +147,13 @@ class ChatRegenerateTest {
         // 重跑喂给 runner 的是库里那条原提问
         ArgumentCaptor<String> enriched = ArgumentCaptor.captor();
         verify(h.turnRunner(), timeout(5_000))
-                .run(any(), anyLong(), eq(SESSION), enriched.capture(), any(), any(), any(), any(), any());
+                .run(any(), anyLong(), eq(SESSION), enriched.capture(), any(), any(), any(), any(), any(), any());
         assertThat(enriched.getValue()).endsWith(
                 ChatTestEndpoints.PROMPTS.get(AgentLang.ZH, "chat.turn.questionPrefix") + "BTC 怎么样");
         // 提问行已经在库里，再落一遍历史里就成了连问两遍
         verify(h.history(), never()).append(any(), anyLong(), eq("user"), any());
         // 新答案落库之后旧答案才被顶掉；提问行一直留着（前端气泡不闪、时间戳不变）
-        verify(h.history(), timeout(5_000)).append(eq(SESSION), eq(1L), eq("assistant"), eq("新答案"), any());
+        verify(h.history(), timeout(5_000)).append(eq(SESSION), eq(1L), eq("assistant"), eq("新答案"), any(), any());
         verify(h.history(), timeout(5_000)).deleteMessage(2L);
         verify(h.history(), never()).deleteMessage(1L);
     }
@@ -181,11 +181,11 @@ class ChatRegenerateTest {
         Harness h = harness(
                 List.of(msg(1, "user", "BTC 怎么样"), msg(2, "assistant", "旧答案")),
                 List.of(turnStart("BTC 怎么样"), new AssistantMessage("旧答案")));
-        when(h.history().append(any(), anyLong(), eq("assistant"), any(), any())).thenReturn(false);
+        when(h.history().append(any(), anyLong(), eq("assistant"), any(), any(), any())).thenReturn(false);
 
         regenerate(h);
 
-        verify(h.history(), timeout(5_000)).append(eq(SESSION), eq(1L), eq("assistant"), eq("新答案"), any());
+        verify(h.history(), timeout(5_000)).append(eq(SESSION), eq(1L), eq("assistant"), eq("新答案"), any(), any());
         verify(h.history(), never()).deleteMessage(anyLong());
     }
 
@@ -199,11 +199,11 @@ class ChatRegenerateTest {
                 List.of(msg(1, "user", "BTC 怎么样"), msg(2, "assistant", "旧答案")),
                 List.of(turnStart("BTC 怎么样"), new AssistantMessage("旧答案")));
         doReturn(ChatTurnRunner.TurnResult.CANCELLED)
-                .when(h.turnRunner()).run(any(), anyLong(), any(), any(), any(), any(), any(), any(), any());
+                .when(h.turnRunner()).run(any(), anyLong(), any(), any(), any(), any(), any(), any(), any(), any());
 
         regenerate(h);
 
-        verify(h.history(), timeout(5_000)).append(eq(SESSION), eq(1L), eq("assistant"), any(), any());
+        verify(h.history(), timeout(5_000)).append(eq(SESSION), eq(1L), eq("assistant"), any(), any(), any());
         verify(h.history(), never()).deleteMessage(anyLong());
     }
 
@@ -213,13 +213,13 @@ class ChatRegenerateTest {
                 List.of(msg(1, "user", "BTC 怎么样"), msg(2, "assistant", "旧答案")),
                 List.of(turnStart("BTC 怎么样"), new AssistantMessage("旧答案")));
         doThrow(new RuntimeException("上游挂了"))
-                .when(h.turnRunner()).run(any(), anyLong(), any(), any(), any(), any(), any(), any(), any());
+                .when(h.turnRunner()).run(any(), anyLong(), any(), any(), any(), any(), any(), any(), any(), any());
 
         regenerate(h);
 
         // 这一轮不落 assistant 行；旧答案要是已经删了，用户点一次重新生成就把好答案弄丢了，还没法再点
         verify(h.history(), after(500).never()).deleteMessage(anyLong());
-        verify(h.history(), never()).append(any(), anyLong(), eq("assistant"), any(), any());
+        verify(h.history(), never()).append(any(), anyLong(), eq("assistant"), any(), any(), any());
     }
 
     @Test

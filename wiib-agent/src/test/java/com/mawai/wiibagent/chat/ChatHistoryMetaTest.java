@@ -2,6 +2,7 @@ package com.mawai.wiibagent.chat;
 
 import com.mawai.wiibcommon.entity.WorkbenchChatMessage;
 import com.mawai.wiibcommon.i18n.MessageCatalog;
+import com.mawai.wiibagent.llm.SearchEvent;
 import com.mawai.wiibagent.mapper.WorkbenchChatMessageMapper;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -42,7 +43,8 @@ class ChatHistoryMetaTest {
         ChatHistoryService service = new ChatHistoryService(mapper, ChatTestEndpoints.PROMPTS, new MessageCatalog());
 
         service.append(SESSION, 1L, "assistant", "答案",
-                new ChatHistoryService.TurnMeta("我的端点 · gpt-5", 3, 160L, 30L, 190L, 4200));
+                new ChatHistoryService.TurnMeta("我的端点 · gpt-5", 3, 160L, 30L, 190L, 4200),
+                List.of(new SearchEvent.Source("https://a.com/1", "A1")));
 
         ArgumentCaptor<WorkbenchChatMessage> captor = ArgumentCaptor.forClass(WorkbenchChatMessage.class);
         verify(mapper).insert(captor.capture());
@@ -53,6 +55,8 @@ class ChatHistoryMetaTest {
         assertThat(saved.getCompletionTokens()).isEqualTo(30L);
         assertThat(saved.getTotalTokens()).isEqualTo(190L);
         assertThat(saved.getLatencyMs()).isEqualTo(4200);
+        // 来源单独一列，JSON 数组 [{url,title}]
+        assertThat(saved.getSources()).contains("https://a.com/1").contains("A1");
     }
 
     @Test
@@ -64,6 +68,7 @@ class ChatHistoryMetaTest {
         fresh.setModelCalls(3);
         fresh.setTotalTokens(190L);
         fresh.setLatencyMs(4200);
+        fresh.setSources("[{\"url\":\"https://a.com/1\",\"title\":\"A1\"}]");
 
         WorkbenchChatMessageMapper mapper = mock(WorkbenchChatMessageMapper.class);
         when(mapper.selectList(any())).thenReturn(List.of(user, legacy, fresh));
@@ -78,5 +83,8 @@ class ChatHistoryMetaTest {
         assertThat(messages.get(2).meta().totalTokens()).isEqualTo(190L);
         // 上游没报 usage 的那两项照样是 null，不能被补成 0
         assertThat(messages.get(2).meta().promptTokens()).isNull();
+        // 来源同理：没搜过的行是 null 不是空列表
+        assertThat(messages.get(1).sources()).isNull();
+        assertThat(messages.get(2).sources()).extracting(SearchEvent.Source::url).containsExactly("https://a.com/1");
     }
 }

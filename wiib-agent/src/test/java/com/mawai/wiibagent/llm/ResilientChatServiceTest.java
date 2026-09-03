@@ -15,9 +15,12 @@ import org.springframework.ai.chat.prompt.ChatOptions;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.model.tool.ToolCallingChatOptions;
 import org.springframework.ai.openai.OpenAiChatOptions;
+import org.springframework.ai.retry.NonTransientAiException;
 import org.springframework.ai.retry.TransientAiException;
 import org.springframework.ai.tool.ToolCallback;
+import reactor.core.publisher.Flux;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
@@ -152,7 +155,7 @@ class ResilientChatServiceTest {
                 .model(primary).webSearch(true).asFactory().apply(agentWithOneTool());
 
         ToolCallingChatOptions options = (ToolCallingChatOptions) service.chatOptions().orElseThrow();
-        assertThat(options.getToolContext().get(ResponsesChatModel.WEB_SEARCH_KEY)).isEqualTo(Boolean.TRUE);
+        assertThat(options.getToolContext().get(SseChatModel.WEB_SEARCH_KEY)).isEqualTo(Boolean.TRUE);
     }
 
     @Test
@@ -167,7 +170,7 @@ class ResilientChatServiceTest {
                 .model(primary).webSearch(true).asFactory().apply(agentBuilder);
 
         ToolCallingChatOptions options = (ToolCallingChatOptions) service.chatOptions().orElseThrow();
-        assertThat(options.getToolContext().get(ResponsesChatModel.WEB_SEARCH_KEY)).isEqualTo(Boolean.TRUE);
+        assertThat(options.getToolContext().get(SseChatModel.WEB_SEARCH_KEY)).isEqualTo(Boolean.TRUE);
     }
 
     /**
@@ -185,5 +188,47 @@ class ResilientChatServiceTest {
 
         verify(primary, times(2)).call(any(Prompt.class));
         assertThat(result.getResult().getOutput().getText()).isEqualTo("重试成功");
+    }
+
+    /**
+     * 搜索被拒是配置类失败（老模型 / 中转站不认服务端搜索工具，搜索与 function 工具不能同请求）：
+     * 去掉许可重发一次，这一轮不搜；工具照挂，降级只摘搜索许可。
+     */
+    @Test
+    void 搜索被拒时去掉许可重发一次() {
+        when(primary.getOptions()).thenReturn(ToolCallingChatOptions.builder().build());
+        List<Prompt> prompts = new ArrayList<>();
+        when(primary.stream(any(Prompt.class))).thenAnswer(inv -> {
+            prompts.add(inv.getArgument(0));
+            return prompts.size() == 1
+                    ? Flux.error(new NonTransientAiException(
+                            "Gemini API HTTP 400: Multiple tools are supported only when they are all search tools."))
+                    : Flux.just(responseOf("不搜也答"));
+        });
+        ReactAgent.ChatService service = ResilientChatService.builder()
+                .model(primary).webSearch(true).asFactory().apply(agentWithOneTool());
+
+        List<ChatResponse> out = service.streamingExecute(ASK).collectList().block();
+
+        assertThat(out).hasSize(1);
+        assertThat(prompts).hasSize(2);
+        ToolCallingChatOptions first = (ToolCallingChatOptions) prompts.get(0).getOptions();
+        ToolCallingChatOptions second = (ToolCallingChatOptions) prompts.get(1).getOptions();
+        assertThat(first.getToolContext()).containsEntry(SseChatModel.WEB_SEARCH_KEY, true);
+        assertThat(second.getToolContext()).containsEntry(SseChatModel.WEB_SEARCH_KEY, false);
+        assertThat(second.getToolCallbacks()).hasSize(1);
+    }
+
+    /** 没捎许可的失败退无可退，报错原样透传，不会白发第二次 */
+    @Test
+    void 没捎许可时搜索类报错不降级() {
+        when(primary.getOptions()).thenReturn(ToolCallingChatOptions.builder().build());
+        when(primary.stream(any(Prompt.class))).thenReturn(Flux.error(new NonTransientAiException("400 search")));
+        ReactAgent.ChatService service = ResilientChatService.builder()
+                .model(primary).asFactory().apply(agentWithOneTool());
+
+        assertThatThrownBy(() -> service.streamingExecute(ASK).collectList().block())
+                .isInstanceOf(NonTransientAiException.class);
+        verify(primary, times(1)).stream(any(Prompt.class));
     }
 }

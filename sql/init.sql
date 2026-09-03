@@ -561,7 +561,7 @@ COMMENT ON COLUMN ai_runtime_config.api_key IS 'API Key';
 COMMENT ON COLUMN ai_runtime_config.base_url IS 'OpenAI Compatible Base URL（不含/v1后缀，quant/sim 均自拼 /v1/chat/completions）';
 COMMENT ON COLUMN ai_runtime_config.model IS '该LLM的模型名（功能位切到此配置即用此模型）';
 COMMENT ON COLUMN ai_runtime_config.reasoning_effort IS '思考档位，任意上游认的值（none/low/medium/high/xhigh…），NULL=不传走模型默认；同模型要深浅两档就建两条配置分给不同功能位';
-COMMENT ON COLUMN ai_runtime_config.api_protocol IS '上游协议：openai=/v1/chat/completions（DeepSeek等通用），responses=/v1/responses（CPA/OpenAI官方/xAI，思考模型优先）';
+COMMENT ON COLUMN ai_runtime_config.api_protocol IS '上游协议：openai=/v1/chat/completions，responses=/v1/responses，anthropic=/v1/messages，gemini=/v1beta/models/{model}:streamGenerateContent';
 COMMENT ON COLUMN ai_runtime_config.enabled IS '是否启用';
 
 -- ============================================
@@ -659,8 +659,12 @@ CREATE TABLE IF NOT EXISTS workbench_chat_message (
     completion_tokens BIGINT,
     total_tokens BIGINT,
     latency_ms  INT,
+    -- 这一轮联网搜索的来源 [{url,title}]，只有搜过的 assistant 行有值
+    sources     JSONB,
     created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+-- 旧库补列（新库的 CREATE 里已有），可反复执行
+ALTER TABLE workbench_chat_message ADD COLUMN IF NOT EXISTS sources JSONB;
 
 CREATE INDEX IF NOT EXISTS idx_wb_chat_session ON workbench_chat_message (session_id, id);
 CREATE INDEX IF NOT EXISTS idx_wb_chat_user ON workbench_chat_message (user_id, id DESC);
@@ -668,6 +672,7 @@ COMMENT ON TABLE workbench_chat_message IS '工作台对话历史(展示用):use
 COMMENT ON COLUMN workbench_chat_message.model_label IS '这一轮用的对话主模型:端点名 · 模型名(与LlmEndpointSelect展示口径一致)';
 COMMENT ON COLUMN workbench_chat_message.total_tokens IS '本轮全部模型调用(路由+专家+汇总+压缩+深研判)的token合计;NULL=上游端点没返回usage或本轮账不可信(有别轮的在途专家仍在记账),不是0';
 COMMENT ON COLUMN workbench_chat_message.latency_ms IS '本轮墙钟耗时:从controller接手这一轮起算,不含准入/建叶子/让位握手;比[TurnMetrics]日志多一帧session与user行落库';
+COMMENT ON COLUMN workbench_chat_message.sources IS '这一轮联网搜索搜到/引用的来源 [{url,title}],按url去重;答案底部展示;没搜过或老数据为NULL';
 
 -- ============ workbench_chat_context：工作台会话模型侧上下文（续聊主链；一会话一行整体替换） ============
 -- 替代 langgraph4j PostgresSaver 的 lg4j* 表：那套图每走一步存一行完整快照（一轮 8 行、同一份历史重复存），
@@ -1021,7 +1026,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_user_llm_endpoint_default ON user_llm_endpo
 ALTER TABLE user_llm_endpoint ADD COLUMN IF NOT EXISTS web_search BOOLEAN NOT NULL DEFAULT FALSE;
 COMMENT ON TABLE  user_llm_endpoint IS '用户 BYOK 端点库：一条=协议+URL+key+模型(+思考档位)，一人多条；对话/交易员/复盘教练从中选';
 COMMENT ON COLUMN user_llm_endpoint.reasoning_effort IS '思考档位，任意上游认的值（none/low/medium/high/xhigh…），NULL=不传走模型默认；模型支不支持查不到，由用户自选';
-COMMENT ON COLUMN user_llm_endpoint.web_search IS '服务端联网搜索(web_search)：请求显式声明才搜(opt-in)；仅responses协议有效，端点支不支持由用户自己勾；当前只有对话summarizer用';
+COMMENT ON COLUMN user_llm_endpoint.web_search IS '服务端联网搜索：请求里声明该协议的服务端搜索工具才搜(opt-in)，上游拒收自动退回不搜；responses/anthropic/gemini协议可勾(openai归一false)，端点支不支持由用户自己勾；当前只有对话summarizer用';
 COMMENT ON COLUMN user_llm_endpoint.api_key_enc IS 'AES-256-GCM 密文，密钥来自 WIIB_TRADER_KEY_SECRET';
 COMMENT ON COLUMN user_llm_endpoint.is_default IS '默认端点：没按用途绑定的地方都用它；一人恰一条（首条自动、删默认时最早的顶上）';
 

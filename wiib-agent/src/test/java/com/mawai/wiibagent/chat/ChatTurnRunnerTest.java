@@ -2,6 +2,7 @@ package com.mawai.wiibagent.chat;
 
 import com.mawai.wiibcommon.enums.AgentLang;
 import com.mawai.wiibagent.llm.ChatEndpoints;
+import com.mawai.wiibagent.llm.SearchEvent;
 import com.mawai.wiibagent.analysis.DeepAnalysisService;
 import com.mawai.wiibagent.behavior.BehaviorAnalysisService;
 import com.mawai.wiibagent.toolkit.MarketToolkit;
@@ -12,6 +13,7 @@ import org.mockito.ArgumentCaptor;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.UserMessage;
+import org.springframework.ai.chat.metadata.ChatResponseMetadata;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
@@ -70,6 +72,8 @@ class ChatTurnRunnerTest {
     private final List<Prompt> summarizerPrompts = new CopyOnWriteArrayList<>();
     private final List<Prompt> expertPrompts = new CopyOnWriteArrayList<>();
     private final StringBuilder answer = new StringBuilder();
+    /** summarizer 报的搜索过程 */
+    private final List<SearchEvent> search = new CopyOnWriteArrayList<>();
 
     private static ChatResponse responseOf(AssistantMessage message) {
         return new ChatResponse(List.of(new Generation(message)));
@@ -130,7 +134,7 @@ class ChatTurnRunnerTest {
 
     private void turn(String message, ChatIntent intent) {
         new ChatTurnRunner(contextStore, registry, ChatTestEndpoints.PROMPTS, ChatTestEndpoints.TOOLS)
-                .run(leaves(), 1L, SESSION, message, intent, answer::append, progress::add,
+                .run(leaves(), 1L, SESSION, message, intent, answer::append, progress::add, search::add,
                         ChatTurnRunner.TurnYield.NONE, null);
     }
 
@@ -284,6 +288,30 @@ class ChatTurnRunnerTest {
         verify(traderChatService).overview(1L, AgentLang.ZH);
         // 专家结论进了上下文，汇总者才写得出答案
         assertThat(summarizerInput()).contains("你的 trader 正在运行");
+    }
+
+    /** 模型层把搜索过程挂在帧 metadata 上（空文本帧），runner 逐帧取出交给 searchSink，正文不受影响 */
+    @Test
+    void 帧metadata上的搜索事件交给searchSink() {
+        lightAnswers(() -> route("FINISH"), () -> responseOf(new AssistantMessage("市场结论")),
+                () -> responseOf(new AssistantMessage("新闻结论")));
+        when(deep.stream(any(Prompt.class))).thenReturn(Flux.just(
+                searchFrame(SearchEvent.searching("BTC news")),
+                searchFrame(SearchEvent.searched("BTC news", List.of(new SearchEvent.Source("https://a.com/1", "A1")))),
+                responseOf(new AssistantMessage("这是答案"))));
+
+        turn("BTC 新闻");
+
+        assertThat(search).extracting(SearchEvent::phase)
+                .containsExactly(SearchEvent.SEARCHING, SearchEvent.SEARCHED);
+        assertThat(search.get(1).sources()).extracting(SearchEvent.Source::url).containsExactly("https://a.com/1");
+        assertThat(answer.toString()).isEqualTo("这是答案");
+    }
+
+    /** 与 SseChatModel.searchFrame 同形：空文本帧 + 响应 metadata 上挂事件 JSON */
+    private static ChatResponse searchFrame(SearchEvent event) {
+        return new ChatResponse(List.of(new Generation(new AssistantMessage(""))),
+                ChatResponseMetadata.builder().keyValue(SearchEvent.KEY, event.toJson()).build());
     }
 
     /** 路由失败不该把整轮对话拖死：退化成"不派发直接作答"，用户至少拿得到回复 */
@@ -533,7 +561,7 @@ class ChatTurnRunnerTest {
         when(light.getOptions()).thenReturn(OpenAiChatOptions.builder().model("deepseek-chat").build());
 
         new ChatTurnRunner(contextStore, registry, ChatTestEndpoints.PROMPTS, ChatTestEndpoints.TOOLS)
-                .run(leaves, 1L, SESSION, "BTC 怎么样", null, answer::append, progress::add,
+                .run(leaves, 1L, SESSION, "BTC 怎么样", null, answer::append, progress::add, search::add,
                         ChatTurnRunner.TurnYield.NONE, null);
 
         ArgumentCaptor<Prompt> prompt = ArgumentCaptor.forClass(Prompt.class);
@@ -593,7 +621,7 @@ class ChatTurnRunnerTest {
 
     private ChatTurnRunner.TurnResult deferredTurn(ChatTurnRunner.ExpertBatch batch, ChatTurnRunner.TurnYield yield) {
         return new ChatTurnRunner(contextStore, registry, ChatTestEndpoints.PROMPTS, ChatTestEndpoints.TOOLS)
-                .run(leaves(), 1L, SESSION, "补答指令：看看行情", null, answer::append, progress::add, yield, batch);
+                .run(leaves(), 1L, SESSION, "补答指令：看看行情", null, answer::append, progress::add, search::add, yield, batch);
     }
 
     /** 某个专家的进度阶段序列 */

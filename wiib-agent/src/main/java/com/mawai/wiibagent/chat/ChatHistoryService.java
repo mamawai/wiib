@@ -1,9 +1,11 @@
 package com.mawai.wiibagent.chat;
 
+import com.alibaba.fastjson2.JSON;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.mawai.wiibcommon.entity.WorkbenchChatMessage;
 import com.mawai.wiibcommon.i18n.MessageCatalog;
 import com.mawai.wiibagent.i18n.PromptCatalog;
+import com.mawai.wiibagent.llm.SearchEvent;
 import com.mawai.wiibagent.llm.UsageTrackingChatModel;
 import com.mawai.wiibagent.mapper.WorkbenchChatMessageMapper;
 import lombok.RequiredArgsConstructor;
@@ -54,19 +56,24 @@ public class ChatHistoryService {
         }
     }
 
-    /** kind=特殊行的码（见 {@link ChatRowKind}），普通行为 null。前端认码不认文案 */
-    public record ChatMessage(long id, String role, String content, long createdAt, TurnMeta meta, String kind) {}
+    /**
+     * kind=特殊行的码（见 {@link ChatRowKind}），普通行为 null，前端认码不认文案。
+     * sources=这一轮联网搜索的来源（答案底部展示），没搜过或老数据为 null；不属于读数，单独一列
+     */
+    public record ChatMessage(long id, String role, String content, long createdAt, TurnMeta meta, String kind,
+                              List<SearchEvent.Source> sources) {}
 
     /** 追加一条消息。历史是增益不是主链，失败只记日志不打断对话。 */
     public boolean append(String sessionId, long userId, String role, String content) {
-        return append(sessionId, userId, role, content, null);
+        return append(sessionId, userId, role, content, null, null);
     }
 
     /**
-     * 带本轮读数的追加（assistant 行专用；meta 为空即退化成普通追加）。
+     * 带本轮读数与来源的追加（assistant 行专用；meta/sources 为空即退化成普通追加）。
      * 返回是否真落了库：重新生成靠它决定敢不敢删旧答案——没落上还删，这个提问就一条答案都不剩了。
      */
-    public boolean append(String sessionId, long userId, String role, String content, TurnMeta meta) {
+    public boolean append(String sessionId, long userId, String role, String content, TurnMeta meta,
+                          List<SearchEvent.Source> sources) {
         if (content == null || content.isBlank()) return false;
         try {
             WorkbenchChatMessage row = new WorkbenchChatMessage();
@@ -81,6 +88,9 @@ public class ChatHistoryService {
                 row.setCompletionTokens(meta.completionTokens());
                 row.setTotalTokens(meta.totalTokens());
                 row.setLatencyMs(meta.latencyMs());
+            }
+            if (sources != null && !sources.isEmpty()) {
+                row.setSources(SearchEvent.Source.toJson(sources).toJSONString());
             }
             // createdAt 由全局 MetaObjectHandler 填，不手塞
             messageMapper.insert(row);
@@ -121,8 +131,13 @@ public class ChatHistoryService {
                 .stream()
                 .map(row -> new ChatMessage(row.getId(), row.getRole(), row.getContent(),
                         toEpochMillis(row.getCreatedAt()), metaOf(row),
-                        ChatRowKind.of(row.getRole(), row.getContent(), prompts)))
+                        ChatRowKind.of(row.getRole(), row.getContent(), prompts), sourcesOf(row)))
                 .toList();
+    }
+
+    /** 没搜过的行（user 行、老数据）给 null，不给空列表 */
+    private static List<SearchEvent.Source> sourcesOf(WorkbenchChatMessage row) {
+        return row.getSources() == null ? null : SearchEvent.Source.fromJson(JSON.parseArray(row.getSources()));
     }
 
     /** 没落过读数的行（user 行、老数据）给 null 而不是空壳，省得前端再判一层"有对象但全空" */

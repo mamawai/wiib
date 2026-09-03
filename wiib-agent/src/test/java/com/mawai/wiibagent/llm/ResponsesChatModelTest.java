@@ -165,6 +165,39 @@ class ResponsesChatModelTest {
                 .contains("web_search_calls");
     }
 
+    /** 搜索项 added=开搜、done=搜完（query/sources 在 action 里），url_citation 注解=引用；都是空文本帧不进正文 */
+    @Test
+    void 流式_搜索事件帧_searching_searched_cited() {
+        events = new String[]{
+                """
+                {"type":"response.output_item.added","output_index":0,"item":{"type":"web_search_call","id":"ws_1","status":"in_progress"}}""",
+                """
+                {"type":"response.output_item.done","output_index":0,"item":{"type":"web_search_call","id":"ws_1","status":"completed",
+                 "action":{"type":"search","query":"BTC news","sources":[{"type":"url","url":"https://a.com/1","title":"A1"}]}}}""",
+                """
+                {"type":"response.output_text.delta","delta":"据 A 报道"}""",
+                """
+                {"type":"response.output_text.annotation.added","annotation":{"type":"url_citation","url":"https://a.com/1","title":"A1"}}""",
+                """
+                {"type":"response.completed","response":{"id":"resp_s","status":"completed","model":"grok-test","output":[]}}"""
+        };
+        ResponsesChatModel m = model(true);
+        List<ChatResponse> frames = m.stream(new Prompt("BTC 新闻", allowWebSearch(m))).collectList().block();
+
+        List<SearchEvent> search = frames.stream()
+                .filter(f -> f.getMetadata().<String>get(SearchEvent.KEY) != null)
+                .map(f -> SearchEvent.parse(f.getMetadata().get(SearchEvent.KEY))).toList();
+        assertThat(search).extracting(SearchEvent::phase)
+                .containsExactly(SearchEvent.SEARCHING, SearchEvent.SEARCHED, SearchEvent.CITED);
+        assertThat(search.get(0).query()).isNull();      // added 时上游还没给 query
+        assertThat(search.get(1).query()).isEqualTo("BTC news");
+        assertThat(search.get(1).sources()).extracting(SearchEvent.Source::url).containsExactly("https://a.com/1");
+        assertThat(search.get(2).sources()).extracting(SearchEvent.Source::title).containsExactly("A1");
+        assertThat(frames.stream().map(f -> f.getResult().getOutput().getText()).reduce("", String::concat))
+                .isEqualTo("据 A 报道");
+        assertThat(frames.getLast().getResult().getMetadata().getFinishReason()).isEqualTo("STOP");
+    }
+
     @Test
     void getOptions必须给ToolCallingChatOptions() {
         // 真实实例、不 mock：ResilientChatService 靠 instanceof 这个类型决定挂不挂工具

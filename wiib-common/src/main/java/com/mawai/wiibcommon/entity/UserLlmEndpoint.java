@@ -26,7 +26,7 @@ public class UserLlmEndpoint {
     private Long userId;
     /** 用户给的名字（下拉框里认它） */
     private String name;
-    /** 上游协议：openai=/v1/chat/completions，responses=/v1/responses */
+    /** 上游协议，见 AiProtocols：openai / responses / anthropic / gemini */
     private String apiProtocol;
     private String baseUrl;
     private String model;
@@ -37,8 +37,8 @@ public class UserLlmEndpoint {
     @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private String reasoningEffort;
     /**
-     * 服务端联网搜索（web_search，OpenAI Responses 与 xAI Agent Tools 通认）：请求里显式声明才搜（opt-in）。
-     * 仅 responses 协议有效；端点支不支持查不到，由用户自己勾。当前只有对话 summarizer 会用到。
+     * 服务端联网搜索：请求里声明该协议的服务端搜索工具才搜（opt-in），上游拒收自动退回不搜。
+     * 能声明的协议才存 true（AiProtocols.supportsServerSearch）；端点支不支持查不到，由用户自己勾。当前只有对话 summarizer 会用到。
      */
     private Boolean webSearch;
     /** AES-GCM 密文 base64(iv+cipher)，密钥来自 WIIB_TRADER_KEY_SECRET */

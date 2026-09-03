@@ -1,5 +1,5 @@
 import { ApiError, workbenchApi } from '../../api';
-import type { BehaviorAnalysisReport, ChatIntent, TraderFormKind, TurnMeta, WorkbenchChatMessage, WorkbenchEvent } from '../../types';
+import type { BehaviorAnalysisReport, ChatIntent, SearchSource, TraderFormKind, TurnMeta, WorkbenchChatMessage, WorkbenchEvent } from '../../types';
 
 /** 与后端 ErrorCode 对齐：2200 段是研判工作台（1600 段是 Crypto，别复用） */
 export const CHAT_ERROR = {
@@ -32,7 +32,8 @@ export type ChatItem =
   // meta=这一轮的读数（端点/耗时/token），流式结束时随 done 事件到；历史回放从库里带。
   // deferred=这条是补答（对应提问不在会话末尾，回退会误伤中间轮次），不给重新生成；
   // 实时流里的答案永远在末尾，只有历史回放才可能是补答行
-  | { kind: 'assistant'; content: string; streaming: boolean; at: number; meta?: TurnMeta | null; deferred?: boolean }
+  // sources=这一轮联网搜索的来源，随 done 到（历史回放从库里带），答案底部展示
+  | { kind: 'assistant'; content: string; streaming: boolean; at: number; meta?: TurnMeta | null; deferred?: boolean; sources?: SearchSource[] | null }
   // 专家过程流（不落历史）：视图层收进"工作过程"轨，折叠状态归视图管。
   // rid=轨内条目的自增号，视图拿轨首那条的 rid 当折叠状态的键——用下标做键的话，
   // 让位说明行往中间一插、重新生成把尾巴一砍，键就整体错位，收着的轨会自己弹开
@@ -43,6 +44,8 @@ export type ChatItem =
   // store 是纯 ts 模块、条目一存就是一整场会话，存翻好的字面量切了语言会僵在旧语言里。
   // 后端下发的阶段文案 keyed 为假，原样显示（那是后端数据，不进词表）
   | { kind: 'progress'; rid: number; text: string; keyed?: boolean; active: boolean }
+  // 汇总者的一次联网搜索：active=还在搜（亮着转圈），搜完回填 sources 熄灭；query 开搜时可能还没有
+  | { kind: 'search'; rid: number; query: string | null; sources: SearchSource[]; active: boolean }
   // requestId 存在 item 上：hitlDecide 按它取回本条再原样回传，服务端据此确认"点的是哪张卡"
   | { kind: 'hitl'; symbol: string; reason: string; requestId: string; resumeMessage: string; status: 'pending' | 'approved' | 'rejected' }
   // trader 动作表单卡：模型只有弹卡的权，执行权归用户点击。纯前端态不落历史，id 本地发
@@ -141,7 +144,7 @@ function toItems(messages: WorkbenchChatMessage[]): ChatItem[] {
     if (m.role !== 'user') {
       return {
         kind: 'assistant' as const, content: m.content, streaming: false,
-        at: m.createdAt, meta: m.meta, deferred: m.kind === 'deferred',
+        at: m.createdAt, meta: m.meta, deferred: m.kind === 'deferred', sources: m.sources,
       };
     }
     return m.kind === 'hitlResume'
@@ -160,6 +163,38 @@ function deactivateProgress(items: ChatItem[]): ChatItem[] {
   return items.some(it => it.kind === 'progress' && it.active)
     ? items.map(it => (it.kind === 'progress' && it.active ? { ...it, active: false } : it))
     : items;
+}
+
+/** 来源按 url 去重合并（同一个网站可能被几次搜索重复命中） */
+function mergeSources(a: SearchSource[], b: SearchSource[]): SearchSource[] {
+  const seen = new Set(a.map(s => s.url));
+  return [...a, ...b.filter(s => !seen.has(s.url) && seen.add(s.url))];
+}
+
+/** 还亮着的搜索条目熄灭：done 到了说明搜索早已过去（searched 没配上对的那种） */
+function settleSearches(items: ChatItem[]): ChatItem[] {
+  return items.some(it => it.kind === 'search' && it.active)
+    ? items.map(it => (it.kind === 'search' && it.active ? { ...it, active: false } : it))
+    : items;
+}
+
+/**
+ * 搜完事件回填到哪条：先找亮着且 query 相同（或开搜时没给 query）的，
+ * 再找同 query 已熄灭的（Gemini 分块补来源），都没有就新建一条
+ */
+function fillSearched(items: ChatItem[], query: string | null, sources: SearchSource[]): ChatItem[] {
+  const next = [...items];
+  for (let j = next.length - 1; j >= 0; j--) {
+    const it = next[j];
+    if (it.kind !== 'search') continue;
+    const hit = it.active ? (it.query === query || !it.query) : (it.query !== null && it.query === query);
+    if (hit) {
+      next[j] = { ...it, query: it.query ?? query, sources: mergeSources(it.sources, sources), active: false };
+      return next;
+    }
+  }
+  next.push({ kind: 'search', rid: nextRid(), query, sources, active: false });
+  return next;
 }
 
 /**
@@ -262,6 +297,13 @@ function handleEvent(e: WorkbenchEvent) {
       // 报告卡先上屏，模型紧接着会就着它讲两句——卡是数据、答案是解读，两者互补不重复
       updateItems(prev => [...deactivateProgress(prev), { kind: 'behavior', report: e.report }]);
       break;
+    case 'search':
+      // 引用只并入后端攒的来源（随 done 回来），过程轨不画
+      if (e.phase === 'cited') break;
+      updateItems(prev => e.phase === 'searching'
+        ? [...deactivateProgress(prev), { kind: 'search', rid: nextRid(), query: e.query ?? null, sources: [], active: true }]
+        : fillSearched(deactivateProgress(prev), e.query ?? null, e.sources ?? []));
+      break;
     case 'done':
       // 欠不欠补答以后端此刻的口径为准：补答轮跑完队列里可能还排着下一单，让位收尾则必然欠着
       deferredPending = e.pending === true;
@@ -271,8 +313,8 @@ function handleEvent(e: WorkbenchEvent) {
         break;
       }
       updateItems(prev => {
-        const next = deactivateProgress(prev).map(it => {
-          // 读数随 done 一起到：本轮不用等刷新就能显示端点/耗时/token。
+        const next = settleSearches(deactivateProgress(prev)).map(it => {
+          // 读数与来源随 done 一起到：本轮不用等刷新就能显示端点/耗时/token 和答案底部的来源。
           // 中断的那条要整段用服务端定稿覆盖——"（已中断）"这个尾标只在服务端拼一次，
           // 前端复刻一份的话两处措辞迟早对不上，刷新前后看到的就不是同一段文字
           if (it.kind === 'assistant' && it.streaming) {
@@ -281,6 +323,7 @@ function handleEvent(e: WorkbenchEvent) {
               content: e.cancelled ? e.answer : (it.content || e.answer),
               streaming: false,
               meta: e.meta,
+              sources: e.sources,
             };
           }
           if (it.kind === 'expert' && it.streaming) return { ...it, streaming: false };
@@ -293,7 +336,7 @@ function handleEvent(e: WorkbenchEvent) {
         }
         const hasAnswer = next.slice(lastUser + 1).some(it => it.kind === 'assistant');
         if (!hasAnswer && e.answer) {
-          next.push({ kind: 'assistant', content: e.answer, streaming: false, at: Date.now(), meta: e.meta });
+          next.push({ kind: 'assistant', content: e.answer, streaming: false, at: Date.now(), meta: e.meta, sources: e.sources });
         }
         return next;
       });

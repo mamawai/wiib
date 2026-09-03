@@ -40,15 +40,16 @@ class OpenAiBaseUrlTest {
     }
 
     /**
-     * forResponses 与 forSdk 互为镜像：同一份带 /v1 的配置，openai 协议好用而
-     * responses 协议打到 /v1/v1/responses 拿 404——用户只会觉得"换个协议就坏了"。
+     * strip 与 forSdk 互为镜像：同一份带 /v1 的配置，openai 协议好用而
+     * 自拼路径的协议打到 /v1/v1/responses 拿 404——用户只会觉得"换个协议就坏了"。
      */
     @Test
-    void responses路剥掉手滑带上的v1() {
-        assertThat(OpenAiBaseUrl.forResponses("https://api.x.ai/v1")).isEqualTo("https://api.x.ai");
-        assertThat(OpenAiBaseUrl.forResponses("https://api.x.ai/v1/")).isEqualTo("https://api.x.ai");
-        assertThat(OpenAiBaseUrl.forResponses("https://api.x.ai")).isEqualTo("https://api.x.ai");
-        assertThat(OpenAiBaseUrl.forResponses("https://api.x.ai/")).isEqualTo("https://api.x.ai");
-        assertThat(OpenAiBaseUrl.forResponses(null)).isNull();
+    void 自拼路径的协议剥掉手滑带上的版本后缀() {
+        assertThat(OpenAiBaseUrl.strip("https://api.x.ai/v1", "/v1")).isEqualTo("https://api.x.ai");
+        assertThat(OpenAiBaseUrl.strip("https://api.x.ai/v1/", "/v1")).isEqualTo("https://api.x.ai");
+        assertThat(OpenAiBaseUrl.strip("https://api.x.ai", "/v1")).isEqualTo("https://api.x.ai");
+        assertThat(OpenAiBaseUrl.strip("https://api.x.ai/", "/v1")).isEqualTo("https://api.x.ai");
+        assertThat(OpenAiBaseUrl.strip("https://g.com/v1beta/", "/v1beta")).isEqualTo("https://g.com");
+        assertThat(OpenAiBaseUrl.strip(null, "/v1")).isNull();
     }
 }

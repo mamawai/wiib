@@ -626,12 +626,16 @@ export type WorkbenchEvent =
   // 行为分析报告：整份结构化数据只走这条通道给前端渲染成卡片，模型手里是裁剪版
   //（少了 overview.trend 那 30 天逐日快照——对模型是噪音，对卡片是那条资产曲线）
   | { type: 'behavior_report'; report: BehaviorAnalysisReport }
+  // 汇总者的服务端搜索过程：searching=开搜（query 可能还没有）、searched=搜完（sources 是命中站点）、
+  // cited=正文引用了某来源（只并入后端攒的来源随 done 回来，过程轨不画）
+  | { type: 'search'; phase: 'searching' | 'searched' | 'cited'; query?: string | null; sources: SearchSource[] }
   // deferred=true：让位收尾（专家还在取数就来了新消息），answer 只是过渡话术；
   // 真答案由后端补答轮落历史，前端靠 status 轮询等它落库后整体回放补显
   // meta 是本轮读数，让位收尾那条 done 不带（答案还没出，无账可报）。
   // cancelled=用户中断，answer 是"半截 + （已中断）"的定稿，前端要整段用它覆盖屏上那半截
   // deferred=让位收尾（answer 只是过渡话术，question=被让位的原问题）；pending=此刻会话还欠着补答，前端空闲时发起补答轮
-  | { type: 'done'; sessionId: string; answer: string; deferred?: boolean; question?: string; cancelled?: boolean; pending?: boolean; meta?: TurnMeta }
+  // sources=这一轮搜到/引用的来源（按 url 去重），答案底部展示；没搜过为空数组
+  | { type: 'done'; sessionId: string; answer: string; deferred?: boolean; question?: string; cancelled?: boolean; pending?: boolean; meta?: TurnMeta; sources?: SearchSource[] }
   | { type: 'error'; message: string };
 
 /**
@@ -715,6 +719,12 @@ export interface WorkbenchSessionSummary {
  * 两条来路的空值形状还不一样：SSE 走 fastjson2，默认不输出 null，字段直接<b>缺席</b>；
  * 历史接口走 Jackson，会老老实实输出 null。所以一律按 `!= null` 判，别判 0、也别只判 undefined。
  */
+/** 联网搜索命中/引用的一个来源 */
+export interface SearchSource {
+  url: string;
+  title?: string | null;
+}
+
 export interface TurnMeta {
   /** 端点名 · 模型名 */
   modelLabel?: string | null;
@@ -733,6 +743,8 @@ export interface WorkbenchChatMessage {
   createdAt: number;
   /** 只有 assistant 行有；user 行与加列之前的老数据是 null */
   meta?: TurnMeta | null;
+  /** 这一轮联网搜索的来源；没搜过或老数据是 null */
+  sources?: SearchSource[] | null;
   /**
    * 后端自己写进历史的特殊行的码（服务端 ChatRowKind），普通行为 null：
    * deferred=补答行（不给重新生成）、hitlResume=批准后自动补发的续跑指令（还原成过程轨）。
@@ -754,7 +766,7 @@ export interface LlmEndpointView {
   model: string;
   /** 任意上游认的档位值（none/low/medium/high/xhigh…），null=不传给上游走模型默认 */
   reasoningEffort: string | null;
-  /** 服务端联网搜索（仅 responses 协议端点；只有对话汇总者用它） */
+  /** 服务端联网搜索（responses / anthropic / gemini 协议端点可开；只有对话汇总者用它） */
   webSearch: boolean;
   apiKeyTail: string;
   /** 默认端点：没按用途绑定的地方都用它 */

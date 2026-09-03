@@ -47,7 +47,7 @@ public class LlmEndpointService {
 
     private static final Set<String> PURPOSES = Set.of(UserLlmBinding.CHAT_MAIN, UserLlmBinding.CHAT_LIGHT, UserLlmBinding.TRADER);
 
-    /** apiKey 传空=沿用已存的 key（只在 update/探测已有端点时合法）；webSearch 仅 responses 协议生效 */
+    /** apiKey 传空=沿用已存的 key（只在 update/探测已有端点时合法）；webSearch 只在能声明服务端搜索的协议下入库 */
     public record SaveReq(String name, String apiProtocol, String baseUrl, String model,
                           String reasoningEffort, String apiKey, Boolean webSearch) {
     }
@@ -268,7 +268,8 @@ public class LlmEndpointService {
             return new ListModelsResult(messages.get("agent.endpoint.apiKeyRequired"), List.of());
         }
         try {
-            return new ListModelsResult(null, modelBuilder.listModels(stripTrailingSlash(req.baseUrl().trim()), keyEnc));
+            return new ListModelsResult(null, modelBuilder.listModels(req.apiProtocol(),
+                    stripTrailingSlash(req.baseUrl().trim()), keyEnc));
         } catch (Exception e) {
             return new ListModelsResult(truncate(e), List.of());
         }
@@ -340,9 +341,9 @@ public class LlmEndpointService {
         row.setBaseUrl(stripTrailingSlash(req.baseUrl().trim()));
         row.setModel(req.model().trim());
         row.setReasoningEffort(normalizeEffort(req.reasoningEffort()));
-        // 归一而非报错：chat-completions 没有标准的服务端搜索，openai 协议勾了也不把兑现不了的承诺存进库
+        // 归一而非报错：协议声明不了服务端搜索的（chat-completions），勾了也不把兑现不了的承诺存进库
         row.setWebSearch(Boolean.TRUE.equals(req.webSearch())
-                && AiProtocols.isResponses(row.getApiProtocol()));
+                && AiProtocols.supportsServerSearch(row.getApiProtocol()));
         row.setApiKeyEnc(keepKeyEnc != null ? keepKeyEnc : apiKeyCrypto.encrypt(req.apiKey().trim()));
         return row;
     }
@@ -379,13 +380,9 @@ public class LlmEndpointService {
         return null;
     }
 
-    /**
-     * 下游 {@link AiProtocols#isResponses} 是 equalsIgnoreCase 且不 trim，
-     * "responses " 这种脏值存进去会被当成 openai——用户选了 responses 却发 /chat/completions。
-     * 所以校验和落库都用抹平后的值，保证"验的就是存的"。
-     */
+    /** 校验和落库都用抹平后的值，保证"验的就是存的"；null 留给 validate 报 protocolRequired */
     private static String normalizeProtocol(String protocol) {
-        return protocol == null ? null : protocol.trim().toLowerCase();
+        return protocol == null ? null : AiProtocols.normalize(protocol);
     }
 
     /** 同 normalizeProtocol 的道理：档位是原样进请求体的，脏值等到上游才报错就太晚了。留空一律 null=不传 */

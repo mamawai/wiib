@@ -4,6 +4,7 @@ import com.alibaba.fastjson2.JSONObject;
 import com.mawai.wiibcommon.enums.AgentLang;
 import com.mawai.wiibagent.i18n.PromptCatalog;
 import com.mawai.wiibagent.llm.LlmErrorMessages;
+import com.mawai.wiibagent.llm.SearchEvent;
 import com.mawai.wiibagent.llm.SseChannel;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -12,6 +13,9 @@ import org.springframework.stereotype.Component;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -89,6 +93,8 @@ public class ChatTurnStreamer {
         private String prefix = "";
         /** 账本里混着别轮在途专家的账：本轮只报耗时不报 token */
         private boolean dirtyBook;
+        /** 本轮搜到/引用到的来源，按 url 去重保序：随 done 下发并落库，刷新后答案底部还在 */
+        private final Map<String, SearchEvent.Source> sources = new LinkedHashMap<>();
 
         void run() {
             ScheduledFuture<?> heartbeat = heartbeatScheduler.scheduleWithFixedDelay(
@@ -124,8 +130,9 @@ public class ChatTurnStreamer {
                 // dirtyBook = 有没有停不下来、会往这份账本上继续加 token 的在途专家，如果有就不报token计数
                 dirtyBook = yieldCoordinator.hasInFlightExperts(userId) || (deferred != null && !deferred.isDone());
                 leaves.resetUsage();
+
                 ChatTurnRunner.TurnResult result = turnRunner.run(leaves, userId, sessionId, enriched, intent,
-                        this::onAnswerChunk, this::onExpertProgress, handle, deferred);
+                        this::onAnswerChunk, this::onExpertProgress, this::onSearch, handle, deferred);
 
                 if (result.cancelled()) {
                     finishCancelled();
@@ -162,6 +169,18 @@ public class ChatTurnStreamer {
             }
         }
 
+        /** 搜索过程逐条外发（过程轨画"正在搜索/搜索了 N 个网站"），来源攒起来 */
+        private void onSearch(SearchEvent event) {
+            for (SearchEvent.Source source : event.sources()) {
+                if (source.url() != null) {
+                    sources.putIfAbsent(source.url(), source);
+                }
+            }
+            if (!channel.isClosed()) {
+                channel.send("search", event.toJsonObject());
+            }
+        }
+
         /**
          * 给前端发一帧专家的进度
          */
@@ -193,7 +212,7 @@ public class ChatTurnStreamer {
         private void finishCancelled() {
             String stopped = ChatTurnRunner.cancelledAnswer(prompts, leaves.lang(), prefix + answer);
             ChatHistoryService.TurnMeta meta = turnMeta();
-            boolean saved = chatHistoryService.append(sessionId, userId, "assistant", stopped, meta);
+            boolean saved = chatHistoryService.append(sessionId, userId, "assistant", stopped, meta, sourceList());
             // 重生成轮：出了半截才顶掉旧答案，半截也是这一次重生成的产物，留着旧的同一个提问下
             // 就是两条 assistant 行。一个字都没出（点得快）就别删——那等于拿一行"未作答"
             // 换掉用户原来那条好答案，而且不可恢复
@@ -205,7 +224,8 @@ public class ChatTurnStreamer {
                     .fluentPut("answer", stopped)
                     .fluentPut("cancelled", true)
                     .fluentPut("pending", yieldCoordinator.hasPending(sessionId))
-                    .fluentPut("meta", metaJson(meta)));
+                    .fluentPut("meta", metaJson(meta))
+                    .fluentPut("sources", SearchEvent.Source.toJson(sourceList())));
         }
 
         /**
@@ -253,7 +273,7 @@ public class ChatTurnStreamer {
             ChatHistoryService.TurnMeta meta = turnMeta();
             // 历史不看连接死活：切页断连后这一轮照跑完，答案必须落库（前端回来靠 status+历史补）。
             // 且必须在 finally 摘运行标记之前写完——轮询端不能出现"已结束但查不到答案"的空窗
-            boolean saved = chatHistoryService.append(sessionId, userId, "assistant", finalAnswer, meta);
+            boolean saved = chatHistoryService.append(sessionId, userId, "assistant", finalAnswer, meta, sourceList());
             // 旧答案留到新答案确实落库之后才删（append 落没落库看返回值，空产出压根不落行）：
             // 重跑抛异常、产出为空、insert 失败、中途被让位的任何一条路上，用户至少还留着原来那条，
             // 也还能再点一次重新生成——两条都没了的话末尾是 user 行，连重新生成都点不了
@@ -264,7 +284,8 @@ public class ChatTurnStreamer {
                     .fluentPut("sessionId", sessionId)
                     .fluentPut("answer", finalAnswer)
                     .fluentPut("pending", yieldCoordinator.hasPending(sessionId))
-                    .fluentPut("meta", metaJson(meta)));
+                    .fluentPut("meta", metaJson(meta))
+                    .fluentPut("sources", SearchEvent.Source.toJson(sourceList())));
         }
 
         /** done 是本轮最后一帧，发完就收口通道；断掉的通道什么都不写 */
@@ -274,6 +295,10 @@ public class ChatTurnStreamer {
             }
             channel.send("done", done);
             channel.complete();
+        }
+
+        private List<SearchEvent.Source> sourceList() {
+            return new ArrayList<>(sources.values());
         }
 
         /**

@@ -14,10 +14,10 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 工具挂载与 tool_choice 的协议适配，两条协议在这里收口：
+ * 工具挂载与 tool_choice 的协议适配，各协议在这里收口：
  * <ul>
  *   <li>openai 协议（Spring AI {@code OpenAiChatModel}）：tool_choice 是 {@link OpenAiChatOptions#getToolChoice()} 字段</li>
- *   <li>responses 协议（自研 {@link ResponsesChatModel}）：portable 的 ChatOptions 没有这个字段，
+ *   <li>自研 SSE 协议（{@link SseChatModel} 子类）：portable 的 ChatOptions 没有这个字段，
  *       经 toolContext 的 {@link #CONTEXT_KEY} 捎进去，模型建请求体时读回</li>
  * </ul>
  * 调用方只说"挂哪些工具、这次强不强制"，不关心底下是哪条协议。
@@ -33,10 +33,10 @@ public final class ToolChoice {
     public static final String REQUIRED = "required";
     public static final String AUTO = "auto";
 
-    /** {@link ResponsesChatModel} 读的 toolContext 键：值 required/auto/具体工具名；缺省按 auto */
+    /** {@link SseChatModel} 子类读的 toolContext 键：值 required/auto/具体工具名；缺省按 auto */
     public static final String CONTEXT_KEY = "wiib_tool_choice";
 
-    /** 两协议共用的参数名。上游拒收强制时报错文案里带它，是 ResilientChatService 判降级的抓手 */
+    /** 各协议共用的参数名。上游拒收强制时报错文案里带它，是 ResilientChatService 判降级的抓手 */
     public static final String PARAM = "tool_choice";
 
     private ToolChoice() {
@@ -65,7 +65,7 @@ public final class ToolChoice {
         return options;
     }
 
-    /** responses 协议侧读回本次调用的 tool_choice；没捎就是 auto */
+    /** 自研协议侧读回本次调用的 tool_choice；没捎就是 auto */
     public static String of(ChatOptions options) {
         if (options instanceof ToolCallingChatOptions tool && tool.getToolContext() != null
                 && tool.getToolContext().get(CONTEXT_KEY) != null) {

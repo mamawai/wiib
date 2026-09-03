@@ -15,9 +15,20 @@ export interface LlmEndpointValue {
   /** 思考档位，空串=不传给上游走模型默认 */
   reasoningEffort: string;
   apiKey: string;
-  /** 服务端联网搜索（仅 responses 协议；openai 协议下后端归一 false） */
+  /** 服务端联网搜索（responses / anthropic / gemini 协议可勾；openai 协议下后端归一 false） */
   webSearch: boolean;
 }
+
+const PROTOCOLS = ['openai', 'responses', 'anthropic', 'gemini'];
+/** 各协议的 Base URL 示例，只是占位不是白名单 */
+const BASE_URL_PH: Record<string, string> = {
+  openai: 'https://api.deepseek.com',
+  responses: 'https://api.deepseek.com',
+  anthropic: 'https://api.anthropic.com',
+  gemini: 'https://generativelanguage.googleapis.com',
+};
+/** 能在请求里声明服务端搜索工具的协议，与后端 AiProtocols.supportsServerSearch 同口径 */
+const SEARCHABLE = new Set(['responses', 'anthropic', 'gemini']);
 
 export interface LlmEndpointFormProps {
   value: LlmEndpointValue;
@@ -88,22 +99,16 @@ export function LlmEndpointForm({ value, onChange, exists, keyTail, onDetect, on
         </label>
         <label className="space-y-1 text-xs">
           <span className="text-muted-foreground font-bold">{t('endpoint.protocol')}</span>
-          <div className="flex gap-1.5">
-            {['openai', 'responses'].map(p => (
-              <button key={p} type="button" onClick={() => onChange({ apiProtocol: p })}
-                      className={cn('flex-1 h-9 rounded-lg border text-xs font-bold',
-                        value.apiProtocol === p
-                          ? 'border-primary/60 bg-card-2 text-primary'
-                          : 'border-border text-muted-foreground hover:text-foreground')}>
-                {p}
-              </button>
-            ))}
-          </div>
+          <select value={PROTOCOLS.includes(value.apiProtocol) ? value.apiProtocol : 'openai'}
+                  onChange={e => onChange({ apiProtocol: e.target.value })}
+                  className="w-full h-9 rounded-lg border border-border bg-card-2 px-3 text-xs font-bold num">
+            {PROTOCOLS.map(p => <option key={p} value={p}>{p}</option>)}
+          </select>
         </label>
         <label className="space-y-1 text-xs">
           <span className="text-muted-foreground font-bold">{t('endpoint.baseUrl')}</span>
           <input value={value.baseUrl} onChange={e => onChange({ baseUrl: e.target.value })}
-                 placeholder="https://api.deepseek.com"
+                 placeholder={BASE_URL_PH[value.apiProtocol] ?? BASE_URL_PH.openai}
                  className="w-full h-9 rounded-lg border border-border bg-card-2 px-3 text-xs num" />
         </label>
       </div>
@@ -161,9 +166,9 @@ export function LlmEndpointForm({ value, onChange, exists, keyTail, onDetect, on
         </span>
       </div>
 
-      {/* 服务端联网搜索：仅 responses 协议可勾（chat-completions 没有标准的服务端搜索）。
+      {/* 服务端联网搜索：能声明搜索工具的协议才有勾选框（chat-completions 没有标准的服务端搜索）。
           端点支不支持查不到，与档位同理由用户自己勾；只有对话的汇总者会用它 */}
-      {value.apiProtocol === 'responses' && (
+      {SEARCHABLE.has(value.apiProtocol) ? (
         <label className="flex items-start gap-2 text-xs cursor-pointer select-none">
           <input type="checkbox" checked={value.webSearch}
                  onChange={e => onChange({ webSearch: e.target.checked })}
@@ -175,6 +180,10 @@ export function LlmEndpointForm({ value, onChange, exists, keyTail, onDetect, on
             <span className="text-[10px] text-muted-foreground/70 block">{t('endpoint.webSearchHint')}</span>
           </span>
         </label>
+      ) : (
+        <span className="text-[10px] text-muted-foreground/70 flex items-center gap-1">
+          <Globe className="w-3 h-3" /> {t('endpoint.webSearchOpenAiHint')}
+        </span>
       )}
 
       <button type="button" onClick={() => void test()}
