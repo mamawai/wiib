@@ -18,6 +18,7 @@ import org.springframework.ai.chat.prompt.ChatOptions;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.model.tool.ToolCallingChatOptions;
 import org.springframework.ai.model.tool.ToolCallingManager;
+import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.ai.retry.NonTransientAiException;
 import org.springframework.ai.retry.TransientAiException;
 import org.springframework.core.ParameterizedTypeReference;
@@ -154,8 +155,15 @@ public abstract class SseChatModel<S extends SseChatModel.StreamState> implement
         return streamOnce(prompt);
     }
 
-    /** 给单次调用捎整体超时。openai 协议路走 SDK 全局超时，捎了也无害 */
+    /**
+     * 给单次调用捎整体超时，按协议落点：openai 协议落 {@code OpenAiChatOptions.timeout}
+     * （Spring AI 2.0.1 起逐请求传给 SDK，盖过 client 级超时），自研协议经 toolContext 捎、{@link #doCall} 读回。
+     */
     public static ChatOptions withCallTimeout(ChatOptions options, Duration timeout) {
+        // OpenAiChatOptions 也实现了 ToolCallingChatOptions，必须先判它
+        if (options instanceof OpenAiChatOptions openAi) {
+            return openAi.mutate().timeout(timeout).build();
+        }
         if (options instanceof ToolCallingChatOptions tool) {
             Map<String, Object> context = tool.getToolContext() == null
                     ? new HashMap<>() : new HashMap<>(tool.getToolContext());

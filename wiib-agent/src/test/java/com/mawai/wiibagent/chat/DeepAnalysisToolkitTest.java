@@ -11,6 +11,7 @@ import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatModel;
+import org.springframework.ai.chat.model.ToolContext;
 
 import java.util.List;
 import java.util.Map;
@@ -34,6 +35,8 @@ import static org.mockito.Mockito.when;
 class DeepAnalysisToolkitTest {
 
     private static final String SESSION = "wb-1-x";
+    /** 生产里会话号由 ChatTurnRunner 放进图 state、框架经 ToolContext 交给工具 */
+    private static final ToolContext CTX = new ToolContext(Map.of(ToolRunContext.SESSION_KEY, SESSION));
 
     private final ChatModel model = mock(ChatModel.class);
     private final DeepAnalysisService deepAnalysisService = mock(DeepAnalysisService.class);
@@ -55,7 +58,7 @@ class DeepAnalysisToolkitTest {
         when(deepAnalysisService.judge(eq(model), eq("BTCUSDT"), anyLong(), eq("chat"),
                 eq("ctx"), eq("bull"), eq("bear"), eq(AgentLang.ZH))).thenReturn(analysis);
 
-        String result = toolkit.runDeepAnalysis("BTCUSDT");
+        String result = toolkit.runDeepAnalysis("BTCUSDT", CTX);
 
         assertThat(result).contains("\"status\":\"OK\"").contains("研判叙事").contains("作废");
         verify(deepAnalysisService).persist(analysis);
@@ -69,7 +72,7 @@ class DeepAnalysisToolkitTest {
         when(deepAnalysisService.judge(any(), anyString(), anyLong(), anyString(),
                 anyString(), anyString(), anyString(), any())).thenReturn(null);
 
-        String result = toolkit.runDeepAnalysis("BTCUSDT");
+        String result = toolkit.runDeepAnalysis("BTCUSDT", CTX);
 
         assertThat(result).contains("FAILED");
         verify(deepAnalysisService, never()).persist(any());
@@ -93,7 +96,7 @@ class DeepAnalysisToolkitTest {
         String gateSymbol = registry.peekPending(SESSION).orElseThrow().symbol();
         when(deepAnalysisService.buildNewsContext(any())).thenReturn("ctx");
 
-        toolkit.runDeepAnalysis("btc");
+        toolkit.runDeepAnalysis("btc", CTX);
 
         verify(deepAnalysisService).bullArgue(model, gateSymbol, "ctx", AgentLang.ZH);
         verify(deepAnalysisService).bearArgue(model, gateSymbol, "ctx", AgentLang.ZH);

@@ -8,6 +8,7 @@ import com.mawai.wiibagent.analysis.DeepAnalysisService;
 import com.mawai.wiibagent.i18n.PromptCatalog;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.model.ChatModel;
+import org.springframework.ai.chat.model.ToolContext;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
 
@@ -22,7 +23,7 @@ import java.util.concurrent.CompletableFuture;
  * 只有那一层同时看得到 sessionId 和本次 tool_call 的参数。
  * <p>
  * 模型建图时构造注入（同配置的用户共享同一张图和同一个模型实例）；
- * sessionId 是请求级的，从 {@link ToolRunContext} 取，只用来推进度。
+ * sessionId 是请求级的，从框架交给工具的 ToolContext 里取（{@link ToolRunContext#sessionId}），只用来推进度。
  */
 @Slf4j
 public class DeepAnalysisToolkit {
@@ -51,11 +52,12 @@ public class DeepAnalysisToolkit {
             If the result status is PENDING_APPROVAL, tell the user approval is needed and why - the UI
             will show a confirmation card; after they approve, call this tool again to execute.
             Returns: narrative, bull/range/bear scenario distribution, invalidation condition, noDirection flag.""")
-    public String runDeepAnalysis(@ToolParam(description = "Symbol, e.g. BTCUSDT") String symbol) {
+    public String runDeepAnalysis(@ToolParam(description = "Symbol, e.g. BTCUSDT") String symbol,
+                                  ToolContext context) {
         // 归一化必须与闸门同一套：闸门按它算授权键、也按它写确认卡的 symbol。
         // 这里另算一套的话，模型填 btc 时卡片写 BTCUSDT、工具却拿 BTC 去取数，取不到任何数据
         String normalized = ApprovalGate.approvalSymbol(symbol);
-        String sessionId = ToolRunContext.sessionId();
+        String sessionId = ToolRunContext.sessionId(context);
         log.info("[DeepTool] 执行深研判 session={} symbol={}", sessionId, normalized);
 
         long closeTime = System.currentTimeMillis();

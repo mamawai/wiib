@@ -29,9 +29,7 @@ import java.util.concurrent.CompletableFuture;
  * <b>管辖范围：只有深度研判</b>。弹表单卡的三个 trader 工具不受管辖——执行权本来就归用户
  * 在卡上点击，再批准一次等于让用户确认两遍，第一道毫无信息量。
  * <p>
- * <b>但每个工具都得从这里走一趟</b>：{@link #passThrough} 里的 {@link ToolRunContext#set} 是
- * 工具方法体拿 sessionId 的唯一来源，受不受管辖都一样。
- * 判断做在这一层，这么写为了同时拿到 sessionId 和 tool_call 的 name/arguments（工具方法体看不到 sessionId）。
+ * 判断做在这一层，这么写为了在执行之前拿到 sessionId 和 tool_call 的 name/arguments。
  * <p>
  * 挂在 summarizer 叶子的工具边（addExecuteToolsHook），且<b>必须先于 ModelCallLimiter 注册</b>——
  * WrapCall 后注册的在外层先执行，保险丝必须在外层。
@@ -79,7 +77,7 @@ public class ApprovalGate implements EdgeHook.WrapCall<MessagesState<Message>> {
         String sessionId = config == null ? null : config.threadId().orElse(null);
         Optional<AssistantMessage.ToolCall> guarded = guardedCall(state);
         if (sessionId == null || guarded.isEmpty()) {
-            return passThrough(sessionId, state, config, action);
+            return action.apply(state, config);
         }
         AssistantMessage.ToolCall call = guarded.get();
         String symbol = normalizedSymbol(call);
@@ -96,7 +94,7 @@ public class ApprovalGate implements EdgeHook.WrapCall<MessagesState<Message>> {
 
         if (registry.consumeApproval(sessionId, call.name(), symbol)) {
             log.info("[HITL] 授权命中，放行 session={} tool={} symbol={}", sessionId, call.name(), symbol);
-            return passThrough(sessionId, state, config, action);
+            return action.apply(state, config);
         }
 
         // 又要弹卡 = 上一条授权已经用不上了（模型改口换了 symbol）。留着它，
@@ -125,28 +123,6 @@ public class ApprovalGate implements EdgeHook.WrapCall<MessagesState<Message>> {
     private Command shortCircuit(MessagesState<Message> state, String guardedCallId, String body) {
         return new Command(Agent.AGENT_LABEL,
                 Map.of("messages", List.of(reply(state, guardedCallId, body))));
-    }
-
-    /**
-     * 放行：把会话号放进 ThreadLocal 供工具推进度、推表单卡，执行完清掉。
-     * <p>
-     * <b>所有工具都从这里进</b>，受不受管辖都一样（applyWrap 开头那个分支也落到这里）：
-     * {@link ToolRunContext#set} 是工具方法体拿 sessionId 的唯一来源，
-     * 没有它，弹表单的工具不知道该往哪个会话推，进度条也没了。
-     * <p>
-     * <b>必须直接调 action.apply</b>——包一层 thenCompose 就换线程了，ThreadLocal 立刻失效。
-     */
-    private CompletableFuture<Command> passThrough(String sessionId, MessagesState<Message> state,
-                                                   RunnableConfig config,
-                                                   AsyncCommandAction<MessagesState<Message>> action) {
-        if (sessionId != null) {
-            ToolRunContext.set(sessionId);
-        }
-        try {
-            return action.apply(state, config);
-        } finally {
-            ToolRunContext.clear();
-        }
     }
 
     /** 本批 tool_call 里受管辖的那个（一批里最多处理一个贵操作，其余的连同它一起等下一轮）。 */

@@ -13,6 +13,7 @@ import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.model.tool.ToolCallingChatOptions;
 import org.springframework.ai.retry.NonTransientAiException;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 import reactor.util.retry.Retry;
 
 import java.time.Duration;
@@ -47,6 +48,7 @@ import java.util.function.Function;
  * 去掉强制重发。它不是重试——换的是请求本身，原样再发多少次都一样。
  * 流式路径还有一层同款的<b>搜索降级</b>（{@link #searchRejected}）：上游拒收服务端搜索工具时去掉许可重发
  * （只有 summarizer 捎许可且它是流式的，阻塞路径用不上）。
+ * 流式路径的最外层是<b>中断</b>（{@link CancelSignal}）：用户点停止时掐断整条流水线，取消传到模型层。
  * <p>
  * 不做兜底模型：BYOK 只有用户自己那一个端点，切"同端点另一个模型"没意义（端点挂了两个一起挂）。
  */
@@ -128,7 +130,7 @@ public class ResilientChatService implements ReactAgent.ChatService {
         List<Message> withSystem = withSystem(messages);
         ChatOptions used = optionsFor(withSystem);
         AtomicBoolean emitted = new AtomicBoolean(false);
-        return primaryModel.stream(promptOf(primaryModel, withSystem, used))
+        Flux<ChatResponse> stream = primaryModel.stream(promptOf(primaryModel, withSystem, used))
                 .doOnNext(r -> emitted.set(true))
                 .retryWhen(Retry.backoff(maxAttempts - 1, Duration.ofMillis(initialDelayMs))
                         .maxBackoff(Duration.ofMillis(maxDelayMs))
@@ -152,6 +154,12 @@ public class ResilientChatService implements ReactAgent.ChatService {
                     }
                     return Flux.error(e);
                 });
+        // 用户中断：整条流水线（含重试与降级）在这儿被掐断，取消向上游传到 WebClient / SDK 流
+        // （Spring AI 2.0.1 起 SDK 流随 dispose 关闭）。suppressCancel=true 必须给：
+        // 缺省会在流正常结束时反向 cancel 这个 future，专家等待期挂在它上面的 anyOf 会被误唤醒
+        return CancelSignal.current()
+                .map(signal -> stream.takeUntilOther(Mono.fromFuture(signal, true)))
+                .orElse(stream);
     }
 
     /**

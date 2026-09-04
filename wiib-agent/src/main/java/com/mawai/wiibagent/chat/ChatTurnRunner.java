@@ -5,6 +5,7 @@ import com.alibaba.fastjson2.JSONArray;
 import com.mawai.wiibcommon.enums.AgentLang;
 import com.mawai.wiibagent.i18n.LocalizedToolCallbacks;
 import com.mawai.wiibagent.i18n.PromptCatalog;
+import com.mawai.wiibagent.llm.CancelSignal;
 import com.mawai.wiibagent.llm.ConversationSummarizer;
 import com.mawai.wiibagent.llm.LlmErrorMessages;
 import com.mawai.wiibagent.llm.ModelCallLimiter;
@@ -340,9 +341,8 @@ public class ChatTurnRunner {
                     answerTokenSink.accept(chunk);
                 }, searchSink, yield);
         if (yield.cancelRequested()) {
-            // 拉流是 break 出来的，被丢下的那条流还在跑：图生成器不支持取消（见 ChatAgentFactory
-            // 的说明），模型照样吐完、入账挂在流终止上。所以这次汇总调用的 token 省不掉，
-            // 而且会落在读数之后——账本就此不可信，标记让它退化成只报耗时
+            // 拉流是 break 出来的，在途那条流已被中断信号掐断（见 CancelSignal），但它的收尾帧没到、
+            // 这次调用的 token 未知——账本就此不可信，标记让它退化成只报耗时
             leaves.deep().markAbandoned();
             leaves.light().markAbandoned();
             return cancelTurn(userId, sessionId, working, emitted.toString(), lang);
@@ -405,7 +405,7 @@ public class ChatTurnRunner {
             yield.exitExpertWait();
         }
         if (yield.cancelRequested()) {
-            // 账本被它们写脏了，见 markAbandoned
+            // 专家批次还在跑（阻塞 invoke 掐不断），它们的账要在读数之后才到——本轮不可信，见 markAbandoned
             leaves.deep().markAbandoned();
             leaves.light().markAbandoned();
             return cancelTurn(userId, sessionId, working, "", lang);
@@ -468,14 +468,17 @@ public class ChatTurnRunner {
                                                                 String sessionId, Consumer<String> tokenSink,
                                                                 Consumer<SearchEvent> searchSink,
                                                                 TurnYield yield) {
-        // threadId 是 ApprovalGate 取会话号的唯一来源（工具方法体看不到它），少了它 HITL 整条链断掉
-        RunnableConfig config = RunnableConfig.builder().threadId(sessionId).build();
+        // threadId 给 ApprovalGate 取会话号，少了它 HITL 整条链断掉（工具方法体那份走 state 里的 SESSION_KEY）；
+        // 中断信号也从这儿带进图：模型节点的 CancelSignal.hook 把它接到答案流上，点停止就掐断在途流
+        RunnableConfig config = RunnableConfig.builder().threadId(sessionId)
+                .addMetadata(CancelSignal.CONFIG_KEY, yield.cancelSignal()).build();
         NodeOutput<MessagesState<Message>> last = null;
         try {
             // 必须用普通迭代消费而非 forEachAsync：后者 thenCompose 递归自链，
             // 每个流式 chunk 叠一层栈帧，长回答（数千帧）会 StackOverflowError（真跑实证过）
+            // 会话号随 state 走：框架执行工具时整个 state 就是 ToolContext，工具靠它推进度、推表单卡
             for (NodeOutput<MessagesState<Message>> output : leaves.summarizer().stream(
-                    Map.of("messages", working), config)) {
+                    Map.of("messages", working, ToolRunContext.SESSION_KEY, sessionId), config)) {
                 if (output instanceof StreamingOutput<?> streaming) {
                     String chunk = streaming.chunk();
                     if (chunk != null && !chunk.isEmpty()) {

@@ -16,7 +16,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -337,25 +336,19 @@ class ApprovalGateTest {
     /**
      * trader 那三个工具都不进闸门：留言只写一行字，唤醒和点播复盘现在只弹一张表单卡、
      * 执行权在用户点击上——再拦一道就成了"先批准打开表单、再填表单"两道确认。
-     * <p>
-     * 顺带钉住"闸门不能因为没什么可管了就被摘掉"：表单卡靠 ThreadLocal 里的会话号
-     * 才知道往哪条 SSE 推，而全仓只有 {@code ApprovalGate.passThrough} 会设它
      */
     @ParameterizedTest
     @ValueSource(strings = {"leave_note_to_trader", "wake_trader", "review_trader_now"})
-    void trader动作不进闸门但仍拿得到会话号(String tool) {
+    void trader动作不进闸门原样放行(String tool) {
         AtomicBoolean toolRan = new AtomicBoolean();
-        AtomicReference<String> seen = new AtomicReference<>();
 
         gate.applyWrap("tools", stateWithToolCall(tool, "{\"note\":\"仓位轻点\"}"), config(),
                 (s, c) -> {
                     toolRan.set(true);
-                    seen.set(ToolRunContext.sessionId());
                     return CompletableFuture.completedFuture(Command.emptyCommand());
                 }).join();
 
         assertThat(toolRan).isTrue();
-        assertThat(seen.get()).isEqualTo(SESSION);
         assertThat(registry.peekPending(SESSION)).isEmpty();
     }
 
@@ -371,33 +364,5 @@ class ApprovalGateTest {
                 }).join();
 
         assertThat(toolRan).isTrue();
-    }
-
-    /**
-     * 工具方法体要靠 ThreadLocal 拿会话号推进度；放行时必须设上，执行完必须清掉。
-     * <p>
-     * <b>action 故意返回一个"稍后才 complete"的 future</b>：真正的约束是
-     * "hook 必须在同步栈里直接调 action.apply，不能先 thenCompose"——
-     * 若 action 用同步的 completedFuture，实现写成 {@code action.apply(s,c).thenCompose(...)}
-     * 或 {@code .whenComplete((r,e) -> clear())} 测试照样绿，那个约束就没被钉住
-     */
-    @Test
-    void 放行时在同步栈里就能读到会话号执行后清掉() {
-        gate.applyWrap("tools", stateWithToolCall("run_deep_analysis", "{\"symbol\":\"BTCUSDT\"}"),
-                config(), (s, c) -> CompletableFuture.completedFuture(Command.emptyCommand())).join();
-        registry.approve(SESSION, registry.peekPending(SESSION).orElseThrow().requestId());
-        AtomicReference<String> seen = new AtomicReference<>();
-        CompletableFuture<Command> pendingFuture = new CompletableFuture<>();
-
-        gate.applyWrap("tools", stateWithToolCall("run_deep_analysis", "{\"symbol\":\"BTCUSDT\"}"),
-                config(), (s, c) -> {
-                    seen.set(ToolRunContext.sessionId());   // 同步栈里必须已经读得到
-                    return pendingFuture;
-                });
-
-        assertThat(seen.get()).isEqualTo(SESSION);
-        // action 尚未完成，但 applyWrap 已经返回 → finally 已跑过，ThreadLocal 必须干净
-        assertThat(ToolRunContext.sessionId()).isNull();
-        pendingFuture.complete(Command.emptyCommand());
     }
 }

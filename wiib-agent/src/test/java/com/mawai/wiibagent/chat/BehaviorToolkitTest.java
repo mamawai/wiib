@@ -9,9 +9,11 @@ import com.mawai.wiibagent.behavior.BehaviorAnalysisService;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.ai.chat.model.ChatModel;
+import org.springframework.ai.chat.model.ToolContext;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -62,12 +64,17 @@ class BehaviorToolkitTest {
         when(service.analyze(anyLong(), any(), any(), any())).thenReturn(Result.ok(report()));
     }
 
+    /** 生产里会话号由 ChatTurnRunner 放进图 state、框架经 ToolContext 交给工具；这里手动摆一个 */
+    private static ToolContext ctx(String sessionId) {
+        return new ToolContext(sessionId == null ? Map.of() : Map.of(ToolRunContext.SESSION_KEY, sessionId));
+    }
+
     @Test
     void 整份报告推给卡片_回模型的砍掉逐日快照() {
         succeeds();
         when(registry.publishBehaviorReport(any(), any())).thenReturn(true);
 
-        JSONObject out = JSON.parseObject(toolkit.analyzeMyBehavior());
+        JSONObject out = JSON.parseObject(toolkit.analyzeMyBehavior(ctx(null)));
 
         ArgumentCaptor<JSONObject> card = ArgumentCaptor.forClass(JSONObject.class);
         verify(registry).publishBehaviorReport(any(), card.capture());
@@ -89,7 +96,7 @@ class BehaviorToolkitTest {
         // 断连/补答轮/会话已结束都走这条
         when(registry.publishBehaviorReport(any(), any())).thenReturn(false);
 
-        JSONObject out = JSON.parseObject(toolkit.analyzeMyBehavior());
+        JSONObject out = JSON.parseObject(toolkit.analyzeMyBehavior(ctx(null)));
 
         assertThat(out.getString("status")).isEqualTo("OK");
         assertThat(out.getBooleanValue("cardShown")).isFalse();
@@ -102,7 +109,7 @@ class BehaviorToolkitTest {
         when(service.analyze(anyLong(), any(), any(), any()))
                 .thenReturn(Result.fail("当前分析人数已满，请稍后再试"));
 
-        JSONObject out = JSON.parseObject(toolkit.analyzeMyBehavior());
+        JSONObject out = JSON.parseObject(toolkit.analyzeMyBehavior(ctx(null)));
 
         assertThat(out.getString("status")).isEqualTo("FAILED");
         assertThat(out.getString("message")).isEqualTo("当前分析人数已满，请稍后再试");
@@ -114,13 +121,14 @@ class BehaviorToolkitTest {
     void 只分析自己_userId不经模型() {
         succeeds();
 
-        toolkit.analyzeMyBehavior();
+        toolkit.analyzeMyBehavior(ctx(null));
 
         verify(service).analyze(eq(USER), eq(AgentLang.ZH), any(), any());
+        // ToolContext 是框架注入的、不进 schema，模型看不见；除它之外不许有任何参数
         assertThat(BehaviorToolkit.class.getDeclaredMethods())
                 .filteredOn(m -> m.getName().equals("analyzeMyBehavior"))
-                .allSatisfy(m -> assertThat(m.getParameterCount())
-                        .as("工具一旦有参数，模型就能填别人的 id").isZero());
+                .allSatisfy(m -> assertThat(m.getParameterTypes())
+                        .as("工具一旦有模型可填的参数，模型就能填别人的 id").containsOnly(ToolContext.class));
     }
 
     /** 进度推给对话通道：几十秒静默期里用户只有这几行字可看 */
@@ -132,13 +140,7 @@ class BehaviorToolkitTest {
             return Result.ok(report());
         });
 
-        // 生产里会话号由闸门设进 ToolRunContext，这里手动摆一个
-        ToolRunContext.set("s-1");
-        try {
-            toolkit.analyzeMyBehavior();
-        } finally {
-            ToolRunContext.clear();
-        }
+        toolkit.analyzeMyBehavior(ctx("s-1"));
 
         verify(registry).publishProgress(eq("s-1"), anyString());
     }

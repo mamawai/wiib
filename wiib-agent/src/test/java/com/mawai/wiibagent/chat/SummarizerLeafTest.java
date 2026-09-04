@@ -37,7 +37,10 @@ import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -63,14 +66,19 @@ class SummarizerLeafTest {
     private final ChatModel light = mock(ChatModel.class);
     private final ApprovalRegistry registry = new ApprovalRegistry();
     private final DeepAnalysisService deepAnalysisService = mock(DeepAnalysisService.class);
+    private final WorkbenchRunRegistry runRegistry = mock(WorkbenchRunRegistry.class);
 
     private static ChatResponse responseOf(AssistantMessage message) {
         return new ChatResponse(List.of(new Generation(message)));
     }
 
-    private static AssistantMessage deepAnalysisCall(String id) {
+    private static AssistantMessage toolCall(String id, String name, String arguments) {
         return AssistantMessage.builder().content("").toolCalls(List.of(new AssistantMessage.ToolCall(
-                id, "function", "run_deep_analysis", "{\"symbol\":\"BTCUSDT\"}"))).build();
+                id, "function", name, arguments))).build();
+    }
+
+    private static AssistantMessage deepAnalysisCall(String id) {
+        return toolCall(id, "run_deep_analysis", "{\"symbol\":\"BTCUSDT\"}");
     }
 
     /**
@@ -89,17 +97,17 @@ class SummarizerLeafTest {
         ChatEndpoints llmConfig = ChatTestEndpoints.eps(1L, "gpt-5");   // 叶子指纹含 userId（trader 工具按它认人）
         return new ChatAgentFactory(chatModelFactory, mock(MarketToolkit.class), mock(NewsToolkit.class),
                 deepAnalysisService, mock(BehaviorAnalysisService.class),
-                mock(TraderChatService.class), mock(WorkbenchRunRegistry.class),
+                mock(TraderChatService.class), runRegistry,
                 registry, ChatTestEndpoints.PROMPTS, ChatTestEndpoints.TOOLS, limit, threshold, keep, "X")
                 .leavesFor(llmConfig, AgentLang.ZH);
     }
 
-    /** 与 {@code ChatTurnRunner} 同款消费：普通迭代 + 带 threadId（闸门要拿会话号） */
+    /** 与 {@code ChatTurnRunner} 同款消费：普通迭代 + threadId（闸门要拿会话号）+ state 里的会话号（工具要拿） */
     private List<String> consume(ChatAgentFactory.Leaves leaves, List<Message> input,
                                  List<NodeOutput<MessagesState<Message>>> outputs) {
         List<String> chunks = new ArrayList<>();
         for (NodeOutput<MessagesState<Message>> output : leaves.summarizer().stream(
-                Map.of("messages", input),
+                Map.of("messages", input, ToolRunContext.SESSION_KEY, SESSION),
                 RunnableConfig.builder().threadId(SESSION).build())) {
             if (output instanceof StreamingOutput<?> streaming
                     && streaming.chunk() != null && !streaming.chunk().isEmpty()) {
@@ -128,6 +136,20 @@ class SummarizerLeafTest {
     private void approveDeepAnalysis() {
         registry.requestApproval(SESSION, "run_deep_analysis", "BTCUSDT", "贵操作");
         registry.approve(SESSION, registry.peekPending(SESSION).orElseThrow().requestId());
+    }
+
+    /** 工具方法体的会话号来自图 state：输入里带的 SESSION_KEY 经框架交给工具的 ToolContext 到达，不靠 ThreadLocal */
+    @Test
+    void 工具从图state里拿到会话号() {
+        AtomicInteger round = new AtomicInteger();
+        when(deep.stream(any(Prompt.class))).thenAnswer(inv -> Flux.just(responseOf(round.incrementAndGet() == 1
+                ? toolCall("c1", "wake_trader", "{}")
+                : new AssistantMessage("表单已打开"))));
+        when(runRegistry.publishForm(any(), any(), any())).thenReturn(true);
+
+        consume(leaves(NO_COMPRESSION, 6, 8), List.of(new UserMessage("叫醒交易员")), new ArrayList<>());
+
+        verify(runRegistry).publishForm(eq(SESSION), eq("wake"), isNull());
     }
 
     /**

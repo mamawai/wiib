@@ -97,8 +97,10 @@ public class ByokModelBuilder {
                 OpenAiBaseUrl.forSdk(baseUrl), apiKey, null, null, null, null,
                 false, false, model, SseChatModel.CALL_TIMEOUT, 3, null, null,
                 observationRegistry, null, REJECT_CROSS_HOST_REDIRECT);
-        // 不设 temperature：走各模型默认值，思考模型（多数拒收或忽略温度）也安全
-        OpenAiChatOptions.Builder options = OpenAiChatOptions.builder().model(model);
+        // 不设 temperature：走各模型默认值，思考模型（多数拒收或忽略温度）也安全。
+        // timeout 必须显式给：2.0.1 起每请求都把它传给 SDK，缺省 60s 会盖掉上面 client 的 10 分钟
+        OpenAiChatOptions.Builder options = OpenAiChatOptions.builder().model(model)
+                .timeout(SseChatModel.CALL_TIMEOUT);
         if (effort != null) {
             options.reasoningEffort(effort);
         }

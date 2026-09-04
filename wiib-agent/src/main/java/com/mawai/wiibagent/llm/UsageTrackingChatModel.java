@@ -20,6 +20,9 @@ import java.util.concurrent.atomic.AtomicReference;
  * <p>
  * <b>getOptions 必须原样透传</b>：返回自己造的 options 会让 ReactAgent 的工具列表变成空数组。
  * <p>
+ * 账按轮记在 {@link TokenLedger} 上：调用在发起那一刻抓住当时那本账，终止时记回它。
+ * {@link #reset()} 整本换新，晚到的入账（用户中断丢下的在途调用）只会落进旧账本，新一轮天然干净。
+ * <p>
  * 两种用法：交易员轨每次唤醒 new 一个实例、用完取 {@link #snapshot()}；
  * 对话轨的实例跟着叶子图跨轮缓存，靠 {@link #reset()} 划轮边界（同一用户同时只有一轮，见 ChatConcurrencyGate）。
  */
@@ -47,16 +50,56 @@ public class UsageTrackingChatModel implements ChatModel {
         }
     }
 
-    private final ChatModel delegate;
+    /** 一轮的账本。ReAct 循环可能跑在虚拟线程上，读写都加锁 */
+    private static final class TokenLedger {
 
-    private int calls;
-    private Long promptTokens;
-    private Long completionTokens;
-    private Long totalTokens;
-    /** 本轮有过被抛弃的在途流 */
-    private boolean abandoned;
-    /** 上一轮抛弃的流：它可能在这一轮清零之后才终止入账，所以脏要往后带一轮 */
-    private boolean abandonedCarry;
+        private int calls;
+        private Long promptTokens;
+        private Long completionTokens;
+        private Long totalTokens;
+        /** 本轮丢下过在途调用（用户中断）：它们的 token 要么未知、要么在读数之后才到，这本账不能报 */
+        private boolean abandoned;
+
+        synchronized void record(Usage usage) {
+            calls++;
+            if (usage == null) {
+                return;
+            }
+            promptTokens = plus(promptTokens, usage.getPromptTokens());
+            completionTokens = plus(completionTokens, usage.getCompletionTokens());
+            totalTokens = plus(totalTokens, usage.getTotalTokens());
+        }
+
+        synchronized UsageSnapshot snapshot() {
+            return new UsageSnapshot(calls, promptTokens, completionTokens, totalTokens);
+        }
+
+        synchronized void markAbandoned() {
+            abandoned = true;
+        }
+
+        synchronized boolean untrusted() {
+            return abandoned;
+        }
+
+        /**
+         * 按字段各算各的（网关只报一半也不丢），"没报告"与"报了 0"合并成 null。
+         * <p>
+         * 不能靠 null 判断有没有报告：Spring AI 的 ChatResponse 即使没带 usage 也会给一个全 0 的
+         * EmptyUsage，DefaultUsage 还会把 null 归一成 0。所以只认正数——真实调用的 prompt token
+         * 不可能是 0，全程没见过正数就是上游压根没报。
+         */
+        private static Long plus(Long acc, Integer add) {
+            if (add == null || add <= 0) {
+                return acc;
+            }
+            return acc == null ? add.longValue() : acc + add;
+        }
+    }
+
+    private final ChatModel delegate;
+    /** 当前这一轮的账本；reset 整本换掉，不清字段 */
+    private volatile TokenLedger ledger = new TokenLedger();
 
     public UsageTrackingChatModel(ChatModel delegate) {
         this.delegate = delegate;
@@ -69,32 +112,34 @@ public class UsageTrackingChatModel implements ChatModel {
 
     @Override
     public @NonNull ChatResponse call(@NonNull Prompt prompt) {
+        TokenLedger book = ledger;
         ChatResponse response = delegate.call(prompt);
-        record(usageOf(response));
+        book.record(usageOf(response));
         return response;
     }
 
     @Override
     public @NonNull Flux<ChatResponse> stream(@NonNull Prompt prompt) {
-        // 流式的 usage 只挂在最后一个 chunk 上，且通常是本次调用的累计值，逐块相加会翻倍。
-        // 只留最后见到的那份，流终止时入账一次。
-        AtomicReference<Usage> last = new AtomicReference<>();
-        AtomicBoolean recorded = new AtomicBoolean();
-        return delegate.stream(prompt)
-                .doOnNext(r -> {
-                    Usage u = usageOf(r);
-                    last.set(u);
-                })
-                // 入账必须赶在终止信号传给下游之前：消费方一收到 onComplete 就会去读 snapshot()，
-                // 而 doFinally 是信号传播完才跑的——那一次（往往正是最贵的汇总）会漏记
-                .doOnTerminate(() -> recordOnce(recorded, last))
-                // 取消不经 doOnTerminate，但 token 照样是真烧掉的，兜在这儿；CAS 保证同一次流只入账一遍
-                .doFinally(sig -> recordOnce(recorded, last));
+        // defer：每次订阅（ResilientChatService 的流式重试会重订阅）各自一套 last/recorded，各自入账一次
+        return Flux.defer(() -> {
+            TokenLedger book = ledger;
+            // 流式的 usage 只挂在最后一个 chunk 上，且通常是本次调用的累计值，逐块相加会翻倍。
+            // 只留最后见到的那份，流终止时入账一次。
+            AtomicReference<Usage> last = new AtomicReference<>();
+            AtomicBoolean recorded = new AtomicBoolean();
+            return delegate.stream(prompt)
+                    .doOnNext(r -> last.set(usageOf(r)))
+                    // 入账必须赶在终止信号传给下游之前：消费方一收到 onComplete 就会去读 snapshot()，
+                    // 而 doFinally 是信号传播完才跑的——那一次（往往正是最贵的汇总）会漏记
+                    .doOnTerminate(() -> recordOnce(book, recorded, last))
+                    // 取消不经 doOnTerminate，但 token 照样是真烧掉的，兜在这儿；CAS 保证同一次订阅只入账一遍
+                    .doFinally(sig -> recordOnce(book, recorded, last));
+        });
     }
 
-    private void recordOnce(AtomicBoolean recorded, AtomicReference<Usage> last) {
+    private static void recordOnce(TokenLedger book, AtomicBoolean recorded, AtomicReference<Usage> last) {
         if (recorded.compareAndSet(false, true)) {
-            record(last.get());
+            book.record(last.get());
         }
     }
 
@@ -108,65 +153,33 @@ public class UsageTrackingChatModel implements ChatModel {
         return Objects.requireNonNull(call(new Prompt(Arrays.asList(messages))).getResult()).getOutput().getText();
     }
 
-    /** 本轮累计；ReAct 循环可能跑在虚拟线程上，加锁保稳。 */
-    public synchronized UsageSnapshot snapshot() {
-        return new UsageSnapshot(calls, promptTokens, completionTokens, totalTokens);
+    /** 本轮累计 */
+    public UsageSnapshot snapshot() {
+        return ledger.snapshot();
     }
 
     /**
-     * 归零，划出新一轮的账本起点。
+     * 换一本新账，划出新一轮的起点。
      * <p>
      * 给"实例跨轮复用"的对话轨用：那边模型被烤进编译好的叶子图、图又按配置指纹缓存，
-     * 拿不到"每轮 new 一个"的机会，只能在轮开头清零。交易员轨每轮新建，不需要调它。
+     * 拿不到"每轮 new 一个"的机会，只能在轮开头换账本。交易员轨每轮新建，不需要调它。
      */
-    public synchronized void reset() {
-        calls = 0;
-        promptTokens = null;
-        completionTokens = null;
-        totalTokens = null;
-        abandonedCarry = abandoned;
-        abandoned = false;
+    public void reset() {
+        ledger = new TokenLedger();
     }
 
     /**
-     * 标记"这一轮丢下了一条还在跑的流"（用户中断时会发生）。
-     * <p>
-     * 被丢下的流不会停：图生成器不支持取消（见 {@code ChatAgentFactory} 的说明），
-     * 模型照样一路吐到终止，而入账挂在流终止上——它会在<b>这一轮读完数之后</b>、
-     * 甚至<b>下一轮清零之后</b>才把整次调用的 token 加进来。
-     * 所以这一轮和紧接着的下一轮，账都不能报，见 {@link #untrusted()}。
+     * 标记"这一轮丢下了在途调用"（用户中断时会发生）：答案流被掐断后收尾帧没到、token 未知；
+     * 专家批次是阻塞调用掐不断，它们的账在读数之后才到。两种都让本轮的账不能报，见 {@link #untrusted()}。
+     * 下一轮不受影响：账本已换新，晚到的只会写进旧的那本。
      */
-    public synchronized void markAbandoned() {
-        abandoned = true;
+    public void markAbandoned() {
+        ledger.markAbandoned();
     }
 
-    /** 账本被抛弃的流写脏了：宁可不报，也别报个错的（与全站 token null≠0 同口径） */
-    public synchronized boolean untrusted() {
-        return abandoned || abandonedCarry;
-    }
-
-    private synchronized void record(Usage usage) {
-        calls++;
-        if (usage == null) {
-            return;
-        }
-        promptTokens = plus(promptTokens, usage.getPromptTokens());
-        completionTokens = plus(completionTokens, usage.getCompletionTokens());
-        totalTokens = plus(totalTokens, usage.getTotalTokens());
-    }
-
-    /**
-     * 按字段各算各的（网关只报一半也不丢），"没报告"与"报了 0"合并成 null。
-     * <p>
-     * 不能靠 null 判断有没有报告：Spring AI 的 ChatResponse 即使没带 usage 也会给一个全 0 的
-     * EmptyUsage，DefaultUsage 还会把 null 归一成 0。所以只认正数——真实调用的 prompt token
-     * 不可能是 0，全程没见过正数就是上游压根没报。
-     */
-    private static Long plus(Long acc, Integer add) {
-        if (add == null || add <= 0) {
-            return acc;
-        }
-        return acc == null ? add.longValue() : acc + add;
+    /** 账本被丢下的调用写脏了：宁可不报，也别报个错的（与全站 token null≠0 同口径） */
+    public boolean untrusted() {
+        return ledger.untrusted();
     }
 
     private static Usage usageOf(ChatResponse response) {

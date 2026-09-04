@@ -8,6 +8,7 @@ import com.mawai.wiibagent.behavior.BehaviorAnalysisReport;
 import com.mawai.wiibagent.behavior.BehaviorAnalysisService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.model.ChatModel;
+import org.springframework.ai.chat.model.ToolContext;
 import org.springframework.ai.tool.annotation.Tool;
 
 /**
@@ -55,8 +56,8 @@ public class BehaviorToolkit {
             The full report is rendered as a card in the chat UI. Your job afterwards is to talk about
             it, not to recite every number - unless cardShown is false, in which case the user cannot
             see the card and you must state the key findings yourself.""")
-    public String analyzeMyBehavior() {
-        String sessionId = ToolRunContext.sessionId();
+    public String analyzeMyBehavior(ToolContext context) {
+        String sessionId = ToolRunContext.sessionId(context);
         log.info("[BehaviorTool] 执行行为分析 session={} userId={}", sessionId, userId);
 
         Result<BehaviorAnalysisReport> result = behaviorAnalysisService.analyze(userId, lang, model,

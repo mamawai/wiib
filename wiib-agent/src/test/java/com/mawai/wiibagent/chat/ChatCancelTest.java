@@ -4,7 +4,6 @@ import com.mawai.wiibcommon.enums.AgentLang;
 import com.mawai.wiibagent.analysis.DeepAnalysisService;
 import com.mawai.wiibagent.behavior.BehaviorAnalysisService;
 import com.mawai.wiibagent.llm.ChatEndpoints;
-import com.mawai.wiibagent.llm.UsageTrackingChatModel;
 import com.mawai.wiibagent.toolkit.MarketToolkit;
 import com.mawai.wiibagent.toolkit.NewsToolkit;
 import com.mawai.wiibagent.trader.TraderChatService;
@@ -38,8 +37,8 @@ import static org.mockito.Mockito.when;
  * 两个检查点效果不同，测试也分开钉：
  * <ul>
  *   <li><b>派发之前</b>中断＝真省钱：专家和汇总那次调用都不会发生；</li>
- *   <li><b>答案流中途</b>中断＝只停屏幕：那次汇总调用的 token 照烧完（生成器不可取消），
- *       但已经吐出来的半截必须留住——它是花钱换的。</li>
+ *   <li><b>答案流中途</b>中断＝掐断在途流：取消经 CancelSignal 传到模型层，后面的 token 不再烧；
+ *       已经吐出来的半截必须留住——它是花钱换的。</li>
  * </ul>
  * 与让位的分界也要钉死：中断<b>不欠补答</b>，deferredExperts 必须是空。
  */
@@ -106,6 +105,35 @@ class ChatCancelTest {
             @Override
             public boolean cancelRequested() {
                 return cancelled.get();
+            }
+        };
+    }
+
+    /** 带真实中断信号的让位面：runner 把它放进 config，在途答案流靠它掐断 */
+    private static ChatTurnRunner.TurnYield yieldWith(AtomicBoolean cancelled, CompletableFuture<Void> signal) {
+        return new ChatTurnRunner.TurnYield() {
+            @Override
+            public CompletableFuture<Void> enterExpertWait() {
+                return new CompletableFuture<>();
+            }
+
+            @Override
+            public void exitExpertWait() {
+            }
+
+            @Override
+            public boolean yieldRequested() {
+                return false;
+            }
+
+            @Override
+            public boolean cancelRequested() {
+                return cancelled.get();
+            }
+
+            @Override
+            public CompletableFuture<Void> cancelSignal() {
+                return signal;
             }
         };
     }
@@ -185,20 +213,28 @@ class ChatCancelTest {
         assertThat(savedContext().getLast().getText()).contains("中断");
     }
 
-    /** 中断丢下的在途流会在读数之后才入账，这一轮和下一轮的账都不能报 */
+    /** 点停止后在途的答案流被掐断：取消传到上游（自研协议断连、openai 协议关 SDK 流），token 不再往下烧 */
     @Test
-    void 丢下在途流之后账本连着两轮不可信() {
-        UsageTrackingChatModel model = new UsageTrackingChatModel(mock(ChatModel.class));
-        assertThat(model.untrusted()).isFalse();
+    void 中断时掐断在途答案流() {
+        routerFinishes();
+        AtomicBoolean cancelled = new AtomicBoolean(false);
+        CompletableFuture<Void> signal = new CompletableFuture<>();
+        AtomicBoolean upstreamCancelled = new AtomicBoolean(false);
+        // 吐一帧之后挂住：不掐它永远不结束
+        when(deep.stream(any(Prompt.class))).thenAnswer(inv ->
+                Flux.concat(Flux.just(responseOf("半截")), Flux.<ChatResponse>never())
+                        .doOnCancel(() -> upstreamCancelled.set(true)));
 
-        model.markAbandoned();
-        assertThat(model.untrusted()).isTrue();          // 中断这一轮
+        ChatTurnRunner.TurnResult result = new ChatTurnRunner(contextStore, registry, ChatTestEndpoints.PROMPTS, ChatTestEndpoints.TOOLS)
+                .run(leaves(), 1L, SESSION, "看看行情", null, chunk -> {
+                    answer.append(chunk);
+                    cancelled.set(true);
+                    signal.complete(null);   // 与 TurnHandle.requestCancel 同序：先置位再发信号
+                }, e -> { }, s -> { }, yieldWith(cancelled, signal), null);
 
-        model.reset();
-        assertThat(model.untrusted()).isTrue();          // 下一轮：被丢下的流可能刚在清零后入账
-
-        model.reset();
-        assertThat(model.untrusted()).isFalse();         // 再下一轮才干净
+        assertThat(result.cancelled()).isTrue();
+        assertThat(answer.toString()).isEqualTo("半截");
+        assertThat(upstreamCancelled).isTrue();
     }
 
     @Test

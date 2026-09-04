@@ -1,32 +1,25 @@
 package com.mawai.wiibagent.chat;
 
+import org.springframework.ai.chat.model.ToolContext;
+
 /**
- * 工具执行期的会话号传递。
- * 用 ThreadLocal，这么写为了工具方法体拿到请求级 sessionId
- * （ChatService.execute 签名没有 RunnableConfig，ToolContext 是建图时算死的静态值）。
+ * 工具执行期的会话号传递：放在图 state 里走框架的 ToolContext。
+ * langgraph4j 执行工具时把整个 state 作为 ToolContext 交给每个工具，工具方法声明一个 ToolContext 参数就读得到
+ * （Spring AI 不把它放进 schema，模型看不见也填不了）。
  * <p>
- * 安全性依据：langgraph4j 的工具执行链全程同线程无线程池
- * （SpringAIToolService 里是普通 for 循环 + 同步 call + completedFuture），
- * 所以在 {@code action.apply(...)} 之前设、之后清是可靠的。
- * <b>前提是 hook 必须直接调 action.apply，不能先 thenCompose——那样就换线程了。</b>
+ * 调用方在图输入里放 {@link #SESSION_KEY}（见 ChatTurnRunner.streamSummarizer），工具方法体用 {@link #sessionId} 读。
+ * 不在图里跑（单测直接调方法）时没带这个键，读到 null。
  */
 public final class ToolRunContext {
 
-    private static final ThreadLocal<String> SESSION_ID = new ThreadLocal<>();
+    /** 图 state / ToolContext 里的会话号键 */
+    public static final String SESSION_KEY = "session_id";
 
     private ToolRunContext() {
     }
 
-    static void set(String sessionId) {
-        SESSION_ID.set(sessionId);
-    }
-
-    static void clear() {
-        SESSION_ID.remove();
-    }
-
-    /** 工具方法体内读当前会话号；不在工具执行栈里时返回 null。 */
-    public static String sessionId() {
-        return SESSION_ID.get();
+    /** 工具方法体内读当前会话号；没带就是 null */
+    public static String sessionId(ToolContext context) {
+        return (String) context.getContext().get(SESSION_KEY);
     }
 }

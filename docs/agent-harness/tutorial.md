@@ -56,7 +56,7 @@ flowchart LR
 | 文件 | 行数 | 读它干什么 |
 |---|---|---|
 | `chat/ChatConcurrencyGate.java` | 56 | 全包最简单的一个类。看两件事：`tryAcquire` 为什么**先占用户位再占全局位**（反过来会让同一用户的第二次请求先拿走一个全局名额再被拒，中间那一瞬别人被无谓挡住）；为什么返回**枚举而不是 boolean**（拒因得由闸门自己给，让调用方去别处二次推断既是重新发明轮子又有竞态） |
-| `chat/ToolRunContext.java` | 32 | 一个 ThreadLocal。读完你会问"为什么要靠 ThreadLocal 传东西"——这个问题的答案是第 2 章站点 8 的核心，先把疑惑留着 |
+| `chat/ToolRunContext.java` | 25 | 会话号怎么到工具方法体：放进图 state，langgraph4j 执行工具时整个 state 就是 Spring AI 的 `ToolContext`，工具声明一个 `ToolContext` 参数就读得到（不进 schema，模型看不见）。为什么不走 `RunnableConfig`，是第 2 章站点 8 的核心，先把疑惑留着 |
 
 读完这两个，你应该能感觉到：**这个仓库的注释讲"为什么"不讲"做了什么"**。看到一段费解的代码，先找它头上那句注释，多半解释了它为什么不能写成更直觉的样子。
 
@@ -212,7 +212,7 @@ POST /api/ai/workbench/chat
 两处当前版本的要点：
 
 - **管辖范围只剩深研判一个工具**（`GUARDED_TOOLS`）。trader 那三个工具只弹表单、真正的执行扳机在用户手指上，再批准一次等于让用户确认两遍。
-- **但每个工具都得从 `passThrough` 走一趟**——里面的 `ToolRunContext.set` 是工具方法体拿 sessionId 的唯一来源，受不受管辖都一样。
+- **不受管辖的工具原样放行**。工具方法体自己的 sessionId 不经闸门：`ChatTurnRunner` 把它放进图 state（`ToolRunContext.SESSION_KEY`），框架经 `ToolContext` 交给工具。
 
 再看 `discardApprovals` 那段注释：又要弹卡就说明上一条授权已经用不上了，不丢的话它会一直躺到 TTL 结束，而路由见 `hasApproval` 为真就跳过全部专家派发——于是这 10 分钟内该会话每一条新提问都不取数据、直接凭空作答，**且没有任何日志会说明原因**。
 
@@ -261,7 +261,7 @@ langgraph4j 有几处行为跟直觉相反，而且**错了不报错**。这几�
 |---|---|
 | `new Command(null, update)` 必然 NPE | `gotoNode()` 是 `requireNonNull`，而框架拿到 hook 返回值第一件事就是调它。`Command.emptyCommand().withMergedUpdate()` 一样炸 |
 | **token 帧不吃迭代格** | 帧走生成器栈顶，不经过 `AsyncNodeGenerator.next()`，而迭代计数只活在后者里。长回答不会撞递归硬顶 |
-| 图生成器**取消不了** | `mergeAtStreamEnd` 那层没实现 `AsyncGenerator.Cancellable`。本仓从不 cancel 图生成器（断连后是**故意**消费到底好落历史的），所以现在没影响——但中断那一轮的 summarizer token 因此省不掉，`markAbandoned` 就是为它准备的 |
+| 图生成器**取消不了** | `mergeAtStreamEnd` 那层没实现 `AsyncGenerator.Cancellable`，且 `StreamingChatGenerator` 在构造函数里就订阅了模型流、不留 Disposable。本仓从不 cancel 图生成器（断连后是**故意**消费到底好落历史的）；用户中断走的是 `llm/CancelSignal`：信号放进 `RunnableConfig` 的 metadata，模型节点最内层的 hook 用 ScopedValue 把它带到 `ResilientChatService` 建流那一刻做 `takeUntilOther`，取消传到 WebClient / SDK 流。被掐断那次调用的 token 未知，`markAbandoned` 让本轮的账退化成只报耗时；账本按轮换新（`UsageTrackingChatModel.TokenLedger`），晚到的入账只会落进旧账本 |
 | `UsageTrackingChatModel.getOptions` 必须原样透传 | 返回自己造的 options 会让 ReactAgent 的工具列表变成空数组 |
 | `options` 必须从 `model.getOptions().mutate()` 派生 | Spring AI 2.0 的 `OpenAiChatModel` 把 `prompt.getOptions()` 直接硬转 `OpenAiChatOptions`，塞个泛型 builder 造的进去当场 ClassCastException。真跑实证：路由这一次调用抛了、被兜成 FINISH，整轮零专家派发 |
 
@@ -550,7 +550,8 @@ cd wiib-web && npx tsc -b && npm run build
 它们各自守的、以及仍需手工验的：
 
 - hook 在生产装配下真的被执行到（挂错了不报错也不告警，单测全绿也发现不了）
-- 工具执行链是否全程同线程（ThreadLocal 传 sessionId 依赖这个）
+- 模型节点从 hook 到建流是否同线程（`CancelSignal` 的 ScopedValue 依赖这个；工具拿 sessionId 已改走 state → ToolContext，不再有线程假设）
+- 点停止后上游是否真的断了（openai 协议靠 Spring AI 2.0.1 的 `sink.onDispose(response::close)`，单测里只能验到 Flux 被取消）
 - 批准"深研判 BTCUSDT"后诱导模型去查 ETH，应该**重新弹卡**；再问普通行情问题，专家必须照常派发（验残留授权被丢弃）
 - 让位链路的真实时序：专家取数期间发第二条消息该插队，出答案期间发该排队
 - 收尾格式的 `[SYMBOL]` 分段模型到底填不填得对（`TraderConclusionFormatRealRunTest` 就是为它建的）

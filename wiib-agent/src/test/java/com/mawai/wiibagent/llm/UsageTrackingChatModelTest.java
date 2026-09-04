@@ -9,8 +9,11 @@ import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.chat.prompt.ChatOptions;
 import org.springframework.ai.chat.prompt.Prompt;
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.Sinks;
 
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -147,5 +150,51 @@ class UsageTrackingChatModelTest {
         assertThat(merged.promptTokens()).isEqualTo(130L);
         assertThat(merged.completionTokens()).isEqualTo(20L);   // 一边没报，用报了的那份
         assertThat(merged.totalTokens()).isNull();              // 两边都没报
+    }
+
+    /** reset 之后才终止的流入账到发起时那本账：中断丢下的在途流不会污染下一轮 */
+    @Test
+    void 晚到的入账落进发起时的账本不污染新一轮() {
+        ChatModel inner = mock(ChatModel.class);
+        Sinks.Many<ChatResponse> late = Sinks.many().unicast().onBackpressureBuffer();
+        when(inner.stream(any(Prompt.class))).thenReturn(late.asFlux());
+        UsageTrackingChatModel m = new UsageTrackingChatModel(inner);
+        m.stream(new Prompt("上一轮")).subscribe();
+        m.reset();
+
+        late.tryEmitNext(respWith(100, 20, 120));
+        late.tryEmitComplete();
+
+        assertThat(m.snapshot().modelCalls()).isZero();
+        assertThat(m.snapshot().totalTokens()).isNull();
+    }
+
+    /** 丢下在途流只这一轮不可信：账本换新之后，旧流再晚到也写不进来 */
+    @Test
+    void 丢下在途流只标本轮不可信() {
+        UsageTrackingChatModel m = new UsageTrackingChatModel(mock(ChatModel.class));
+        assertThat(m.untrusted()).isFalse();
+
+        m.markAbandoned();
+        assertThat(m.untrusted()).isTrue();
+
+        m.reset();
+        assertThat(m.untrusted()).isFalse();
+    }
+
+    /** 重订阅（ResilientChatService 的流式重试）：每次尝试各自入账，成功那次的 token 不能丢 */
+    @Test
+    void 重订阅时每次尝试各自入账() {
+        ChatModel inner = mock(ChatModel.class);
+        AtomicInteger attempts = new AtomicInteger();
+        when(inner.stream(any(Prompt.class))).thenReturn(Flux.defer(() -> attempts.incrementAndGet() == 1
+                ? Flux.error(new RuntimeException("502"))
+                : Flux.just(respWith(100, 20, 120))));
+        UsageTrackingChatModel m = new UsageTrackingChatModel(inner);
+
+        m.stream(new Prompt("a")).retry(1).blockLast();
+
+        assertThat(m.snapshot().modelCalls()).isEqualTo(2);     // 失败那次也是一次调用
+        assertThat(m.snapshot().totalTokens()).isEqualTo(120L);
     }
 }

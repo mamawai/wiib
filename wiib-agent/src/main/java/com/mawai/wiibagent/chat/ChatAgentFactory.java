@@ -6,6 +6,7 @@ import com.mawai.wiibcommon.enums.AgentLang;
 import com.mawai.wiibagent.i18n.LocalizedToolCallbacks;
 import com.mawai.wiibagent.i18n.PromptCatalog;
 import com.mawai.wiibagent.llm.AgentGraphs;
+import com.mawai.wiibagent.llm.CancelSignal;
 import com.mawai.wiibagent.llm.ChatEndpoints;
 import com.mawai.wiibagent.analysis.DeepAnalysisService;
 import com.mawai.wiibagent.behavior.BehaviorAnalysisService;
@@ -325,9 +326,10 @@ public class ChatAgentFactory {
      * 派谁、还要不要再派，全归 {@link ChatTurnRunner} 的显式循环管，这里一个字都不提——
      * 角色单一，模型不会再纠结"该作答还是该派发"（那正是之前无限循环的病根）。
      * <p>
-     * 三个 hook 挂在框架自己的挂载点上：叶子是独立 {@code compile()} 的，
+     * 四个 hook 挂在框架自己的挂载点上：叶子是独立 {@code compile()} 的，
      * {@code addCallModelHook} 落到模型节点、{@code addExecuteToolsHook} 落到工具边。
-     * 工具边那两个按 {@link #summarizerToolHooks} 的列表顺序注册，末尾的保险丝因此在最外层。
+     * 模型节点两个：{@link CancelSignal} 先注册在最内层（它要在 apply 的同一调用栈里把中断信号接到答案流上），
+     * 压缩在它外面。工具边那两个按 {@link #summarizerToolHooks} 的列表顺序注册，末尾的保险丝因此在最外层。
      *
      * @param light  压缩用浅模型：摘要是简单活，用深模型纯烧钱
      * @param userId 动作类工具烤死的归属；查询归专家，动手归汇总者，理由见 {@link TraderActionToolkit}
@@ -348,6 +350,7 @@ public class ChatAgentFactory {
                         new TraderActionToolkit(runRegistry, userId, prompts, lang),
                         // 行为分析的模型也是这份 deep：平台 behavior 功能位已退休，账记在用户自己的 key 上
                         new BehaviorToolkit(deep, behaviorAnalysisService, runRegistry, userId, lang)))
+                .addCallModelHook(CancelSignal.hook())   // 最内层：用户点停止时掐断在途答案流
                 .addCallModelHook(wrapBefore(new ConversationSummarizer(
                         light, summarizeThresholdTokens, summarizeKeepMessages, prompts, lang)));
         for (EdgeHook.WrapCall<MessagesState<Message>> hook :
@@ -431,7 +434,7 @@ public class ChatAgentFactory {
      *   <li>这一层没实现 {@code AsyncGenerator.Cancellable}，包上之后图生成器的 cancel 传不到
      *       底层的 StreamingChatGenerator（{@code WithEmbed.cancel()} 只 cancel 栈里实现了该接口的项）。
      *       本仓从不 cancel 图生成器——{@code ChatWorkbenchController.run()} 断连后是<b>故意</b>
-     *       继续消费到底好落历史的，所以现在没有影响；哪天真要支持中止，这里得补上</li>
+     *       继续消费到底好落历史的；用户中断走的是 {@link CancelSignal} 直接掐模型流，也不经这里</li>
      *   <li>流出错就原样放行不合并：压缩这一次白做，下次模型调用会重新压。
      *       是有意的降级——这条路上再加补救只会把一次失败放大成两次</li>
      * </ul>
