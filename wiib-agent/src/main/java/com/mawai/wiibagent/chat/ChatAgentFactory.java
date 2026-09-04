@@ -192,9 +192,9 @@ public class ChatAgentFactory {
         }
         Leaves built;
         try {
-            built = build(eps, lang);               // 锁外建，慢也只慢自己
+            // 锁外建好图
+            built = build(eps, lang);
         } catch (Exception e) {
-            // build 抛检查异常；包成运行时，让上层当"这份配置建不出模型"处理
             throw new IllegalStateException("对话叶子构建失败", e);
         }
         // 并发下可能有人先放好了，用先到的那份：叶子无会话状态，多建一份只是一次 GC
@@ -219,8 +219,7 @@ public class ChatAgentFactory {
 
     private Leaves build(ChatEndpoints eps, AgentLang lang) throws Exception {
         ChatModelFactory.Models models = chatModelFactory.modelsFor(eps);
-        // 服务端搜索能力 = 端点勾了 web_search 且协议能声明服务端搜索工具。
-        // 它决定两件事：summarizer 提示词的新闻条款用哪版、summarizer 的调用捎不捎搜索许可
+        // 是否允许网络搜索
         boolean webSearch = AiProtocols.supportsServerSearch(eps.deep().getApiProtocol())
                 && Boolean.TRUE.equals(eps.deep().getWebSearch());
         // 用量装饰器进行包装
@@ -340,35 +339,30 @@ public class ChatAgentFactory {
                                                                  long userId, AgentLang lang,
                                                                  boolean webSearch) throws Exception {
         // 工具的模型在这一层绑死："当前用的是谁的 key"只有这里知道
-        ReactAgent.Builder<MessagesState<Message>> builder = AgentGraphs.reactAgent(deep,
-                        summarizerInstruction(lang, webSearch))
+        ReactAgent.Builder<MessagesState<Message>> builder = AgentGraphs.reactAgent(deep, summarizerInstruction(lang, webSearch))
                 .streaming(true) // 答案要逐字推给前端
                 .tools(localizedTools.of(lang,
+                        // 三套工具 研判/trader/行为分析
                         new DeepAnalysisToolkit(deep, deepAnalysisService, runRegistry, prompts, lang),
-                        // 可以多次给：三套工具分别是"研判"、"对 trader 动手"、"分析本人行为"，
-                        // 合成一个类只会让职责糊掉
                         new TraderActionToolkit(runRegistry, userId, prompts, lang),
-                        // 行为分析的模型也是这份 deep：平台 behavior 功能位已退休，账记在用户自己的 key 上
                         new BehaviorToolkit(deep, behaviorAnalysisService, runRegistry, userId, lang)))
                 .addCallModelHook(CancelSignal.hook())   // 最内层：用户点停止时掐断在途答案流
-                .addCallModelHook(wrapBefore(new ConversationSummarizer(
-                        light, summarizeThresholdTokens, summarizeKeepMessages, prompts, lang)));
-        for (EdgeHook.WrapCall<MessagesState<Message>> hook :
-                summarizerToolHooks(approvalRegistry, prompts, lang, runModelCallLimit)) {
+                .addCallModelHook(wrapBefore(
+                        new ConversationSummarizer(light, summarizeThresholdTokens, summarizeKeepMessages, prompts, lang)
+                ));
+
+        for (EdgeHook.WrapCall<MessagesState<Message>> hook : summarizerToolHooks(approvalRegistry, prompts, lang, runModelCallLimit)) {
             builder.addExecuteToolsHook(hook);
         }
-        return builder.build(ResilientChatService.builder()
+
+        return builder.build(
+                ResilientChatService.builder()
                         .model(deep)
-                        // 搜索许可（双闸门的调用方那半）：SseChatModel 还要再对端点配置那半
                         .webSearch(webSearch)
                         .maxAttempts(3).initialDelay(500).maxDelay(4000)
-                        .asFactory())
-                // 框架默认硬顶 25 不够：流式模型节点一轮吃 2 格（交回 token 生成器 + 合并它的
-                // resultValue）+ 工具边 1 格，加上 START/END/收尾三格，最小可跑值就是 3L+3——
-                // L=8 实测 27 恰好跑通、26 当场抛 "Maximum number of iterations (26) reached!"。
-                // 抬到 3L+8 留一轮多的余量。真正管事的闸门是 ModelCallLimiter（就是那个 L），
-                // 硬顶只兜"环没收住"这一种情况——它抛在结果交出去之前，一抛用户连截断回答都拿不到。
-                // token 帧不吃格（它们由 WithEmbed 消费，不走图的 next()），所以回答多长都不影响这本账
+                        .asFactory()
+                )
+                // 框架默认 25 不够 修改为 3L+8
                 .compile(CompileConfig.builder().recursionLimit(3 * runModelCallLimit + 8).build());
     }
 
@@ -376,10 +370,9 @@ public class ChatAgentFactory {
      * 把 BeforeCall 语义的钩子接到 ReactAgent 只暴露的 WrapCall 上：
      * 先跑钩子拿状态更新，合并进 state 后再执行真正的模型调用。
      */
-    private NodeHook.WrapCall<MessagesState<Message>> wrapBefore(
-            NodeHook.BeforeCall<MessagesState<Message>> before) {
-        return (nodeId, state, config, action) -> before.applyBefore(nodeId, state, config)
-                .thenCompose(update -> {
+    private NodeHook.WrapCall<MessagesState<Message>> wrapBefore(NodeHook.BeforeCall<MessagesState<Message>> before) {
+        return (nodeId, state, config, action)
+                -> before.applyBefore(nodeId, state, config).thenCompose(update -> {
                     if (update.isEmpty()) {
                         return action.apply(state, config);
                     }

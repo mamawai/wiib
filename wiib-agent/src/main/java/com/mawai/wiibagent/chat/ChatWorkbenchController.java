@@ -113,6 +113,7 @@ public class ChatWorkbenchController {
         if (request.getMessage().length() > MAX_MESSAGE_CHARS) {
             throw new BizException(ErrorCode.CHAT_MESSAGE_TOO_LONG);
         }
+        // leaves 就是一套创建好的子 agent
         ChatAgentFactory.Leaves leaves = leavesFor(userId);
         // 尝试获取对话名额
         ChatConcurrencyGate.Acquire acquired = concurrencyGate.tryAcquire(userId);
@@ -164,7 +165,9 @@ public class ChatWorkbenchController {
         return streamTurn(userId, sessionId, work.question(), leaves, null, null, work.batch());
     }
 
-    /** 建叶子。保存过了仍可能建不出模型（协议对不上等）；建叶子不发请求，慢端点拖不住。 */
+    /**
+     * 为对应userId创建一套子agent
+     */
     private ChatAgentFactory.Leaves leavesFor(long userId) {
         ChatEndpoints eps = endpointService.chatEndpoints(userId);
         if (eps == null) {

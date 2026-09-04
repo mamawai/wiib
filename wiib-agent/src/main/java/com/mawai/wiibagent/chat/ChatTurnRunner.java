@@ -524,8 +524,7 @@ public class ChatTurnRunner {
             List<Message> messages = new ArrayList<>(input);
             // 包装文案保持中性：怎么用这份数据（独占还是与搜索合并）由各专家的 instruction 定
             if (expert.preload() != null) {
-                messages.add(new UserMessage(
-                        prompts.get(lang, "chat.preloadHeader") + "\n" + expert.preload().get()));
+                messages.add(new UserMessage(prompts.get(lang, "chat.preloadHeader") + "\n" + expert.preload().get()));
             }
             // 专家叶子没有 saver，每次 invoke 都从 schema 起算，不需要 threadId 隔离
             Message reply = expert.graph()
