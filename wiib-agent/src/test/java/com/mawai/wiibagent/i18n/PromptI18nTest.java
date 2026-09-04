@@ -96,12 +96,10 @@ class PromptI18nTest {
         // 留言段走开场白不走 system：段头/亲笔提示/footer 同样零中文
         assertNoCjk("英文留言段", assembler.ownerNoteBlock(t, AgentLang.EN));
 
-        // 各条件分支的片段也得干净：单仓 / 禁双开 / 审批段只在开关关掉时才出现
+        // 各条件分支的片段也得干净：单仓 / 禁双开
         AiTrader strict = enTrader();
         strict.setAllowMultiPosition(false);
         strict.setAllowHedge(false);
-        strict.setAllowSelfAdd(false);
-        strict.setAllowSelfReduce(false);
         assertNoCjk("英文 trader 模板（严格档）", assembler.platformTemplate(
                 AgentLang.EN, "4h", "BTCUSDT", TraderRiskConfig.of(strict), "21:00-08:30"));
     }
@@ -318,10 +316,10 @@ class PromptI18nTest {
                 "trader.wake.routineQuestion", "trader.wake.sleepNotice", "trader.error.wakeTimeout",
                 // 落库即公开展示的暂停原因：四种来源必须都有英文，漏一种就是面板上一行中文
                 "trader.pause.manual", "trader.error.keyInvalid", "trader.error.liquidatedReason",
-                // 护栏拒因既回给模型也公开在时间线上；回执与修订标签同理
+                // 护栏拒因既回给模型也公开在时间线上；修订标签同理
                 "trader.guard.leverageRange", "trader.guard.stopLossRequired", "trader.guard.marginOutOfRange",
                 "trader.reject.stopOnlyTighter", "trader.reject.expired", "trader.reject.planAlreadyExists",
-                "trader.receipt.duplicate", "trader.receipt.filled", "trader.revise.moveStop",
+                "trader.revise.moveStop",
                 "trader.revise.addOnNote",
                 "news.tagging", "news.flashLine",
                 // 轮起始标记与 trader 查询说明字段：全是喂模型的，回落成中文就混语

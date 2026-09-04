@@ -17,11 +17,6 @@ trader:
     notClosed: Only settled trades can be ignored
     staleRequired: Missing required field 'stale'
 
-  # The two buttons on an approval card (add / reduce requests)
-  request:
-    notFoundOrHandled: That request does not exist or was already handled
-    accountUnavailable: The trader account is unavailable
-
   # Entry validation for create / update config
   config:
     nameRequired: A name is required, up to 32 characters

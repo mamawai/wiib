@@ -223,8 +223,7 @@ public class TraderPromptAssembler {
                 "marginPctMin", plain(risk.marginPctMin()),
                 "marginPctMax", plain(risk.marginPctMax()),
                 "positionRule", positionRule(lang, risk),
-                "hedgeRule", hedgeRule(lang, risk),
-                "approval", approvalSection(lang, risk)));
+                "hedgeRule", hedgeRule(lang, risk)));
     }
 
     /** 节奏行按时段说真话：全天=每根K线醒一次；有时段就把"只在时段内醒、时段外例行与警报都停、手动例外"写进同一句 */
@@ -246,24 +245,5 @@ public class TraderPromptAssembler {
 
     private String hedgeRule(AgentLang lang, TraderRiskConfig risk) {
         return prompts.get(lang, risk.allowHedge() ? "trader.hedgeRule.allow" : "trader.hedgeRule.deny");
-    }
-
-    /**
-     * 加仓/减仓审批段：只在对应开关关掉时才出现。
-     * footer 必须写明"止损止盈不受约束"——否则模型会因为"平不了仓"而焦虑，做出别的怪动作。
-     */
-    private String approvalSection(AgentLang lang, TraderRiskConfig risk) {
-        if (risk.allowSelfAdd() && risk.allowSelfReduce()) {
-            return "";
-        }
-        StringBuilder sb = new StringBuilder("\n")
-                .append(prompts.get(lang, "trader.approval.header")).append('\n');
-        if (!risk.allowSelfAdd()) {
-            sb.append(prompts.get(lang, "trader.approval.add")).append('\n');
-        }
-        if (!risk.allowSelfReduce()) {
-            sb.append(prompts.get(lang, "trader.approval.reduce")).append('\n');
-        }
-        return sb.append(prompts.get(lang, "trader.approval.footer")).toString();
     }
 }

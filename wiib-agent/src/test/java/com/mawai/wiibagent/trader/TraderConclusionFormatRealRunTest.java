@@ -124,6 +124,6 @@ class TraderConclusionFormatRealRunTest {
         plan.setOpenedWakeTime(boundary - 3 * 3_600_000L);
 
         return TraderWakeupRunner.accountStateJson(prompts, lang, new BigDecimal("10000"),
-                List.of(pos), List.of(), List.of(plan), boundary, List.of(), List.of());
+                List.of(pos), List.of(), List.of(plan), boundary);
     }
 }

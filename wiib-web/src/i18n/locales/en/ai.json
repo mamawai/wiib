@@ -237,10 +237,6 @@
       "title": "How many positions / hedging allowed",
       "body": "Turning off \"multiple positions\" means at most one position across the whole account, and the AI picks which coin. Unfilled orders take the slot too, otherwise it would just place three orders and walk around the rule.\n\n\"Hedging\" is whether the same coin may hold a long and a short at once. Turning it off stops it from hedging against itself and paying fees twice. In single-position mode this is moot — hedging needs two slots."
     },
-    "selfManage": {
-      "title": "Do adds and reduces need your approval",
-      "body": "Turn either off and the AI no longer executes directly; it sends you a request that shows up at the top of this page.\n\nThe point is that it never blocks — once the request is out it finishes the round and moves on, and you approve or dismiss whenever you like. The card shows both the price when it asked and the live price, so you judge whether the move has run away.\n\nBy default adds are free and reduces need approval. Stop-loss and take-profit orders are unaffected and always execute, so risk stays covered."
-    },
     "byok": {
       "title": "Your model, your bill",
       "body": "The platform provides no model. Endpoints (protocol / base URL / key / model name) are all kept under Model config on the AI page; here you only pick one of them. Pick none and it follows your default endpoint.\n\nEvery wake-up spends your tokens — the more often it wakes, the bigger the bill."
@@ -280,10 +276,6 @@
     "hedge": "Allow hedging",
     "hedgeHint": "The same coin may hold a long and a short at once",
     "hedgeNeedMulti": "Turn on multiple positions first (hedging needs two slots)",
-    "selfAdd": "Let the AI add on its own",
-    "selfAddHint": "Off = it sends you a request to add and waits for your approval",
-    "selfReduce": "Let the AI reduce on its own",
-    "selfReduceHint": "Off = reducing and closing need your approval; stop loss and take profit still fire, so risk stays covered",
     "alertTitle": "Volatility alert (1h/4h intervals only)",
     "alertHint": "Wakes it early when the 5-minute range breaks the threshold on a coin it holds or has an order on",
     "alertOn": "Enable volatility alerts",
@@ -306,8 +298,6 @@
     "listSep": ", ",
     "guardSinglePos": "one position only",
     "guardNoHedge": "no hedging on the same coin",
-    "guardAskAdd": "adds need your approval",
-    "guardAskReduce": "reduces need your approval",
     "promptOffTail": ". Every entry must carry a stop loss, a thesis and an invalidation condition; stops may only tighten; take profits may only move away from entry. Violating calls are rejected with the reason.",
     "customPrompt": "Custom prompt (sets style and strategy; yours wins over the platform default)",
     "customPromptOnly": "Custom prompt (the only instruction source, required)",
@@ -341,15 +331,6 @@
       "option_iv": "Deribit DVOL and ATM implied volatility.",
       "news_search": "Recent market news flashes, full text."
     }
-  },
-  "req": {
-    "title": "AI approval requests · {{n}}",
-    "hint": "Approved requests execute at market",
-    "add": "Add",
-    "reduce": "Reduce",
-    "atRequest": "At request",
-    "now": "Now",
-    "approve": "Approve"
   },
   "chat": {
     "title": "Analysis chat",
@@ -564,8 +545,6 @@
     "analyzeDone": "Analysis done",
     "analyzeFailed": "Analysis failed",
     "actionFailed": "Action failed",
-    "approved": "Approved, executing at market",
-    "rejected": "Rejected",
     "started": "Started — it wakes on the next candle",
     "reset": "Reset, new round started",
     "saved": "Config saved",

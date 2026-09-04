@@ -60,14 +60,12 @@ class TradeToolsTest {
 
     private final SimTradeClient simTradeClient = mock(SimTradeClient.class);
     private final AiTraderPlanMapper planMapper = mock(AiTraderPlanMapper.class);
-    private final TraderRequestService requestService = mock(TraderRequestService.class);
-    /** 本类只验工具本身：自主加/减仓都开着，不走审批分流 */
     private final TradeTools tools = new TradeTools(simTradeClient, 99L, Set.of("BTCUSDT"),
             new BigDecimal("10000"), sym -> new BigDecimal("100000"),
-            new TraderPlanStore(planMapper, PROMPTS), requestService,
+            new TraderPlanStore(planMapper, PROMPTS),
             new TradeTools.WakeCtx(7L, 1, 1785171600000L, DEADLINE,
                     new TraderRiskConfig(1, 20, new BigDecimal("1"), new BigDecimal("50"),
-                            true, true, true, true), AgentLang.ZH), PROMPTS, MESSAGES);
+                            true, true), AgentLang.ZH), PROMPTS, MESSAGES);
 
     /** 多单：入场10万，当前止损9.5万、止盈11万 */
     private FuturesPositionDTO longPosition() {
@@ -410,10 +408,10 @@ class TradeToolsTest {
     void expiredRoundRejectsAllWriteTools() {
         TradeTools late = new TradeTools(simTradeClient, 99L, Set.of("BTCUSDT"),
                 new BigDecimal("10000"), sym -> new BigDecimal("100000"),
-                new TraderPlanStore(planMapper, PROMPTS), requestService,
+                new TraderPlanStore(planMapper, PROMPTS),
                 new TradeTools.WakeCtx(7L, 1, 1785171600000L, System.currentTimeMillis() - 1,
                         new TraderRiskConfig(1, 20, new BigDecimal("1"), new BigDecimal("50"),
-                                true, true, true, true), AgentLang.ZH), PROMPTS, MESSAGES);
+                                true, true), AgentLang.ZH), PROMPTS, MESSAGES);
 
         assertThat(openOnce(late)).startsWith("REJECTED").contains("本轮已超时");
         assertThat(late.closePosition(5L, 0.01, "失效条件触发")).contains("本轮已超时");
@@ -433,10 +431,10 @@ class TradeToolsTest {
         TradeTools strict = new TradeTools(simTradeClient, 99L, Set.of("BTCUSDT"),
                 new BigDecimal("10000"),
                 sym -> { throw new IllegalStateException("不该发起行情查询"); },
-                new TraderPlanStore(planMapper, PROMPTS), requestService,
+                new TraderPlanStore(planMapper, PROMPTS),
                 new TradeTools.WakeCtx(7L, 1, 1785171600000L, DEADLINE,
                         new TraderRiskConfig(1, 20, new BigDecimal("1"), new BigDecimal("50"),
-                                true, true, true, true), AgentLang.ZH), PROMPTS, MESSAGES);
+                                true, true), AgentLang.ZH), PROMPTS, MESSAGES);
 
         String r = strict.openPosition(null, "SHORT", "MARKET", 0.64, 20,
                 null, 64980.0, 64640.0, "BREAKOUT", "突破", "收回箱体");
@@ -459,50 +457,40 @@ class TradeToolsTest {
     }
 
     /**
-     * 转请求不是成交：回执原样带给模型（纯文本非 JSON，不许被当异常转成 ERROR），
-     * 但开头必须先说清"未成交"，动作轨迹也得记成 pending 而不是 ok——
-     * 记成 ok 模型会当已平仓继续推进（例如给并不存在的新仓挂止损），账面与实际脱节。
+     * 同向已有仓位＝加仓，现在直接成交：审批闸门拆掉后这条路径不该再被拦下，
+     * 且计划要走加仓覆盖（isAddOn）而不是新立一份。
      */
     @Test
-    void reduceTurnedIntoRequestIsMarkedPendingNotOk() {
+    void addOnFillsImmediately() {
         when(simTradeClient.getAllPositions(99L)).thenReturn(List.of(longPosition()));
-        when(requestService.submit(any(), any()))
-                .thenReturn("减仓请求已提交给主人确认，本轮不会成交。你的止损单仍在生效，风险有保护");
-        TradeTools noSelfReduce = new TradeTools(simTradeClient, 99L, Set.of("BTCUSDT"),
-                new BigDecimal("10000"), sym -> new BigDecimal("100000"),
-                new TraderPlanStore(planMapper, PROMPTS), requestService,
-                new TradeTools.WakeCtx(7L, 1, 1785171600000L, DEADLINE,
-                        new TraderRiskConfig(1, 20, new BigDecimal("1"), new BigDecimal("50"),
-                                true, true, true, false), AgentLang.ZH), PROMPTS, MESSAGES);
+        FuturesOrderResponse resp = new FuturesOrderResponse();
+        resp.setOrderId(777L);
+        resp.setPositionId(5L);
+        when(simTradeClient.openPosition(eq(99L), any())).thenReturn(resp);
+        when(planMapper.selectOne(any())).thenReturn(existingPlan());
 
-        String r = noSelfReduce.closePosition(5L, 0.01, "失效条件触发");
-
-        assertThat(r).startsWith("PENDING").contains("未成交").contains("已提交给主人确认");
-        assertThat(noSelfReduce.actions()).hasSize(1);
-        assertThat(noSelfReduce.actions().get(0).getString("status")).isEqualTo("pending");
-        verify(simTradeClient, never()).closePosition(anyLong(), any());
-    }
-
-    /** 加仓转请求同理：没成交就不许回 ok */
-    @Test
-    void addTurnedIntoRequestIsMarkedPendingNotOk() {
-        when(simTradeClient.getAllPositions(99L)).thenReturn(List.of(longPosition()));
-        when(requestService.submit(any(), any()))
-                .thenReturn("加仓请求已提交给主人确认，本轮不会成交。继续做你该做的其余判断，结果下一轮揭晓");
-        TradeTools noSelfAdd = new TradeTools(simTradeClient, 99L, Set.of("BTCUSDT"),
-                new BigDecimal("10000"), sym -> new BigDecimal("100000"),
-                new TraderPlanStore(planMapper, PROMPTS), requestService,
-                new TradeTools.WakeCtx(7L, 1, 1785171600000L, DEADLINE,
-                        new TraderRiskConfig(1, 20, new BigDecimal("1"), new BigDecimal("50"),
-                                true, true, false, true), AgentLang.ZH), PROMPTS, MESSAGES);
-
-        String r = noSelfAdd.openPosition("BTCUSDT", "LONG", "MARKET", 0.01, 10,
+        String r = tools.openPosition("BTCUSDT", "LONG", "MARKET", 0.01, 10,
                 null, 95000.0, null, "PULLBACK", "回踩确认支撑", "1h收盘跌破97000");
 
-        assertThat(r).startsWith("PENDING").contains("未成交");
-        assertThat(noSelfAdd.actions()).hasSize(1);
-        assertThat(noSelfAdd.actions().get(0).getString("status")).isEqualTo("pending");
-        verify(simTradeClient, never()).openPosition(anyLong(), any());
+        assertThat(r).doesNotStartWith("REJECTED").contains("777");
+        assertThat(tools.actions().get(0).getString("status")).isEqualTo("ok");
+        verify(simTradeClient).openPosition(eq(99L), any());
+        // isAddOn 是从 sameSide 推出来的：覆盖走 updateById，判成新立就会多插一行
+        verify(planMapper).updateById(any(AiTraderPlan.class));
+        verify(planMapper, never()).insert(any(AiTraderPlan.class));
+    }
+
+    /** 平仓同理：进来就是市价单，不再有转请求那一跳 */
+    @Test
+    void closeFillsImmediately() {
+        FuturesOrderResponse resp = new FuturesOrderResponse();
+        resp.setOrderId(778L);
+        when(simTradeClient.closePosition(eq(99L), any())).thenReturn(resp);
+
+        String r = tools.closePosition(5L, 0.01, "失效条件触发");
+
+        assertThat(r).doesNotStartWith("REJECTED").contains("778");
+        verify(simTradeClient).closePosition(eq(99L), any());
     }
 
     /** 加仓覆盖：旧论点进修订历史（含理由），持有时长按最初开仓算；sim 并仓 id 不变，绑定跟着保留 */

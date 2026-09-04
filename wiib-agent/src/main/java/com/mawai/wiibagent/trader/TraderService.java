@@ -7,7 +7,6 @@ import com.mawai.wiibcommon.config.BinanceProperties;
 import com.mawai.wiibcommon.entity.AiTrader;
 import com.mawai.wiibcommon.entity.AiTraderDecision;
 import com.mawai.wiibcommon.entity.AiTraderPlan;
-import com.mawai.wiibcommon.entity.AiTraderRequest;
 import com.mawai.wiibcommon.entity.UserLlmBinding;
 import com.mawai.wiibcommon.entity.UserLlmEndpoint;
 import com.mawai.wiibcommon.i18n.MessageCatalog;
@@ -17,7 +16,6 @@ import com.mawai.wiibagent.llm.LlmEndpointService;
 import com.mawai.wiibquant.external.sim.SimTradeClient;
 import com.mawai.wiibagent.mapper.AiTraderDecisionMapper;
 import com.mawai.wiibagent.mapper.AiTraderMapper;
-import com.mawai.wiibagent.mapper.AiTraderRequestMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -56,7 +54,6 @@ public class TraderService {
     private final SimTradeClient simTradeClient;
     private final BinanceProperties binanceProperties;
     private final TraderPlanStore planStore;
-    private final AiTraderRequestMapper requestMapper;
     /** 暂停原因落库即公开展示，跟 trader 主人的语言写入——与 TraderWakeupRunner 那几种同一口径 */
     private final PromptCatalog prompts;
     private final UserLangResolver langResolver;
@@ -70,7 +67,6 @@ public class TraderService {
                             Integer leverageMin, Integer leverageMax,
                             BigDecimal marginPctMin, BigDecimal marginPctMax,
                             Boolean allowMultiPosition, Boolean allowHedge,
-                            Boolean allowSelfAdd, Boolean allowSelfReduce,
                             Boolean alertEnabled, BigDecimal alertThresholdMult,
                             Boolean reviewEnabled, Boolean learningEnabled,
                             String wakeWindow) {
@@ -157,8 +153,6 @@ public class TraderService {
                 .set(AiTrader::getMarginPctMax, probe.getMarginPctMax())
                 .set(AiTrader::getAllowMultiPosition, probe.getAllowMultiPosition())
                 .set(AiTrader::getAllowHedge, probe.getAllowHedge())
-                .set(AiTrader::getAllowSelfAdd, probe.getAllowSelfAdd())
-                .set(AiTrader::getAllowSelfReduce, probe.getAllowSelfReduce())
                 .set(AiTrader::getAlertEnabled, probe.getAlertEnabled())
                 .set(AiTrader::getAlertThresholdMult, probe.getAlertThresholdMult())
                 .set(AiTrader::getReviewEnabled, probe.getReviewEnabled())
@@ -245,14 +239,6 @@ public class TraderService {
         Long simUserId = simTradeClient.ensureAccount(accountName(userId, newRound), INITIAL_BALANCE);
         // 本局存活计划随重置归档（不删）：论点/失效条件/修订史是公开凭证，也是reviewer的复盘原料
         planStore.archiveRound(t.getId(), t.getRoundNo(), System.currentTimeMillis());
-        // 未处理的请求随本局一并作废：换了新账户，那个 positionId 早已不存在，留着也永远处理不掉
-        requestMapper.update(null, new LambdaUpdateWrapper<AiTraderRequest>()
-                .eq(AiTraderRequest::getTraderId, t.getId())
-                .eq(AiTraderRequest::getStatus, AiTraderRequest.STATUS_PENDING)
-                .set(AiTraderRequest::getStatus, AiTraderRequest.STATUS_REJECTED)
-                .set(AiTraderRequest::getExecutedResult,
-                        prompts.get(langResolver.of(userId), "trader.receipt.voidedByReset"))
-                .set(AiTraderRequest::getDecidedAt, LocalDateTime.now()));
         LambdaUpdateWrapper<AiTrader> upd = new LambdaUpdateWrapper<AiTrader>()
                 .eq(AiTrader::getId, t.getId())
                 .set(AiTrader::getRoundNo, newRound)
@@ -260,7 +246,7 @@ public class TraderService {
                 .set(AiTrader::getStatus, AiTrader.STATUS_PAUSED)
                 .set(AiTrader::getPausedReason, null)
                 .set(AiTrader::getConsecutiveFailures, 0)
-                // 未读留言同请求一起作废：那是对上一局那个 trader 说的话（"这周别碰 SOL"），
+                // 未读留言随重置作废：那是对上一局那个 trader 说的话（"这周别碰 SOL"），
                 // 新账户新计划新战绩，唯独叮嘱跟过来最没道理；留言最多能挂 24 轮，
                 // 不清就会污染新局开头的一整天——而新局恰恰最需要干净的上下文。
                 // memory/learning_notes 默认不清（跨局的认知积累，不是本局的未决事项），主人可选不带入
@@ -289,9 +275,6 @@ public class TraderService {
         decisionMapper.delete(new LambdaQueryWrapper<AiTraderDecision>()
                 .eq(AiTraderDecision::getTraderId, traderId)
                 .le(AiTraderDecision::getRoundNo, expired));
-        requestMapper.delete(new LambdaQueryWrapper<AiTraderRequest>()
-                .eq(AiTraderRequest::getTraderId, traderId)
-                .le(AiTraderRequest::getRoundNo, expired));
         planStore.purgeRounds(traderId, expired);
         try {
             simTradeClient.deleteAccount(accountName(userId, expired));
@@ -432,7 +415,7 @@ public class TraderService {
         if (symbols.isEmpty()) {
             return messages.get("trader.config.symbolRequired");
         }
-        if (whitelist == null || !whitelist.containsAll(symbols)) {
+        if (whitelist == null || !new HashSet<>(whitelist).containsAll(symbols)) {
             return messages.get("trader.config.symbolNotAllowed", Map.of("whitelist", whitelist));
         }
         if (req.customPrompt() != null && req.customPrompt().length() > 4000) {
@@ -493,8 +476,6 @@ public class TraderService {
         t.setAllowMultiPosition(!Boolean.FALSE.equals(req.allowMultiPosition()));
         // 单仓+双开这个自相矛盾的组合，validateSpec 已经在入口拒掉了，这里不必再判一次
         t.setAllowHedge(Boolean.TRUE.equals(req.allowHedge()));
-        t.setAllowSelfAdd(!Boolean.FALSE.equals(req.allowSelfAdd()));
-        t.setAllowSelfReduce(Boolean.TRUE.equals(req.allowSelfReduce()));
         t.setAlertEnabled(!Boolean.FALSE.equals(req.alertEnabled()));
         t.setAlertThresholdMult(req.alertThresholdMult() == null ? BigDecimal.ONE : req.alertThresholdMult());
         t.setReviewEnabled(!Boolean.FALSE.equals(req.reviewEnabled()));

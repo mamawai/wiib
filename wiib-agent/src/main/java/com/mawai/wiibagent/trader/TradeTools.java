@@ -13,7 +13,6 @@ import com.mawai.wiibcommon.entity.AiTraderPlan;
 import com.mawai.wiibagent.i18n.PromptCatalog;
 import com.mawai.wiibcommon.enums.AgentLang;
 import com.mawai.wiibcommon.i18n.MessageCatalog;
-import com.mawai.wiibcommon.entity.AiTraderRequest;
 import com.mawai.wiibcommon.entity.FuturesPosition;
 import com.mawai.wiibcommon.entity.FuturesStopLoss;
 import com.mawai.wiibcommon.entity.FuturesTakeProfit;
@@ -59,8 +58,6 @@ public class TradeTools {
     /** 现价查询（symbol → mark price）；由唤醒回路注入，通常取最近K线收盘价 */
     private final Function<String, BigDecimal> markPrice;
     private final TraderPlanStore planStore;
-    /** 自主加/减仓关掉时，工具调用转成待确认请求走这里 */
-    private final TraderRequestService requestService;
     private final WakeCtx ctx;
     /** 拒因文案：回给模型、也进公开时间线，跟 {@code ctx.lang()} 走 */
     private final PromptCatalog prompts;
@@ -71,7 +68,7 @@ public class TradeTools {
 
     public TradeTools(SimTradeClient simTradeClient, long simUserId, Set<String> symbolWhitelist,
                       BigDecimal equity, Function<String, BigDecimal> markPrice,
-                      TraderPlanStore planStore, TraderRequestService requestService, WakeCtx ctx,
+                      TraderPlanStore planStore, WakeCtx ctx,
                       PromptCatalog prompts, MessageCatalog messages) {
         this.simTradeClient = simTradeClient;
         this.simUserId = simUserId;
@@ -79,7 +76,6 @@ public class TradeTools {
         this.equity = equity;
         this.markPrice = markPrice;
         this.planStore = planStore;
-        this.requestService = requestService;
         this.ctx = ctx;
         this.prompts = prompts;
         this.messages = messages;
@@ -181,23 +177,8 @@ public class TradeTools {
             // action() 内部已入轨迹列表，不许再包一层 add——否则拒绝动作双计
             return rejected("open_position", argSummary, reject);
         }
-        // 加仓需主人确认：转请求即返回，本轮唤醒继续跑，不在这里等
+        // 同向已有仓位＝这单是加仓，计划走覆盖而不是新立
         FuturesPositionDTO sameSide = acct.sameSide(req.symbol(), req.side());
-        if (sameSide != null && !ctx.risk().allowSelfAdd()) {
-            AiTraderRequest ask = new AiTraderRequest();
-            ask.setTraderId(ctx.traderId());
-            ask.setRoundNo(ctx.roundNo());
-            ask.setType(AiTraderRequest.TYPE_ADD);
-            ask.setSymbol(req.symbol());
-            ask.setSide(req.side());
-            ask.setPositionId(sameSide.getId());
-            ask.setQuantity(req.quantity());
-            ask.setLeverage(req.leverage());
-            ask.setRequestPrice(mark);
-            ask.setReason(req.signalsUsed());
-            ask.setWakeTime(ctx.boundaryTime());
-            return pending("open_position", argSummary, requestService.submit(ask, ctx.lang()));
-        }
         try {
             FuturesOpenRequest openReq = new FuturesOpenRequest();
             openReq.setSymbol(req.symbol());
@@ -269,25 +250,6 @@ public class TradeTools {
             return expired("close_position", args);
         }
         try {
-            // 减仓需主人确认：转请求即返回。止损止盈单不走这条路，仍自动执行，风险有保护
-            if (!ctx.risk().allowSelfReduce()) {
-                FuturesPositionDTO pos = findPosition(positionId);
-                if (pos == null) {
-                    return rejected("close_position", args, prompts.get(ctx.lang(), "trader.reject.positionGone"));
-                }
-                AiTraderRequest ask = new AiTraderRequest();
-                ask.setTraderId(ctx.traderId());
-                ask.setRoundNo(ctx.roundNo());
-                ask.setType(AiTraderRequest.TYPE_REDUCE);
-                ask.setSymbol(pos.getSymbol());
-                ask.setSide(pos.getSide());
-                ask.setPositionId(positionId);
-                ask.setQuantity(BigDecimal.valueOf(quantity));
-                ask.setRequestPrice(markPrice.apply(pos.getSymbol()));
-                ask.setReason(reason);
-                ask.setWakeTime(ctx.boundaryTime());
-                return pending("close_position", args, requestService.submit(ask, ctx.lang()));
-            }
             FuturesCloseRequest req = new FuturesCloseRequest();
             req.setPositionId(positionId);
             req.setQuantity(BigDecimal.valueOf(quantity));
@@ -570,15 +532,6 @@ public class TradeTools {
         return "REJECTED: " + reason;
     }
 
-    /**
-     * 转成待主人确认的请求：没有成交。轨迹状态必须与 ok 区分开——
-     * 记成 ok 模型会当已成交继续推进（接着给并不存在的新仓挂止损），账面与实际脱节。
-     */
-    private String pending(String tool, JSONObject args, String receipt) {
-        action(tool, args).fluentPut("status", "pending").fluentPut("result", receipt);
-        return prompts.get(ctx.lang(), "trader.reject.pending", Map.of("receipt", String.valueOf(receipt)));
-    }
-
     @Tool(name = "cancel_order", description = "Cancel a pending limit order by orderId (from get_account pendingOrders).")
     public String cancelOrder(@ToolParam(description = "Order id from get_account pendingOrders") long orderId) {
         JSONObject args = new JSONObject().fluentPut("orderId", orderId);
@@ -628,7 +581,7 @@ public class TradeTools {
             try {
                 result = JSON.parse(s);
             } catch (Exception e) {
-                result = s; // 审批回执等纯文本结果不是 JSON，原样入轨迹
+                result = s; // 不是 JSON 的结果原样入轨迹
             }
         }
         action(tool, args).fluentPut("status", "ok").fluentPut("result", result);

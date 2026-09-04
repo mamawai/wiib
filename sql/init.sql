@@ -851,8 +851,6 @@ CREATE TABLE IF NOT EXISTS ai_trader (
     margin_pct_max  NUMERIC(5,2) NOT NULL DEFAULT 20,
     allow_multi_position BOOLEAN NOT NULL DEFAULT TRUE,
     allow_hedge     BOOLEAN NOT NULL DEFAULT FALSE,
-    allow_self_add  BOOLEAN NOT NULL DEFAULT TRUE,
-    allow_self_reduce BOOLEAN NOT NULL DEFAULT FALSE,
     review_enabled  BOOLEAN NOT NULL DEFAULT TRUE,
     learning_enabled BOOLEAN NOT NULL DEFAULT TRUE,
     alert_enabled   BOOLEAN NOT NULL DEFAULT TRUE,
@@ -884,8 +882,8 @@ COMMENT ON COLUMN ai_trader.margin_pct_min IS '单笔保证金占权益%下界�
 COMMENT ON COLUMN ai_trader.margin_pct_max IS '单笔保证金占权益%上界，0.1~100';
 COMMENT ON COLUMN ai_trader.allow_multi_position IS '允许同时持有多个仓位；false=全账户至多一仓（挂单一并计数，否则挂几单就能绕过）';
 COMMENT ON COLUMN ai_trader.allow_hedge IS '允许同币多空双开；仅在allow_multi_position=true时有意义（双开天然占两个仓位）';
-COMMENT ON COLUMN ai_trader.allow_self_add IS '允许模型自主加仓；false=转成待确认请求，不阻塞本轮唤醒';
-COMMENT ON COLUMN ai_trader.allow_self_reduce IS '允许模型自主减仓/平仓；false=转请求。止损止盈自动触发不受此约束';
+-- 自主加/减仓开关 allow_self_add / allow_self_reduce 已删：agentic trading 里调仓不等人点头，模型始终自主。旧库执行：
+--     ALTER TABLE ai_trader DROP COLUMN IF EXISTS allow_self_add, DROP COLUMN IF EXISTS allow_self_reduce;
 
 CREATE TABLE IF NOT EXISTS ai_trader_decision (
     id              BIGSERIAL PRIMARY KEY,
@@ -954,40 +952,8 @@ COMMENT ON COLUMN ai_trader_plan.closed_wake_time IS '归档时刻(ms)：懒清�
 COMMENT ON COLUMN ai_trader_plan.stale IS '主人标记忽略:true=本笔不进论点战绩统计与复盘教材(配对表/了结统计行);权益/排行榜/同侪学习照常。仅CLOSED可标,可随时取消';
 COMMENT ON COLUMN ai_trader_plan.position_id IS 'sim仓位id:市价开仓/加仓从下单响应落盘,限价单成交后唤醒懒清理趟补绑;计划↔仓位配对的精确键,NULL(历史行/未成交挂单)走bestMatch时间就近兜底';
 
--- ============ ai_trader_request：加仓/减仓待主人确认（allow_self_add/reduce 关闭时才产生） ============
--- 异步不阻塞：模型调工具即落库返回，本轮唤醒照常收尾；主人在"我的trader"页点同意才市价执行。
--- 不设过期——卡片上同时给"请求时价"和实时价，价格跑没跑掉由人自己看。
-CREATE TABLE IF NOT EXISTS ai_trader_request (
-    id              BIGSERIAL PRIMARY KEY,
-    trader_id       BIGINT NOT NULL,
-    round_no        INT NOT NULL,
-    type            VARCHAR(8) NOT NULL,
-    symbol          VARCHAR(20) NOT NULL,
-    side            VARCHAR(8) NOT NULL,
-    position_id     BIGINT NOT NULL,
-    quantity        NUMERIC(20,8) NOT NULL,
-    leverage        INT,
-    request_price   NUMERIC(20,8) NOT NULL,
-    reason          TEXT NOT NULL,
-    status          VARCHAR(10) NOT NULL DEFAULT 'PENDING',
-    executed_result TEXT,
-    notified        BOOLEAN NOT NULL DEFAULT FALSE,
-    wake_time       BIGINT NOT NULL,
-    decided_at      TIMESTAMP,
-    created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
--- 同仓位同类型至多一条待确认：模型每轮看仓位没动会反复提，不去重就堆满卡片
-CREATE UNIQUE INDEX IF NOT EXISTS uq_atr_pending ON ai_trader_request (position_id, type)
-    WHERE status = 'PENDING';
-CREATE INDEX IF NOT EXISTS idx_atr_trader ON ai_trader_request (trader_id, status, created_at DESC);
-COMMENT ON TABLE ai_trader_request IS 'AI Trader加仓/减仓待确认请求：自主开关关闭时模型的调用转为此表一行，主人点同意才市价执行';
-COMMENT ON COLUMN ai_trader_request.type IS 'ADD=加仓 / REDUCE=减仓或平仓';
-COMMENT ON COLUMN ai_trader_request.position_id IS '目标仓位id（sim侧）；批准时重查存在性，已被止损带走则置失败';
-COMMENT ON COLUMN ai_trader_request.request_price IS '模型发起时的mark快照，与实时价并列展示供主人判断价格是否跑掉';
-COMMENT ON COLUMN ai_trader_request.status IS 'PENDING待确认 / APPROVED已同意(执行结果见executed_result) / REJECTED主人拒绝';
-COMMENT ON COLUMN ai_trader_request.executed_result IS '批准后的执行结果或失败原因（余额不足/仓位已不存在等），不吞';
-COMMENT ON COLUMN ai_trader_request.notified IS '处理结果是否已回注给模型：主人批/拒之后的下一次唤醒注入一次并置true——反馈闭环的最后一环，不注模型只能从仓位变化倒猜';
-COMMENT ON COLUMN ai_trader_request.wake_time IS '发起时所在唤醒边界(ms)，用于回注提示词时说明"这是第几轮提的"';
+-- 加仓/减仓待主人确认表 ai_trader_request 已删：agentic trading 里调仓不该等人点头，审批链路整条拆掉。旧库执行：
+--     DROP TABLE IF EXISTS ai_trader_request;
 
 -- 旧库放开这几列的列宽（新库的 CREATE 里已是 TEXT）。装的是模型自由文本与上游异常串，
 -- 长度封顶换不来任何好处：PG 的 varchar(n) 与 text 存储实现相同，超长不截断而是整行拒收——
@@ -996,8 +962,6 @@ ALTER TABLE ai_trader          ALTER COLUMN paused_reason          TYPE TEXT;
 ALTER TABLE ai_trader_decision ALTER COLUMN error                  TYPE TEXT;
 ALTER TABLE ai_trader_plan     ALTER COLUMN signals_used           TYPE TEXT;
 ALTER TABLE ai_trader_plan     ALTER COLUMN invalidation_condition TYPE TEXT;
-ALTER TABLE ai_trader_request  ALTER COLUMN reason                 TYPE TEXT;
-ALTER TABLE ai_trader_request  ALTER COLUMN executed_result        TYPE TEXT;
 
 -- ============ user_llm_endpoint / user_llm_binding：用户 BYOK 端点库（2026-08 重构） ============
 -- 全站 BYOK 总配置：一人多条端点（协议+URL+key+模型+思考档位），对话/交易员/复盘教练只做选择；

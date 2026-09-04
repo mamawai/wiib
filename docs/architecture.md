@@ -89,7 +89,7 @@ whatifibought/                        # Maven 多 module 聚合 reactor
 ├── wiib-agent/                       # ② AI 交易员进程（:8082，唯一可执行进程，下单只走 sim 子账户）
 │   │                                 # 纯 LLM harness：六处装置（非 LLM 代码都在 wiib-quant 库里）
 │   ├── trader/                       # trader agent：调度/唤醒回路/提示词/交易工具/护栏
-│   │                                 # + 计划存取 + 审批 + 波动哨兵 + 交易员模型工厂
+│   │                                 # + 计划存取 + 波动哨兵 + 交易员模型工厂
 │   ├── learning/                     # reviewer workflow + learning agent：素材组装（硬事实）+ 复盘/学习回路
 │   ├── chat/                         # chat agent：router + 子 agent 并行 + summarizer + checkpoint
 │   │                                 # + HITL 授权闸门 + 并发闸门

@@ -19,7 +19,6 @@ import com.mawai.wiibquant.external.sim.SimTradeClient;
 import com.mawai.wiibagent.trader.TradeRecordService;
 import com.mawai.wiibagent.trader.TraderActionService;
 import com.mawai.wiibagent.trader.TraderPromptAssembler;
-import com.mawai.wiibagent.trader.TraderRequestService;
 import com.mawai.wiibagent.trader.TraderRiskConfig;
 import com.mawai.wiibagent.trader.TraderService;
 import com.mawai.wiibagent.trader.WakeWindow;
@@ -48,7 +47,6 @@ public class TraderController {
     private final TraderService traderService;
     private final SimTradeClient simTradeClient;
     private final TraderPromptAssembler promptAssembler;
-    private final TraderRequestService requestService;
     private final LlmEndpointService endpointService;
     private final TraderActionService actionService;
     private final TradeRecordService tradeRecordService;
@@ -77,17 +75,16 @@ public class TraderController {
     /** 仓位规格：配置回显与提示词预览共用一个形状，前端改一处两边同步。 */
     public record TraderSpec(int leverageMin, int leverageMax,
                              BigDecimal marginPctMin, BigDecimal marginPctMax,
-                             boolean allowMultiPosition, boolean allowHedge,
-                             boolean allowSelfAdd, boolean allowSelfReduce) {
+                             boolean allowMultiPosition, boolean allowHedge) {
         TraderRiskConfig toConfig() {
             return new TraderRiskConfig(leverageMin, leverageMax, marginPctMin, marginPctMax,
-                    allowMultiPosition, allowHedge, allowSelfAdd, allowSelfReduce);
+                    allowMultiPosition, allowHedge);
         }
 
         static TraderSpec of(AiTrader t) {
             TraderRiskConfig c = TraderRiskConfig.of(t);
             return new TraderSpec(c.leverageMin(), c.leverageMax(), c.marginPctMin(), c.marginPctMax(),
-                    c.allowMultiPosition(), c.allowHedge(), c.allowSelfAdd(), c.allowSelfReduce());
+                    c.allowMultiPosition(), c.allowHedge());
         }
     }
 
@@ -116,7 +113,6 @@ public class TraderController {
     @PostMapping("/prompt-template")
     @Operation(summary = "平台系统提示词预览（与唤醒组装同一份文本）")
     public Result<String> promptTemplate(@CurrentUserId long userId, @RequestBody PromptPreviewRequest req) {
-        StpUtil.checkLogin();
         String interval = req.intervalCode() == null || req.intervalCode().isBlank() ? "15m" : req.intervalCode();
         String symbols = req.symbols() == null || req.symbols().isBlank() ? "BTCUSDT" : req.symbols();
         TraderRiskConfig cfg = req.spec() == null
@@ -149,7 +145,6 @@ public class TraderController {
                     s == null ? null : s.leverageMin(), s == null ? null : s.leverageMax(),
                     s == null ? null : s.marginPctMin(), s == null ? null : s.marginPctMax(),
                     s == null ? null : s.allowMultiPosition(), s == null ? null : s.allowHedge(),
-                    s == null ? null : s.allowSelfAdd(), s == null ? null : s.allowSelfReduce(),
                     alertEnabled, alertThresholdMult, reviewEnabled, learningEnabled, wakeWindow);
         }
     }
@@ -165,37 +160,6 @@ public class TraderController {
     @Operation(summary = "改配置（apiKey传空=不换；提示词改完下一根K线生效）")
     public Result<Void> updateConfig(@CurrentUserId long userId, @RequestBody UpsertRequest req) {
         String err = traderService.updateConfig(userId, req.toReq());
-        return err == null ? Result.ok(null) : Result.fail(err);
-    }
-
-    /** 待确认请求卡片：请求时价随行，前端另配实时价对照，判断价格跑没跑掉。 */
-    public record TraderRequestView(long id, String type, String symbol, String side, long positionId,
-                                    BigDecimal quantity, Integer leverage, BigDecimal requestPrice,
-                                    String reason, long createdAt) {
-    }
-
-    @GetMapping("/requests")
-    @Operation(summary = "我的待确认加仓/减仓请求")
-    public Result<List<TraderRequestView>> requests(@CurrentUserId long userId) {
-        return Result.ok(requestService.myPending(userId).stream()
-                .map(r -> new TraderRequestView(r.getId(), r.getType(), r.getSymbol(), r.getSide(),
-                        r.getPositionId(), r.getQuantity(), r.getLeverage(), r.getRequestPrice(),
-                        r.getReason(),
-                        r.getCreatedAt().atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()))
-                .toList());
-    }
-
-    @PostMapping("/requests/{id}/approve")
-    @Operation(summary = "同意并按市价立即执行")
-    public Result<Void> approveRequest(@CurrentUserId long userId, @PathVariable long id) {
-        String err = requestService.approve(userId, id);
-        return err == null ? Result.ok(null) : Result.fail(err);
-    }
-
-    @PostMapping("/requests/{id}/reject")
-    @Operation(summary = "拒绝（不执行，留档）")
-    public Result<Void> rejectRequest(@CurrentUserId long userId, @PathVariable long id) {
-        String err = requestService.reject(userId, id);
         return err == null ? Result.ok(null) : Result.fail(err);
     }
 
@@ -340,7 +304,6 @@ public class TraderController {
                                                     @RequestParam(required = false) Integer round,
                                                     @RequestParam(required = false) Long from,
                                                     @RequestParam(required = false) Long to) {
-        StpUtil.checkLogin();
         return Result.ok(traderService.decisions(id, limit, before, round, from, to));
     }
 
@@ -350,14 +313,12 @@ public class TraderController {
                                    @RequestParam(required = false) Integer round,
                                    @RequestParam(required = false) Long from,
                                    @RequestParam(required = false) Long to) {
-        StpUtil.checkLogin();
         return Result.ok(traderService.sumTokens(id, round, from, to));
     }
 
     @GetMapping("/{id}/trades")
     @Operation(summary = "已了结交易（当前局；论点→结局配对 + 开/平仓那一轮的决策全文）")
     public Result<List<TradeRecordService.TradeRecord>> trades(@PathVariable long id) {
-        StpUtil.checkLogin();
         AiTrader t = traderService.byId(id);
         if (t == null) {
             return Result.fail(ErrorCode.SYSTEM_ERROR.getCode(), messages.get("trader.notFound"));
@@ -378,7 +339,6 @@ public class TraderController {
     @Operation(summary = "净值曲线（round缺省=当前局）")
     public Result<List<EquityPoint>> equityCurve(@PathVariable long id,
                                                  @RequestParam(required = false) Integer round) {
-        StpUtil.checkLogin();
         AiTrader t = traderService.byId(id);
         if (t == null) {
             return Result.fail(ErrorCode.SYSTEM_ERROR.getCode(), messages.get("trader.notFound"));

@@ -17,11 +17,6 @@ trader:
     notClosed: 只能忽略已了结的交易
     staleRequired: 请求缺少 stale 参数
 
-  # 审批卡上的两个按钮（加仓/减仓请求）
-  request:
-    notFoundOrHandled: 请求不存在或已处理
-    accountUnavailable: trader 账户不可用
-
   # 创建 / 改配置的入口校验
   config:
     nameRequired: 名字必填且不超过32字符

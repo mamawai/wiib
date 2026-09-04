@@ -10,7 +10,6 @@ import com.mawai.wiibcommon.dto.FuturesPositionDTO;
 import com.mawai.wiibcommon.entity.AiTrader;
 import com.mawai.wiibcommon.entity.AiTraderDecision;
 import com.mawai.wiibcommon.entity.AiTraderPlan;
-import com.mawai.wiibcommon.entity.AiTraderRequest;
 import com.mawai.wiibcommon.entity.FuturesPosition;
 import com.mawai.wiibcommon.entity.FuturesStopLoss;
 import com.mawai.wiibcommon.entity.FuturesTakeProfit;
@@ -112,7 +111,6 @@ public class TraderWakeupRunner {
     private final AiTraderMapper traderMapper;
     private final AiTraderDecisionMapper decisionMapper;
     private final TraderPlanStore planStore;
-    private final TraderRequestService requestService;
     private final UserLangResolver userLangResolver;
     private final PromptCatalog prompts;
     /** sim 拒因按错误码成文（见 SimTradeClient.describe），同样跟 trader 主人的语言 */
@@ -332,7 +330,7 @@ public class TraderWakeupRunner {
                                      long boundaryTime, long budgetSeconds, AgentLang lang) {
         return new TradeTools(simTradeClient, trader.getSimUserId(), whitelist, equity,
                 sym -> JSON.parseObject(binanceRestClient.getPremiumIndex(sym)).getBigDecimal("markPrice"),
-                planStore, requestService,
+                planStore,
                 // 截止时刻交给工具层：超时后 cancel(true) 未必立刻打断图里正在跑的工具调用，
                 // 写工具自己按这个时间点拒发，才不会在作废的一轮里继续下单
                 new TradeTools.WakeCtx(trader.getId(), trader.getRoundNo(), boundaryTime,
@@ -385,19 +383,13 @@ public class TraderWakeupRunner {
         return planStore.cleanupStale(trader.getId(), trader.getRoundNo(), liveKeys, positionIdByKey, boundaryTime);
     }
 
-    /**
-     * 系统提示词组装（跟 trader 主人的语言走：ai_trader.user_id → user.lang，取不到回落中文），
-     * 已处理审批的结果随账户状态注入本轮，注入后置已通知——结果说一次就够，防同一条回执每轮反复出现。
-     */
+    /** 系统提示词组装，跟 trader 主人的语言走：ai_trader.user_id → user.lang，取不到回落中文 */
     private String wakePrompt(AiTrader trader, BigDecimal equity, List<FuturesPositionDTO> positions,
                               List<FuturesOrderResponse> pendingOrders, List<AiTraderPlan> plans,
                               long boundaryTime, List<AiTraderDecision> recent, AgentLang lang) {
-        List<AiTraderRequest> decided = requestService.decidedUnnotified(trader.getId(), trader.getRoundNo());
-        String prompt = promptAssembler.assemble(trader,
-                accountStateJson(prompts, lang, equity, positions, pendingOrders, plans, boundaryTime,
-                        requestService.pendingOf(trader.getId(), trader.getRoundNo()), decided), recent, lang);
-        requestService.markNotified(decided);
-        return prompt;
+        return promptAssembler.assemble(trader,
+                accountStateJson(prompts, lang, equity, positions, pendingOrders, plans, boundaryTime),
+                recent, lang);
     }
 
     /**
@@ -568,16 +560,14 @@ public class TraderWakeupRunner {
     }
 
     /**
-     * 账户状态一次给足（持仓+计划+挂单+待办与结果）：模型不必再花工具预算查户口，
+     * 账户状态一次给足（持仓+计划+挂单）：模型不必再花工具预算查户口，
      * 预算留给行情求证。持仓携带交易计划与当前止损止盈——让模型一眼看到
      * "浮亏离止损还远/计划没被证伪"，掐灭恐慌平仓。
      */
     static String accountStateJson(PromptCatalog prompts, AgentLang lang,
                                            BigDecimal equity, List<FuturesPositionDTO> positions,
                                            List<FuturesOrderResponse> pendingOrders,
-                                           List<AiTraderPlan> plans, long boundaryTime,
-                                           List<AiTraderRequest> pendingRequests,
-                                           List<AiTraderRequest> decidedRequests) {
+                                           List<AiTraderPlan> plans, long boundaryTime) {
         Map<String, AiTraderPlan> planByKey = new HashMap<>();
         plans.forEach(p -> planByKey.put(TraderPlanStore.key(p.getSymbol(), p.getSide()), p));
         JSONObject out = new JSONObject();
@@ -587,16 +577,6 @@ public class TraderWakeupRunner {
         // 挂出时刻与已挂时长必须在：限价单挂了多久只有代码知道，模型据此执行自己写的作废条件
         if (pendingOrders != null && !pendingOrders.isEmpty()) {
             out.put("pendingOrders", pendingOrdersJson(prompts, lang, pendingOrders, planByKey, boundaryTime));
-        }
-        // 已处理请求的结果回注一次：模型提的请求什么下场必须告诉它，不然它只能从仓位变化倒猜
-        if (decidedRequests != null && !decidedRequests.isEmpty()) {
-            out.put("requestResults", decidedRequestsJson(prompts, lang, decidedRequests));
-            out.put("requestResultsNote", prompts.get(lang, "trader.wake.requestResultsNote"));
-        }
-        // 待确认请求必须回注：不然模型看仓位没动，下一轮还会提同一个请求，卡片越堆越多
-        if (pendingRequests != null && !pendingRequests.isEmpty()) {
-            out.put("pendingRequests", pendingRequestsJson(prompts, lang, pendingRequests));
-            out.put("pendingRequestsNote", prompts.get(lang, "trader.wake.pendingRequestsNote"));
         }
         return out.toJSONString();
     }
@@ -669,39 +649,6 @@ public class TraderWakeupRunner {
             po.add(row);
         }
         return po;
-    }
-
-    private static JSONArray decidedRequestsJson(PromptCatalog prompts, AgentLang lang,
-                                                 List<AiTraderRequest> decidedRequests) {
-        JSONArray rr = new JSONArray();
-        for (AiTraderRequest r : decidedRequests) {
-            rr.add(new JSONObject()
-                    .fluentPut("type", r.getType())
-                    .fluentPut("symbol", r.getSymbol())
-                    .fluentPut("quantity", r.getQuantity())
-                    .fluentPut("decision", prompts.get(lang,
-                            AiTraderRequest.STATUS_APPROVED.equals(r.getStatus())
-                                    ? "trader.wake.request.approved" : "trader.wake.request.rejected"))
-                    .fluentPut("result", r.getExecutedResult()));
-        }
-        return rr;
-    }
-
-    private static JSONArray pendingRequestsJson(PromptCatalog prompts, AgentLang lang,
-                                                 List<AiTraderRequest> pendingRequests) {
-        JSONArray rs = new JSONArray();
-        for (AiTraderRequest r : pendingRequests) {
-            rs.add(new JSONObject()
-                    .fluentPut("type", r.getType())
-                    .fluentPut("symbol", r.getSymbol())
-                    .fluentPut("side", r.getSide())
-                    .fluentPut("positionId", r.getPositionId())
-                    .fluentPut("quantity", r.getQuantity())
-                    .fluentPut("requestPrice", r.getRequestPrice())
-                    .fluentPut("askedAt", TIME_FMT.format(Instant.ofEpochMilli(r.getWakeTime())))
-                    .fluentPut("reason", r.getReason()));
-        }
-        return rs;
     }
 
     private static String humanizeHeld(PromptCatalog prompts, AgentLang lang, long ms) {

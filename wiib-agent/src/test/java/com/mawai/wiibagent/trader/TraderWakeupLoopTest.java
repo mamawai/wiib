@@ -5,7 +5,6 @@ import com.mawai.wiibcommon.dto.FuturesOrderResponse;
 import com.mawai.wiibcommon.dto.FuturesPositionDTO;
 import com.mawai.wiibcommon.entity.AiTrader;
 import com.mawai.wiibcommon.entity.AiTraderPlan;
-import com.mawai.wiibcommon.entity.AiTraderRequest;
 import com.mawai.wiibcommon.entity.FuturesPosition;
 import com.mawai.wiibagent.mapper.AiTraderPlanMapper;
 import com.mawai.wiibcommon.entity.AiTraderDecision;
@@ -78,7 +77,6 @@ class TraderWakeupLoopTest {
     private final AiTraderMapper traderMapper = mock(AiTraderMapper.class);
     private final AiTraderDecisionMapper decisionMapper = mock(AiTraderDecisionMapper.class);
     private final AiTraderPlanMapper planMapper = mock(AiTraderPlanMapper.class);
-    private final TraderRequestService requestService = mock(TraderRequestService.class);
 
     /** 语言解析走真实词表的中文侧：本类钉的是唤醒回路行为，不是文案 */
     private final UserLangResolver langResolver = mock(UserLangResolver.class);
@@ -91,7 +89,7 @@ class TraderWakeupLoopTest {
             new IndicatorToolkit(new KlineFetcher(binanceRestClient, 60_000)),
             new MarketToolkit(mock(MarketDataService.class)),
             new NewsToolkit(mock(NewsCache.class), mock(NewsFlashLocalizer.class)),
-            traderMapper, decisionMapper, new TraderPlanStore(planMapper, prompts), requestService, langResolver,
+            traderMapper, decisionMapper, new TraderPlanStore(planMapper, prompts), langResolver,
             prompts, new MessageCatalog(), new LocalizedToolCallbacks(prompts),
             new ReviewMaterialAssembler(decisionMapper, planMapper, simTradeClient,
                     mock(KlineHistoryStore.class), prompts),
@@ -322,53 +320,18 @@ class TraderWakeupLoopTest {
         assertThat(dec.getValue().getReasoning()).isNotBlank();
     }
 
-    /**
-     * 自主减仓关闭：close_position 转成待确认请求，sim 不下单，但本轮唤醒照常收尾写 OK 决策。
-     * "不阻塞"是这条设计的核心——阻塞等审批会把整轮唤醒挂死。
-     */
+    /** close_position 进来就是市价单，中间没有别的跳转 */
     @Test
-    void reduceTurnsIntoRequestWithoutBlockingTheRound() {
-        stubHealthyAccount();
-        when(simTradeClient.getAllPositions(99L)).thenReturn(List.of(crossPosition("2000", "0")));
-        when(requestService.submit(any(), any())).thenReturn("减仓请求已提交给主人确认，本轮不会成交");
-        // 先建好再 stub：嵌套在 when() 里建 mock 会触发 UnfinishedStubbingException
-        ChatModel model = modelCallingThenSummary("close_position",
-                "{\"positionId\":349,\"quantity\":0.1,\"reason\":\"失效条件触发\"}");
-        when(modelFactory.modelFor(any())).thenReturn(model);
-        AiTrader t = trader();
-        t.setAllowSelfReduce(false);
-
-        runner.wake(t, 1785171600000L);
-
-        verify(simTradeClient, never()).closePosition(anyLong(), any());
-        ArgumentCaptor<AiTraderRequest> ask = ArgumentCaptor.forClass(AiTraderRequest.class);
-        verify(requestService).submit(ask.capture(), any());
-        assertThat(ask.getValue().getType()).isEqualTo(AiTraderRequest.TYPE_REDUCE);
-        assertThat(ask.getValue().getPositionId()).isEqualTo(349L);
-        assertThat(ask.getValue().getRequestPrice()).isEqualByComparingTo("100000");
-        assertThat(ask.getValue().getReason()).isEqualTo("失效条件触发");
-
-        // 本轮没被挂住：决策照常落库，状态 OK
-        ArgumentCaptor<AiTraderDecision> dec = ArgumentCaptor.forClass(AiTraderDecision.class);
-        verify(decisionMapper).insert(dec.capture());
-        assertThat(dec.getValue().getStatus()).isEqualTo(AiTraderDecision.STATUS_OK);
-    }
-
-    /** 自主减仓开着时不绕道，直接下单 */
-    @Test
-    void reduceExecutesDirectlyWhenSelfManaged() {
+    void reduceExecutesDirectly() {
         stubHealthyAccount();
         when(simTradeClient.getAllPositions(99L)).thenReturn(List.of(crossPosition("2000", "0")));
         ChatModel model = modelCallingThenSummary("close_position",
                 "{\"positionId\":349,\"quantity\":0.1,\"reason\":\"到目标位\"}");
         when(modelFactory.modelFor(any())).thenReturn(model);
-        AiTrader t = trader();
-        t.setAllowSelfReduce(true);
 
-        runner.wake(t, 1785171600000L);
+        runner.wake(trader(), 1785171600000L);
 
         verify(simTradeClient).closePosition(eq(99L), any());
-        verify(requestService, never()).submit(any(), any());
     }
 
     @Test
@@ -625,32 +588,6 @@ class TraderWakeupLoopTest {
         verify(planMapper).updateById(cap.capture());
         assertThat(cap.getValue().getStatus()).isEqualTo(AiTraderPlan.STATUS_CLOSED);
         assertThat(cap.getValue().getClosedWakeTime()).isEqualTo(1785171600000L);
-    }
-
-    /** 主人批/拒的结果必须回注一次并置已通知：模型提的请求什么下场，不能让它从仓位变化倒猜。 */
-    @Test
-    void decidedRequestResultInjectedOnceAndMarkedNotified() {
-        stubHealthyAccount();
-        AiTraderRequest done = new AiTraderRequest();
-        done.setId(31L);
-        done.setType(AiTraderRequest.TYPE_REDUCE);
-        done.setSymbol("BTCUSDT");
-        done.setQuantity(new BigDecimal("0.1"));
-        done.setStatus(AiTraderRequest.STATUS_APPROVED);
-        done.setExecutedResult("已成交 0.1 @订单88");
-        when(requestService.decidedUnnotified(7L, 1)).thenReturn(List.of(done));
-        ChatModel model = modelCheckingThenSummary();
-        when(modelFactory.modelFor(any())).thenReturn(model);
-
-        runner.wake(trader(), 1785171600000L);
-
-        ArgumentCaptor<Prompt> prompts = ArgumentCaptor.forClass(Prompt.class);
-        verify(model, atLeastOnce()).call(prompts.capture());
-        String firstCall = prompts.getAllValues().get(0).getInstructions().stream()
-                .map(org.springframework.ai.chat.messages.Message::getText)
-                .reduce("", String::concat);
-        assertThat(firstCall).contains("主人已同意").contains("已成交 0.1");
-        verify(requestService).markNotified(List.of(done));
     }
 
     /** 预算 = 距下一边界−5s，上限600s：唤醒决不占用下一根K线（超时级联跳过的根治）。 */

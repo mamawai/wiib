@@ -1,15 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Trans, useTranslation } from 'react-i18next';
-import { BookOpen, Bot, Check, ChevronDown, ChevronLeft, Database, GraduationCap, Loader2, Pause, Play, RotateCcw, Save, Wrench, X } from 'lucide-react';
+import { BookOpen, Bot, ChevronDown, ChevronLeft, Database, GraduationCap, Loader2, Pause, Play, RotateCcw, Save, Wrench } from 'lucide-react';
 import { llmEndpointApi, traderApi } from '../api';
 import { DATA_TOOLS, TRADE_TOOLS, toolName } from '../components/arena/traderTools';
 import { GuidedTour, type TourStep } from '../components/GuidedTour';
 import { LlmEndpointSelect } from '../components/LlmEndpointSelect';
-import { useCryptoStream } from '../hooks/useCryptoStream';
 import { useToast } from '../components/ui/use-toast';
-import { cn, fmtNum, fmtRelative } from '../lib/utils';
-import type { LlmEndpointView, TraderOwnerView, TraderRequestView, TraderSpec, TraderUpsertRequest } from '../types';
+import { cn, fmtNum } from '../lib/utils';
+import type { LlmEndpointView, TraderOwnerView, TraderSpec, TraderUpsertRequest } from '../types';
 
 const TOUR_SEEN_KEY = 'wiib-trader-tour-seen';
 
@@ -26,7 +25,7 @@ const SKILL_GROUPS = [
 
 const DEFAULT_SPEC: TraderSpec = {
   leverageMin: 3, leverageMax: 20, marginPctMin: 5, marginPctMax: 20,
-  allowMultiPosition: true, allowHedge: false, allowSelfAdd: true, allowSelfReduce: false,
+  allowMultiPosition: true, allowHedge: false,
 };
 
 // 默认 15m 起步：5m 高频唤醒对"LLM+双边taker手续费"是绞肉机，保留仅为短期测试观察
@@ -57,7 +56,6 @@ export function MyTrader() {
     { target: 'leverage', title: t('tour.leverage.title'), body: t('tour.leverage.body') },
     { target: 'margin', title: t('tour.margin.title'), body: t('tour.margin.body') },
     { target: 'position-rules', title: t('tour.positionRules.title'), body: t('tour.positionRules.body') },
-    { target: 'self-manage', title: t('tour.selfManage.title'), body: t('tour.selfManage.body') },
     { target: 'byok', title: t('tour.byok.title'), body: t('tour.byok.body') },
     { target: 'prompt', title: t('tour.prompt.title'), body: t('tour.prompt.body') },
     { target: 'save', title: t('tour.save.title'), body: t('tour.save.body') },
@@ -67,7 +65,6 @@ export function MyTrader() {
   const [form, setForm] = useState<TraderUpsertRequest>(EMPTY_FORM);
   const [busy, setBusy] = useState<string | null>(null);
   const [template, setTemplate] = useState('');
-  const [requests, setRequests] = useState<TraderRequestView[]>([]);
   const [tour, setTour] = useState(false);
   // 重置确认面板：打开时笔记默认带入，每次重新打开都回到默认
   const [resetAsk, setResetAsk] = useState(false);
@@ -75,10 +72,6 @@ export function MyTrader() {
   /** 端点库（下拉选项）；进页面拉一次，改动在 AI 页做 */
   const [endpoints, setEndpoints] = useState<LlmEndpointView[]>([]);
   useEffect(() => { llmEndpointApi.list().then(setEndpoints).catch(() => setEndpoints([])); }, []);
-
-  const loadRequests = useCallback(() => {
-    traderApi.requests().then(setRequests).catch(() => setRequests([]));
-  }, []);
 
   const load = useCallback(() => {
     traderApi.mine().then(v => {
@@ -92,10 +85,9 @@ export function MyTrader() {
           reviewEnabled: v.reviewEnabled, learningEnabled: v.learningEnabled,
           wakeWindow: v.wakeWindow,
         });
-        loadRequests();
       }
     }).finally(() => setLoaded(true));
-  }, [loadRequests]);
+  }, []);
 
   useEffect(() => { load(); }, [load]);
 
@@ -139,19 +131,6 @@ export function MyTrader() {
     }
     return { ...f, spec };
   });
-
-  const decide = async (id: number, approve: boolean) => {
-    setBusy('req' + id);
-    try {
-      await (approve ? traderApi.approveRequest(id) : traderApi.rejectRequest(id));
-      toast(approve ? t('toast.approved') : t('toast.rejected'), 'success');
-      loadRequests();
-    } catch (e) {
-      toast((e as Error).message || t('toast.actionFailed'), 'error');
-    } finally {
-      setBusy(null);
-    }
-  };
 
   const toggleSymbol = (s: string) => {
     const cur = new Set(form.symbols.split(',').filter(Boolean));
@@ -250,20 +229,6 @@ export function MyTrader() {
               </div>
             </div>
           )}
-        </div>
-      )}
-
-      {/* 待确认请求：自主加/减仓关掉时 AI 发来的申请，有待办才显示 */}
-      {requests.length > 0 && (
-        <div className="rounded-lg pt-card p-4 space-y-2.5 border-amber-500/40">
-          <div className="flex items-baseline justify-between">
-            <span className="microlabel text-amber-600">{t('req.title', { n: requests.length })}</span>
-            <span className="text-[10px] text-muted-foreground">{t('req.hint')}</span>
-          </div>
-          {requests.map(r => (
-            <RequestCard key={r.id} r={r} busy={busy === 'req' + r.id} disabled={busy != null}
-                         onDecide={approve => void decide(r.id, approve)} />
-          ))}
         </div>
       )}
 
@@ -403,24 +368,14 @@ export function MyTrader() {
             />
           </p>
 
-          <div className="grid sm:grid-cols-2 gap-x-4 gap-y-2 pt-1">
-            <div className="space-y-2" data-tour="position-rules">
-              <SpecToggle checked={form.spec.allowMultiPosition} onChange={v => setSpec({ allowMultiPosition: v })}
-                          label={t('cfg.multiPos')}
-                          hint={t('cfg.multiPosHint')} />
-              <SpecToggle checked={form.spec.allowHedge} onChange={v => setSpec({ allowHedge: v })}
-                          disabled={!form.spec.allowMultiPosition}
-                          label={t('cfg.hedge')}
-                          hint={form.spec.allowMultiPosition ? t('cfg.hedgeHint') : t('cfg.hedgeNeedMulti')} />
-            </div>
-            <div className="space-y-2" data-tour="self-manage">
-              <SpecToggle checked={form.spec.allowSelfAdd} onChange={v => setSpec({ allowSelfAdd: v })}
-                          label={t('cfg.selfAdd')}
-                          hint={t('cfg.selfAddHint')} />
-              <SpecToggle checked={form.spec.allowSelfReduce} onChange={v => setSpec({ allowSelfReduce: v })}
-                          label={t('cfg.selfReduce')}
-                          hint={t('cfg.selfReduceHint')} />
-            </div>
+          <div className="space-y-2 pt-1" data-tour="position-rules">
+            <SpecToggle checked={form.spec.allowMultiPosition} onChange={v => setSpec({ allowMultiPosition: v })}
+                        label={t('cfg.multiPos')}
+                        hint={t('cfg.multiPosHint')} />
+            <SpecToggle checked={form.spec.allowHedge} onChange={v => setSpec({ allowHedge: v })}
+                        disabled={!form.spec.allowMultiPosition}
+                        label={t('cfg.hedge')}
+                        hint={form.spec.allowMultiPosition ? t('cfg.hedgeHint') : t('cfg.hedgeNeedMulti')} />
           </div>
         </div>
 
@@ -517,8 +472,6 @@ export function MyTrader() {
               {[
                 !form.spec.allowMultiPosition && t('cfg.guardSinglePos'),
                 form.spec.allowMultiPosition && !form.spec.allowHedge && t('cfg.guardNoHedge'),
-                !form.spec.allowSelfAdd && t('cfg.guardAskAdd'),
-                !form.spec.allowSelfReduce && t('cfg.guardAskReduce'),
               ].filter(Boolean).map(c => `${t('cfg.listSep')}${c}`).join('')}
               {t('cfg.promptOffTail')}
             </p>
@@ -623,62 +576,3 @@ function SpecToggle({ checked, onChange, label, hint, disabled }: {
     </label>
   );
 }
-
-/**
- * 待确认请求卡：请求时价与实时价并排，价格跑没跑掉由主人自己判断——不设过期，不替他决定。
- */
-function RequestCard({ r, onDecide, busy, disabled }: {
-  r: TraderRequestView; onDecide: (approve: boolean) => void; busy: boolean; disabled: boolean;
-}) {
-  // 订阅词表：这张卡里的 fmtRelative 是全站共用的相对时间，切语言得跟着刷新
-  const { t } = useTranslation('ai');
-  const tick = useCryptoStream(r.symbol, 'futures');
-  const live = tick?.price ?? null;
-  const drift = live != null && r.requestPrice > 0 ? (live - r.requestPrice) / r.requestPrice * 100 : null;
-  const isAdd = r.type === 'ADD';
-
-  return (
-    <div className="rounded-lg border border-border bg-card-2/60 p-3 space-y-2">
-      <div className="flex items-center gap-2 flex-wrap text-xs">
-        <span className={cn('px-1.5 py-0.5 rounded font-bold text-[10px]',
-          isAdd ? 'bg-gain/15 text-gain' : 'bg-loss/15 text-loss')}>
-          {isAdd ? t('req.add') : t('req.reduce')}
-        </span>
-        <span className="font-bold">{r.symbol.replace('USDT', '')}</span>
-        <span className="text-muted-foreground">{r.side === 'LONG' ? t('term.long') : t('term.short')}</span>
-        <span className="num">{r.quantity}</span>
-        {r.leverage != null && <span className="text-muted-foreground num">{r.leverage}x</span>}
-        <span className="ml-auto text-[10px] text-muted-foreground">{fmtRelative(r.createdAt)}</span>
-      </div>
-
-      <div className="flex items-center gap-4 text-[11px]">
-        <span className="text-muted-foreground">
-          {t('req.atRequest')} <span className="num text-foreground">{fmtNum(r.requestPrice, 2)}</span>
-        </span>
-        <span className="text-muted-foreground">
-          {t('req.now')} <span className="num text-foreground">{live == null ? '—' : fmtNum(live, 2)}</span>
-        </span>
-        {drift != null && (
-          <span className={cn('num font-bold', drift >= 0 ? 'text-gain' : 'text-loss')}>
-            {drift >= 0 ? '+' : ''}{drift.toFixed(2)}%
-          </span>
-        )}
-      </div>
-
-      <p className="text-[11px] text-muted-foreground leading-relaxed">{r.reason}</p>
-
-      <div className="flex gap-2">
-        <button onClick={() => onDecide(true)} disabled={disabled}
-                className="border border-border hover:bg-surface-hover rounded-lg px-3 py-1.5 text-xs font-bold text-gain flex items-center gap-1.5 disabled:opacity-50">
-          {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />} {t('req.approve')}
-        </button>
-        <button onClick={() => onDecide(false)} disabled={disabled}
-                className="border border-border hover:bg-surface-hover rounded-lg px-2.5 py-1.5 text-xs font-bold text-muted-foreground disabled:opacity-50"
-                aria-label={t('term.reject')}>
-          <X className="w-3.5 h-3.5" />
-        </button>
-      </div>
-    </div>
-  );
-}
-

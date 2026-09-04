@@ -11,8 +11,7 @@ import java.math.BigDecimal;
  */
 public record TraderRiskConfig(int leverageMin, int leverageMax,
                                BigDecimal marginPctMin, BigDecimal marginPctMax,
-                               boolean allowMultiPosition, boolean allowHedge,
-                               boolean allowSelfAdd, boolean allowSelfReduce) {
+                               boolean allowMultiPosition, boolean allowHedge) {
 
     /** 配置校验用的绝对边界；实际可用杠杆还受 sim 按名义价值分档限制（超档由 sim 拒并回传拒因） */
     public static final int LEVERAGE_HARD_MAX = 125;
@@ -32,8 +31,6 @@ public record TraderRiskConfig(int leverageMin, int leverageMax,
                 t.getMarginPctMin() == null ? DEF_MARGIN_MIN : t.getMarginPctMin(),
                 t.getMarginPctMax() == null ? DEF_MARGIN_MAX : t.getMarginPctMax(),
                 !Boolean.FALSE.equals(t.getAllowMultiPosition()),
-                Boolean.TRUE.equals(t.getAllowHedge()),
-                !Boolean.FALSE.equals(t.getAllowSelfAdd()),
-                Boolean.TRUE.equals(t.getAllowSelfReduce()));
+                Boolean.TRUE.equals(t.getAllowHedge()));
     }
 }

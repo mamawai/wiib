@@ -49,7 +49,7 @@ class TraderWakeupRunnerAccountStateTest {
         order.setLeverage(50);
 
         String json = TraderWakeupRunner.accountStateJson(prompts, AgentLang.ZH, new BigDecimal("15833"),
-                List.of(), List.of(order), List.of(plan), BOUNDARY, List.of(), List.of());
+                List.of(), List.of(order), List.of(plan), BOUNDARY);
 
         JSONObject planJson = JSON.parseObject(json).getJSONArray("pendingOrders")
                 .getJSONObject(0).getJSONObject("plan");

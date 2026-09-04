@@ -29,12 +29,12 @@ class TradeGuardTest {
     /** 默认配置：杠杆 5~20，保证金 5~20%，多仓位开、双开关 */
     private TraderRiskConfig cfg() {
         return new TraderRiskConfig(5, 20, new BigDecimal("5"), new BigDecimal("20"),
-                true, false, true, false);
+                true, false);
     }
 
     private TraderRiskConfig cfg(boolean multi, boolean hedge) {
         return new TraderRiskConfig(5, 20, new BigDecimal("5"), new BigDecimal("20"),
-                multi, hedge, true, false);
+                multi, hedge);
     }
 
     /** 基准单：0.1×100000/10 = 保证金1000 = 权益10%，落在 5~20% 区间内 */
@@ -111,7 +111,7 @@ class TradeGuardTest {
     void marginHintQuantitiesAreCopyPasteSafe() {
         // 0.05×100000/10=500=5%，低于 cfg 里改设的 10~15 下界 → 拒并给建议数量
         TraderRiskConfig tight = new TraderRiskConfig(5, 20, new BigDecimal("10"), new BigDecimal("15"),
-                true, false, true, false);
+                true, false);
         String reject = validateOpen(withQuantity(base(), new BigDecimal("0.05")),
                 EQUITY, MARK, WL, tight, List.of());
         java.util.regex.Matcher m = java.util.regex.Pattern
@@ -128,7 +128,7 @@ class TradeGuardTest {
     @Test
     void marginPctDisplayedWithoutMisleadingRounding() {
         TraderRiskConfig tight = new TraderRiskConfig(5, 20, new BigDecimal("10"), new BigDecimal("15"),
-                true, false, true, false);
+                true, false);
         // 0.09995×100000/10=999.5 → 9.995%，贴着下界差一丝
         String r = validateOpen(withQuantity(base(), new BigDecimal("0.09995")),
                 EQUITY, MARK, WL, tight, List.of());

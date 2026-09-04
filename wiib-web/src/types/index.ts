@@ -852,25 +852,6 @@ export interface TraderSpec {
   allowMultiPosition: boolean;
   /** 允许同币多空双开；仅在 allowMultiPosition 开启时有意义 */
   allowHedge: boolean;
-  /** 允许模型自主加仓；关=转待确认请求 */
-  allowSelfAdd: boolean;
-  /** 允许模型自主减仓/平仓；关=转请求。止损止盈自动触发不受影响 */
-  allowSelfReduce: boolean;
-}
-
-/** 待确认的加仓/减仓请求：卡片给"请求时价"，前端另配实时价对照 */
-export interface TraderRequestView {
-  id: number;
-  /** ADD=加仓 / REDUCE=减仓 */
-  type: 'ADD' | 'REDUCE';
-  symbol: string;
-  side: string;
-  positionId: number;
-  quantity: number;
-  leverage: number | null;
-  requestPrice: number;
-  reason: string;
-  createdAt: number;
 }
 
 /** 计划修订记录（revisionsJson 解析后）：修改必须留痕带理由 */

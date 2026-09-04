@@ -55,7 +55,7 @@ class WakeInstructionI18nTest {
             new NewsToolkit(mock(NewsCache.class), mock(NewsFlashLocalizer.class)),
             traderMapper, mock(AiTraderDecisionMapper.class),
             new TraderPlanStore(mock(AiTraderPlanMapper.class), prompts),
-            mock(TraderRequestService.class), mock(UserLangResolver.class), prompts,
+            mock(UserLangResolver.class), prompts,
             new MessageCatalog(),
             new LocalizedToolCallbacks(prompts),
             mock(com.mawai.wiibagent.learning.ReviewMaterialAssembler.class),

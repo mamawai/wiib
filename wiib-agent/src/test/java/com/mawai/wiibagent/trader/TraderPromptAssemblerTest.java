@@ -318,29 +318,6 @@ class TraderPromptAssemblerTest {
         assertThat(p).contains("50~100 倍").contains("10%~10%").contains("不是上限");
     }
 
-    /** 自主加/减仓都开着时不出现审批段，省 token 也免得模型多想 */
-    @Test
-    void approvalSectionAbsentWhenBothSelfManaged() {
-        AiTrader t = trader();
-        t.setAllowSelfAdd(true);
-        t.setAllowSelfReduce(true);
-
-        assertThat(assembler.assemble(t, "{}", List.of(), AgentLang.ZH)).doesNotContain("需要主人确认的动作");
-    }
-
-    /** 关掉自主减仓：必须同时告诉模型"止损止盈仍自动执行"，否则它会因为平不了仓而乱来 */
-    @Test
-    void approvalSectionExplainsStopsStillFire() {
-        AiTrader t = trader();
-        t.setAllowSelfAdd(true);
-        t.setAllowSelfReduce(false);
-
-        String p = assembler.assemble(t, "{}", List.of(), AgentLang.ZH);
-        assertThat(p).contains("减仓/平仓不会立即成交")
-                .contains("止损单和止盈单是自动执行的")
-                .doesNotContain("加仓（对已有仓位再开同方向）不会立即成交");
-    }
-
     /** 单仓模式的措辞要把"挂单也占坑"讲明，否则模型会先挂单绕过 */
     @Test
     void singlePositionRuleMentionsPendingOrders() {

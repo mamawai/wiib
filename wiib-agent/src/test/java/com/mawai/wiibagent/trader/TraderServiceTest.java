@@ -8,7 +8,6 @@ import com.mawai.wiibcommon.config.BinanceProperties;
 import com.mawai.wiibcommon.i18n.MessageCatalog;
 import com.mawai.wiibcommon.entity.AiTrader;
 import com.mawai.wiibcommon.entity.AiTraderDecision;
-import com.mawai.wiibcommon.entity.AiTraderRequest;
 import com.mawai.wiibcommon.entity.UserLlmBinding;
 import com.mawai.wiibcommon.entity.UserLlmEndpoint;
 import com.mawai.wiibcommon.enums.AgentLang;
@@ -18,7 +17,6 @@ import com.mawai.wiibagent.llm.LlmEndpointService;
 import com.mawai.wiibquant.external.sim.SimTradeClient;
 import com.mawai.wiibagent.mapper.AiTraderDecisionMapper;
 import com.mawai.wiibagent.mapper.AiTraderMapper;
-import com.mawai.wiibagent.mapper.AiTraderRequestMapper;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -45,7 +43,6 @@ class TraderServiceTest {
     static void initTableInfoCache() {
         TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""), AiTrader.class);
         TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""), AiTraderDecision.class);
-        TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""), AiTraderRequest.class);
     }
 
     private final AiTraderMapper traderMapper = mock(AiTraderMapper.class);
@@ -55,14 +52,13 @@ class TraderServiceTest {
 
     private final SimTradeClient simTradeClient = mock(SimTradeClient.class);
     private final TraderPlanStore planStore = mock(TraderPlanStore.class);
-    private final AiTraderRequestMapper requestMapper = mock(AiTraderRequestMapper.class);
     private final AiTraderDecisionMapper decisionMapper = mock(AiTraderDecisionMapper.class);
 
     private final UserLangResolver langResolver = mock(UserLangResolver.class);
 
     private final TraderService service = new TraderService(
             traderMapper, decisionMapper, modelFactory, endpointService,
-            simTradeClient, binanceProperties, planStore, requestMapper,
+            simTradeClient, binanceProperties, planStore,
             new PromptCatalog(), langResolver, new MessageCatalog());
 
     /** 端点库里的一条 */
@@ -83,7 +79,7 @@ class TraderServiceTest {
                                                Boolean multi, Boolean hedge,
                                                Boolean alertEnabled, java.math.BigDecimal alertMult) {
         return new TraderService.UpsertReq("小虎", "BTCUSDT", "5m", customPrompt, null, useDefaultPrompt,
-                levMin, levMax, null, null, multi, hedge, null, null, alertEnabled, alertMult, null, null, null);
+                levMin, levMax, null, null, multi, hedge, alertEnabled, alertMult, null, null, null);
     }
 
     /** 退出平台模板后自定义就是唯一指令来源，空着=模型裸奔 */
@@ -166,7 +162,7 @@ class TraderServiceTest {
         when(simTradeClient.ensureAccount(any(), any())).thenReturn(99L);
 
         String err = service.create(1L, new TraderService.UpsertReq("小虎", "BTCUSDT", "5m", null, 5L, true,
-                null, null, null, null, null, null, null, null, null, null, null, null, null));
+                null, null, null, null, null, null, null, null, null, null, null));
 
         assertThat(err).isNull();
         verify(modelFactory).testConnection(chosen);
@@ -181,7 +177,7 @@ class TraderServiceTest {
         when(traderMapper.selectOne(any())).thenReturn(null);
 
         String err = service.create(1L, new TraderService.UpsertReq("小虎", "BTCUSDT", "5m", null, null, true,
-                null, null, null, null, null, null, null, null, null, null, null, null, "21:03-08:30"));
+                null, null, null, null, null, null, null, null, null, null, "21:03-08:30"));
 
         assertThat(err).contains("0/5");
         verify(traderMapper, never()).insert(any(AiTrader.class));
@@ -194,7 +190,7 @@ class TraderServiceTest {
         when(traderMapper.selectOne(any())).thenReturn(null);
 
         String err = service.create(1L, new TraderService.UpsertReq("小虎", "BTCUSDT", "4h", null, null, true,
-                null, null, null, null, null, null, null, null, null, null, null, null, "21:00-23:00"));
+                null, null, null, null, null, null, null, null, null, null, "21:00-23:00"));
 
         assertThat(err).contains("永远不会醒");
         verify(traderMapper, never()).insert(any(AiTrader.class));
@@ -211,7 +207,7 @@ class TraderServiceTest {
         when(simTradeClient.ensureAccount(any(), any())).thenReturn(99L);
 
         String err = service.create(1L, new TraderService.UpsertReq("小虎", "BTCUSDT", "5m", null, 5L, true,
-                null, null, null, null, null, null, null, null, null, null, null, null, " 21:00-08:30 "));
+                null, null, null, null, null, null, null, null, null, null, " 21:00-08:30 "));
 
         assertThat(err).isNull();
         ArgumentCaptor<AiTrader> captor = ArgumentCaptor.forClass(AiTrader.class);
@@ -251,14 +247,13 @@ class TraderServiceTest {
         assertThat(service.reset(1L, true)).isNull();
 
         verify(planStore).archiveRound(eq(7L), eq(3), org.mockito.ArgumentMatchers.anyLong());
-        verify(requestMapper).update(any(), any());     // 待确认请求一并作废
         // 窗口内（R4 ≤ 10 局）不触发过期清理
         verify(planStore, never()).purgeRounds(org.mockito.ArgumentMatchers.anyLong(),
                 org.mockito.ArgumentMatchers.anyInt());
         verify(simTradeClient, never()).deleteAccount(any());
     }
 
-    /** 保留窗口 10 局：开 R11 时 R1 整局清除——三表 roundNo≤1 删 + sim 子账户 ai_trader_1_r1 销户 */
+    /** 保留窗口 10 局：开 R11 时 R1 整局清除——两表 roundNo≤1 删 + sim 子账户 ai_trader_1_r1 销户 */
     @Test
     void resetBeyondWindowPurgesOldestRound() {
         AiTrader t = new AiTrader();
@@ -271,7 +266,6 @@ class TraderServiceTest {
         assertThat(service.reset(1L, true)).isNull();
 
         verify(decisionMapper).delete(any());
-        verify(requestMapper).delete(any());
         verify(planStore).purgeRounds(7L, 1);
         verify(simTradeClient).deleteAccount("ai_trader_1_r1");
     }
@@ -341,7 +335,7 @@ class TraderServiceTest {
         when(modelFactory.testConnection(next)).thenReturn(null);
 
         String err = service.updateConfig(1L, new TraderService.UpsertReq("小虎", "BTCUSDT", "5m", null, 6L, true,
-                null, null, null, null, null, null, null, null, null, null, null, null, null));
+                null, null, null, null, null, null, null, null, null, null, null));
 
         assertThat(err).isNull();
         verify(modelFactory).testConnection(next);

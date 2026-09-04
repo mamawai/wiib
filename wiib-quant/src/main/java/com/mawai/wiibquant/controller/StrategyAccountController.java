@@ -1,6 +1,5 @@
 package com.mawai.wiibquant.controller;
 
-import cn.dev33.satoken.stp.StpUtil;
 import com.mawai.wiibcommon.annotation.RequireAdmin;
 import com.mawai.wiibcommon.exception.BizException;
 import com.mawai.wiibcommon.util.Result;
@@ -50,14 +49,12 @@ public class StrategyAccountController {
     @GetMapping("/overview")
     @Operation(summary = "三策略账户全景（余额/权益/盈亏/持仓/已平仓历史）")
     public Result<List<StrategyAccountService.StrategyAccountView>> overview() {
-        StpUtil.checkLogin();
         return Result.ok(strategyAccountService.overview());
     }
 
     @GetMapping("/signals")
     @Operation(summary = "各策略×币种实时信号状态快照（通道位置/压缩计数/签名命中等）")
     public Result<List<StrategySignalState>> signals() {
-        StpUtil.checkLogin();
         return Result.ok(strategyRuntime.signalStates());
     }
 
