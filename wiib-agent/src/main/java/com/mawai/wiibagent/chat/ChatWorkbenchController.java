@@ -2,7 +2,6 @@ package com.mawai.wiibagent.chat;
 
 import com.alibaba.fastjson2.JSONObject;
 import com.mawai.wiibcommon.annotation.CurrentUserId;
-import com.mawai.wiibcommon.enums.AgentLang;
 import com.mawai.wiibcommon.enums.ErrorCode;
 import com.mawai.wiibcommon.exception.BizException;
 import com.mawai.wiibcommon.i18n.MessageCatalog;
@@ -10,7 +9,6 @@ import com.mawai.wiibcommon.util.Result;
 import com.mawai.wiibagent.i18n.PromptCatalog;
 import com.mawai.wiibagent.i18n.UserLangResolver;
 import com.mawai.wiibagent.llm.ChatEndpoints;
-import com.mawai.wiibagent.llm.ConversationSummarizer;
 import com.mawai.wiibagent.llm.LlmEndpointService;
 import com.mawai.wiibagent.llm.SseChannel;
 import io.swagger.v3.oas.annotations.Operation;
@@ -19,8 +17,6 @@ import jakarta.servlet.http.HttpServletResponse;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.ai.chat.messages.Message;
-import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -56,6 +52,8 @@ public class ChatWorkbenchController {
     private final ChatHistoryService chatHistoryService;
     private final ChatContextStore contextStore;
     private final ChatTurnStreamer turnStreamer;
+    /** 重新生成前的上下文回退，见 {@link ChatTurnRewinder} */
+    private final ChatTurnRewinder rewinder;
     private final WorkbenchRunRegistry runRegistry;
     private final ChatConcurrencyGate concurrencyGate;
     /** 会话归属与确认失效的提示跟界面语言 */
@@ -108,8 +106,7 @@ public class ChatWorkbenchController {
     @PostMapping(value = "/chat", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     @Operation(summary = "工作台对话（SSE：agent调度过程+token流式）")
     public SseEmitter chat(@CurrentUserId long userId, @RequestBody WorkbenchChatRequest request, HttpServletResponse response) {
-        // nginx 反代默认缓冲会把 SSE 憋成一次性输出，显式关掉（免改服务器配置）
-        response.setHeader("X-Accel-Buffering", "no");
+        SseChannel.noProxyBuffering(response);
         if (request.getMessage() == null || request.getMessage().isBlank()) {
             throw new IllegalArgumentException("消息不能为空");
         }
@@ -144,7 +141,7 @@ public class ChatWorkbenchController {
     @Operation(summary = "补答轮：接回让位时交出去的专家批次，补上欠的答案（SSE，事件协议同 /chat）")
     public SseEmitter deferred(@CurrentUserId long userId, @RequestBody DeferredRequest request,
                                HttpServletResponse response) {
-        response.setHeader("X-Accel-Buffering", "no");
+        SseChannel.noProxyBuffering(response);
         String sessionId = request.getSessionId();
         if (sessionId == null || !sessionId.startsWith("wb-" + userId + "-")
                 || !yieldCoordinator.hasPending(sessionId)) {
@@ -185,7 +182,7 @@ public class ChatWorkbenchController {
     @Operation(summary = "重新生成会话最后一条回答（SSE，事件协议同 /chat）")
     public SseEmitter regenerate(@CurrentUserId long userId, @RequestBody RegenerateRequest request,
                                  HttpServletResponse response) {
-        response.setHeader("X-Accel-Buffering", "no");
+        SseChannel.noProxyBuffering(response);
         String sessionId = request.getSessionId();
         if (sessionId == null || !sessionId.startsWith("wb-" + userId + "-")) {
             throw new BizException(ErrorCode.CHAT_REGENERATE_UNAVAILABLE);
@@ -197,11 +194,11 @@ public class ChatWorkbenchController {
             throw new BizException(acquired == ChatConcurrencyGate.Acquire.USER_BUSY
                     ? ErrorCode.CHAT_ALREADY_RUNNING : ErrorCode.CHAT_CAPACITY_FULL);
         }
-        Rollback rollback;
+        ChatTurnRewinder.Rollback rollback;
         try {
-            // 名额到手后才回退：此刻没有别的轮在跑（补答也占同一个名额），
-            // 读到的历史与上下文不会被人从背后改掉，回退也不会被别人的落库覆盖
-            rollback = rollbackLastTurn(sessionId, userId);
+            // 名额到手后才回退，理由见 rewind 的 javadoc；回不去的几种原因在 HTTP 上是同一个码
+            rollback = rewinder.rewind(sessionId, userId)
+                    .orElseThrow(() -> new BizException(ErrorCode.CHAT_REGENERATE_UNAVAILABLE));
         } catch (RuntimeException e) {
             concurrencyGate.release(userId);
             throw e;
@@ -209,77 +206,6 @@ public class ChatWorkbenchController {
         // 重新生成不带意图：库里存的是提问原文，按钮意图是请求级的、没落库。
         // 行为分析这类提问原文本身就够明确，路由与汇总的成文规则接得住
         return streamTurn(userId, sessionId, rollback.question(), leaves, rollback.answerId(), null, null);
-    }
-
-    /** 回退的产物：要重问的原文，以及那条等着被顶替的旧答案行 */
-    private record Rollback(String question, long answerId) {
-    }
-
-    /**
-     * 把模型侧上下文回退到"最后一问已在、回答未出"的状态，交出要重问的原文和那条待顶替的旧答案行。
-     * <p>
-     * 上下文从尾部回删到本轮提问为止（含它）——一轮的尾巴不止"一问一答"，中间还夹着专家结论、
-     * 交接指令与 tool_call 配对。展示表这里一行不动：旧答案要留到新答案确实落库之后才删，见 {@link ChatTurnStreamer}。
-     * <p>
-     * <b>光靠轮起始标记定位不住</b>：历史压缩会把首条用户消息<b>原样</b>放回压缩结果队首
-     *（见 {@code ConversationSummarizer}），那条正是会话第一轮的提问、同样带着标记。
-     * 所以标记只用来找候选，还要拿它与展示表里那条提问核对——对不上就说明本轮提问已被压进摘要，回不去了。
-     * <p>
-     * 回不去的一律抛 2206 拒绝，不做半吊子的补偿。
-     */
-    private Rollback rollbackLastTurn(String sessionId, long userId) {
-        List<ChatHistoryService.ChatMessage> history = chatHistoryService.messages(sessionId);
-        if (history.isEmpty() || !"assistant".equals(history.getLast().role())
-                || ChatRowKind.DEFERRED.equals(history.getLast().kind())) {
-            throw new BizException(ErrorCode.CHAT_REGENERATE_UNAVAILABLE);
-        }
-        ChatHistoryService.ChatMessage answer = history.getLast();
-        String question = null;
-        for (int i = history.size() - 2; i >= 0; i--) {
-            if ("user".equals(history.get(i).role())) {
-                question = history.get(i).content();
-                break;
-            }
-        }
-        if (question == null) {
-            throw new BizException(ErrorCode.CHAT_REGENERATE_UNAVAILABLE);
-        }
-        List<Message> context = contextStore.load(sessionId);
-        int cut = getCut(context, question);
-        // 切在队首且紧跟着摘要，说明命中的是压缩原样放回的首问，不是本轮提问——
-        // 同一句常用问法在一个会话里问两遍就会这样，文本对得上但位置是假的，照切会把整段上下文连摘要清空
-        if (cut == 0 && context.size() > 1 && ConversationSummarizer.isSummary(context.get(1), prompts)) {
-            throw new BizException(ErrorCode.CHAT_REGENERATE_UNAVAILABLE);
-        }
-        contextStore.save(sessionId, userId, List.copyOf(context.subList(0, cut)));
-        return new Rollback(question, answer.id());
-    }
-
-    /**
-     * 从尾部找本轮提问那条（带轮起始标记的 user 消息）。标记按语言取自词表（chat.turn.*），
-     * 认的时候遍历全部语言：切语言后旧轮的标记仍是旧语言。核对用命中那门语言的问题前缀——
-     * enriched 是一门语言一次拼成的，不存在跨语言混拼。
-     */
-    private int getCut(List<Message> context, String question) {
-        for (int i = context.size() - 1; i >= 0; i--) {
-            Message message = context.get(i);
-            if (!(message instanceof UserMessage) || message.getText() == null) {
-                continue;
-            }
-            String text = message.getText();
-            for (AgentLang lang : AgentLang.values()) {
-                if (!text.startsWith(prompts.get(lang, "chat.turn.timePrefix"))) {
-                    continue;
-                }
-                // 核对的是 enriched 的尾巴（拼法见 ChatTurnStreamer.Turn.run），对不上就是压缩把本轮提问
-                // 吃掉了，此时命中的那条是压缩留下的首问——照它切会把中间好几轮连同摘要一起抹掉
-                if (!text.endsWith(prompts.get(lang, "chat.turn.questionPrefix") + question)) {
-                    throw new BizException(ErrorCode.CHAT_REGENERATE_UNAVAILABLE);
-                }
-                return i;
-            }
-        }
-        throw new BizException(ErrorCode.CHAT_REGENERATE_UNAVAILABLE);
     }
 
     /**

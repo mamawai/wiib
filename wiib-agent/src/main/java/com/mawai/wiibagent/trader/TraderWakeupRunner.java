@@ -35,6 +35,7 @@ import com.mawai.wiibagent.mapper.AiTraderDecisionMapper;
 import com.mawai.wiibagent.mapper.AiTraderMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.bsc.langgraph4j.CompileConfig;
 import org.bsc.langgraph4j.CompiledGraph;
 import org.bsc.langgraph4j.RunnableConfig;
 import org.bsc.langgraph4j.prebuilt.MessagesState;
@@ -82,8 +83,15 @@ public class TraderWakeupRunner {
     static final int MAX_WAKE_SECONDS = 600;
     /** 截止安全余量：唤醒决不占用下一根K线 */
     private static final long DEADLINE_SAFETY_MS = 5_000;
-    /** 单次唤醒模型调用上限（ReAct 迭代保险丝，挡住无限工具循环烧用户的钱） */
-    static final int MAX_MODEL_CALLS = 8;
+    /**
+     * 单次唤醒模型调用上限（ReAct 迭代保险丝，挡住无限工具循环烧用户的钱）。
+     * <p>
+     * 值给到 12 是因为并不并行差得远：会并行的模型一轮发 4~9 个 tool_call，2~3 次调用就取完数据；
+     * 不并行的一轮一个，5 币多周期求证根本走不完。撞上限不算失败（见下面 setError 那段），
+     * 但收束时最后一条是纯 tool_call、正文空，这轮决策就没有收尾的结论块——
+     * 下一轮的检验旧论点和复盘素材都跟着缺。
+     */
+    static final int MAX_MODEL_CALLS = 12;
     static final int MAX_CONSECUTIVE_FAILURES = 5;
     /** 爆仓判定线：权益 < 初始资金 10000 的 1% */
     static final BigDecimal LIQUIDATION_FLOOR = new BigDecimal("100");
@@ -272,7 +280,11 @@ public class TraderWakeupRunner {
                 .addExecuteToolsHook(trace)
                 // 首轮强制调工具：不看数据不许决策；弱模型不支持 tool_choice 会以 ERROR 落库并最终自动暂停
                 .build(ResilientChatService.builder().model(model).forceFirstToolChoice("required").asFactory())
-                .compile();
+                // 框架默认硬顶 25 不够：非流式模型节点吃 1 格 + 工具边 1 格，一轮 2 格，
+                // 加 START/END/收尾三格，最小可跑值 2L+3——L=12 就是 27，已经越过 25。
+                // 抬到 2L+8 留一轮多的余量。真正管事的闸门是 ModelCallLimiter（那个 L），
+                // 硬顶只兜"环没收住"，它抛在结果交出去之前，一抛这轮连截断的决策都拿不到
+                .compile(CompileConfig.builder().recursionLimit(2 * MAX_MODEL_CALLS + 8).build());
 
         String calendar = econCalendar.assemble(nowMs.getAsLong(), lang);
         String instruction = trigger != null

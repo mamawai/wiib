@@ -301,21 +301,21 @@ public class ChatAgentFactory {
      *                             null=不强制
      */
     CompiledGraph<MessagesState<Message>> expertGraph(AgentLang lang, ChatModel model, Object toolkit,
-                                                      String forceFirstToolChoice, String instruction)
-            throws Exception {
+                                                      String forceFirstToolChoice, String instruction) throws Exception {
         ReactAgent.Builder<MessagesState<Message>> builder = AgentGraphs.reactAgent(model, instruction);
+
         if (toolkit != null) {
-            // 工具描述也跟语言走：@Tool 的 description 是编译期常量，这一层替它换（词表里没有的照旧用注解）
-            builder.tools(localizedTools.of(lang, toolkit));
-            // 有工具才有 ReAct 循环，没保险丝就一路顶到框架 25 次迭代硬顶抛异常；而 market 的工具
-            // 每调一次就打一次真实上游，是行情配额账里唯一没封顶的一项
+            builder.tools(localizedTools.of(lang, toolkit)); // 按照lang设置tool的description语言
             builder.addExecuteToolsHook(new ModelCallLimiter(runModelCallLimit,
-                    prompts.get(lang, "llm.callLimit.notExecuted")));
+                    prompts.get(lang, "llm.callLimit.notExecuted"))); // 设置模型调用限制
         }
-        // 专家的立身之本是"用工具拿真实数据"：不强制的话模型可能用自带的内置搜索直接答，
-        // 工具一次都不调，数据源就失控了（本系统的行情/预测战绩全被绕过去）
-        return builder.build(ResilientChatService.builder().model(model)
-                        .forceFirstToolChoice(forceFirstToolChoice).asFactory())
+
+        return builder.build(
+                ResilientChatService.builder()
+                        .model(model)
+                        .forceFirstToolChoice(forceFirstToolChoice)
+                        .asFactory()
+                )
                 .compile();
     }
 

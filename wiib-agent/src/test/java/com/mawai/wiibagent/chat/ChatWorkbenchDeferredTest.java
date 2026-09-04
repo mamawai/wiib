@@ -69,7 +69,7 @@ class ChatWorkbenchDeferredTest {
         when(endpointService.chatEndpoints(1L)).thenReturn(ChatTestEndpoints.eps(1L, "gpt-5"));
         when(factory.leavesFor(any(), any())).thenReturn(leaves());
         return new ChatWorkbenchController(factory, endpointService, new ApprovalRegistry(),
-                history, mock(ChatContextStore.class), streamer(),
+                history, mock(ChatContextStore.class), streamer(), mock(ChatTurnRewinder.class),
                 mock(WorkbenchRunRegistry.class), gate, new MessageCatalog(), coordinator,
                 ChatTestEndpoints.PROMPTS, ChatTestEndpoints.zhLang());
     }

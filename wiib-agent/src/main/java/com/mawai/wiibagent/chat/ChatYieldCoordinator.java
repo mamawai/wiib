@@ -56,7 +56,7 @@ public class ChatYieldCoordinator {
         /** 本轮完全结束（名额已还）：让位等待者以它为"可以抢名额了"的发令枪 */
         private final CompletableFuture<Void> turnDone = new CompletableFuture<>();
         /** 让位窗口开关（写：runner 线程；读：新消息的请求线程） */
-        private volatile boolean yieldable = false;
+        private volatile boolean yieldAble = false;
         /** 用户点了停止（写：请求线程；读：runner 线程）。粘滞，跑到下一个检查点就收尾 */
         private volatile boolean cancelled = false;
         /** 中断信号：专家等待期阻塞在 anyOf 上，只有 future 能把它叫醒，光有布尔叫不醒 */
@@ -69,13 +69,13 @@ public class ChatYieldCoordinator {
 
         @Override
         public CompletableFuture<Void> enterExpertWait() {
-            yieldable = preemptible;
+            yieldAble = preemptible;
             return yieldSignal;
         }
 
         @Override
         public void exitExpertWait() {
-            yieldable = false;
+            yieldAble = false;
         }
 
         @Override
@@ -141,7 +141,7 @@ public class ChatYieldCoordinator {
      */
     public CompletableFuture<Void> requestYield(long userId) {
         TurnHandle handle = activeTurns.get(userId);
-        if (handle == null || !handle.yieldable) {
+        if (handle == null || !handle.yieldAble) {
             return null;
         }
         handle.yieldSignal.complete(null);

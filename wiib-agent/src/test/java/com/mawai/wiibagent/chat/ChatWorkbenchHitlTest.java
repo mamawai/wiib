@@ -175,7 +175,7 @@ class ChatWorkbenchHitlTest {
         streamer = new ChatTurnStreamer(turnRunner, history, runRegistry, yieldCoordinator, registry,
                 ChatTestEndpoints.PROMPTS);
         return new ChatWorkbenchController(mock(ChatAgentFactory.class), mock(LlmEndpointService.class),
-                registry, history, contextStore, streamer,
+                registry, history, contextStore, streamer, mock(ChatTurnRewinder.class),
                 runRegistry, gate, new MessageCatalog(), yieldCoordinator, ChatTestEndpoints.PROMPTS, ChatTestEndpoints.zhLang());
     }
 

@@ -84,7 +84,7 @@ public class ReplayCoachController {
     @Operation(summary = "复盘 AI 教练（SSE：HINT 盘面提示 / REVIEW 评估用户看法）")
     public SseEmitter coach(@CurrentUserId long userId, @RequestBody ReplayCoachRequest request,
                             HttpServletResponse response) {
-        response.setHeader("X-Accel-Buffering", "no");
+        SseChannel.noProxyBuffering(response);
         AgentLang lang = userLangResolver.of(userId);
         String invalid = coachPrompts.validate(request, lang);
         if (invalid != null) {

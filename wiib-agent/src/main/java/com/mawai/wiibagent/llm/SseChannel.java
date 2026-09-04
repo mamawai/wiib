@@ -1,6 +1,7 @@
 package com.mawai.wiibagent.llm;
 
 import com.alibaba.fastjson2.JSONObject;
+import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -13,6 +14,15 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * 研判工作台对话与复盘 AI 提示两个 SSE 端点共用（事件协议同为 token/done/error）。
  */
 public final class SseChannel {
+
+    /**
+     * 关掉反代缓冲，每个 SSE 端点在建流之前调一次。
+     * nginx 反代默认缓冲会把 SSE 憋成一次性输出，显式关掉（免改服务器配置）。
+     */
+    public static void noProxyBuffering(HttpServletResponse response) {
+        response.setHeader("X-Accel-Buffering", "no");
+    }
+
     private final SseEmitter emitter;
     private final AtomicBoolean closed = new AtomicBoolean(false);
     private final Object writeLock = new Object();

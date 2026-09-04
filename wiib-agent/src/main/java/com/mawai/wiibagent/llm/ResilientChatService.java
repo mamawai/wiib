@@ -22,6 +22,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Function;
 
 /**
  * 带韧性的 ChatService：退避重试，装配进 langgraph4j 的 ReactAgent。
@@ -290,7 +291,7 @@ public class ResilientChatService implements ReactAgent.ChatService {
         }
 
         /** 交给 {@code ReactAgent.Builder#build(factory)}：建图时框架回传 agentBuilder 取工具与系统提示。 */
-        public java.util.function.Function<ReactAgentBuilder<?, ?>, ReactAgent.ChatService> asFactory() {
+        public Function<ReactAgentBuilder<?, ?>, ReactAgent.ChatService> asFactory() {
             return agentBuilder -> new ResilientChatService(this, agentBuilder);
         }
     }

@@ -116,7 +116,7 @@ public class ChatTurnStreamer {
                 }
 
                 // 补充时间信息。轮起始标记按语言取自词表（chat.turn.*）：重新生成靠它从尾部找到
-                // "本轮提问"那条，认的一侧在 ChatWorkbenchController.getCut，遍历全部语言
+                // "本轮提问"那条，认的一侧在 ChatTurnRewinder.cutAt，遍历全部语言
                 String enriched = prompts.get(leaves.lang(), "chat.turn.timeMark",
                         Map.of("time", TIME_FMT.format(Instant.now()))) + "\n"
                         + (deferred == null
