@@ -1,11 +1,12 @@
-import { useMemo } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { GraduationCap, MousePointerClick, NotebookPen, Zap } from 'lucide-react';
-import i18n from '../../i18n';
+import { GraduationCap, ListTree, Loader2, MousePointerClick, NotebookPen, Zap } from 'lucide-react';
+import { traderApi } from '../../api';
 import { cn, fmtDateTime, fmtNum, fmtTokens } from '../../lib/utils';
-import type { AiTraderDecisionView } from '../../types';
+import type { AiTraderDecisionView, WakeTrace } from '../../types';
 import { ReasoningFold } from './ReasoningFold';
-import { TRADE_TOOL_SET, toolName } from './traderTools';
+import { WakeTraceView } from './WakeTraceView';
+import { TRADE_TOOL_SET, toolName, tradeArgsSummary, type ActionRow } from './traderTools';
 
 /** 徽章存的是词表 key：模块级常量只算一次，存翻好的字面量切了语言也不会变 */
 const DECISION_STATUS: Record<string, { labelKey: string; tone: string }> = {
@@ -17,50 +18,22 @@ const DECISION_STATUS: Record<string, { labelKey: string; tone: string }> = {
 /** "看了什么"一行最多点名几个工具，其余折成 +N */
 const LOOKED_MAX = 4;
 
-interface ActionRow {
-  tool: string;
-  status?: string;
-  rejected?: string;
-  error?: string;
-  args?: Record<string, unknown>;
-}
-
-/** 交易动作的关键参数一行话（按工具挑重点，不倒整个 JSON）。词表在函数体里现查，切语言即变 */
-function tradeArgsSummary(a: ActionRow): string {
-  const g = (k: string) => a.args?.[k] != null ? String(a.args[k]) : '';
-  const tr = (key: string, vars?: Record<string, string>) => i18n.t(`ai:${key}`, vars ?? {});
-  switch (a.tool) {
-    case 'open_position': {
-      const parts = [g('symbol'), g('side') === 'LONG' ? tr('args.long') : g('side') === 'SHORT' ? tr('args.short') : g('side'),
-        g('quantity') && tr('args.qty', { n: g('quantity') }), g('leverage') && `${g('leverage')}x`,
-        g('stopLossPrice') && tr('args.sl', { p: g('stopLossPrice') }),
-        g('takeProfitPrice') && tr('args.tp', { p: g('takeProfitPrice') }),
-        g('playType')];
-      return parts.filter(Boolean).join(' · ');
-    }
-    case 'close_position':
-      return [tr('args.position', { id: g('positionId') }), g('quantity') && tr('args.qty', { n: g('quantity') }), g('reason')]
-        .filter(Boolean).join(' · ');
-    case 'set_stop_loss':
-      return [`→${g('stopLossPrice')}`, g('reason')].filter(Boolean).join(' · ');
-    case 'set_take_profit':
-      return [`→${g('takeProfitPrice')}`, g('reason')].filter(Boolean).join(' · ');
-    case 'write_plan':
-      return [g('playType'), g('invalidationCondition') && tr('args.invalidation', { c: g('invalidationCondition') })]
-        .filter(Boolean).join(' · ');
-    case 'cancel_order':
-      return tr('args.order', { id: g('orderId') });
-    default:
-      return '';
-  }
-}
-
 /**
- * 单条决策卡：徽章/时间/权益 + token（耗时·工具次·模型次收进 hover）→ "看了什么"一句 → 交易动作行（参数/拒因）→ 推理折叠。
+ * 单条决策卡：徽章/时间/权益 + token（耗时·工具次·模型次收进 hover）→ "看了什么"一句 → 交易动作行（参数/拒因）→ 推理折叠 + 过程按钮。
  * highlight=从已了结交易跳过来的那一条，描个边让人找得到。
  */
 export function DecisionCard({ d, highlight }: { d: AiTraderDecisionView; highlight?: boolean }) {
   const { t } = useTranslation('ai');
+  // 过程轨迹：首次点开才拉，之后开合不重拉；拉失败复位标记，再点一次重试
+  const [traceOpen, setTraceOpen] = useState(false);
+  const [trace, setTrace] = useState<WakeTrace | null>(null);
+  const traceRequested = useRef(false);
+  const toggleTrace = () => {
+    setTraceOpen(o => !o);
+    if (traceRequested.current) return;
+    traceRequested.current = true;
+    void traderApi.decisionTrace(d.traderId, d.id).then(setTrace, () => { traceRequested.current = false; });
+  };
   // 复盘行不是交易决策，徽章与配色单独一套：reviewer 的每日日志，时间线上要一眼认出
   // 学习行同样不交易，但来源不同（复盘看自己、学习看同侪），再分一套色——两种日志行混在时间线上要能一眼分清
   const meta = d.kind === 'REVIEW'
@@ -184,7 +157,25 @@ export function DecisionCard({ d, highlight }: { d: AiTraderDecisionView; highli
         <p className="text-[11px] text-muted-foreground leading-relaxed">{d.error}</p>
       )}
 
-      <ReasoningFold reasoning={d.reasoning} segmentable={d.kind !== 'REVIEW' && d.kind !== 'LEARN'} />
+      {/* 推理折叠靠左，过程按钮贴在它右下角；这轮落了轨迹（hasTrace）才有按钮 */}
+      {(d.reasoning || d.hasTrace) && (
+        <div className="flex items-end gap-2">
+          <div className="flex-1 min-w-0">
+            <ReasoningFold reasoning={d.reasoning} segmentable={d.kind !== 'REVIEW' && d.kind !== 'LEARN'} />
+          </div>
+          {d.hasTrace && (
+            <button type="button" onClick={toggleTrace}
+                    className={cn('shrink-0 text-[10px] font-bold flex items-center gap-0.5', traceOpen ? 'text-foreground' : 'text-primary')}>
+              <ListTree className="w-3 h-3" />{t('live.process')}
+            </button>
+          )}
+        </div>
+      )}
+      {traceOpen && (
+        <div className="rounded border border-border bg-card-2/40 p-2.5">
+          {trace ? <WakeTraceView trace={trace} /> : <Loader2 className="w-3.5 h-3.5 animate-spin text-muted-foreground" />}
+        </div>
+      )}
     </div>
   );
 }

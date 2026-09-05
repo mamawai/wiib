@@ -4,7 +4,7 @@ import type { TnOverview, TnTrade, TnDailyCell, TnEquityPoint, TnFillStats, TnMa
 import type { BacktestTaskStatus, BacktestEventsPage, BacktestKlinesPage, BacktestResultPayload, ReplayCoverage, HistoryKlinesPayload, ReplayCoachRequest, ReplayCoachEvent } from '../types';
 import type { LedgerEntry, LedgerBizTypeOption, PublicTrade, UserProfile, PositionHistoryItem, RankingSort } from '../types';
 import type { LlmEndpointView, LlmEndpointSaveRequest, LlmBindings, LlmPurpose } from '../types';
-import type { User, PageResult, RankingItem, CommentItem, NotificationItem, BuffStatus, UserBuff, BlackjackStatus, GameState, ConvertResult, MinesStatus, MinesGameState, VideoPokerStatus, VideoPokerGameState, CryptoPrice, CryptoOrderRequest, CryptoOrder, CryptoPosition, BStock, FuturesOpenRequest, FuturesCloseRequest, FuturesAddMarginRequest, FuturesReduceMarginRequest, FuturesStopLossRequest, FuturesTakeProfitRequest, FuturesAdjustLeverageRequest, FuturesCrossAccount, WalletTransferPreview, FuturesPosition, FuturesOrder, FuturesReverseResult, FuturesBracket, TradeFilterMap, PredictionRound, PredictionBet, PredictionBuyRequest, PredictionBetLive, PredictionPnl, AssetSnapshot, CategoryAverages, ForceOrder, AiKeyConfig, AiModelAssignment, InviteCode, ChatIntent, WorkbenchEvent, StrategyAccountView, TraderPublicView, TraderOwnerView, TraderDetailView, AiTraderDecisionView, TraderEquityPoint, TraderUpsertRequest, TraderSpec, StrategySignalState, FeedStreamHealth, WorkbenchSessionSummary, WorkbenchSessionStatus, WorkbenchChatMessage, TraderActionPanel, TraderActionResult, TradeRecordView } from '../types';
+import type { User, PageResult, RankingItem, CommentItem, NotificationItem, BuffStatus, UserBuff, BlackjackStatus, GameState, ConvertResult, MinesStatus, MinesGameState, VideoPokerStatus, VideoPokerGameState, CryptoPrice, CryptoOrderRequest, CryptoOrder, CryptoPosition, BStock, FuturesOpenRequest, FuturesCloseRequest, FuturesAddMarginRequest, FuturesReduceMarginRequest, FuturesStopLossRequest, FuturesTakeProfitRequest, FuturesAdjustLeverageRequest, FuturesCrossAccount, WalletTransferPreview, FuturesPosition, FuturesOrder, FuturesReverseResult, FuturesBracket, TradeFilterMap, PredictionRound, PredictionBet, PredictionBuyRequest, PredictionBetLive, PredictionPnl, AssetSnapshot, CategoryAverages, ForceOrder, AiKeyConfig, AiModelAssignment, InviteCode, ChatIntent, WorkbenchEvent, StrategyAccountView, TraderPublicView, TraderOwnerView, TraderDetailView, AiTraderDecisionView, TraderEquityPoint, TraderUpsertRequest, TraderSpec, StrategySignalState, FeedStreamHealth, WorkbenchSessionSummary, WorkbenchSessionStatus, WorkbenchChatMessage, TraderActionPanel, TraderActionResult, TradeRecordView, TraderLiveEvent, ArenaLiveEvent, WakeTrace } from '../types';
 
 const api = axios.create({
   baseURL: '/api',
@@ -426,23 +426,17 @@ const streamSseEvents = async <E,>(
   }
 };
 
+/** fetch 走 SSE 时的鉴权与语言头（satoken 只认 header 不认 cookie） */
+const sseHeaders = (): Record<string, string> => {
+  const token = getToken();
+  return { [LANG_HEADER]: currentLang(), ...(token ? { satoken: token } : {}) };
+};
+
 /**
- * POST 一个 JSON 请求、以 SSE 收流。准入失败时后端返回的是普通 JSON（Result），
+ * fetch 回来的响应交给 SSE 解析。准入失败时后端返回的是普通 JSON（Result），
  * 抛 ApiError 带 code 让调用方分流（2201/2202 引导去配置）；正常返回 event-stream 就逐事件回调。
  */
-const postSse = async <E,>(url: string, body: unknown, onEvent: (e: E) => void, signal?: AbortSignal) => {
-  const token = getToken();
-  const response = await fetch(url, {
-    method: 'POST',
-    credentials: 'include',
-    headers: {
-      'Content-Type': 'application/json',
-      [LANG_HEADER]: currentLang(),
-      ...(token ? { satoken: token } : {}),
-    },
-    body: JSON.stringify(body),
-    signal,
-  });
+const consumeSse = async <E,>(response: Response, onEvent: (e: E) => void) => {
   const contentType = response.headers.get('content-type') || '';
   if (contentType.includes('application/json')) {
     const payload = await response.json() as { code?: number; msg?: string };
@@ -450,6 +444,24 @@ const postSse = async <E,>(url: string, body: unknown, onEvent: (e: E) => void, 
   }
   if (!response.ok) throw new Error(i18n.t('errors:requestFailedStatus', { status: response.status }));
   await streamSseEvents<E>(response, onEvent);
+};
+
+/** POST 一个 JSON 请求、以 SSE 收流 */
+const postSse = async <E,>(url: string, body: unknown, onEvent: (e: E) => void, signal?: AbortSignal) => {
+  const response = await fetch(url, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json', ...sseHeaders() },
+    body: JSON.stringify(body),
+    signal,
+  });
+  await consumeSse<E>(response, onEvent);
+};
+
+/** GET 一条 SSE 流（订阅型：trader 现场/竞技场列表），断流由调用方重连 */
+const getSse = async <E,>(url: string, onEvent: (e: E) => void, signal?: AbortSignal) => {
+  const response = await fetch(url, { credentials: 'include', headers: sseHeaders(), signal });
+  await consumeSse<E>(response, onEvent);
 };
 
 export const workbenchApi = {
@@ -566,6 +578,20 @@ export const traderApi = {
   trades: (id: number) => api.get<unknown, TradeRecordView[]>(`/ai/trader/${id}/trades`),
   /** 标记/取消忽略一笔已了结交易（仅本人、仅CLOSED）：AI 统计与复盘不再参考，公开记录不变 */
   setPlanStale: (planId: number, stale: boolean) => api.post<unknown, void>(`/ai/trader/plan/${planId}/stale`, { stale }),
+
+  // ---- 唤醒过程实时流 ----
+  /**
+   * 一只 trader 的现场 SSE：run_start/prompt/model_start/token/model_end/tool_result/run_end。
+   * 中途连上后端按当前状态回放，空闲时只有心跳；prompt 只有主人收得到
+   */
+  live: (id: number, onEvent: (e: TraderLiveEvent) => void, signal?: AbortSignal) =>
+    getSse<TraderLiveEvent>(`/api/ai/trader/${id}/live`, onEvent, signal),
+  /** 竞技场列表 SSE：连上先 snapshot（只含在跑的），之后逐条 status */
+  arenaLive: (onEvent: (e: ArenaLiveEvent) => void, signal?: AbortSignal) =>
+    getSse<ArenaLiveEvent>('/api/ai/trader/live', onEvent, signal),
+  /** 某条决策落库的过程轨迹；没有为 null，非主人拿到的没 prompt */
+  decisionTrace: (id: number, decisionId: number) =>
+    api.get<unknown, WakeTrace | null>(`/ai/trader/${id}/decisions/${decisionId}/trace`),
 
   // ---- 动作面板：三个动作的唯一执行入口，对话轨只负责把表单卡弹出来 ----
   /** 三张卡的状态一次取齐；每张卡挂载且未落地时拉一次 */

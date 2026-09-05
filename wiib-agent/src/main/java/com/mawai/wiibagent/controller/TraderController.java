@@ -1,6 +1,8 @@
 package com.mawai.wiibagent.controller;
 
 import cn.dev33.satoken.stp.StpUtil;
+import com.alibaba.fastjson2.JSON;
+import com.alibaba.fastjson2.JSONObject;
 import com.mawai.wiibcommon.annotation.CurrentUserId;
 import com.mawai.wiibcommon.dto.FuturesOrderResponse;
 import com.mawai.wiibcommon.dto.FuturesPositionDTO;
@@ -11,22 +13,28 @@ import com.mawai.wiibcommon.entity.UserLlmBinding;
 import com.mawai.wiibcommon.entity.UserLlmEndpoint;
 import com.mawai.wiibcommon.enums.AgentLang;
 import com.mawai.wiibcommon.enums.ErrorCode;
+import com.mawai.wiibcommon.exception.BizException;
 import com.mawai.wiibcommon.i18n.MessageCatalog;
 import com.mawai.wiibcommon.util.Result;
 import com.mawai.wiibagent.i18n.UserLangResolver;
 import com.mawai.wiibagent.llm.LlmEndpointService;
+import com.mawai.wiibagent.llm.SseChannel;
 import com.mawai.wiibquant.external.sim.SimTradeClient;
 import com.mawai.wiibagent.trader.TradeRecordService;
 import com.mawai.wiibagent.trader.TraderActionService;
+import com.mawai.wiibagent.trader.TraderLiveHub;
 import com.mawai.wiibagent.trader.TraderPromptAssembler;
 import com.mawai.wiibagent.trader.TraderRiskConfig;
 import com.mawai.wiibagent.trader.TraderService;
 import com.mawai.wiibagent.trader.WakeWindow;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -36,6 +44,15 @@ import java.util.Map;
 /**
  * AI Trader：我的 trader 管理（创建/配置/启停/重置）+ 公开竞技场（排行/详情/决策时间线/净值曲线）。
  * 竞技场读接口登录即可看（决策日志天生公开——观赏性是产品核心）；写操作只动自己的 trader。
+ * <p>
+ * 唤醒现场（SSE，事件名即 {@code event:}，data 是 JSON，帧的拼装在 {@code WakeTrace}）：
+ * <ul>
+ *   <li>{@code GET /{id}/live} 详情流，每帧带 traderId/runId/seq：
+ *       run_start → prompt（只发主人）→ 每次模型调用 model_start / token… / model_end → tool_result… → run_end；
+ *       中途连上按当前状态回放，空闲只有心跳</li>
+ *   <li>{@code GET /live} 列表流：连上发一次 snapshot（只含在跑的），之后逐条 status（running/kind/call/tool/symbol）</li>
+ *   <li>{@code GET /{id}/decisions/{decisionId}/trace} 落库轨迹原样返回，非主人剥掉 prompt；老行没有轨迹回 null</li>
+ * </ul>
  */
 @Slf4j
 @Tag(name = "AI Trader")
@@ -52,6 +69,7 @@ public class TraderController {
     private final TradeRecordService tradeRecordService;
     private final UserLangResolver userLangResolver;
     private final MessageCatalog messages;
+    private final TraderLiveHub liveHub;
 
     // ========== 我的 trader ==========
 
@@ -305,6 +323,42 @@ public class TraderController {
                                                     @RequestParam(required = false) Long from,
                                                     @RequestParam(required = false) Long to) {
         return Result.ok(traderService.decisions(id, limit, before, round, from, to));
+    }
+
+    // ========== 唤醒现场 ==========
+
+    @GetMapping(value = "/live", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    @Operation(summary = "竞技场列表现场流（snapshot + status，30 分钟到点前端自动重连）")
+    public SseEmitter arenaLive(HttpServletResponse response) {
+        SseChannel.noProxyBuffering(response);
+        return liveHub.subscribeArena();
+    }
+
+    @GetMapping(value = "/{id}/live", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    @Operation(summary = "trader 唤醒现场流（提示词只发主人；中途连上回放当前状态）")
+    public SseEmitter live(@PathVariable long id, HttpServletResponse response) {
+        SseChannel.noProxyBuffering(response);
+        AiTrader t = traderService.byId(id);
+        if (t == null) {
+            // 抛成 JSON 而不是开流：前端 getSse 见到 JSON 就按接口报错处理
+            throw new BizException(messages.get("trader.notFound"));
+        }
+        // 主人门控：提示词只给 trader 的主人
+        return liveHub.subscribeTrader(id, t.getUserId() == StpUtil.getLoginIdAsLong());
+    }
+
+    @GetMapping("/{id}/decisions/{decisionId}/trace")
+    @Operation(summary = "一条决策的过程轨迹（trace_json 原样；非主人看不到提示词；没有轨迹回 null）")
+    public Result<JSONObject> decisionTrace(@PathVariable long id, @PathVariable long decisionId) {
+        AiTraderDecision d = traderService.trace(decisionId);
+        if (d == null || d.getTraderId() != id) {
+            return Result.ok(null);
+        }
+        JSONObject trace = JSON.parseObject(d.getTraceJson());
+        if (traderService.byId(id).getUserId() != StpUtil.getLoginIdAsLong()) {
+            trace.remove("prompt");
+        }
+        return Result.ok(trace);
     }
 
     @GetMapping("/{id}/token-usage")

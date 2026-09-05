@@ -955,12 +955,111 @@ export interface AiTraderDecisionView {
   latencyMs: number | null;
   error: string | null;
   createdAt: string;
+  /** 这轮有没有落库的过程轨迹（trace_json 非空）；老决策行没有，不出"过程"按钮 */
+  hasTrace: boolean;
 }
 
 export interface TraderEquityPoint {
   wakeTime: number;
   equity: number;
 }
+
+// ---- 唤醒过程：实时流（/ai/trader/{id}/live、/ai/trader/live）与落库轨迹（trace_json）----
+
+/** 会走实时流的唤醒类型（复盘/学习不进这条通道） */
+export type WakeKind = 'TRADE' | 'ALERT' | 'MANUAL';
+/** 工具回执状态：按回执前缀 REJECTED: / ERROR: 判，其余 ok */
+export type WakeToolStatus = 'ok' | 'rejected' | 'error';
+
+/** 模型发起的一次工具调用；args 是解析后的对象，解析不了就是原字符串 */
+export interface WakeToolCall {
+  id: string;
+  name: string;
+  args: Record<string, unknown> | string;
+}
+
+/** 一条工具回执；preview 后端已截 2000 字 */
+export interface WakeToolResult {
+  id: string;
+  name: string;
+  status: WakeToolStatus;
+  preview: string;
+}
+
+/** 一次模型调用：文本 + 它发起的工具调用 + 对应回执；startedAt/endedAt 只有落库轨迹带，实时归约的没有 */
+export interface WakeCall {
+  n: number;
+  text: string;
+  toolCalls: WakeToolCall[];
+  results: WakeToolResult[];
+  startedAt?: number;
+  endedAt?: number;
+}
+
+/** 收尾：totalTokens null=上游没回 usage */
+export interface WakeEnd {
+  status: 'OK' | 'ERROR';
+  error: string | null;
+  equity: number;
+  latencyMs: number;
+  modelCalls: number;
+  totalTokens: number | null;
+}
+
+/**
+ * 一次唤醒的完整过程。实时流按帧归约出来的和 trace 接口原样返回的是同一形状；
+ * prompt 只有主人拿得到（非主人后端剥掉/不发），end 跑完才有
+ */
+export interface WakeTrace {
+  v: number;
+  kind: WakeKind;
+  wakeTime: number;
+  startedAt: number;
+  budgetSeconds: number;
+  equity: number;
+  positions: number;
+  pendingOrders: number;
+  prompt?: { system: string; instruction: string };
+  calls: WakeCall[];
+  end?: WakeEnd;
+}
+
+/** 详情流每帧都带的三个字段：runId 一次唤醒一个，seq 本轮内递增 */
+interface LiveFrame {
+  traderId: number;
+  runId: string;
+  seq: number;
+}
+
+/** 详情流 SSE 事件（与后端 TraderLiveHub 帧协议一一对应） */
+export type TraderLiveEvent = LiveFrame & (
+  | { type: 'run_start'; kind: WakeKind; wakeTime: number; budgetSeconds: number; equity: number; positions: number; pendingOrders: number; startedAt: number }
+  // 只发给主人订阅者
+  | { type: 'prompt'; system: string; instruction: string }
+  | { type: 'model_start'; call: number }
+  | { type: 'token'; call: number; text: string }
+  // text 是这次调用的整段文本
+  | { type: 'model_end'; call: number; text: string; toolCalls: WakeToolCall[] }
+  | { type: 'tool_result'; call: number; id: string; name: string; status: WakeToolStatus; preview: string }
+  // 决策行已落库后发
+  | { type: 'run_end'; status: 'OK' | 'ERROR'; error: string | null; equity: number; latencyMs: number; modelCalls: number; totalTokens: number | null; decisionId: number }
+);
+
+/** 列表流里一只 trader 的状态：tool 是正在跑的工具（回执到了就清掉），symbol 取自它的 args，没有就缺席 */
+export interface TraderLiveStatus {
+  traderId: number;
+  running: boolean;
+  kind: WakeKind;
+  since: number;
+  call: number;
+  tool?: string | null;
+  symbol?: string | null;
+}
+
+/** 列表流 SSE 事件：snapshot 连上时发一次只含在跑的，之后逐条 status */
+export type ArenaLiveEvent =
+  | { type: 'snapshot'; traders: TraderLiveStatus[] }
+  | ({ type: 'status' } & TraderLiveStatus);
 
 /** 创建/改配置入参（apiKey 改配置时传空=不换） */
 export interface TraderUpsertRequest {

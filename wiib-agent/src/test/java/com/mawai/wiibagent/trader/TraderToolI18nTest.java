@@ -57,7 +57,7 @@ class TraderToolI18nTest {
             new MessageCatalog(),
             new LocalizedToolCallbacks(prompts),
             mock(com.mawai.wiibagent.learning.ReviewMaterialAssembler.class),
-            mock(EconCalendarAssembler.class), mock(PlayStatsAssembler.class));
+            mock(EconCalendarAssembler.class), mock(PlayStatsAssembler.class), new TraderLiveHub());
 
     /** 只做反射扫描的壳：工具方法一个都不会被调起来，依赖给 null 即可 */
     private final TradeTools tradeTools = new TradeTools(

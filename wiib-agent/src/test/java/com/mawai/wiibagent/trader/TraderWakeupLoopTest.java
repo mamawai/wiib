@@ -1,5 +1,8 @@
 package com.mawai.wiibagent.trader;
 
+import com.alibaba.fastjson2.JSON;
+import com.alibaba.fastjson2.JSONArray;
+import com.alibaba.fastjson2.JSONObject;
 import com.mawai.wiibcommon.dto.FuturesOpenRequest;
 import com.mawai.wiibcommon.dto.FuturesOrderResponse;
 import com.mawai.wiibcommon.dto.FuturesPositionDTO;
@@ -38,8 +41,10 @@ import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.model.tool.ToolCallingChatOptions;
+import reactor.core.publisher.Flux;
 
 import java.math.BigDecimal;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -59,9 +64,27 @@ import static org.mockito.Mockito.when;
 
 /**
  * 唤醒回路 mock 回路测试（纯 mock 无外部依赖，常规套件必跑；勿再用 *IT 命名——surefire 默认不收）：mock ChatModel 走一遍真 ReactAgent 工具循环——
- * 开仓工具真被调用（经 TradeGuard）、决策行真落库（含论点标签/动作轨迹/权益）。
+ * 开仓工具真被调用（经 TradeGuard）、决策行真落库（含论点标签/动作轨迹/权益/过程轨迹）、现场帧按序推给订阅者。
+ * 图开着 streaming，模型桩打在 {@code stream()} 上：一帧一个 ChatResponse，tool_call 帧正文空。
  */
 class TraderWakeupLoopTest {
+
+    /** 收帧的出口：事件名与 data 按序存 */
+    private static final class Frames implements TraderLiveHub.Sink {
+        final List<String> events = new ArrayList<>();
+        final List<JSONObject> data = new ArrayList<>();
+
+        @Override
+        public boolean send(String event, JSONObject d) {
+            events.add(event);
+            data.add(d);
+            return true;
+        }
+
+        JSONObject last(String event) {
+            return data.get(events.lastIndexOf(event));
+        }
+    }
 
     @BeforeAll
     static void initTableInfoCache() {
@@ -84,6 +107,7 @@ class TraderWakeupLoopTest {
     private final PromptCatalog prompts = new PromptCatalog();
     /** 默认（未打桩）返回 null = 本局无统计不注入 */
     private final PlayStatsAssembler playStats = mock(PlayStatsAssembler.class);
+    private final TraderLiveHub hub = new TraderLiveHub();
 
     private final TraderWakeupRunner runner = new TraderWakeupRunner(
             modelFactory, new TraderPromptAssembler(traderMapper, prompts),
@@ -95,7 +119,7 @@ class TraderWakeupLoopTest {
             prompts, new MessageCatalog(), new LocalizedToolCallbacks(prompts),
             new ReviewMaterialAssembler(decisionMapper, planMapper, simTradeClient,
                     mock(KlineHistoryStore.class), prompts),
-            mock(EconCalendarAssembler.class), playStats);
+            mock(EconCalendarAssembler.class), playStats, hub);
 
     {
         // 测试边界是固定历史时刻，墙钟钉在边界后 1s——预算充足，各用例不受真实时间影响
@@ -121,6 +145,10 @@ class TraderWakeupLoopTest {
         return t;
     }
 
+    private static Flux<ChatResponse> frameOf(AssistantMessage message) {
+        return Flux.just(new ChatResponse(List.of(new Generation(message))));
+    }
+
     /** 模型第一轮调 open_position、第二轮给总结文本。 */
     private ChatModel modelOpeningThenSummary(String openArgsJson) {
         ChatModel model = mock(ChatModel.class);
@@ -128,9 +156,9 @@ class TraderWakeupLoopTest {
         AssistantMessage openCall = AssistantMessage.builder().content("")
                 .toolCalls(List.of(new AssistantMessage.ToolCall("c1", "function", "open_position", openArgsJson)))
                 .build();
-        when(model.call(any(Prompt.class))).thenReturn(
-                new ChatResponse(List.of(new Generation(openCall))),
-                new ChatResponse(List.of(new Generation(new AssistantMessage("突破前高放量，做多并挂好止损，本轮结束。")))));
+        when(model.stream(any(Prompt.class))).thenReturn(
+                frameOf(openCall),
+                frameOf(new AssistantMessage("突破前高放量，做多并挂好止损，本轮结束。")));
         return model;
     }
 
@@ -151,9 +179,9 @@ class TraderWakeupLoopTest {
         AssistantMessage call = AssistantMessage.builder().content("")
                 .toolCalls(List.of(new AssistantMessage.ToolCall("c1", "function", tool, argsJson)))
                 .build();
-        when(model.call(any(Prompt.class))).thenReturn(
-                new ChatResponse(List.of(new Generation(call))),
-                new ChatResponse(List.of(new Generation(new AssistantMessage("已提请主人确认，本轮其余保持不动。")))));
+        when(model.stream(any(Prompt.class))).thenReturn(
+                frameOf(call),
+                frameOf(new AssistantMessage("已提请主人确认，本轮其余保持不动。")));
         return model;
     }
 
@@ -164,9 +192,9 @@ class TraderWakeupLoopTest {
         AssistantMessage check = AssistantMessage.builder().content("")
                 .toolCalls(List.of(new AssistantMessage.ToolCall("c1", "function", "get_account", "{}")))
                 .build();
-        when(model.call(any(Prompt.class))).thenReturn(
-                new ChatResponse(List.of(new Generation(check))),
-                new ChatResponse(List.of(new Generation(new AssistantMessage("持仓符合计划，本轮 HOLD。")))));
+        when(model.stream(any(Prompt.class))).thenReturn(
+                frameOf(check),
+                frameOf(new AssistantMessage("持仓符合计划，本轮 HOLD。")));
         return model;
     }
 
@@ -195,6 +223,16 @@ class TraderWakeupLoopTest {
         when(modelFactory.modelFor(any())).thenReturn(model);
         FuturesOrderResponse resp = new FuturesOrderResponse();
         when(simTradeClient.openPosition(eq(99L), any())).thenReturn(resp);
+        // 真库 insert 回填自增 id，run_end 帧要带它
+        when(decisionMapper.insert(any(AiTraderDecision.class))).thenAnswer(inv -> {
+            inv.<AiTraderDecision>getArgument(0).setId(1234L);
+            return 1;
+        });
+        // 主人与路人各挂一个现场出口，唤醒前就连上
+        Frames owner = new Frames();
+        Frames viewer = new Frames();
+        hub.subscribeTrader(7L, true, owner);
+        hub.subscribeTrader(7L, false, viewer);
 
         runner.wake(trader(), 1785171600000L);
 
@@ -216,6 +254,37 @@ class TraderWakeupLoopTest {
         assertThat(d.getActionsJson()).contains("open_position").contains("BREAKOUT");
         assertThat(d.getEquity()).isEqualByComparingTo("10000");
         assertThat(d.getToolCalls()).isGreaterThanOrEqualTo(1);
+
+        // 过程轨迹落库：提示词、第 1 次调用想调的工具与回执、第 2 次调用的正文、收尾
+        JSONObject trace = JSON.parseObject(d.getTraceJson());
+        assertThat(trace.getIntValue("v")).isEqualTo(1);
+        assertThat(trace.getString("kind")).isEqualTo(AiTraderDecision.KIND_TRADE);
+        assertThat(trace.getJSONObject("prompt").getString("system")).isNotBlank();
+        assertThat(trace.getJSONObject("prompt").getString("instruction")).contains("【当前账户】");
+        JSONArray calls = trace.getJSONArray("calls");
+        assertThat(calls).hasSize(2);
+        assertThat(calls.getJSONObject(0).getJSONArray("toolCalls").getJSONObject(0).getString("name")).isEqualTo("open_position");
+        assertThat(calls.getJSONObject(0).getJSONArray("toolCalls").getJSONObject(0).getJSONObject("args").getString("playType")).isEqualTo("BREAKOUT");
+        assertThat(calls.getJSONObject(0).getJSONArray("results").getJSONObject(0).getString("status")).isEqualTo("ok");
+        assertThat(calls.getJSONObject(1).getString("text")).isEqualTo("突破前高放量，做多并挂好止损，本轮结束。");
+        assertThat(trace.getJSONObject("end").getString("status")).isEqualTo(AiTraderDecision.STATUS_OK);
+
+        // 现场帧序：主人全收；非主人少的只有 prompt
+        assertThat(owner.events).containsExactly("run_start", "prompt", "model_start", "model_end", "tool_result",
+                "model_start", "token", "model_end", "run_end");
+        assertThat(viewer.events).containsExactly("run_start", "model_start", "model_end", "tool_result",
+                "model_start", "token", "model_end", "run_end");
+        assertThat(owner.last("run_end").getLong("decisionId")).isEqualTo(1234L);
+        assertThat(owner.last("tool_result").getString("name")).isEqualTo("open_position");
+        assertThat(owner.last("token").getString("text")).contains("本轮结束");
+        // 每帧都带 traderId/runId/seq，seq 本轮内递增
+        String runId = owner.data.getFirst().getString("runId");
+        assertThat(runId).isNotBlank();
+        for (int i = 0; i < owner.data.size(); i++) {
+            assertThat(owner.data.get(i).getLong("traderId")).isEqualTo(7L);
+            assertThat(owner.data.get(i).getString("runId")).isEqualTo(runId);
+            assertThat(owner.data.get(i).getIntValue("seq")).isEqualTo(i + 1);
+        }
     }
 
     /** 唤醒"最近决策"回注同样过 stale：被忽略交易的分段不注入；行本身保留——行头时刻是唤醒事实 */
@@ -246,7 +315,7 @@ class TraderWakeupLoopTest {
         runner.wake(trader(), 1785171600000L);
 
         ArgumentCaptor<Prompt> prompt = ArgumentCaptor.forClass(Prompt.class);
-        verify(model, org.mockito.Mockito.atLeastOnce()).call(prompt.capture());
+        verify(model, org.mockito.Mockito.atLeastOnce()).stream(prompt.capture());
         String injected = prompt.getAllValues().get(0).getInstructions().stream()
                 .map(org.springframework.ai.chat.messages.Message::getText).reduce("", String::concat);
         assertThat(injected).contains("站上 1925").doesNotContain("回踩 63400");
@@ -264,12 +333,12 @@ class TraderWakeupLoopTest {
         ChatModel model = mock(ChatModel.class);
         when(model.getOptions()).thenReturn(ToolCallingChatOptions.builder().build());
         AtomicInteger n = new AtomicInteger();
-        when(model.call(any(Prompt.class))).thenAnswer(inv -> {
+        when(model.stream(any(Prompt.class))).thenAnswer(inv -> {
             int i = n.incrementAndGet();
             AssistantMessage call = AssistantMessage.builder().content(contentOf.apply(i))
                     .toolCalls(List.of(new AssistantMessage.ToolCall("c" + i, "function", "get_account", "{}")))
                     .build();
-            return new ChatResponse(List.of(new Generation(call)));
+            return frameOf(call);
         });
         return model;
     }
@@ -562,7 +631,7 @@ class TraderWakeupLoopTest {
         runner.wake(trader(), 1785171600000L);
 
         ArgumentCaptor<Prompt> prompts = ArgumentCaptor.forClass(Prompt.class);
-        verify(model, atLeastOnce()).call(prompts.capture());
+        verify(model, atLeastOnce()).stream(prompts.capture());
         List<org.springframework.ai.chat.messages.Message> first = prompts.getAllValues().get(0).getInstructions();
         String system = first.stream().filter(m -> m instanceof org.springframework.ai.chat.messages.SystemMessage)
                 .map(org.springframework.ai.chat.messages.Message::getText).reduce("", String::concat);
@@ -602,7 +671,7 @@ class TraderWakeupLoopTest {
         runner.wake(trader(), boundary);
 
         ArgumentCaptor<Prompt> prompt = ArgumentCaptor.forClass(Prompt.class);
-        verify(model, atLeastOnce()).call(prompt.capture());
+        verify(model, atLeastOnce()).stream(prompt.capture());
         String injected = prompt.getAllValues().get(0).getInstructions().stream()
                 .map(org.springframework.ai.chat.messages.Message::getText).reduce("", String::concat);
         assertThat(injected)
@@ -645,7 +714,7 @@ class TraderWakeupLoopTest {
         runner.wake(trader(), 1785171600000L);
 
         ArgumentCaptor<Prompt> prompt = ArgumentCaptor.forClass(Prompt.class);
-        verify(model, atLeastOnce()).call(prompt.capture());
+        verify(model, atLeastOnce()).stream(prompt.capture());
         String user = prompt.getAllValues().get(0).getInstructions().stream()
                 .filter(m -> m instanceof org.springframework.ai.chat.messages.UserMessage)
                 .map(org.springframework.ai.chat.messages.Message::getText).reduce("", String::concat);
@@ -673,7 +742,7 @@ class TraderWakeupLoopTest {
         runner.wake(trader(), 1785171600000L);
 
         ArgumentCaptor<Prompt> prompt = ArgumentCaptor.forClass(Prompt.class);
-        verify(model, atLeastOnce()).call(prompt.capture());
+        verify(model, atLeastOnce()).stream(prompt.capture());
         String user = prompt.getAllValues().get(0).getInstructions().stream()
                 .filter(m -> m instanceof org.springframework.ai.chat.messages.UserMessage)
                 .map(org.springframework.ai.chat.messages.Message::getText).reduce("", String::concat);
@@ -772,9 +841,9 @@ class TraderWakeupLoopTest {
                 .toolCalls(List.of(new AssistantMessage.ToolCall("c1", "function", "klines",
                         "{\"symbol\":\"BTCUSDT\",\"interval\":\"1h\",\"limit\":50}")))
                 .build();
-        when(model.call(any(Prompt.class))).thenReturn(
-                new ChatResponse(List.of(new Generation(klinesCall))),
-                new ChatResponse(List.of(new Generation(new AssistantMessage("看完K线，本轮 HOLD。")))));
+        when(model.stream(any(Prompt.class))).thenReturn(
+                frameOf(klinesCall),
+                frameOf(new AssistantMessage("看完K线，本轮 HOLD。")));
         when(modelFactory.modelFor(any())).thenReturn(model);
 
         runner.wake(trader(), 1785171600000L);
@@ -807,7 +876,7 @@ class TraderWakeupLoopTest {
         assertThat(dec.getValue().getStatus()).isEqualTo(AiTraderDecision.STATUS_OK);
 
         ArgumentCaptor<Prompt> prompts = ArgumentCaptor.forClass(Prompt.class);
-        verify(model, atLeastOnce()).call(prompts.capture());
+        verify(model, atLeastOnce()).stream(prompts.capture());
         String firstCall = prompts.getAllValues().get(0).getInstructions().stream()
                 .map(org.springframework.ai.chat.messages.Message::getText)
                 .reduce("", String::concat);

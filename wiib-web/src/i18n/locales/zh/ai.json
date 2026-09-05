@@ -167,6 +167,20 @@
     "learnFailed": "学习失败",
     "alert": "波动警报"
   },
+  "live": {
+    "title": "现场",
+    "running": "唤醒中",
+    "thinking": "思考中 #{{n}}",
+    "prompt": "提示词 · 仅主人可见",
+    "systemPrompt": "系统提示词",
+    "instruction": "开场白",
+    "result": "结果",
+    "budget": "{{used}}s / {{budget}}s",
+    "process": "过程",
+    "endedOk": "本轮结束",
+    "endedError": "本轮失败",
+    "callN": "第 {{n}} 次思考"
+  },
   "plan": {
     "title": "交易计划",
     "basis": "依据：{{s}}",

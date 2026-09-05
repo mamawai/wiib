@@ -74,6 +74,14 @@ public class AiTraderDecision {
      */
     private String memoryAfter;
 
+    /** 唤醒过程轨迹 JSON（形状见 WakeTrace.toJson）；列表查询不背它，单独接口取。老行为空 */
+    @TableField(select = false)
+    private String traceJson;
+
+    /** 时间线行有没有过程可看（trace_json 非空），decisions() 回填 */
+    @TableField(exist = false)
+    private Boolean hasTrace;
+
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdAt;
 }

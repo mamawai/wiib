@@ -904,8 +904,10 @@ CREATE TABLE IF NOT EXISTS ai_trader_decision (
     latency_ms      INT,
     error           TEXT,
     memory_after    TEXT,
+    trace_json      TEXT,
     created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+ALTER TABLE ai_trader_decision ADD COLUMN IF NOT EXISTS trace_json TEXT;
 
 CREATE INDEX IF NOT EXISTS idx_atd_trader_time ON ai_trader_decision(trader_id, wake_time DESC);
 COMMENT ON TABLE ai_trader_decision IS 'AI Trader每次唤醒一行：推理全文+动作(含play_type论点标签)+权益快照——竞技场决策时间线与净值曲线数据源';
@@ -915,6 +917,7 @@ COMMENT ON COLUMN ai_trader_decision.memory_after IS '仅REVIEW行：本期学�
 COMMENT ON COLUMN ai_trader_decision.equity IS '本轮动作落地后的账户权益USDT';
 COMMENT ON COLUMN ai_trader_decision.model_calls IS '本轮模型调用次数：ReAct是循环，一次唤醒会调很多次（上限见ModelCallLimiter）';
 COMMENT ON COLUMN ai_trader_decision.total_tokens IS '本轮全部模型调用的token合计；NULL=上游端点没返回usage（BYOK网关各不相同），不是0';
+COMMENT ON COLUMN ai_trader_decision.trace_json IS '唤醒过程轨迹JSON（提示词/每次模型调用的正文与工具调用/回执预览/收尾），形状见WakeTrace.toJson；仅TRADE/ALERT/MANUAL行，NULL=老行或begin之前就失败';
 
 CREATE TABLE IF NOT EXISTS ai_trader_plan (
     id              BIGSERIAL PRIMARY KEY,

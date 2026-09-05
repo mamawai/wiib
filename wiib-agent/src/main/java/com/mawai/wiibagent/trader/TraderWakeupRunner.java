@@ -21,6 +21,7 @@ import com.mawai.wiibagent.i18n.PromptCatalog;
 import com.mawai.wiibagent.i18n.UserLangResolver;
 import com.mawai.wiibagent.learning.ReviewMaterialAssembler;
 import com.mawai.wiibagent.llm.AgentGraphs;
+import com.mawai.wiibagent.llm.CancelSignal;
 import com.mawai.wiibagent.llm.LlmErrorMessages;
 import com.mawai.wiibagent.llm.ModelCallLimiter;
 import com.mawai.wiibagent.llm.ResilientChatService;
@@ -36,10 +37,13 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.bsc.langgraph4j.CompileConfig;
 import org.bsc.langgraph4j.CompiledGraph;
+import org.bsc.langgraph4j.NodeOutput;
 import org.bsc.langgraph4j.RunnableConfig;
 import org.bsc.langgraph4j.prebuilt.MessagesState;
+import org.bsc.langgraph4j.streaming.StreamingOutput;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
+import org.springframework.ai.chat.messages.ToolResponseMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.stereotype.Component;
@@ -61,6 +65,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -123,6 +128,8 @@ public class TraderWakeupRunner {
     private final EconCalendarAssembler econCalendar;
     /** 论点战绩统计块，进观察包；null=本局无可统计或取数失败，整块缺席 */
     private final PlayStatsAssembler playStats;
+    /** 唤醒现场：过程逐帧推给竞技场订阅者，轨迹落 trace_json */
+    private final TraderLiveHub hub;
 
     /** 墙钟注入点：预算计算要可测（测试里把"现在"钉在边界附近） */
     LongSupplier nowMs = System::currentTimeMillis;
@@ -187,6 +194,8 @@ public class TraderWakeupRunner {
     private void doWake(AiTrader trader, long boundaryTime, long budgetSeconds,
                         AiTraderDecision decision, AlertTrigger trigger, AgentLang lang) {
         long start = System.currentTimeMillis();
+        // begin 之前出的异常没有这一轮现场
+        TraderLiveHub.Run run = null;
         try {
             List<FuturesPositionDTO> positions = simTradeClient.getAllPositions(trader.getSimUserId());
             BigDecimal equity = computeEquity(trader.getSimUserId(), positions);
@@ -197,7 +206,12 @@ public class TraderWakeupRunner {
                 return;
             }
 
-            String reasoning = runAgentSession(trader, boundaryTime, budgetSeconds, positions, equity, decision, trigger, lang);
+            // 挂单一次拉取三用：现场开场帧的挂单数 + 计划补绑的判活依据 + 账户状态注入
+            List<FuturesOrderResponse> pendingOrders = simTradeClient.getPendingOrders(trader.getSimUserId(), null);
+            run = hub.begin(trader, decision.getKind(), decision.getWakeTime(), budgetSeconds, equity,
+                    positions.size(), pendingOrders.size());
+            String reasoning = runAgentSession(trader, boundaryTime, budgetSeconds, positions, pendingOrders,
+                    equity, decision, trigger, lang, run);
             decision.setStatus(AiTraderDecision.STATUS_OK);
             decision.setReasoning(reasoning);
             // 动作都落地了再记权益：本轮开平仓立刻体现在净值曲线，否则要等下一根K线才现形。
@@ -211,7 +225,11 @@ public class TraderWakeupRunner {
                         trader.getId(), equity, e.getMessage());
             }
             decision.setLatencyMs((int) (System.currentTimeMillis() - start));
+            decision.setTraceJson(run.finish(AiTraderDecision.STATUS_OK, null, decision.getEquity(),
+                    decision.getLatencyMs(), decision.getModelCalls(), decision.getTotalTokens()));
             decisionMapper.insert(decision);
+            // 决策行落库了才发 run_end：前端收到就刷时间线，得查得到这一行
+            run.end(decision.getId());
             clearFailures(trader);
         } catch (Exception e) {
             // 落库即公开展示（时间线的 error 行、连败暂停的 pausedReason），一律跟 lang：
@@ -240,7 +258,14 @@ public class TraderWakeupRunner {
             // 这句要原样铺进竞技场的错误行，几十 KB 会把时间线撑烂
             decision.setError(msg.length() > 500 ? msg.substring(0, 500) : msg);
             decision.setLatencyMs((int) (System.currentTimeMillis() - start));
+            if (run != null) {
+                decision.setTraceJson(run.finish(AiTraderDecision.STATUS_ERROR, decision.getError(), decision.getEquity(),
+                        decision.getLatencyMs(), decision.getModelCalls(), decision.getTotalTokens()));
+            }
             decisionMapper.insert(decision);
+            if (run != null) {
+                run.end(decision.getId());
+            }
             recordFailure(trader, msg, lang, keyInvalid);
         }
     }
@@ -254,13 +279,13 @@ public class TraderWakeupRunner {
     }
 
     /**
-     * ReactAgent 会话：备料（工具/最近决策/计划/提示词）→ 建图 → 开场白 → 限时执行。
+     * ReactAgent 会话：备料（工具/最近决策/计划/提示词）→ 建图 → 开场白 → 限时执行，过程逐帧推给现场 {@code run}。
      * 返回模型最终文本；动作轨迹随 decision 一并写入。trigger 非空=警报唤醒（只换开场白）。
      */
     private String runAgentSession(AiTrader trader, long boundaryTime, long budgetSeconds,
-                                   List<FuturesPositionDTO> positions, BigDecimal equity,
-                                   AiTraderDecision decision, AlertTrigger trigger,
-                                   AgentLang lang) throws Exception {
+                                   List<FuturesPositionDTO> positions, List<FuturesOrderResponse> pendingOrders,
+                                   BigDecimal equity, AiTraderDecision decision, AlertTrigger trigger,
+                                   AgentLang lang, TraderLiveHub.Run run) throws Exception {
         // 包一层用量统计：ReAct 一轮要调模型很多次，包在最外层才收得全。
         // 工厂里的实例是跨唤醒缓存的，装饰器必须每轮新建，否则用量会跨轮累加
         UsageTrackingChatModel model = new UsageTrackingChatModel(modelFactory.modelFor(trader));
@@ -270,8 +295,6 @@ public class TraderWakeupRunner {
         // 本局全部计划一次查两用：stale 教材过滤 + 轨迹行的工具名过滤
         List<AiTraderPlan> allPlans = planStore.listAll(trader.getId(), trader.getRoundNo());
         List<AiTraderDecision> recent = recentDecisionsStaleFiltered(trader, boundaryTime, allPlans);
-        // 挂单一次拉取两用：计划补绑的判活依据 + 账户状态注入
-        List<FuturesOrderResponse> pendingOrders = simTradeClient.getPendingOrders(trader.getSimUserId(), null);
         TraderPlanStore.Cleanup cleanup = cleanupAndRebindPlans(trader, positions, pendingOrders, boundaryTime);
         // system 只放身份/规则/格式；事件、账户、上一轮结论、轨迹、战绩全走开场白的观察包
         String prompt = promptAssembler.assemble(trader, lang);
@@ -282,29 +305,65 @@ public class TraderWakeupRunner {
         // 全量工具轨迹（含数据工具）：收集器在本方法手里，超时 cancel 也保得住已发生的记录
         ToolCallTraceHook trace = new ToolCallTraceHook();
         CompiledGraph<MessagesState<Message>> graph = AgentGraphs.reactAgent(model, prompt)
+                .streaming(true) // 模型文本逐字推给现场
                 .tools(wakeTools(lang, tradeTools))
+                .addCallModelHook(CancelSignal.hook()) // 超时/异常收尾时掐断在途模型流
                 .addExecuteToolsHook(new ModelCallLimiter(MAX_MODEL_CALLS, prompts.get(lang, "llm.callLimit.notExecuted"),
                         prompts.get(lang, "llm.callLimit.lastCall")))
                 .addExecuteToolsHook(trace)
                 // 首轮强制调工具：不看数据不许决策；弱模型不支持 tool_choice 会以 ERROR 落库并最终自动暂停
                 .build(ResilientChatService.builder().model(model).forceFirstToolChoice("required").asFactory())
-                // 框架默认 25 不够，改为 2L+8
-                .compile(CompileConfig.builder().recursionLimit(2 * MAX_MODEL_CALLS + 8).build());
+                // 框架默认 25 不够；流式模型节点吃 2 格，账按 3L+8（见 ChatAgentFactory.summarizerLeaf）
+                .compile(CompileConfig.builder().recursionLimit(3 * MAX_MODEL_CALLS + 8).build());
 
         String calendar = econCalendar.assemble(nowMs.getAsLong(), lang);
         String instruction = trigger != null
                 ? alertInstruction(trader, trigger, recent, observation, calendar, lang, ownerNote)
                 : routineInstruction(trader, boundaryTime, observation, marketSnapshot(whitelist, lang), calendar, lang, ownerNote);
+        run.prompt(prompt, instruction);
+        // 中断信号随 config 进图，finally 里 complete：在途模型流不再往下烧
+        CompletableFuture<Void> cancel = new CompletableFuture<>();
         RunnableConfig config = RunnableConfig.builder()
-                .threadId("trader-" + trader.getId() + "-" + boundaryTime).build();
+                .threadId("trader-" + trader.getId() + "-" + boundaryTime)
+                .addMetadata(CancelSignal.CONFIG_KEY, cancel).build();
 
         record SessionOutcome(String reasoning, int modelCalls) {
         }
         // 虚拟线程 + FutureTask 承载超时；超时后本轮作废（已发出的订单不回滚——sim 是事实源）
         FutureTask<SessionOutcome> task = new FutureTask<>(() -> {
-            MessagesState<Message> state = graph
-                    .invoke(Map.of("messages", List.of(new UserMessage(instruction))), config)
-                    .orElseThrow(() -> new IllegalStateException("图执行无返回状态"));
+            run.callStart();
+            // 已处理消息数水位：节点输出的 state 是到此为止的全部消息，只看比上次多出来的那截
+            int seen = 0;
+            NodeOutput<MessagesState<Message>> last = null;
+            // 普通迭代不用 forEachAsync：后者每个 chunk 叠一层栈帧，长回答会 StackOverflowError
+            for (NodeOutput<MessagesState<Message>> output : graph.stream(
+                    Map.of("messages", List.of(new UserMessage(instruction))), config)) {
+                if (output instanceof StreamingOutput<?> streaming) {
+                    String chunk = streaming.chunk();
+                    if (chunk != null && !chunk.isEmpty()) {
+                        run.token(chunk);
+                    }
+                    continue;
+                }
+                last = output;
+                List<Message> messages = output.state().messages();
+                // 不按节点名分支：保险丝跳 END 补的占位回执也走这条路
+                for (; seen < messages.size(); seen++) {
+                    Message m = messages.get(seen);
+                    if (m instanceof AssistantMessage assistant) {
+                        run.callEnd(assistant.getText(), assistant.getToolCalls());
+                    } else if (m instanceof ToolResponseMessage responses) {
+                        for (ToolResponseMessage.ToolResponse r : responses.getResponses()) {
+                            run.toolResult(r.id(), r.name(), r.responseData());
+                        }
+                        run.callStart();
+                    }
+                }
+            }
+            if (last == null) {
+                throw new IllegalStateException("图执行无返回状态");
+            }
+            MessagesState<Message> state = last.state();
             return new SessionOutcome(finalReasoning(prompts, lang, state.messages()),
                     state.<Number>value(ModelCallLimiter.CALL_COUNT_KEY).map(Number::intValue).orElse(0));
         });
@@ -313,6 +372,7 @@ public class TraderWakeupRunner {
         try {
             outcome = task.get(budgetSeconds, TimeUnit.SECONDS);
         } finally {
+            cancel.complete(null);
             task.cancel(true);
             // 无论成败，动作轨迹都要留：超时/异常时已执行的开平仓是真实发生的
             List<JSONObject> actions = mergeActions(trace.calls(), tradeTools.actions());

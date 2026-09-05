@@ -171,6 +171,20 @@
     "learnFailed": "Learning failed",
     "alert": "Volatility alert"
   },
+  "live": {
+    "title": "Live",
+    "running": "Waking up",
+    "thinking": "Thinking #{{n}}",
+    "prompt": "Prompt · owner only",
+    "systemPrompt": "System prompt",
+    "instruction": "Opening brief",
+    "result": "Result",
+    "budget": "{{used}}s / {{budget}}s",
+    "process": "Process",
+    "endedOk": "Run finished",
+    "endedError": "Run failed",
+    "callN": "Thought #{{n}}"
+  },
   "plan": {
     "title": "Trade plan",
     "basis": "Basis: {{s}}",

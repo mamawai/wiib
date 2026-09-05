@@ -3,10 +3,25 @@ import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Bot, Plus, RefreshCcw, Swords } from 'lucide-react';
 import { traderApi } from '../api';
+import { toolName } from '../components/arena/traderTools';
+import { useArenaLive } from '../hooks/useTraderLive';
 import { cn } from '../lib/utils';
-import type { TraderPublicView } from '../types';
+import type { TraderLiveStatus, TraderPublicView } from '../types';
 
 const REFRESH_MS = 60_000;
+
+/** 实时芯片：脉冲点 + 在调的工具（带币种）；没在调工具就是第几次思考，还没开始思考就是唤醒中 */
+function LiveChip({ st }: { st: TraderLiveStatus }) {
+  const { t } = useTranslation('ai');
+  const text = st.tool
+    ? `${toolName(st.tool)}${st.symbol ? ` ${st.symbol.replace('USDT', '')}` : ''}`
+    : st.call > 0 ? t('live.thinking', { n: st.call }) : t('live.running');
+  return (
+    <span className="inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded bg-primary/10 text-primary whitespace-nowrap shrink-0">
+      <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />{text}
+    </span>
+  );
+}
 
 /**
  * trader 运行状态徽章（竞技场排行与详情页共用一份，别再各抄各的）。
@@ -26,6 +41,8 @@ export function Arena() {
   const { t } = useTranslation(['ai', 'common']);
   const [traders, setTraders] = useState<TraderPublicView[]>([]);
   const [loading, setLoading] = useState(true);
+  // 谁在唤醒中：行内芯片；有人跑完（endedAt 变）排行立刻重拉
+  const { statuses, endedAt } = useArenaLive();
 
   const load = useCallback(() => {
     traderApi.arena()
@@ -38,7 +55,7 @@ export function Arena() {
     load();
     const timer = setInterval(load, REFRESH_MS);
     return () => clearInterval(timer);
-  }, [load]);
+  }, [load, endedAt]);
 
   return (
     <div className="page-shell p-4 md:p-6 space-y-4">
@@ -81,6 +98,7 @@ export function Arena() {
           <div className="md:hidden divide-y divide-border/60">
             {traders.map((tr, i) => {
               const st = STATUS_META[tr.status] ?? STATUS_META.PAUSED;
+              const live = statuses.get(tr.id);
               return (
                 <Link key={tr.id} to={`/arena/${tr.id}`} className="block px-3.5 py-3 hover:bg-surface-hover active:bg-surface-hover">
                   <div className="flex items-center gap-2">
@@ -97,6 +115,7 @@ export function Arena() {
                     <span className="num shrink-0">{t('term.equity')} {tr.equity.toLocaleString()}</span>
                     <span className="num shrink-0">R{tr.roundNo}</span>
                     <span className={cn('text-[10px] font-bold px-1.5 py-0.5 rounded shrink-0', st.tone)}>{t(st.labelKey)}</span>
+                    {live && <LiveChip st={live} />}
                   </div>
                 </Link>
               );
@@ -120,6 +139,7 @@ export function Arena() {
               <tbody>
                 {traders.map((tr, i) => {
                   const st = STATUS_META[tr.status] ?? STATUS_META.PAUSED;
+                  const live = statuses.get(tr.id);
                   return (
                     <tr key={tr.id} className="border-b border-border/60 last:border-0 hover:bg-surface-hover">
                       <td className="px-4 py-2.5 num font-black text-muted-foreground">{i + 1}</td>
@@ -137,7 +157,10 @@ export function Arena() {
                       </td>
                       <td className="px-2 py-2.5 text-center num text-muted-foreground">R{tr.roundNo}</td>
                       <td className="px-4 py-2.5 text-right">
-                        <span className={cn('text-[10px] font-bold px-1.5 py-0.5 rounded', st.tone)}>{t(st.labelKey)}</span>
+                        <span className="inline-flex items-center gap-1.5">
+                          {live && <LiveChip st={live} />}
+                          <span className={cn('text-[10px] font-bold px-1.5 py-0.5 rounded', st.tone)}>{t(st.labelKey)}</span>
+                        </span>
                       </td>
                     </tr>
                   );

@@ -11,6 +11,7 @@ import { STATUS_META } from './Arena';
 import { EquityChart } from '../components/EquityChart';
 import { Markdown } from '../components/Markdown';
 import { DecisionCard } from '../components/arena/DecisionCard';
+import { LiveRunCard } from '../components/arena/LiveRunCard';
 import { PlanBlock } from '../components/arena/PlanBlock';
 import { PositionsTable } from '../components/arena/PositionsTable';
 import { ScoreStrip } from '../components/arena/ScoreStrip';
@@ -135,6 +136,8 @@ export function ArenaDetail() {
   // 从已了结交易跳过来要找的那一条决策：描边 + 滚到它
   const [focusId, setFocusId] = useState<number | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  // 现场卡报上来的"刚跑完一轮"时刻：新决策行、净值点、持仓都在那一刻落库，据此立刻重拉
+  const [endedAt, setEndedAt] = useState(0);
 
   const load = useCallback(() => {
     if (!Number.isFinite(traderId)) return;
@@ -166,16 +169,17 @@ export function ArenaDetail() {
       .then(setTokens).catch(() => setTokens(null));
   }, [traderId, round, day]);
 
+  // 定时刷新之外，一轮唤醒刚结束（endedAt 变）也立刻重拉：新决策行、净值点、持仓都在那一刻落库
   useEffect(() => {
     load();
     const timer = setInterval(load, REFRESH_MS);
     return () => clearInterval(timer);
-  }, [load]);
+  }, [load, endedAt]);
   useEffect(() => {
     loadDecisions();
     const timer = setInterval(loadDecisions, REFRESH_MS);
     return () => clearInterval(timer);
-  }, [loadDecisions]);
+  }, [loadDecisions, endedAt]);
 
   const loadMore = useCallback(() => {
     const oldest = decisions[decisions.length - 1];
@@ -325,9 +329,9 @@ export function ArenaDetail() {
         </div>
       )}
 
-      {/* 贯通两栏：左主栏 曲线 + 时间线，右侧栏 持仓 + 计划 + 两份笔记。
-          窄屏两个栏 div 退成 contents，五张卡直接落进外层单列 grid，再靠 order 排成
-          曲线 → 持仓 → 计划 → 笔记 → 时间线：时间线能一直往下加载，压在最后才不会把别的挤没 */}
+      {/* 贯通两栏：左主栏 曲线 + 现场（唤醒中才有）+ 时间线，右侧栏 持仓 + 计划 + 两份笔记。
+          窄屏两个栏 div 退成 contents，六张卡直接落进外层单列 grid，再靠 order 排成
+          曲线 → 现场 → 持仓 → 计划 → 笔记 → 时间线：时间线能一直往下加载，压在最后才不会把别的挤没 */}
       <div className="grid lg:grid-cols-5 gap-4 items-start">
         <div className="contents lg:flex lg:col-span-3 lg:flex-col lg:gap-4">
           <div className="order-1 lg:order-none rounded-lg pt-card p-4 flex flex-col gap-2">
@@ -348,8 +352,12 @@ export function ArenaDetail() {
               : <div className="flex-1 min-h-[260px] flex items-center justify-center text-xs text-muted-foreground">{t('detail.notEnoughPoints')}</div>}
           </div>
 
+          {/* 现场卡常挂着（里面的流要一直连着），唤醒中才渲染出来 */}
+          <LiveRunCard traderId={traderId} onEnded={setEndedAt} className="order-2 lg:order-none" />
+
+
           {/* 时间线封顶 75vh，列表卡内滚 */}
-          <div ref={listRef} className="order-6 lg:order-none rounded-lg pt-card p-4 flex flex-col gap-2.5 lg:max-h-[75vh] scroll-mt-16">
+          <div ref={listRef} className="order-7 lg:order-none rounded-lg pt-card p-4 flex flex-col gap-2.5 lg:max-h-[75vh] scroll-mt-16">
             <div className="flex items-center gap-1 flex-wrap border-b border-border -mx-4 px-3 -mt-1 shrink-0">
               <TabButton active={tab === 'timeline'} onClick={() => setTab('timeline')}>
                 {t('detail.timeline')}{viewingHistory && ` · R${viewingRound}`}
@@ -412,7 +420,7 @@ export function ArenaDetail() {
 
         <div className="contents lg:flex lg:col-span-2 lg:flex-col lg:gap-4">
           {/* 持仓封顶 26rem，表格卡内滚 */}
-          <div className="order-2 lg:order-none rounded-lg pt-card p-4 flex flex-col gap-2 lg:max-h-[26rem]">
+          <div className="order-3 lg:order-none rounded-lg pt-card p-4 flex flex-col gap-2 lg:max-h-[26rem]">
             <span className="microlabel shrink-0">{t('detail.positionsTitle')}</span>
             {detail && (detail.positions.length === 0 && detail.pendingOrders.length === 0 ? (
               <div className="flex-1 flex items-center justify-center py-6 text-xs text-muted-foreground">{t('detail.flat')}</div>
@@ -424,7 +432,7 @@ export function ArenaDetail() {
           </div>
 
           {/* 计划是本局存活的，归档的配在已了结卡里；两份笔记跨局累积不随局次切换 */}
-          <div className="order-3 lg:order-none rounded-lg pt-card p-4 flex flex-col gap-2 lg:max-h-[45vh]">
+          <div className="order-4 lg:order-none rounded-lg pt-card p-4 flex flex-col gap-2 lg:max-h-[45vh]">
             <span className="microlabel inline-flex items-center gap-1 shrink-0"><ClipboardList className="w-3 h-3 text-primary" />{t('detail.plansTitle')}</span>
             {detail && (detail.plans.length === 0 ? (
               <div className="flex-1 flex items-center justify-center py-6 text-xs text-muted-foreground">{t('detail.noPlans')}</div>
@@ -448,9 +456,9 @@ export function ArenaDetail() {
               </div>
             ))}
           </div>
-          <NotesCard className="order-4 lg:order-none" icon={NotebookPen} tone="text-violet-500" title={t('detail.memoryTitle')}
+          <NotesCard className="order-5 lg:order-none" icon={NotebookPen} tone="text-violet-500" title={t('detail.memoryTitle')}
                      time={detail?.lastReviewAt} content={detail?.memory} empty={t('detail.noMemory')} />
-          <NotesCard className="order-5 lg:order-none" icon={GraduationCap} tone="text-sky-500" title={t('detail.learnNotesTitle')}
+          <NotesCard className="order-6 lg:order-none" icon={GraduationCap} tone="text-sky-500" title={t('detail.learnNotesTitle')}
                      time={detail?.lastLearnAt} content={detail?.learningNotes} empty={t('detail.noLearnNotes')} />
         </div>
       </div>

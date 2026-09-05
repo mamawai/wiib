@@ -28,3 +28,42 @@ export function toolName(tool: string): string {
 
 /** 会动账本的那几个：时间线上独立成行展示参数与拒因，其余数据查询弱化成一句"看了什么" */
 export const TRADE_TOOL_SET: ReadonlySet<string> = new Set(TRADE_TOOLS);
+
+/** actions_json 里的一条工具动作 */
+export interface ActionRow {
+  tool: string;
+  status?: string;
+  rejected?: string;
+  error?: string;
+  args?: Record<string, unknown>;
+}
+
+/** 交易动作的关键参数一行话（按工具挑重点，不倒整个 JSON）。词表在函数体里现查，切语言即变 */
+export function tradeArgsSummary(a: ActionRow): string {
+  const g = (k: string) => a.args?.[k] != null ? String(a.args[k]) : '';
+  const tr = (key: string, vars?: Record<string, string>) => i18n.t(`ai:${key}`, vars ?? {});
+  switch (a.tool) {
+    case 'open_position': {
+      const parts = [g('symbol'), g('side') === 'LONG' ? tr('args.long') : g('side') === 'SHORT' ? tr('args.short') : g('side'),
+        g('quantity') && tr('args.qty', { n: g('quantity') }), g('leverage') && `${g('leverage')}x`,
+        g('stopLossPrice') && tr('args.sl', { p: g('stopLossPrice') }),
+        g('takeProfitPrice') && tr('args.tp', { p: g('takeProfitPrice') }),
+        g('playType')];
+      return parts.filter(Boolean).join(' · ');
+    }
+    case 'close_position':
+      return [tr('args.position', { id: g('positionId') }), g('quantity') && tr('args.qty', { n: g('quantity') }), g('reason')]
+        .filter(Boolean).join(' · ');
+    case 'set_stop_loss':
+      return [`→${g('stopLossPrice')}`, g('reason')].filter(Boolean).join(' · ');
+    case 'set_take_profit':
+      return [`→${g('takeProfitPrice')}`, g('reason')].filter(Boolean).join(' · ');
+    case 'write_plan':
+      return [g('playType'), g('invalidationCondition') && tr('args.invalidation', { c: g('invalidationCondition') })]
+        .filter(Boolean).join(' · ');
+    case 'cancel_order':
+      return tr('args.order', { id: g('orderId') });
+    default:
+      return '';
+  }
+}

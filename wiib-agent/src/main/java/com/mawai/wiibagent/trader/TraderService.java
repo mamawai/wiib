@@ -28,6 +28,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * trader 生命周期：创建（选端点→连通性校验→开sim子账户注资）→ 启停 → 重置开新局。
@@ -318,7 +319,25 @@ public class TraderService {
         if (to != null) {
             q.lt(AiTraderDecision::getWakeTime, to);
         }
-        return decisionMapper.selectList(q);
+        List<AiTraderDecision> page = decisionMapper.selectList(q);
+        if (!page.isEmpty()) {
+            // 有没有过程可看：trace_json 不背进列表，页内 id 再查一次哪些非空
+            Set<Long> withTrace = decisionMapper.selectList(new LambdaQueryWrapper<AiTraderDecision>()
+                            .select(AiTraderDecision::getId)
+                            .in(AiTraderDecision::getId, page.stream().map(AiTraderDecision::getId).toList())
+                            .isNotNull(AiTraderDecision::getTraceJson))
+                    .stream().map(AiTraderDecision::getId).collect(Collectors.toSet());
+            page.forEach(d -> d.setHasTrace(withTrace.contains(d.getId())));
+        }
+        return page;
+    }
+
+    /** 一条决策的过程轨迹（只带 id/traderId/traceJson）；没有轨迹或行不存在=null */
+    public AiTraderDecision trace(long decisionId) {
+        return decisionMapper.selectOne(new LambdaQueryWrapper<AiTraderDecision>()
+                .select(AiTraderDecision::getId, AiTraderDecision::getTraderId, AiTraderDecision::getTraceJson)
+                .eq(AiTraderDecision::getId, decisionId)
+                .isNotNull(AiTraderDecision::getTraceJson));
     }
 
     /**
