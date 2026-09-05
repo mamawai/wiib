@@ -21,6 +21,8 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.BiFunction;
+import java.util.function.Function;
 
 /**
  * trader 调度器：5m K线收盘事件当唯一时钟，对齐到各 trader 的 interval 边界触发唤醒。
@@ -33,8 +35,8 @@ import java.util.concurrent.atomic.AtomicLong;
  * <p>
  * 日线边界走三阶段交接（见 {@link #startDailyHandover}）：先交易、再全体复盘、最后全体学习，
  * 复盘与学习之间是全局屏障——learning 读的是同侪<b>刚写好</b>的复盘，没有屏障，同一轮学习里
- * 各人看到的世界就不一样。交接期间停工窗口拒绝一切唤醒（例行/警报/手动/点播复盘），
- * 复盘与学习读的必须是"已定格的一天"，边写边读的脏读会进记忆污染后续每一轮。
+ * 各人看到的世界就不一样。停工窗口在阶段0的唤醒发出后就开、交接结束才关，期间拒绝一切新唤醒
+ * （例行/警报/手动/点播复盘），复盘与学习读的必须是"已定格的一天"，边写边读的脏读会进记忆污染后续每一轮。
  */
 @Slf4j
 @Component
@@ -112,7 +114,7 @@ public class TraderScheduler {
 
     /**
      * 日线交接编排（本功能唯一的全局同步点）：
-     * 阶段0 全体例行唤醒照常跑完 → 【停工窗口开】→ 阶段1 全体复盘并行 →
+     * 阶段0 全体例行唤醒发出 → 【停工窗口开】→ 等交易跑完 → 阶段1 全体复盘并行 →
      * 屏障（等全部复盘落库）→ 阶段2 全体学习并行 → 【停工窗口关】。
      * 屏障保证每个 learner 读到的是同侪同一天的复盘；窗口保证复盘/学习读的是定格数据。
      * 各阶段单人超时都有硬顶（唤醒600s/复盘600s/学习300s），join 不会永久卡住。
@@ -124,15 +126,17 @@ public class TraderScheduler {
             return;
         }
         Thread.startVirtualThread(() -> {
-            // 阶段0：日线边界同时是四档的边界，全体例行唤醒照常；收集线程等交易全部跑完
+            // 阶段0：日线边界同时是四档的边界，全体例行唤醒照常发出
             List<Thread> wakes = new ArrayList<>();
             for (String ic : WAKE_INTERVALS) {
                 wakes.addAll(fireInterval(ic, boundary));
             }
-            joinAll(wakes);
+            // 发完就关门：在途的照跑，新来的K线/警报/手动全拒——不然 5m 档在阶段0期间又醒一次占住 inFlight，复盘就被跳过
             handoverActive = true;
             log.info("[TraderSched] 日线交接开始 boundary={}，停工窗口开", boundary);
             try {
+                // 等交易全部跑完，复盘读的才是定格的一天
+                joinAll(wakes);
                 // 阶段1：全体复盘并行。fresh 查库——阶段0可能刚改过状态（爆仓/暂停）。
                 // 无素材跳过/失败语义都在 ReviewRunner 内部，这里只管准入与时序
                 joinAll(phase(running().stream()
@@ -231,11 +235,10 @@ public class TraderScheduler {
         return started;
     }
 
-    /** 返回启动的唤醒线程（日线交接的阶段0要 join 等交易跑完）；去重输/互斥拒时返回 null。 */
+    /** 这里可能会并发firTrader，所以要做去重 */
     private Thread fireTrader(AiTrader trader, long boundary) {
-        // 原子抢占本边界：多 symbol 事件并发到达时只有一个赢家，输家静默返回（不是SKIPPED）
         boolean[] won = new boolean[1];
-        firedBoundary.compute(trader.getId(), (id, prev) -> {
+        firedBoundary.compute(trader.getId(), (_, prev) -> {
             if (prev == null || prev < boundary) {
                 won[0] = true;
                 return boundary;
@@ -246,8 +249,7 @@ public class TraderScheduler {
             return null;
         }
         if (!inFlight.add(trader.getId())) {
-            // 上一边界的唤醒还在跑：本边界作废并留痕，等下一根K线的新鲜信号
-            runner.recordSkipped(trader, boundary);
+            runner.recordSkipped(trader, boundary); // 上次唤醒还在跑，本次边界作废并留痕，等下一根K线的新鲜信号
             log.info("[TraderSched] 上轮未完跳过 traderId={} boundary={}", trader.getId(), boundary);
             return null;
         }

@@ -13,6 +13,8 @@ import type { LlmEndpointView, TraderOwnerView, TraderSpec, TraderUpsertRequest 
 const TOUR_SEEN_KEY = 'wiib-trader-tour-seen';
 
 const SYMBOL_OPTIONS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'DOGEUSDT', 'XRPUSDT'];
+/** 币种上限：一次唤醒的工具预算与注意力按币摊——与后端 TraderService.MAX_SYMBOLS 同一个数 */
+const MAX_SYMBOLS = 3;
 const INTERVAL_OPTIONS = ['5m', '15m', '1h', '4h'];
 /** 波动哨兵每币基准阈值%（平台下限，只能经系数调高）——与后端 VolatilitySentinel 同一份数字 */
 const ALERT_BASE: Record<string, number> = { BTCUSDT: 0.6, ETHUSDT: 0.8, XRPUSDT: 0.8, SOLUSDT: 0.9, DOGEUSDT: 1.0 };
@@ -134,6 +136,7 @@ export function MyTrader() {
 
   const toggleSymbol = (s: string) => {
     const cur = new Set(form.symbols.split(',').filter(Boolean));
+    if (!cur.has(s) && cur.size >= MAX_SYMBOLS) return;
     if (cur.has(s)) {
       cur.delete(s);
     } else {
@@ -304,11 +307,15 @@ export function MyTrader() {
         </div>
 
         <div className="space-y-1 text-xs" data-tour="symbols">
-          <span className="text-muted-foreground font-bold">{t('cfg.symbols')}</span>
+          <div className="flex flex-wrap items-baseline justify-between gap-x-2">
+            <span className="text-muted-foreground font-bold">{t('cfg.symbols')}</span>
+            <span className="text-[10px] text-muted-foreground">{t('cfg.symbolsHint', { max: MAX_SYMBOLS })}</span>
+          </div>
           <div className="flex gap-1.5 flex-wrap">
             {SYMBOL_OPTIONS.map(s => (
               <button key={s} type="button" onClick={() => toggleSymbol(s)}
-                      className={cn('px-3 h-9 rounded-lg border text-xs font-bold',
+                      disabled={!selected.has(s) && selected.size >= MAX_SYMBOLS}
+                      className={cn('px-3 h-9 rounded-lg border text-xs font-bold disabled:opacity-40 disabled:cursor-not-allowed',
                         selected.has(s) ? 'border-primary/60 bg-card-2 text-primary' : 'border-border text-muted-foreground hover:text-foreground')}>
                 {s.replace('USDT', '')}
               </button>

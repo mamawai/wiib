@@ -44,6 +44,8 @@ public class TraderService {
     public static final BigDecimal INITIAL_BALANCE = new BigDecimal("10000");
     /** 轮次保留窗口：每 trader 只留最近 10 局（R10），开新局时更早的整局数据连同 sim 子账户一并清除 */
     public static final int MAX_ROUNDS_KEPT = 10;
+    /** 币种上限：单轮 12 次模型调用按币摊，一个币扎实求证约 3 次，3 币正好（前端 MyTrader.MAX_SYMBOLS 同一个数） */
+    public static final int MAX_SYMBOLS = 3;
     /** 唤醒档位四档（1d 已下线：一天一醒的观赏性与反馈密度都撑不起一个档位） */
     private static final Set<String> INTERVALS = Set.of("5m", "15m", "1h", "4h");
 
@@ -246,10 +248,6 @@ public class TraderService {
                 .set(AiTrader::getStatus, AiTrader.STATUS_PAUSED)
                 .set(AiTrader::getPausedReason, null)
                 .set(AiTrader::getConsecutiveFailures, 0)
-                // 未读留言随重置作废：那是对上一局那个 trader 说的话（"这周别碰 SOL"），
-                // 新账户新计划新战绩，唯独叮嘱跟过来最没道理；留言最多能挂 24 轮，
-                // 不清就会污染新局开头的一整天——而新局恰恰最需要干净的上下文。
-                // memory/learning_notes 默认不清（跨局的认知积累，不是本局的未决事项），主人可选不带入
                 .set(AiTrader::getOwnerNote, null)
                 .set(AiTrader::getOwnerNoteRounds, 0)
                 .set(AiTrader::getUpdatedAt, LocalDateTime.now());
@@ -414,6 +412,10 @@ public class TraderService {
         Set<String> symbols = parseSymbols(req.symbols());
         if (symbols.isEmpty()) {
             return messages.get("trader.config.symbolRequired");
+        }
+        // 存量 4~5 币的 trader 不动，下次改配置才被要求裁到 3
+        if (symbols.size() > MAX_SYMBOLS) {
+            return messages.get("trader.config.tooManySymbols", Map.of("max", MAX_SYMBOLS));
         }
         if (whitelist == null || !new HashSet<>(whitelist).containsAll(symbols)) {
             return messages.get("trader.config.symbolNotAllowed", Map.of("whitelist", whitelist));

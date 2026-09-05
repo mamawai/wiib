@@ -63,6 +63,16 @@ public interface NewsEventMapper {
             """)
     List<Translation> selectTranslations(@Param("sourceIds") List<Long> sourceIds);
 
+    /** 最新 N 条（首页快讯卡数据源）：中英两套都投出来，前端按界面语言现选 */
+    @Select("""
+            SELECT id, title, content, title_en AS titleEn, content_en AS contentEn,
+                   url, published_at AS publishedAt, tags
+              FROM news_event
+             ORDER BY published_at DESC
+             LIMIT #{limit}
+            """)
+    List<NewsEventItem> selectLatest(@Param("limit") int limit);
+
     /**
      * 按标签查时间窗内的快讯（K 线图标数据源）。
      * 标签匹配用逗号包夹：tags 是逗号串，裸 LIKE 会让词表未来加了有包含关系的词

@@ -38,6 +38,8 @@ class ModelCallLimiterTest {
 
     /** 占位回执文案生产上按语言取词表传入（llm.callLimit.notExecuted）；这里只验"传进去的原样落到回执上" */
     private static final String NOT_EXECUTED = "未执行：本轮模型调用已达上限，工具被跳过。";
+    /** 预算收尾提示（llm.callLimit.lastCall）同理 */
+    private static final String LAST_CALL = "（系统提示：预算已用完）";
 
     /** 一条带 toolCalls 的助手消息 + 已有调用计数 = 保险丝触发那一刻的 state */
     private static MessagesState<Message> stateAtToolEdge(int alreadyCalled, String... toolCallIds) {
@@ -60,7 +62,7 @@ class ModelCallLimiterTest {
     void 达上限跳END时给未执行的工具调用补齐占位回执() {
         AtomicBoolean toolsRan = new AtomicBoolean();
 
-        Command command = new ModelCallLimiter(3, NOT_EXECUTED).applyWrap("tools", stateAtToolEdge(2, "call_a", "call_b"),
+        Command command = new ModelCallLimiter(3, NOT_EXECUTED, LAST_CALL).applyWrap("tools", stateAtToolEdge(2, "call_a", "call_b"),
                 null, (s, c) -> {
                     toolsRan.set(true);
                     return CompletableFuture.completedFuture(Command.emptyCommand());
@@ -88,7 +90,7 @@ class ModelCallLimiterTest {
                 "messages", List.of(new UserMessage("你好"), new AssistantMessage("好的")),
                 ModelCallLimiter.CALL_COUNT_KEY, 2));
 
-        Command command = new ModelCallLimiter(3, NOT_EXECUTED).applyWrap("tools", state, null,
+        Command command = new ModelCallLimiter(3, NOT_EXECUTED, LAST_CALL).applyWrap("tools", state, null,
                 (s, c) -> CompletableFuture.completedFuture(Command.emptyCommand())).join();
 
         assertThat(command.gotoNode()).isEqualTo("end");
@@ -121,7 +123,7 @@ class ModelCallLimiterTest {
                 .chatModel(model)
                 .stateSerializer(new SpringAIJacksonStateSerializer<>(MessagesState::new))
                 .toolsFromObject(new EchoTools())
-                .addExecuteToolsHook(new ModelCallLimiter(3, NOT_EXECUTED))
+                .addExecuteToolsHook(new ModelCallLimiter(3, NOT_EXECUTED, LAST_CALL))
                 .build()
                 .compile();
 
@@ -141,11 +143,40 @@ class ModelCallLimiterTest {
         assertThat(answered).containsExactlyInAnyOrderElementsOf(called);
     }
 
+    /** 倒数第二次能执行工具：工具照跑，回执末尾贴预算已尽提示，下一次模型调用直接收尾（不再撞保险丝硬切） */
+    @Test
+    void 倒数第二次调用把预算已尽提示贴在回执末尾() {
+        Command command = new ModelCallLimiter(3, NOT_EXECUTED, LAST_CALL).applyWrap("tools", stateAtToolEdge(1, "call_a"),
+                null, (s, c) -> CompletableFuture.completedFuture(new Command("agent", Map.of("messages",
+                        ToolResponseMessage.builder().responses(List.of(
+                                new ToolResponseMessage.ToolResponse("call_a", "get_account", "{\"balance\":1}"))).build())))).join();
+
+        assertThat(command.gotoNode()).isEqualTo("agent");
+        assertThat(command.update()).containsEntry(ModelCallLimiter.CALL_COUNT_KEY, 2);
+        ToolResponseMessage trm = (ToolResponseMessage) appendedMessages(command).getFirst();
+        String data = trm.getResponses().getFirst().responseData();
+        assertThat(data).startsWith("{\"balance\":1}").endsWith(LAST_CALL);
+        assertThat(trm.getResponses().getFirst().id()).isEqualTo("call_a");
+    }
+
+    /** 没到倒数第二次：回执原样，只累加计数 */
+    @Test
+    void 没到倒数第二次不贴提示() {
+        Command command = new ModelCallLimiter(3, NOT_EXECUTED, LAST_CALL).applyWrap("tools", stateAtToolEdge(0, "call_a"),
+                null, (s, c) -> CompletableFuture.completedFuture(new Command("agent", Map.of("messages",
+                        ToolResponseMessage.builder().responses(List.of(
+                                new ToolResponseMessage.ToolResponse("call_a", "get_account", "{\"balance\":1}"))).build())))).join();
+
+        assertThat(command.update()).containsEntry(ModelCallLimiter.CALL_COUNT_KEY, 1);
+        ToolResponseMessage trm = (ToolResponseMessage) appendedMessages(command).getFirst();
+        assertThat(trm.getResponses().getFirst().responseData()).isEqualTo("{\"balance\":1}");
+    }
+
     @Test
     void 未到上限照常执行工具并累加计数() {
         AtomicBoolean toolsRan = new AtomicBoolean();
 
-        Command command = new ModelCallLimiter(8, NOT_EXECUTED).applyWrap("tools", stateAtToolEdge(2, "call_a"),
+        Command command = new ModelCallLimiter(8, NOT_EXECUTED, LAST_CALL).applyWrap("tools", stateAtToolEdge(2, "call_a"),
                 null, (s, c) -> {
                     toolsRan.set(true);
                     return CompletableFuture.completedFuture(Command.emptyCommand());

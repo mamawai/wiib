@@ -20,6 +20,8 @@ import java.util.concurrent.CompletableFuture;
 /**
  * 单次运行的模型调用保险丝：ReAct 是循环，模型可能陷进"查完行情又想查持仓、查完持仓又想查行情"
  * 的死转里一路烧 token。超过上限就直接结束本轮，把已有结果交出去。
+ * 倒数第二次（最后一次能执行工具）的回执末尾贴一句预算已尽，让模型下一次调用直接收尾，
+ * 而不是撞上限硬切、这轮连结论块都没有。
  * <p>
  * 挂在工具边（ExecuteToolsHook）而不是模型节点：只有边的返回值 {@link Command} 能决定路由，
  * 节点 hook 改不了"下一步走哪"。计数存 state；消费方（chat 叶子/trader 唤醒）都无 saver，
@@ -37,10 +39,13 @@ public class ModelCallLimiter implements EdgeHook.WrapCall<MessagesState<Message
     /** 占位回执正文（llm.callLimit.notExecuted）：说清"没执行"，不是伪造的成功结果——
      * 模型和复盘都要看得懂。按语言在建图时由调用方取词表传入 */
     private final String notExecuted;
+    /** 预算收尾提示（llm.callLimit.lastCall）：最后一次能执行工具时贴在回执末尾，下一次模型调用直接给最终答复 */
+    private final String lastCall;
 
-    public ModelCallLimiter(int runLimit, String notExecuted) {
+    public ModelCallLimiter(int runLimit, String notExecuted, String lastCall) {
         this.runLimit = runLimit;
         this.notExecuted = notExecuted;
+        this.lastCall = lastCall;
     }
 
     @Override
@@ -58,7 +63,34 @@ public class ModelCallLimiter implements EdgeHook.WrapCall<MessagesState<Message
             placeholderResponses(state).ifPresent(trm -> update.put("messages", List.of(trm)));
             return CompletableFuture.completedFuture(new Command(GOTO_END, update));
         }
-        return action.apply(state, config).thenApply(command -> command.withMergedUpdate(Map.of(CALL_COUNT_KEY, calls)));
+        CompletableFuture<Command> executed = action.apply(state, config);
+        if (calls == runLimit - 1) {
+            // 这是最后一次能执行工具：回执末尾贴上提示，下一次模型调用直接收尾
+            return executed.thenApply(command -> withLastCallNotice(command, calls));
+        }
+        return executed.thenApply(command -> command.withMergedUpdate(Map.of(CALL_COUNT_KEY, calls)));
+    }
+
+    /**
+     * 提示贴在最后一条工具回执的末尾，不另起一条 user 消息：tool_result 后面紧跟 user 文本，
+     * Anthropic/Gemini 协议不一定收。回执单条 / 列表两种形态都接
+     */
+    @SuppressWarnings("unchecked")
+    private Command withLastCallNotice(Command command, int calls) {
+        Map<String, Object> update = new HashMap<>(command.update());
+        Object messages = update.get("messages");
+        List<Message> list = messages instanceof List<?> l
+                ? new ArrayList<>((List<Message>) l) : new ArrayList<>(List.of((Message) messages));
+        int last = list.size() - 1;
+        ToolResponseMessage trm = (ToolResponseMessage) list.get(last);
+        List<ToolResponseMessage.ToolResponse> responses = new ArrayList<>(trm.getResponses());
+        ToolResponseMessage.ToolResponse tail = responses.getLast();
+        responses.set(responses.size() - 1, new ToolResponseMessage.ToolResponse(
+                tail.id(), tail.name(), tail.responseData() + "\n\n" + lastCall));
+        list.set(last, ToolResponseMessage.builder().responses(responses).build());
+        update.put("messages", list);
+        update.put(CALL_COUNT_KEY, calls);
+        return new Command(command.gotoNode(), update);
     }
 
     /** 最后一条助手消息里待执行的 tool_call → 一条标记未执行的 ToolResponseMessage（没有就不补，空回执本身也是孤儿） */

@@ -646,6 +646,15 @@ public class ReviewMaterialAssembler {
         return idx < 0 ? null : new Conclusion(lang, idx, mark.length());
     }
 
+    /** 结论块全文（从标记起到末尾），两门语言的标记都认；没有 → null */
+    public String conclusionBlock(String reasoning) {
+        if (reasoning == null || reasoning.isBlank()) {
+            return null;
+        }
+        Conclusion c = locateConclusion(reasoning, AgentLang.ZH);
+        return c == null ? null : reasoning.substring(c.index());
+    }
+
     // ==================== 结论分段（总分结构） ====================
 
     /**

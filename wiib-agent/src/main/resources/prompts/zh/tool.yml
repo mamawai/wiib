@@ -121,8 +121,8 @@ tool:
   # ---- 唤醒交易工具（trader 醒来时挂的动作工具；护栏由服务端强制，描述只是说明书）----
   get_account: |-
     获取你的完整账户状态：可用余额、在场持仓（含 id、方向、数量、开仓价、杠杆、未实现盈亏、
-    强平价、当前止损/止盈）与未成交限价单。这份状态每轮已注入你的提示词，通常不用调它；
-    只在需要重读 positionId、或本轮自己动过手后核对账户时用。
+    强平价、当前止损/止盈）与未成交限价单。这份状态每轮已注入开场白的【当前账户】，通常不用调它；
+    只在本轮自己动过手后核对账户时用。
 
   open_position: |-
     在你的模拟账户开合约仓位。硬规则（违反即拒，拒因可修正、并附带确切的允许区间）：
@@ -135,27 +135,27 @@ tool:
     是你主动平仓的唯一依据。
 
   close_position: |-
-    按 positionId（从 get_account 取）市价平掉持仓的全部或一部分。
+    按 positionId（见开场白【当前账户】的持仓，或 get_account）市价平掉持仓的全部或一部分。
     quantity：要平的币数；传持仓全量即全平。reason：一句话说明为什么现在平。
 
   set_stop_loss: |-
-    替换持仓的止损（positionId 从 get_account 取）。新止损始终覆盖整个仓位——不传数量。
+    替换持仓的止损（positionId 见开场白【当前账户】的持仓，或 get_account）。新止损始终覆盖整个仓位——不传数量。
     只许收紧：LONG 的止损只能上移、SHORT 的只能下移（相对当前止损）——放宽止损说明论点
     已经动摇，去核对失效条件。不许把止损贴到现价旁边逼它秒触发——那是亏损中的恐慌平仓
     换了个马甲；论点若已失效，就明说并用 close_position。reason 必填，进入该仓位公开的
     计划修订史。
 
   set_take_profit: |-
-    替换持仓的止盈（positionId 从 get_account 取）。新止盈始终覆盖整个仓位——不传数量。
+    替换持仓的止盈（positionId 见开场白【当前账户】的持仓，或 get_account）。新止盈始终覆盖整个仓位——不传数量。
     只许远离：LONG 的目标只能上移、SHORT 的只能下移——把 LONG 目标下调到现价附近
     就是变相的恐慌平仓；想提前离场，就引用失效条件并用 close_position。
     reason 必填（进入公开的计划修订史）。
 
   write_plan: |-
-    给一个没有计划记录的在场持仓补立交易计划（positionId 从 get_account 取）。
+    给一个没有计划记录的在场持仓补立交易计划（positionId 见开场白【当前账户】的持仓，或 get_account）。
     已有计划的仓位会被拒——计划不可改，改论点的合法途径只有加仓或平掉重开。
 
-  cancel_order: 按 orderId（从 get_account 的 pendingOrders 取）撤掉一张未成交限价单。
+  cancel_order: 按 orderId（见开场白【当前账户】的挂单，或 get_account 的 pendingOrders）撤掉一张未成交限价单。
 
   # 行为分析：一次调用＝10 个内部端点 + 一次大 prompt 的深模型调用。同 run_deep_analysis，
   # 描述保持英文只换触发词——描述给模型读，触发词要匹配用户真会说的话。

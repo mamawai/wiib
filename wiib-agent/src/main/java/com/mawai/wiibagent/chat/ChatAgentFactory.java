@@ -288,7 +288,8 @@ public class ChatAgentFactory {
     static List<EdgeHook.WrapCall<MessagesState<Message>>> summarizerToolHooks(
             ApprovalRegistry registry, PromptCatalog prompts, AgentLang lang, int limit) {
         return List.of(new ApprovalGate(registry, prompts, lang),
-                new ModelCallLimiter(limit, prompts.get(lang, "llm.callLimit.notExecuted")));  // 内层 → 外层
+                new ModelCallLimiter(limit, prompts.get(lang, "llm.callLimit.notExecuted"),
+                        prompts.get(lang, "llm.callLimit.lastCall")));  // 内层 → 外层
     }
 
     /**
@@ -307,7 +308,8 @@ public class ChatAgentFactory {
         if (toolkit != null) {
             builder.tools(localizedTools.of(lang, toolkit)); // 按照lang设置tool的description语言
             builder.addExecuteToolsHook(new ModelCallLimiter(runModelCallLimit,
-                    prompts.get(lang, "llm.callLimit.notExecuted"))); // 设置模型调用限制
+                    prompts.get(lang, "llm.callLimit.notExecuted"),
+                    prompts.get(lang, "llm.callLimit.lastCall"))); // 设置模型调用限制
         }
 
         return builder.build(

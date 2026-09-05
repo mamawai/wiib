@@ -23,6 +23,7 @@ trader:
     badInterval: The candle interval must be 5m, 15m, 1h or 4h
     windowNeverWakes: No {{interval}} candle closes inside that wake window, so it would never wake up. Widen the window or change the interval
     symbolRequired: Pick at least one coin to trade
+    tooManySymbols: "At most {{max}} symbols (each wake-up's tool budget and attention are split per symbol)"
     symbolNotAllowed: "Coin outside the tradable set: {{whitelist}}"
     promptTooLong: A custom prompt is at most 4000 characters
     customPromptRequired: With the platform prompt off, a custom prompt is required

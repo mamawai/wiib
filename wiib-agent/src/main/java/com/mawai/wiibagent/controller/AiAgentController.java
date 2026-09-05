@@ -2,8 +2,6 @@ package com.mawai.wiibagent.controller;
 
 import com.mawai.wiibcommon.dto.NewsEventItem;
 import com.mawai.wiibcommon.util.Result;
-import com.mawai.wiibquant.market.service.NewsCache;
-import com.mawai.wiibquant.market.service.NewsFlashLocalizer;
 import com.mawai.wiibquant.mapper.NewsEventMapper;
 
 import io.swagger.v3.oas.annotations.Operation;
@@ -30,15 +28,19 @@ import java.util.List;
 @RequiredArgsConstructor
 public class AiAgentController {
 
-    private final NewsCache newsCache;
-    private final NewsFlashLocalizer newsFlashLocalizer;
     private final NewsEventMapper newsEventMapper;
 
-    /** 快讯中英两套一起给，前端按界面语言现选；译文空=没译成，前端回落中文 */
+    /** 首页快讯卡最多给 100 条，约两三天的量 */
+    private static final int NEWS_LIMIT = 100;
+
+    /**
+     * 首页快讯卡读 news_event 存档，不走模型侧那份 20 条的内存缓存。
+     * 中英两套一起给，前端按界面语言现选；译文空=没译成，英文界面不展示那条。
+     */
     @GetMapping("/quant/news")
-    @Operation(summary = "重要快讯（BlockBeats 内存缓存：未过期复用不打上游，首页快讯卡数据源）")
-    public Result<List<NewsFlashLocalizer.BilingualFlash>> news() {
-        return Result.ok(newsFlashLocalizer.bilingual(newsCache.getFlashes()));
+    @Operation(summary = "最新快讯（news_event 存档，首页快讯卡数据源）")
+    public Result<List<NewsEventItem>> news() {
+        return Result.ok(newsEventMapper.selectLatest(NEWS_LIMIT));
     }
 
     @GetMapping("/quant/news-events")

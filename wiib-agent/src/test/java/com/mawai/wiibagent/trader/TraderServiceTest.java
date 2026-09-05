@@ -82,6 +82,22 @@ class TraderServiceTest {
                 levMin, levMax, null, null, multi, hedge, alertEnabled, alertMult, null, null, null);
     }
 
+    /** 币种上限 3：单轮工具预算按币摊，4 个被拦；3 个过这道校验（后面才卡在端点上） */
+    @Test
+    void rejectsMoreThanThreeSymbols() {
+        when(binanceProperties.getSymbols()).thenReturn(List.of("BTCUSDT", "ETHUSDT", "SOLUSDT", "DOGEUSDT"));
+        when(traderMapper.selectOne(any())).thenReturn(null);
+        when(endpointService.defaultOf(1L)).thenReturn(null);
+
+        String four = service.create(1L, new TraderService.UpsertReq("小虎", "BTCUSDT,ETHUSDT,SOLUSDT,DOGEUSDT", "5m",
+                null, null, true, null, null, null, null, null, null, null, null, null, null, null));
+        String three = service.create(1L, new TraderService.UpsertReq("小虎", "BTCUSDT,ETHUSDT,SOLUSDT", "5m",
+                null, null, true, null, null, null, null, null, null, null, null, null, null, null));
+
+        assertThat(four).isEqualTo(new MessageCatalog().get("trader.config.tooManySymbols", Map.of("max", 3)));
+        assertThat(three).doesNotContain("最多").contains("模型端点");
+    }
+
     /** 退出平台模板后自定义就是唯一指令来源，空着=模型裸奔 */
     @Test
     void optOutDefaultPromptRequiresCustomPrompt() {

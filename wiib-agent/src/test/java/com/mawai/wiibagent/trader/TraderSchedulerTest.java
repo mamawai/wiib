@@ -315,6 +315,34 @@ class TraderSchedulerTest {
     }
 
     /**
+     * 停工窗口在阶段0发出后就开：交易还在跑时，同币的下一根 5m 边界事件被整个丢弃——
+     * 既不再唤醒一次（占住 inFlight 让复盘被跳过），也不记 SKIPPED（那是互斥跳过的痕迹，说明窗口没开）
+     */
+    @Test
+    void windowOpensWhileTradingStillRunning() throws Exception {
+        AiTrader t = trader1h();
+        t.setIntervalCode("5m");
+        when(traderMapper.selectList(any())).thenReturn(List.of(t));
+        TraderScheduler s = new TraderScheduler(traderMapper, runner, reviewRunner, learningRunner, peers, new MessageCatalog());
+        CountDownLatch tradeHold = new CountDownLatch(1);
+        doAnswer(inv -> {
+            tradeHold.await();
+            return null;
+        }).when(runner).wake(any(), anyLong());
+
+        s.onKlineClosed(new KlineClosedEvent(this, "BTCUSDT", "5m", DAY_BOUNDARY - 1));
+
+        verify(runner, timeout(2_000)).wake(any(), anyLong());
+        awaitWindowOpen(s);
+        assertThat(tradeHold.getCount()).isEqualTo(1);   // 交易还卡着，窗口已经开了
+        s.onKlineClosed(new KlineClosedEvent(this, "BTCUSDT", "5m", DAY_BOUNDARY + 300_000L - 1));
+        verify(runner, after(300).times(1)).wake(any(), anyLong());
+        verify(runner, never()).recordSkipped(any(), anyLong());
+        tradeHold.countDown();
+        awaitWindowClosed(s);
+    }
+
+    /**
      * 复盘→学习之间的全局屏障：任何一个 trader 的复盘没落库，全体学习都不许开始。
      * 没有屏障，先学的人读到的是同侪昨天的复盘，同一轮学习里各人看到的世界不一样。
      */
@@ -459,6 +487,17 @@ class TraderSchedulerTest {
 
         verify(learningRunner, timeout(2_000)).learn(any(), eq(DAY_BOUNDARY));
         awaitWindowClosed(s);
+    }
+
+    /** 自旋等停工窗口打开 */
+    private static void awaitWindowOpen(TraderScheduler s) throws InterruptedException {
+        long deadline = System.currentTimeMillis() + 2_000;
+        while (!s.isHandoverActive()) {
+            if (System.currentTimeMillis() > deadline) {
+                throw new AssertionError("停工窗口2s内没有打开");
+            }
+            Thread.sleep(10);
+        }
     }
 
     /** 自旋等停工窗口关闭（编排线程在后台收尾，verify 不适合等一个布尔位） */

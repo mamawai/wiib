@@ -14,7 +14,6 @@ import com.mawai.wiibcommon.market.KlineBar;
 import com.mawai.wiibcommon.market.KlineHistoryStore;
 import com.mawai.wiibagent.learning.PeerInsightService;
 import com.mawai.wiibagent.learning.ReviewMaterialAssembler;
-import com.mawai.wiibagent.trader.PlayStatsAssembler;
 import com.mawai.wiibagent.trader.TraderPromptAssembler;
 import com.mawai.wiibagent.trader.TraderRiskConfig;
 import com.mawai.wiibquant.external.sim.SimTradeClient;
@@ -80,7 +79,7 @@ class PromptI18nTest {
     @Test
     void 英文trader提示词全文无中文() {
         TraderPromptAssembler assembler =
-                new TraderPromptAssembler(mock(AiTraderMapper.class), prompts, mock(PlayStatsAssembler.class));
+                new TraderPromptAssembler(mock(AiTraderMapper.class), prompts);
         AiTrader t = enTrader();
         t.setMemory("突破回踩不守住颈线就别追。");            // 旧笔记是中文：原样注入不算违规
         t.setLearningNotes("同侪A的BREAKOUT 12笔8胜。");
@@ -89,7 +88,7 @@ class PromptI18nTest {
         t.setOwnerNoteRounds(3);
         t.setWakeWindow("21:00-08:30");
 
-        String full = assembler.assemble(t, "{\"equity\":10000}", List.of(), AgentLang.EN);
+        String full = assembler.assemble(t, AgentLang.EN);
         // 用户自己写的字与旧笔记原样注入，扫描前剥掉——它们本来就不该被翻译
         String platform = full.replace(t.getMemory(), "").replace(t.getLearningNotes(), "");
         assertNoCjk("英文 trader 提示词", platform);
@@ -226,7 +225,7 @@ class PromptI18nTest {
     /** trader 模板的 7 条认知设计原则，各钉一句锚点——搬家时丢哪条都在这里红 */
     @Test
     void 中文trader模板保住七条认知设计原则() {
-        String p = new TraderPromptAssembler(mock(AiTraderMapper.class), prompts, mock(PlayStatsAssembler.class))
+        String p = new TraderPromptAssembler(mock(AiTraderMapper.class), prompts)
                 .platformTemplate(AgentLang.ZH, "1h", "BTCUSDT", TraderRiskConfig.of(new AiTrader()), null);
 
         assertThat(p)
@@ -250,8 +249,8 @@ class PromptI18nTest {
         t.setOwnerNoteRounds(2);
         t.setId(7L);
         TraderPromptAssembler assembler =
-                new TraderPromptAssembler(mock(AiTraderMapper.class), prompts, mock(PlayStatsAssembler.class));
-        String full = assembler.assemble(t, "{}", List.of(), AgentLang.ZH);
+                new TraderPromptAssembler(mock(AiTraderMapper.class), prompts);
+        String full = assembler.assemble(t, AgentLang.ZH);
         assertThat(full.indexOf("主人的交易风格指令"))
                 .as("⑥ 用户风格指令放最后并明示优先级").isGreaterThan(full.indexOf("纪律："));
         assertThat(full).contains("听主人的").contains("不在可覆盖范围");
@@ -292,7 +291,7 @@ class PromptI18nTest {
     /** 任务 4：三处都要显式交代"笔记可能是另一门语言，照读照用，输出用当前语言" */
     @Test
     void 三处提示词都交代了跨语言笔记() {
-        assertThat(new TraderPromptAssembler(mock(AiTraderMapper.class), prompts, mock(PlayStatsAssembler.class))
+        assertThat(new TraderPromptAssembler(mock(AiTraderMapper.class), prompts)
                 .platformTemplate(AgentLang.ZH, "1h", "BTCUSDT", TraderRiskConfig.of(new AiTrader()), null))
                 .contains("可能是另一门语言写的").contains("本轮输出一律用中文");
         assertThat(prompts.get(AgentLang.ZH, "reviewer.system", NOTE_CAP_ZH)).contains("可能是另一门语言写的");
@@ -444,8 +443,8 @@ class PromptI18nTest {
             t.setOwnerNoteRounds(2);
 
             TraderPromptAssembler assembler =
-                    new TraderPromptAssembler(mock(AiTraderMapper.class), prompts, mock(PlayStatsAssembler.class));
-            String prompt = assembler.assemble(t, "{}", List.of(), lang);
+                    new TraderPromptAssembler(mock(AiTraderMapper.class), prompts);
+            String prompt = assembler.assemble(t, lang);
             String block = assembler.ownerNoteBlock(t, lang);
             String tail = prompts.get(lang, "trader.label.outputLanguage");
             String note = prompts.get(lang, "trader.label.ownerWritten");
@@ -474,8 +473,8 @@ class PromptI18nTest {
             AiTrader t = enTrader();
             t.setUseDefaultPrompt(false);
             t.setCustomPrompt("Do whatever you want.");
-            assertThat(new TraderPromptAssembler(mock(AiTraderMapper.class), prompts, mock(PlayStatsAssembler.class))
-                    .assemble(t, "{}", List.of(), lang).stripTrailing())
+            assertThat(new TraderPromptAssembler(mock(AiTraderMapper.class), prompts)
+                    .assemble(t, lang).stripTrailing())
                     .as("%s 退出平台模板后仍要有输出语言硬收尾", lang.code())
                     .endsWith(prompts.get(lang, "trader.label.outputLanguage"));
         }

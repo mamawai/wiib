@@ -271,6 +271,7 @@
     "nextDay": "(next day)",
     "sameTime": "Start and end cannot match (turn the window off for round-the-clock)",
     "symbols": "Symbols",
+    "symbolsHint": "Up to {{max}}: tool budget and attention are split per symbol",
     "specTitle": "Position spec (enforced, the AI cannot bend it)",
     "specHint": "A range means it must pick from inside, not a cap",
     "leverage": "Leverage range (1~125x)",

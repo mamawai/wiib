@@ -208,7 +208,7 @@ public class TraderActionService {
             return new ActionPanel(false, null, null, null, null, null, null, null, null,
                     false, null, null, 0, MAX_NOTE_ROUNDS, MAX_NOTE_CHARS);
         }
-        // 时刻取 created_at 而不是 wake_time：后者是 K 线边界，1h 档在 10:37 手动唤醒会显示 10:00
+        // 时刻取 created_at
         AiTraderDecision lastWake = latestDecision(t, AiTraderDecision.KIND_TRADE,
                 AiTraderDecision.KIND_ALERT, AiTraderDecision.KIND_MANUAL);
         AiTraderDecision lastReview = latestDecision(t, AiTraderDecision.KIND_REVIEW);

@@ -348,7 +348,7 @@ langgraph4j 有几处行为跟直觉相反，而且**错了不报错**。这几�
 UsageTrackingChatModel 每轮新建（工厂里的模型实例是跨唤醒缓存的，装饰器不新建会跨轮累加）
   → TradeTools 每轮 new（绑 sim 子账户 / 白名单 / 风险规格 / 本轮截止时刻）
   → 计划懒清理与补绑（cleanupAndRebindPlans）
-  → 组装系统提示词（wakePrompt）与开场白（routine / alert instruction）
+  → 组装系统提示词（promptAssembler.assemble）、观察包（observation）与开场白（routine / alert instruction）
   → AgentGraphs.reactAgent + 15 工具 + ModelCallLimiter + ToolCallTraceHook
        首轮 forceFirstToolChoice=required：不看数据不许决策
   → FutureTask 限时执行
@@ -361,7 +361,7 @@ UsageTrackingChatModel 每轮新建（工厂里的模型实例是跨唤醒缓存
 
 ### 5.4 注入面（最该细读的一段）
 
-一次唤醒喂给模型的东西分两块：**系统提示词**（`TraderPromptAssembler.assemble`）和**开场白**（`routineInstruction` / `alertInstruction`）。
+一次唤醒喂给模型的东西分两块：**系统提示词**（`TraderPromptAssembler.assemble`）和**开场白**（`routineInstruction` / `alertInstruction`）。分工是：system 只放"你是谁、怎么答"——模板 / 复盘笔记 / 学习笔记 / 主人风格指令 / 固定收尾格式 / 输出语言；开场白只放"这轮发生了什么，回答问题"——头部事实 + 观察包（`TraderWakeupRunner.observation`：事件 / 账户 / 上一轮结论 / 轨迹 / 战绩）+ 快照 / 日历 / 休眠提示 + 单问题 + 留言。模型要"重建"的东西（上一轮等的是什么、仓位为什么不见了、现有杠杆几倍）全部由代码算好直接给。
 
 `TraderPromptAssembler` 的类注释里那**七条认知设计**是这套东西的设计文档，逐条对着代码读。特别注意第 ⑦ 条（最近改的）：
 
@@ -377,8 +377,9 @@ UsageTrackingChatModel 每轮新建（工厂里的模型实例是跨唤醒缓存
 
 | 块 | 来源 | 要点 |
 |---|---|---|
-| 账户状态 | `accountStateJson` | 持仓带计划与修订历史、挂单带已挂时长。一次给足，工具预算才能留给行情求证 |
-| 最近决策 | `recentDecisionsStaleFiltered` | 只回注交易类（TRADE/ALERT/MANUAL），REVIEW/LEARN 已走笔记注入；截断**保尾不保头**（结论块收在末尾） |
+| 自上次唤醒以来 | `events` | 懒清理归档的计划配 sim 已平仓位说结局（止损/止盈/主动平、成交价、盈亏、当时的失效条件），补绑的说限价单成交；没事件整块缺席 |
+| 账户状态 | `accountStateJson` | 持仓带杠杆/标记价/强平价、计划与修订历史（时刻可读）、挂单带已挂时长。一次给足，工具预算才能留给行情求证 |
+| 上一轮结论 + 轨迹 | `lastConclusion` / `trajectory` | 上一轮结论完整回注（最近一条写出结论块的 OK 行，整块不截断）+ 轨迹一行一轮（时刻/状态/权益/工具名或失败原因）；只回注交易类（TRADE/ALERT/MANUAL），REVIEW/LEARN 已走笔记注入 |
 | 论点战绩 | `PlayStatsAssembler` | 纯代码算，模型只许引用不许自算；stale 过滤在**配对之后** |
 | 财经日历 | `EconCalendarAssembler` | 过去 12h + 未来 24h，只给事实不给指令 |
 | 复盘笔记 / 学习笔记 | `ai_trader.memory` / `learning_notes` | **并列注入不合并**：来源分开，模型才分得清"自己的教训"与"从别人学的" |

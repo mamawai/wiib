@@ -82,9 +82,11 @@ class TraderWakeupLoopTest {
     private final UserLangResolver langResolver = mock(UserLangResolver.class);
 
     private final PromptCatalog prompts = new PromptCatalog();
+    /** 默认（未打桩）返回 null = 本局无统计不注入 */
+    private final PlayStatsAssembler playStats = mock(PlayStatsAssembler.class);
 
     private final TraderWakeupRunner runner = new TraderWakeupRunner(
-            modelFactory, new TraderPromptAssembler(traderMapper, prompts, mock(PlayStatsAssembler.class)),
+            modelFactory, new TraderPromptAssembler(traderMapper, prompts),
             simTradeClient, binanceRestClient,
             new IndicatorToolkit(new KlineFetcher(binanceRestClient, 60_000)),
             new MarketToolkit(mock(MarketDataService.class)),
@@ -93,7 +95,7 @@ class TraderWakeupLoopTest {
             prompts, new MessageCatalog(), new LocalizedToolCallbacks(prompts),
             new ReviewMaterialAssembler(decisionMapper, planMapper, simTradeClient,
                     mock(KlineHistoryStore.class), prompts),
-            mock(EconCalendarAssembler.class));
+            mock(EconCalendarAssembler.class), playStats);
 
     {
         // 测试边界是固定历史时刻，墙钟钉在边界后 1s——预算充足，各用例不受真实时间影响
@@ -225,6 +227,7 @@ class TraderWakeupLoopTest {
         prev.setWakeTime(prevWake);
         prev.setKind(AiTraderDecision.KIND_TRADE);
         prev.setStatus(AiTraderDecision.STATUS_OK);
+        prev.setEquity(new BigDecimal("10000"));
         prev.setReasoning("[本轮结论]\n[BTCUSDT]\n动作：HOLD\n等待：回踩 63400 做多"
                 + "\n[ETHUSDT]\n动作：HOLD\n等待：站上 1925 做多");
         when(decisionMapper.selectList(any())).thenReturn(List.of(prev));
@@ -533,9 +536,9 @@ class TraderWakeupLoopTest {
         assertThat(p.getOpenedWakeTime()).isEqualTo(1785171600000L);
     }
 
-    /** 持仓的计划必须回注系统提示词：醒来的模型不再是失忆的新人——恐慌平仓的根治。 */
+    /** 持仓的计划必须回注开场白（user 消息）：醒来的模型不再是失忆的新人——恐慌平仓的根治；system 里不再有账户 JSON */
     @Test
-    void positionPlanInjectedIntoSystemPrompt() {
+    void positionPlanInjectedIntoOpening() {
         when(simTradeClient.getAllPositions(99L)).thenReturn(List.of(crossPosition("1000", "-5")));
         when(simTradeClient.getBalanceDetail(99L)).thenReturn(Map.of("balance", "9995", "frozenBalance", "0"));
         when(simTradeClient.getBalance(99L)).thenReturn(new BigDecimal("9995"));
@@ -560,11 +563,122 @@ class TraderWakeupLoopTest {
 
         ArgumentCaptor<Prompt> prompts = ArgumentCaptor.forClass(Prompt.class);
         verify(model, atLeastOnce()).call(prompts.capture());
-        String firstCall = prompts.getAllValues().get(0).getInstructions().stream()
-                .map(org.springframework.ai.chat.messages.Message::getText)
-                .reduce("", String::concat);
-        assertThat(firstCall).contains("1h收盘跌回64200箱体内").contains("REVERSAL")
+        List<org.springframework.ai.chat.messages.Message> first = prompts.getAllValues().get(0).getInstructions();
+        String system = first.stream().filter(m -> m instanceof org.springframework.ai.chat.messages.SystemMessage)
+                .map(org.springframework.ai.chat.messages.Message::getText).reduce("", String::concat);
+        String user = first.stream().filter(m -> m instanceof org.springframework.ai.chat.messages.UserMessage)
+                .map(org.springframework.ai.chat.messages.Message::getText).reduce("", String::concat);
+        assertThat(user).contains("【当前账户】").contains("1h收盘跌回64200箱体内").contains("REVERSAL")
                 .contains("趋势加速看下一压力位");
+        assertThat(system).doesNotContain("\"equity\"").doesNotContain("1h收盘跌回64200箱体内");
+    }
+
+    /** 上一轮结论整块原样回注（多币段一个不少、不截断）；更早的轮次只留一行轨迹（时刻/状态/权益/工具名） */
+    @Test
+    void latestConclusionInjectedWholeAndOlderRowsAsOneLine() {
+        stubHealthyAccount();
+        long boundary = 1785171600000L;
+        AiTraderDecision latest = new AiTraderDecision();
+        latest.setWakeTime(boundary - 3600_000L);
+        latest.setKind(AiTraderDecision.KIND_TRADE);
+        latest.setStatus(AiTraderDecision.STATUS_OK);
+        latest.setEquity(new BigDecimal("10123.45"));
+        // 300 字铺垫 + 三个币段各 400 字判断：整块远超旧口径的 1000 字尾截
+        latest.setReasoning("行情铺垫".repeat(75) + "\n[本轮结论]\n"
+                + "[BTCUSDT]\n判断：" + "x".repeat(400) + "\n动作：HOLD\n等待：BTC等待A\n"
+                + "[ETHUSDT]\n判断：" + "y".repeat(400) + "\n动作：HOLD\n等待：ETH等待B\n"
+                + "[SOLUSDT]\n判断：" + "z".repeat(400) + "\n动作：HOLD\n等待：SOL等待C");
+        AiTraderDecision older = new AiTraderDecision();
+        older.setWakeTime(boundary - 7200_000L);
+        older.setKind(AiTraderDecision.KIND_TRADE);
+        older.setStatus(AiTraderDecision.STATUS_OK);
+        older.setEquity(new BigDecimal("10050"));
+        older.setReasoning("[本轮结论]\n[BTCUSDT]\n等待：旧等待条件XYZ");
+        older.setActionsJson("[{\"tool\":\"klines\",\"args\":{}},{\"tool\":\"klines\",\"args\":{}}]");
+        when(decisionMapper.selectList(any())).thenReturn(List.of(latest, older));
+        ChatModel model = modelCheckingThenSummary();
+        when(modelFactory.modelFor(any())).thenReturn(model);
+
+        runner.wake(trader(), boundary);
+
+        ArgumentCaptor<Prompt> prompt = ArgumentCaptor.forClass(Prompt.class);
+        verify(model, atLeastOnce()).call(prompt.capture());
+        String injected = prompt.getAllValues().get(0).getInstructions().stream()
+                .map(org.springframework.ai.chat.messages.Message::getText).reduce("", String::concat);
+        assertThat(injected)
+                .contains("【上一轮结论】")
+                .contains("BTC等待A").contains("ETH等待B").contains("SOL等待C")
+                .doesNotContain("旧等待条件XYZ")
+                .contains("工具：klines×2");
+    }
+
+    /**
+     * 仓位在两次唤醒之间被止损带走：计划懒清理归档，开场白的事件块配上 sim 已平仓位把结局说清
+     * （了结方式/成交价/盈亏/当时的失效条件），模型不必靠"仓位不见了"自己猜。
+     */
+    @Test
+    void closedPositionEventInjectedIntoOpening() {
+        stubHealthyAccount();
+        AiTraderPlan plan = new AiTraderPlan();
+        plan.setId(21L);
+        plan.setSymbol("BTCUSDT");
+        plan.setSide("LONG");
+        plan.setStatus(AiTraderPlan.STATUS_LIVE);
+        plan.setPositionId(42L);
+        plan.setPlayType("REVERSAL");
+        plan.setInvalidationCondition("1h收盘跌回64200");
+        plan.setOpenedWakeTime(1785171600000L - 3600_000L);
+        when(planMapper.selectList(any())).thenReturn(List.of(plan));
+        FuturesPositionDTO closed = new FuturesPositionDTO();
+        closed.setId(42L);
+        closed.setSymbol("BTCUSDT");
+        closed.setSide("LONG");
+        closed.setClosedPrice(new BigDecimal("63800"));
+        closed.setClosedPnl(new BigDecimal("-120.5"));
+        com.mawai.wiibcommon.entity.FuturesStopLoss sl = new com.mawai.wiibcommon.entity.FuturesStopLoss();
+        sl.setPrice(new BigDecimal("63800"));
+        closed.setStopLosses(List.of(sl));
+        when(simTradeClient.getClosedPositions(99L, 200)).thenReturn(List.of(closed));
+        ChatModel model = modelCheckingThenSummary();
+        when(modelFactory.modelFor(any())).thenReturn(model);
+
+        runner.wake(trader(), 1785171600000L);
+
+        ArgumentCaptor<Prompt> prompt = ArgumentCaptor.forClass(Prompt.class);
+        verify(model, atLeastOnce()).call(prompt.capture());
+        String user = prompt.getAllValues().get(0).getInstructions().stream()
+                .filter(m -> m instanceof org.springframework.ai.chat.messages.UserMessage)
+                .map(org.springframework.ai.chat.messages.Message::getText).reduce("", String::concat);
+        assertThat(user).contains("【自上次唤醒以来】").contains("止损带走").contains("-120.50")
+                .contains("1h收盘跌回64200");
+        // 事件块排在账户之前
+        assertThat(user.indexOf("【自上次唤醒以来】")).isLessThan(user.indexOf("【当前账户】"));
+    }
+
+    /** 战绩块归观察包：排在轨迹之后、行情快照之前 */
+    @Test
+    void playStatsInjectedAfterTrajectoryBeforeSnapshot() {
+        stubHealthyAccount();
+        when(playStats.assemble(any(), any())).thenReturn("STATS_BLOCK\n");
+        AiTraderDecision prev = new AiTraderDecision();
+        prev.setWakeTime(1785171600000L - 3600_000L);
+        prev.setKind(AiTraderDecision.KIND_TRADE);
+        prev.setStatus(AiTraderDecision.STATUS_OK);
+        prev.setEquity(new BigDecimal("10000"));
+        prev.setReasoning("[本轮结论]\n[BTCUSDT]\n动作：HOLD\n等待：无");
+        when(decisionMapper.selectList(any())).thenReturn(List.of(prev));
+        ChatModel model = modelCheckingThenSummary();
+        when(modelFactory.modelFor(any())).thenReturn(model);
+
+        runner.wake(trader(), 1785171600000L);
+
+        ArgumentCaptor<Prompt> prompt = ArgumentCaptor.forClass(Prompt.class);
+        verify(model, atLeastOnce()).call(prompt.capture());
+        String user = prompt.getAllValues().get(0).getInstructions().stream()
+                .filter(m -> m instanceof org.springframework.ai.chat.messages.UserMessage)
+                .map(org.springframework.ai.chat.messages.Message::getText).reduce("", String::concat);
+        assertThat(user.indexOf("【最近唤醒轨迹】")).isLessThan(user.indexOf("STATS_BLOCK"));
+        assertThat(user.indexOf("STATS_BLOCK")).isLessThan(user.indexOf("行情快照"));
     }
 
     /** 仓位已了结（止损/止盈/平仓殊途同归）→ 计划完成使命，唤醒时懒归档（不删：复盘原料）。 */
@@ -618,7 +732,10 @@ class TraderWakeupLoopTest {
         verify(traderMapper, never()).update(any(), any()); // 不计连败
     }
 
-    /** 手动唤醒落 MANUAL 行：回路同例行，但时间线要看得出扳机在人手里（借预算不足路径免 mock 模型）。 */
+    /**
+     * 手动唤醒落 MANUAL 行：回路同例行，但时间线要看得出扳机在人手里（借预算不足路径免 mock 模型）。
+     * wakeTime 是按下按钮那一刻而不是对齐边界——回注查询 wake_time < 本次 才带得上同一根K线上的例行决策
+     */
     @Test
     void manualWakeStampsManualKind() {
         AiTrader t = trader();
@@ -629,6 +746,20 @@ class TraderWakeupLoopTest {
         ArgumentCaptor<AiTraderDecision> dec = ArgumentCaptor.forClass(AiTraderDecision.class);
         verify(decisionMapper).insert(dec.capture());
         assertThat(dec.getValue().getKind()).isEqualTo(AiTraderDecision.KIND_MANUAL);
+        assertThat(dec.getValue().getWakeTime()).isEqualTo(1785171600000L + 3_580_000L);
+    }
+
+    /** 手动轮开场白：头部"已收盘的那根"按对齐边界说，不是按下按钮那一刻 */
+    @Test
+    void manualWakeOpeningHeaderUsesAlignedBoundary() {
+        long boundary = 1785171600000L;
+        long pressed = boundary + 37 * 60_000L;
+        runner.nowMs = () -> pressed;
+
+        String opening = runner.routineInstruction(trader(), pressed, "", "", null, AgentLang.ZH, "");
+
+        assertThat(opening).contains("已收盘（" + java.time.format.DateTimeFormatter.ofPattern("MM-dd HH:mm")
+                .withZone(java.time.ZoneId.systemDefault()).format(java.time.Instant.ofEpochMilli(boundary)) + "）");
     }
 
     /** 数据工具（klines等）没有自己的记录点，必须经轨迹hook进 actionsJson——"调用了哪些工具"要完整。 */

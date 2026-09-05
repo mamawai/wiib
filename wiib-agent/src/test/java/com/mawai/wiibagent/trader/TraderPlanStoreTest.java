@@ -50,33 +50,37 @@ class TraderPlanStoreTest {
         return p;
     }
 
-    /** 限价成交补绑：LIVE 计划无 id 且同键有在场仓位 → 盖 id 落库，计划保留 */
+    /** 限价成交补绑：LIVE 计划无 id 且同键有在场仓位 → 盖 id 落库，计划保留并进 filled 名单 */
     @Test
     void rebindStampsPositionIdOnUnboundLivePlan() {
         when(mapper.selectList(any())).thenReturn(List.of(livePlan("BTCUSDT", "LONG", null)));
 
-        List<AiTraderPlan> live = store.cleanupStale(7L, 1,
+        TraderPlanStore.Cleanup c = store.cleanupStale(7L, 1,
                 Set.of(TraderPlanStore.key("BTCUSDT", "LONG")),
                 Map.of(TraderPlanStore.key("BTCUSDT", "LONG"), 42L), BOUNDARY);
 
-        assertThat(live).hasSize(1);
-        assertThat(live.get(0).getPositionId()).isEqualTo(42L);
+        assertThat(c.live()).hasSize(1);
+        assertThat(c.live().get(0).getPositionId()).isEqualTo(42L);
+        assertThat(c.filled()).containsExactly(c.live().get(0));
+        assertThat(c.closed()).isEmpty();
         ArgumentCaptor<AiTraderPlan> cap = ArgumentCaptor.forClass(AiTraderPlan.class);
         verify(mapper).updateById(cap.capture());
         assertThat(cap.getValue().getPositionId()).isEqualTo(42L);
         assertThat(cap.getValue().getStatus()).isEqualTo(AiTraderPlan.STATUS_LIVE);
     }
 
-    /** 已绑定的计划不重写：补绑只救 null，不做刷新——省一次每轮白写 */
+    /** 已绑定的计划不重写：补绑只救 null，不做刷新——省一次每轮白写；也不算成交事件 */
     @Test
     void boundPlanNotRewritten() {
         when(mapper.selectList(any())).thenReturn(List.of(livePlan("BTCUSDT", "LONG", 42L)));
 
-        List<AiTraderPlan> live = store.cleanupStale(7L, 1,
+        TraderPlanStore.Cleanup c = store.cleanupStale(7L, 1,
                 Set.of(TraderPlanStore.key("BTCUSDT", "LONG")),
                 Map.of(TraderPlanStore.key("BTCUSDT", "LONG"), 42L), BOUNDARY);
 
-        assertThat(live).hasSize(1);
+        assertThat(c.live()).hasSize(1);
+        assertThat(c.filled()).isEmpty();
+        assertThat(c.closed()).isEmpty();
         verify(mapper, never()).updateById(any(AiTraderPlan.class));
     }
 
@@ -85,22 +89,25 @@ class TraderPlanStoreTest {
     void pendingOrderPlanStaysAliveUnbound() {
         when(mapper.selectList(any())).thenReturn(List.of(livePlan("ETHUSDT", "SHORT", null)));
 
-        List<AiTraderPlan> live = store.cleanupStale(7L, 1,
+        TraderPlanStore.Cleanup c = store.cleanupStale(7L, 1,
                 Set.of(TraderPlanStore.key("ETHUSDT", "SHORT")), Map.of(), BOUNDARY);
 
-        assertThat(live).hasSize(1);
-        assertThat(live.get(0).getPositionId()).isNull();
+        assertThat(c.live()).hasSize(1);
+        assertThat(c.live().get(0).getPositionId()).isNull();
+        assertThat(c.filled()).isEmpty();
         verify(mapper, never()).updateById(any(AiTraderPlan.class));
     }
 
-    /** 既有归档语义回归：同键既无持仓也无挂单 → 归档带了结时刻，从存活列表剔除 */
+    /** 既有归档语义回归：同键既无持仓也无挂单 → 归档带了结时刻，从存活列表剔除、进 closed 名单 */
     @Test
     void deadKeyPlanArchivedWithClosedTime() {
         when(mapper.selectList(any())).thenReturn(List.of(livePlan("BTCUSDT", "LONG", 42L)));
 
-        List<AiTraderPlan> live = store.cleanupStale(7L, 1, Set.of(), Map.of(), BOUNDARY);
+        TraderPlanStore.Cleanup c = store.cleanupStale(7L, 1, Set.of(), Map.of(), BOUNDARY);
 
-        assertThat(live).isEmpty();
+        assertThat(c.live()).isEmpty();
+        assertThat(c.closed()).hasSize(1);
+        assertThat(c.closed().get(0).getPositionId()).isEqualTo(42L);
         ArgumentCaptor<AiTraderPlan> cap = ArgumentCaptor.forClass(AiTraderPlan.class);
         verify(mapper).updateById(cap.capture());
         assertThat(cap.getValue().getStatus()).isEqualTo(AiTraderPlan.STATUS_CLOSED);

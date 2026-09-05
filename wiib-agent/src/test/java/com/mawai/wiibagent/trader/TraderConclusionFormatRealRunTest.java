@@ -65,14 +65,17 @@ class TraderConclusionFormatRealRunTest {
         AiTrader trader = trader();
         long boundary = System.currentTimeMillis() / 3_600_000L * 3_600_000L;
         for (AgentLang lang : AgentLang.values()) {
-            String system = promptAssembler.assemble(trader, accountState(lang, boundary), List.of(), lang);
+            String system = promptAssembler.assemble(trader, lang);
+            // 账户走开场白的观察包（system 里没有账户 JSON），这里手拼账户段一样的形状
+            String observation = "\n" + prompts.get(lang, "trader.wake.accountHeader") + "\n"
+                    + accountState(lang, boundary) + "\n";
             String snapshot = prompts.get(lang, "trader.wake.snapshotRow", Map.of(
                     "symbol", "BTCUSDT", "price", "100000", "funding", "0.0001")) + "\n"
                     + prompts.get(lang, "trader.wake.snapshotRow", Map.of(
                     "symbol", "ETHUSDT", "price", "3000", "funding", "0.0001")) + "\n";
             // 无工具的单次调用：真实提示词会让模型先调工具求证，这里明说工具不可用、直接收束——
             // 验收对象只是收尾格式的服从，不是 ReAct 回路本身
-            String instruction = runner.routineInstruction(trader, boundary, snapshot, null, lang, "")
+            String instruction = runner.routineInstruction(trader, boundary, observation, snapshot, null, lang, "")
                     + (lang == AgentLang.ZH
                     ? "\n（本轮行情工具不可用：直接基于上文注入的账户状态与行情快照收束决策，照常按固定格式收尾。）"
                     : "\n(Market tools are unavailable this round - converge on your decision from the injected account state and snapshot above, and close with the fixed format as usual.)");

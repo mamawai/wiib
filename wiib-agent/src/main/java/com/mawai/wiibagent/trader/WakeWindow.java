@@ -22,11 +22,8 @@ public record WakeWindow(int fromMin, int toMin) {
     private static final Pattern FORMAT = Pattern.compile("^(\\d{2}):(\\d{2})-(\\d{2}):(\\d{2})$");
     private static final long DAY_MS = 86_400_000L;
 
-    /** 严格解析：null/空白 → null(全天)；格式/粒度/起止相同不合法抛 IAE，消息原样回给用户 */
     /**
-     * 解析失败时抛出的 {@code IllegalArgumentException}，其 message 是<b>界面文案词表的 key</b>
-     * 而不是成文的话——这是个纯值对象，不该为了报错去持有词表；渲染归唯一会把它显示出来的
-     * 调用方（{@code TraderService.validate}）。
+     * 解析唤醒时间窗口
      */
     public static WakeWindow parse(String text) {
         if (text == null || text.isBlank()) {

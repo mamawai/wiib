@@ -981,18 +981,6 @@ export interface TraderUpsertRequest {
 }
 
 /** 重要快讯（BlockBeats 缓存透传，plain 为脱 HTML 纯文本） */
-export interface NewsFlashItem {
-  id: number;
-  title: string;
-  plain: string;
-  url: string;
-  /** 形如 "2026-07-09 00:30:12" */
-  createTime: string;
-  /** 英文译文（源是中文快讯）；空=没译成，英文界面回落中文。前端按界面语言现选，切语言不重拉 */
-  titleEn: string | null;
-  plainEn: string | null;
-}
-
 // ========== 留言板与通知 ==========
 
 /** 留言板评论。只有两层：rootId 为空是根评论，非空是该根评论下的子评论。 */

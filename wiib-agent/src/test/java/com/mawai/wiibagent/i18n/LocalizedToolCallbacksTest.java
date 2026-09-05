@@ -12,6 +12,7 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -39,6 +40,17 @@ class LocalizedToolCallbacksTest {
         @Tool(name = "untouched_tool", description = "Annotated untouched description")
         public String untouched() {
             return "untouched";
+        }
+
+        @Tool(name = "boom_tool", description = "Always throws")
+        public String boom() {
+            throw new IllegalStateException("kline data exploded");
+        }
+
+        @Tool(name = "interrupted_tool", description = "Throws with interrupt flag set")
+        public String interrupted() {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("socket closed by interrupt");
         }
     }
 
@@ -83,7 +95,8 @@ class LocalizedToolCallbacksTest {
     @Test
     void 名字与inputSchema照旧由注解推导() {
         assertThat(callbacks(AgentLang.EN).keySet())
-                .containsExactlyInAnyOrder("echo_tool", "zh_only_tool", "untouched_tool");
+                .containsExactlyInAnyOrder("echo_tool", "zh_only_tool", "untouched_tool",
+                        "boom_tool", "interrupted_tool");
         // 参数与其描述都还在自动推导的 schema 里——换描述不能把 schema 弄丢
         assertThat(callbacks(AgentLang.EN).get("echo_tool").getToolDefinition().inputSchema())
                 .contains("text").contains("text to echo");
@@ -99,6 +112,24 @@ class LocalizedToolCallbacksTest {
     @Test
     void 一次可以扫多个工具对象() {
         List<ToolCallback> all = localized.of(AgentLang.ZH, new DemoTools(), new DemoTools());
-        assertThat(all).hasSize(6);
+        assertThat(all).hasSize(10);
+    }
+
+    /** langgraph4j 的工具节点不接异常：抛出去整轮唤醒作废，所以失败必须变成模型看得懂的结果 */
+    @Test
+    void 工具抛异常_回给模型的是失败结果而不是异常() {
+        String result = callbacks(AgentLang.EN).get("boom_tool").call("{}");
+        assertThat(result).contains("\"available\":false").contains("boom_tool failed: kline data exploded");
+    }
+
+    /** 唤醒超时 cancel(true) 打断工具里的 HTTP 时，中断要原样往外抛，否则图会在作废的一轮里接着调模型 */
+    @Test
+    void 带中断标志的异常原样抛出() {
+        try {
+            assertThatThrownBy(() -> callbacks(AgentLang.EN).get("interrupted_tool").call("{}"))
+                    .hasStackTraceContaining("socket closed by interrupt");
+        } finally {
+            assertThat(Thread.interrupted()).isTrue();
+        }
     }
 }

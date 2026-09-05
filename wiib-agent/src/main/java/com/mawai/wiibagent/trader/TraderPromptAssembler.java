@@ -2,22 +2,17 @@ package com.mawai.wiibagent.trader;
 
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.mawai.wiibcommon.entity.AiTrader;
-import com.mawai.wiibcommon.entity.AiTraderDecision;
 import com.mawai.wiibcommon.enums.AgentLang;
 import com.mawai.wiibagent.i18n.PromptCatalog;
 import com.mawai.wiibagent.mapper.AiTraderMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
-import java.time.Instant;
 import java.time.LocalDateTime;
-import java.time.ZoneId;
-import java.time.format.DateTimeFormatter;
-import java.util.List;
 import java.util.Map;
 
 /**
- * trader 系统提示词组装：平台模板 + 账户状态 + 最近决策 + 论点战绩统计 + 复盘笔记 + 学习笔记 + 用户自定义段。
+ * trader 系统提示词组装：平台模板 + 复盘笔记 + 学习笔记 + 用户自定义段 + 固定收尾格式 + 输出语言。
  * 每次唤醒现读现拼——用户改完 customPrompt，下一根 K 线自然生效，热更新零机制。
  * <p>
  * 文本全在 {@link PromptCatalog} 的 {@code trader.*}，按用户的 {@link AgentLang} 取；骨架
@@ -27,7 +22,7 @@ import java.util.Map;
  * 模板的认知设计（顺序即优先级）：
  * ① 身份与记分牌先行——角色决定推理先验，没有身份锚点模型会滑回"有帮助的助手"默认态；
  * ② 单问题框架——每次唤醒只回答"计划需要改变吗"，问题边界越清晰分析越聚焦；
- * ③ 状态与指令分层——账户状态是系统陈述的数据，工具预算留给行情求证，不花在查户口；
+ * ③ 状态与指令分层——账户状态、上一轮结论、事件、战绩都在开场白（user 消息）里，system 只放身份、规则与格式；
  * ④ 检验先于发明——先对上一轮的承诺（等待条件/失效条件）做检验，再考虑新机会，治翻烙饼；
  * ⑤ 固定收尾格式——结论块既是公开展示单元，也是下一轮回注后的检验基准；
  * ⑥ 用户风格指令放最后（近因权重最高）且明示优先级：风格冲突听主人的，硬规格不可覆盖；
@@ -43,19 +38,15 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class TraderPromptAssembler {
 
-    private static final DateTimeFormatter TIME_FMT =
-            DateTimeFormatter.ofPattern("MM-dd HH:mm").withZone(ZoneId.systemDefault());
-
     /** 只为留言而来：注入的同一处就得把轮次减掉，见 {@link #consumeOwnerNote} */
     private final AiTraderMapper traderMapper;
     private final PromptCatalog prompts;
-    private final PlayStatsAssembler playStats;
 
-    public String assemble(AiTrader trader, String accountStateJson, List<AiTraderDecision> recent, AgentLang lang) {
+    public String assemble(AiTrader trader, AgentLang lang) {
         StringBuilder sb = new StringBuilder();
         WakeWindow window = WakeWindow.of(trader);
         String windowText = window == null ? null : window.text();
-        // 用户可退出平台模板（自定义成为唯一指令来源，护栏仍硬校验）；账户状态/最近决策/复盘笔记是数据不是指令，永远注入
+        // 用户可退出平台模板（自定义成为唯一指令来源，护栏仍硬校验）；复盘笔记/学习笔记是数据不是指令，永远注入
         if (!Boolean.FALSE.equals(trader.getUseDefaultPrompt())) {
             sb.append(platformTemplate(lang, trader.getIntervalCode(), trader.getSymbols(),
                     TraderRiskConfig.of(trader), windowText));
@@ -63,37 +54,6 @@ public class TraderPromptAssembler {
             // 退出平台模板时节奏行不在了，时段是事实不是指令，单独补一行——否则模型按"每根K线都醒"管仓位，休眠 12 小时它却不知道
             sb.append('\n').append(prompts.get(lang, "trader.label.wakeWindow",
                     Map.of("window", windowText))).append('\n');
-        }
-
-        sb.append('\n').append(prompts.get(lang, "trader.label.accountState")).append('\n')
-                .append(accountStateJson).append('\n');
-
-        if (recent != null && !recent.isEmpty()) {
-            sb.append('\n').append(prompts.get(lang, "trader.label.recentDecisions",
-                    Map.of("mark", prompts.get(lang, "trader.mark.conclusion")))).append('\n');
-            for (int i = 0; i < recent.size(); i++) {
-                AiTraderDecision d = recent.get(i);
-                sb.append("- ").append(TIME_FMT.format(Instant.ofEpochMilli(d.getWakeTime())))
-                        .append(" [").append(d.getStatus()).append(']');
-                if (d.getEquity() != null) {
-                    sb.append(' ').append(prompts.get(lang, "trader.label.equity", Map.of("value",
-                            d.getEquity().setScale(0, java.math.RoundingMode.HALF_UP))));
-                }
-                String r = d.getReasoning();
-                if (r != null && !r.isBlank()) {
-                    // 最新一条近乎全文，更早的只留概要；截断一律保尾不保头——
-                    // 结论块按纪律收在末尾，保头正好把结论切掉，只剩行情铺垫
-                    int cap = i == 0 ? 1000 : 200;
-                    sb.append(' ').append(r.length() > cap ? "…" + r.substring(r.length() - cap) : r);
-                }
-                sb.append('\n');
-            }
-        }
-
-        // 数据档连排：账户状态/最近决策/论点战绩都是本局事实；null=本局无可统计或取数失败，整块缺席
-        String stats = playStats.assemble(trader, lang);
-        if (stats != null) {
-            sb.append('\n').append(stats);
         }
 
         if (trader.getMemory() != null && !trader.getMemory().isBlank()) {

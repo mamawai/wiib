@@ -404,6 +404,8 @@ const clip = (s: string, n: number) => (s.length > n ? s.slice(0, n) + '…' : s
 
 export function CandleChart({ symbol, interval, limit = 300, visibleBars = 110, klinesFn = futuresApi.klines, streamLive = true, tick = null, indicators = false, onIntervalChange, positionOverlays, tradeMarks, newsTag }: { symbol: string; interval: Interval; limit?: number; visibleBars?: number; klinesFn?: (symbol: string, interval: string, limit: number, endTime?: number) => Promise<number[][]>; streamLive?: boolean; tick?: { price: number; ts: number } | null; indicators?: boolean; onIntervalChange?: (i: Interval) => void; positionOverlays?: PositionOverlay[]; tradeMarks?: TradeMark[]; newsTag?: string }) {
   const { t } = useTranslation('market');
+  // 新闻标记按界面语言取字：英文只留标题正文都译好的，切语言重建标记
+  const uiLang = currentLang();
   const isDark = useIsDark();
   const rootRef = useRef<HTMLDivElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -846,6 +848,7 @@ export function CandleChart({ symbol, interval, limit = 300, visibleBars = 110, 
     const wrap = wrapRef.current, candle = candleRef.current;
     if (!newsTag || !showNews || !wrap || !candle) return;
     let disposed = false;
+    const en = uiLang === 'en';
     const bucketMs = BUCKET_MS[interval];
     /** time → 该桶的快讯组，点击标记时按命中的时间桶取内容 */
     const groups = new Map<number, NewsEventItem[]>();
@@ -861,13 +864,11 @@ export function CandleChart({ symbol, interval, limit = 300, visibleBars = 110, 
       { timeZone: 'Asia/Singapore', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
     const showPopup = (rect: { x: number; y: number; w: number }, events: NewsEventItem[]) => {
       const tip = newsTipRef.current; if (!tip || !events.length) return;
-      // 点开时按界面语言现选：英文界面有译文用译文，缺译文回落中文
-      const en = currentLang() === 'en';
       tip.innerHTML = events.map(e =>
         '<div style="padding:6px 0;border-bottom:1px solid rgba(0,0,0,.07)">'
         + `<div style="color:#6b7280;font-weight:700;margin-bottom:2px">${fmtClock(e.publishedAt)} · ${esc(e.tags)}</div>`
-        + `<div style="color:#1f2328;font-weight:700;margin-bottom:2px">${esc(en && e.titleEn ? e.titleEn : e.title)}</div>`
-        + `<div style="color:#374151">${esc(clip((en && e.contentEn ? e.contentEn : e.content) ?? '', 160))}</div>`
+        + `<div style="color:#1f2328;font-weight:700;margin-bottom:2px">${esc((en ? e.titleEn : e.title) ?? '')}</div>`
+        + `<div style="color:#374151">${esc(clip((en ? e.contentEn : e.content) ?? '', 160))}</div>`
         + (e.url ? `<a href="${esc(e.url)}" target="_blank" rel="noopener noreferrer" style="color:#2962ff;font-weight:700">${i18n.t('market:chart.newsSource')}</a>` : '')
         + '</div>').join('');
       tip.style.display = 'block';
@@ -881,7 +882,8 @@ export function CandleChart({ symbol, interval, limit = 300, visibleBars = 110, 
     // 窗口按内存上限的最远可翻历史算：翻到底标记也都在；服务端上限 500 条倒序保最近
     quantApi.newsEvents(newsTag, Date.now() - bucketMs * MAX_BARS, Date.now() + bucketMs).then(events => {
       if (disposed || !events.length) return;
-      for (const e of events) {
+      // 英文只留标题正文都译好的，没译完的不挂标记，不拿中文凑
+      for (const e of en ? events.filter(e => e.titleEn && e.contentEn) : events) {
         const time = toBarTime(Math.floor(e.publishedAt / bucketMs) * bucketMs);
         const g = groups.get(time) ?? [];
         g.push(e);
@@ -919,7 +921,7 @@ export function CandleChart({ symbol, interval, limit = 300, visibleBars = 110, 
       try { candle.detachPrimitive(layer); } catch { /* chart disposed */ }
       if (newsTipRef.current) newsTipRef.current.style.display = 'none';
     };
-  }, [newsTag, showNews, interval, chartEpoch]);
+  }, [newsTag, showNews, interval, chartEpoch, uiLang]);
 
   // 「最新价 + 收盘倒计时」合体框：顶在价格轴上原生最新价标签的位置（原生标签已关），
   // 上行价格、下行倒计时，一个框解决"倒计时和价格分家"。底色跟当根蜡烛的涨跌走。

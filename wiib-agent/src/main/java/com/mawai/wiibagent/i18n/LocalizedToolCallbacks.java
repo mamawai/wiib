@@ -1,12 +1,16 @@
 package com.mawai.wiibagent.i18n;
 
+import com.alibaba.fastjson2.JSONObject;
 import com.mawai.wiibcommon.enums.AgentLang;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.aop.support.AopUtils;
+import org.springframework.ai.chat.model.ToolContext;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.definition.DefaultToolDefinition;
 import org.springframework.ai.tool.definition.ToolDefinition;
+import org.springframework.ai.tool.execution.ToolExecutionException;
 import org.springframework.ai.tool.metadata.ToolMetadata;
 import org.springframework.ai.tool.method.MethodToolCallback;
 import org.springframework.ai.tool.support.ToolDefinitions;
@@ -31,7 +35,11 @@ import java.util.List;
  * <p>
  * <b>@ToolParam 的参数描述不跟语言走</b>：它嵌在自动推导的 inputSchema 里，换语言要在 schema 层
  * 逐字段改写，复杂度不值。参数描述是字段级技术说明，全仓统一写英文。
+ * <p>
+ * <b>工具失败回给模型，不抛出</b>（{@link FailureAsResult}）：langgraph4j 的工具节点不接异常，
+ * 抛出去整轮就没了。写工具自己都 catch 了，这层兜的是数据工具（K线首拉失败会原样抛）和参数解析失败。
  */
+@Slf4j
 @Component
 @RequiredArgsConstructor
 public class LocalizedToolCallbacks {
@@ -68,12 +76,54 @@ public class LocalizedToolCallbacks {
                         .inputSchema(annotated.inputSchema())
                         .build();
         // 除 definition 外逐项照抄框架的装配，否则 returnDirect、结果转换器这些注解属性会悄悄失效
-        return MethodToolCallback.builder()
+        return new FailureAsResult(MethodToolCallback.builder()
                 .toolDefinition(definition)
                 .toolMetadata(ToolMetadata.from(method))
                 .toolMethod(method)
                 .toolObject(toolObject)
                 .toolCallResultConverter(ToolUtils.getToolCallResultConverter(method))
-                .build();
+                .build());
+    }
+
+    /** 异常 → {"available":false,"reason":...}，与数据工具自己的"取不到"同一形状，模型看得懂就能换个参数或换条路 */
+    private record FailureAsResult(ToolCallback inner) implements ToolCallback {
+
+        private static final int MAX_REASON_CHARS = 300;
+
+        @Override
+        public ToolDefinition getToolDefinition() {
+            return inner.getToolDefinition();
+        }
+
+        @Override
+        public ToolMetadata getToolMetadata() {
+            return inner.getToolMetadata();
+        }
+
+        @Override
+        public String call(String toolInput) {
+            return call(toolInput, null);
+        }
+
+        @Override
+        public String call(String toolInput, ToolContext toolContext) {
+            try {
+                return inner.call(toolInput, toolContext);
+            } catch (RuntimeException e) {
+                // 唤醒超时 cancel(true) 打断的是这里的 HTTP：中断必须原样往外抛，吞成结果图会接着调模型
+                if (Thread.currentThread().isInterrupted()) {
+                    throw e;
+                }
+                Throwable cause = e instanceof ToolExecutionException && e.getCause() != null ? e.getCause() : e;
+                String reason = cause.getMessage() == null ? cause.getClass().getSimpleName() : cause.getMessage();
+                if (reason.length() > MAX_REASON_CHARS) {
+                    reason = reason.substring(0, MAX_REASON_CHARS) + "…";
+                }
+                String name = inner.getToolDefinition().name();
+                log.warn("[Tool] {} 执行失败，回给模型: {}", name, reason, cause);
+                return new JSONObject().fluentPut("available", false)
+                        .fluentPut("reason", name + " failed: " + reason).toJSONString();
+            }
+        }
     }
 }

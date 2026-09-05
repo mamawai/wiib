@@ -3,6 +3,7 @@ package com.mawai.wiibagent.trader;
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONObject;
 import com.mawai.wiibcommon.dto.FuturesOrderResponse;
+import com.mawai.wiibcommon.dto.FuturesPositionDTO;
 import com.mawai.wiibcommon.entity.AiTraderPlan;
 import com.mawai.wiibcommon.enums.AgentLang;
 import com.mawai.wiibagent.i18n.PromptCatalog;
@@ -18,7 +19,7 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * 账户状态 JSON 的挂单段：开仓挂单随计划带上挂出时刻与已挂时长。
+ * 账户状态 JSON：挂单段随计划带上挂出时刻与已挂时长；持仓行带杠杆/标记价/强平价；修订史时间是时刻不是毫秒。
  * 挂单回注若只有 playType/失效条件，模型无从知道这张限价单挂了多久——
  * 线上一张限价单挂 5 小时后在瀑布里成交、2 分钟止损，就是这个信息缺口。
  */
@@ -56,5 +57,49 @@ class TraderWakeupRunnerAccountStateTest {
         assertThat(planJson.getString("placedAt")).isEqualTo(FMT.format(Instant.ofEpochMilli(placed)));
         assertThat(planJson.getString("pendingFor"))
                 .isEqualTo(prompts.get(AgentLang.ZH, "trader.wake.held.hours", Map.of("n", 5L)));
+    }
+
+    /** 持仓行带杠杆/标记价/强平价（同币杠杆一致的硬规则要看得见现有杠杆），权益两位小数 */
+    @Test
+    void positionRowCarriesLeverageMarkAndLiquidation() {
+        FuturesPositionDTO p = new FuturesPositionDTO();
+        p.setId(349L);
+        p.setSymbol("BTCUSDT");
+        p.setSide("LONG");
+        p.setQuantity(new BigDecimal("0.2"));
+        p.setEntryPrice(new BigDecimal("63500"));
+        p.setLeverage(10);
+        p.setMarkPrice(new BigDecimal("64000"));
+        p.setLiquidationPrice(new BigDecimal("58000"));
+        p.setUnrealizedPnl(new BigDecimal("100"));
+
+        String json = TraderWakeupRunner.accountStateJson(prompts, AgentLang.ZH, new BigDecimal("15833"),
+                List.of(p), List.of(), List.of(), BOUNDARY);
+
+        assertThat(json).contains("\"leverage\":10").contains("\"markPrice\":64000")
+                .contains("\"liquidationPrice\":58000").contains("\"equity\":15833.00");
+    }
+
+    /** 修订史的 time 库里是 epoch 毫秒，注入时转成时刻 */
+    @Test
+    void revisionTimeRenderedAsClock() {
+        FuturesPositionDTO p = new FuturesPositionDTO();
+        p.setId(349L);
+        p.setSymbol("BTCUSDT");
+        p.setSide("LONG");
+        p.setQuantity(new BigDecimal("0.2"));
+        p.setEntryPrice(new BigDecimal("63500"));
+        AiTraderPlan plan = new AiTraderPlan();
+        plan.setSymbol("BTCUSDT");
+        plan.setSide("LONG");
+        plan.setPlayType("REVERSAL");
+        plan.setOpenedWakeTime(BOUNDARY - 3600_000L);
+        plan.setRevisionsJson("[{\"time\":1785169800000,\"type\":\"移动止盈\",\"change\":\"66000→68000\",\"reason\":\"趋势加速\"}]");
+
+        String json = TraderWakeupRunner.accountStateJson(prompts, AgentLang.ZH, new BigDecimal("15833"),
+                List.of(p), List.of(), List.of(plan), BOUNDARY);
+
+        assertThat(json).contains(FMT.format(Instant.ofEpochMilli(1785169800000L)))
+                .doesNotContain("1785169800000");
     }
 }

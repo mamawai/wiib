@@ -14,6 +14,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -114,31 +115,50 @@ public class TraderPlanStore {
                 .eq(AiTraderPlan::getStatus, AiTraderPlan.STATUS_LIVE));
     }
 
+    /** 一趟懒清理的结果：还活着的、这趟归档的、这趟刚补绑仓位 id 的（限价成交） */
+    public record Cleanup(List<AiTraderPlan> live, List<AiTraderPlan> closed, List<AiTraderPlan> filled) {
+    }
+
     /**
      * 懒清理 + 补绑：计划的 (symbol|side) 既无持仓也无挂单 → 止损/止盈/主动平/撤单殊途同归，
-     * 计划完成使命，归档带上了结时刻。返回仍存活的计划（清理与查询一次唤醒只跑一趟）。
+     * 计划完成使命，归档带上了结时刻。三份名单一起返回（清理与查询一次唤醒只跑一趟）：
+     * 存活的回注账户状态，归档/补绑的进开场白的事件块。
      * <p>
      * 补绑：LIVE 计划无 positionId（限价挂单成交前响应里没有）且同键有在场仓位 → 盖仓位 id。
      * liveKeys 含挂单键（挂单保活的计划没有仓位可绑），所以映射单独传；同键至多一仓，无歧义。
      */
-    public List<AiTraderPlan> cleanupStale(long traderId, int roundNo, Set<String> liveKeys,
-                                           Map<String, Long> positionIdByKey, long boundaryTime) {
-        List<AiTraderPlan> plans = list(traderId, roundNo);
-        return plans.stream().filter(p -> {
+    public Cleanup cleanupStale(long traderId, int roundNo, Set<String> liveKeys,
+                                Map<String, Long> positionIdByKey, long boundaryTime) {
+        List<AiTraderPlan> live = new ArrayList<>();
+        List<AiTraderPlan> closed = new ArrayList<>();
+        List<AiTraderPlan> filled = new ArrayList<>();
+        for (AiTraderPlan p : list(traderId, roundNo)) {
             if (liveKeys.contains(key(p.getSymbol(), p.getSide()))) {
                 Long posId = positionIdByKey.get(key(p.getSymbol(), p.getSide()));
                 if (p.getPositionId() == null && posId != null) {
                     p.setPositionId(posId);
                     mapper.updateById(p);
+                    filled.add(p);
                     log.info("[TraderPlan] 限价成交补绑仓位id traderId={} {} {} positionId={}",
                             traderId, p.getSymbol(), p.getSide(), posId);
                 }
-                return true;
+                live.add(p);
+                continue;
             }
             archive(p, boundaryTime);
+            closed.add(p);
             log.info("[TraderPlan] 归档已了结计划 traderId={} {} {}", traderId, p.getSymbol(), p.getSide());
-            return false;
-        }).toList();
+        }
+        return new Cleanup(live, closed, filled);
+    }
+
+    /** 按仓位 id 找存活计划：平仓工具手里只有 positionId */
+    public AiTraderPlan findLiveByPositionId(long traderId, int roundNo, long positionId) {
+        return mapper.selectOne(new LambdaQueryWrapper<AiTraderPlan>()
+                .eq(AiTraderPlan::getTraderId, traderId)
+                .eq(AiTraderPlan::getRoundNo, roundNo)
+                .eq(AiTraderPlan::getPositionId, positionId)
+                .eq(AiTraderPlan::getStatus, AiTraderPlan.STATUS_LIVE));
     }
 
     /** 按 id 取计划（stale 开关的归属校验用），无则 null。 */

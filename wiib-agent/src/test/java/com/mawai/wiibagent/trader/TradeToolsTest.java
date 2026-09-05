@@ -61,7 +61,7 @@ class TradeToolsTest {
     private final SimTradeClient simTradeClient = mock(SimTradeClient.class);
     private final AiTraderPlanMapper planMapper = mock(AiTraderPlanMapper.class);
     private final TradeTools tools = new TradeTools(simTradeClient, 99L, Set.of("BTCUSDT"),
-            new BigDecimal("10000"), sym -> new BigDecimal("100000"),
+            positions -> new BigDecimal("10000"), sym -> new BigDecimal("100000"),
             new TraderPlanStore(planMapper, PROMPTS),
             new TradeTools.WakeCtx(7L, 1, 1785171600000L, DEADLINE,
                     new TraderRiskConfig(1, 20, new BigDecimal("1"), new BigDecimal("50"),
@@ -407,7 +407,7 @@ class TradeToolsTest {
     @Test
     void expiredRoundRejectsAllWriteTools() {
         TradeTools late = new TradeTools(simTradeClient, 99L, Set.of("BTCUSDT"),
-                new BigDecimal("10000"), sym -> new BigDecimal("100000"),
+                positions -> new BigDecimal("10000"), sym -> new BigDecimal("100000"),
                 new TraderPlanStore(planMapper, PROMPTS),
                 new TradeTools.WakeCtx(7L, 1, 1785171600000L, System.currentTimeMillis() - 1,
                         new TraderRiskConfig(1, 20, new BigDecimal("1"), new BigDecimal("50"),
@@ -429,7 +429,7 @@ class TradeToolsTest {
     @Test
     void blankSymbolRejectedBeforeMarketFetch() {
         TradeTools strict = new TradeTools(simTradeClient, 99L, Set.of("BTCUSDT"),
-                new BigDecimal("10000"),
+                positions -> new BigDecimal("10000"),
                 sym -> { throw new IllegalStateException("不该发起行情查询"); },
                 new TraderPlanStore(planMapper, PROMPTS),
                 new TradeTools.WakeCtx(7L, 1, 1785171600000L, DEADLINE,
@@ -491,6 +491,44 @@ class TradeToolsTest {
 
         assertThat(r).doesNotStartWith("REJECTED").contains("778");
         verify(simTradeClient).closePosition(eq(99L), any());
+    }
+
+    /** 平仓理由进计划修订史：归档后复盘看得到"为什么平"，不再只留在 actions_json 里 */
+    @Test
+    void closeLeavesReasonInPlanRevisions() {
+        AiTraderPlan plan = existingPlan();
+        plan.setPositionId(42L);
+        when(planMapper.selectOne(any())).thenReturn(plan);
+        FuturesOrderResponse resp = new FuturesOrderResponse();
+        resp.setOrderId(779L);
+        when(simTradeClient.closePosition(eq(99L), any())).thenReturn(resp);
+
+        String r = tools.closePosition(42L, 0.01, "失效条件触发：1h收盘跌破64200");
+
+        assertThat(r).contains("779");
+        ArgumentCaptor<AiTraderPlan> cap = ArgumentCaptor.forClass(AiTraderPlan.class);
+        verify(planMapper).updateById(cap.capture());
+        assertThat(cap.getValue().getRevisionsJson()).contains("平仓").contains("1h收盘跌破64200").contains("0.01");
+    }
+
+    /**
+     * 保证金占比按开仓那一刻现算的权益：同一轮先平后开，护栏要按平完之后的权益算。
+     * 按 10000 权益合法的数量（保证金 4000=40%），权益只剩 5000 时就是 80%，拒且给出允许的数量区间
+     */
+    @Test
+    void marginBandUsesEquityAtOpenTime() {
+        TradeTools poorer = new TradeTools(simTradeClient, 99L, Set.of("BTCUSDT"),
+                positions -> new BigDecimal("5000"), sym -> new BigDecimal("100000"),
+                new TraderPlanStore(planMapper, PROMPTS),
+                new TradeTools.WakeCtx(7L, 1, 1785171600000L, DEADLINE,
+                        new TraderRiskConfig(1, 20, new BigDecimal("1"), new BigDecimal("50"),
+                                true, true), AgentLang.ZH), PROMPTS, MESSAGES);
+
+        String r = poorer.openPosition("BTCUSDT", "LONG", "MARKET", 0.4, 10,
+                null, 95000.0, null, "BREAKOUT", "突破前高", "1h收盘跌回箱体内");
+
+        assertThat(r).startsWith("REJECTED").contains("数量应在");
+        verify(simTradeClient, never()).openPosition(anyLong(), any());
     }
 
     /** 加仓覆盖：旧论点进修订历史（含理由），持有时长按最初开仓算；sim 并仓 id 不变，绑定跟着保留 */

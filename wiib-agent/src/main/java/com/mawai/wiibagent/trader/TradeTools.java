@@ -54,7 +54,8 @@ public class TradeTools {
     private final SimTradeClient simTradeClient;
     private final long simUserId;
     private final Set<String> symbolWhitelist;
-    private final BigDecimal equity;
+    /** 按现查持仓算权益：同一轮先平后开，护栏要按平完之后的权益算占比 */
+    private final Function<List<FuturesPositionDTO>, BigDecimal> equityOf;
     /** 现价查询（symbol → mark price）；由唤醒回路注入，通常取最近K线收盘价 */
     private final Function<String, BigDecimal> markPrice;
     private final TraderPlanStore planStore;
@@ -67,13 +68,13 @@ public class TradeTools {
     private final List<JSONObject> actions = new ArrayList<>();
 
     public TradeTools(SimTradeClient simTradeClient, long simUserId, Set<String> symbolWhitelist,
-                      BigDecimal equity, Function<String, BigDecimal> markPrice,
+                      Function<List<FuturesPositionDTO>, BigDecimal> equityOf, Function<String, BigDecimal> markPrice,
                       TraderPlanStore planStore, WakeCtx ctx,
                       PromptCatalog prompts, MessageCatalog messages) {
         this.simTradeClient = simTradeClient;
         this.simUserId = simUserId;
         this.symbolWhitelist = symbolWhitelist;
-        this.equity = equity;
+        this.equityOf = equityOf;
         this.markPrice = markPrice;
         this.planStore = planStore;
         this.ctx = ctx;
@@ -90,8 +91,8 @@ public class TradeTools {
     @Tool(name = "get_account", description = """
             Get your full account state: available balance, open positions (with id, side, quantity,
             entry price, leverage, unrealized PnL, liquidation price, current stop-loss/take-profit)
-            and pending limit orders. This same state is already injected into your prompt every
-            round, so you normally do not need to call this; use it only to re-read positionIds or
+            and pending limit orders. This same state is already injected into your opening message
+            every round (the [Account] block), so you normally do not need to call this; use it only
             to confirm the account after your own trades within this round.""")
     public String getAccount() {
         try {
@@ -171,6 +172,7 @@ public class TradeTools {
             return fail("open_position", argSummary, e);
         }
         Account acct = account();
+        BigDecimal equity = equityOf.apply(acct.positions());
         String reject = TradeGuard.validateOpen(req, equity, mark, symbolWhitelist, ctx.risk(), acct.snaps(),
                 prompts, ctx.lang());
         if (reject != null) {
@@ -236,10 +238,10 @@ public class TradeTools {
     }
 
     @Tool(name = "close_position", description = """
-            Close (part of) an open position by positionId (get it from get_account), at market price.
+            Close (part of) an open position by positionId (from the [Account] block in your opening message, or get_account), at market price.
             quantity: coins to close; pass the full position quantity to close it entirely.
             reason: one sentence on why you are closing now.""")
-    public String closePosition(@ToolParam(description = "Position id from get_account") long positionId,
+    public String closePosition(@ToolParam(description = "Position id from the [Account] block in your opening message (or get_account)") long positionId,
                                 @ToolParam(description = "Quantity in coins to close") double quantity,
                                 @ToolParam(description = "One sentence: why close now") String reason) {
         JSONObject args = new JSONObject()
@@ -256,6 +258,7 @@ public class TradeTools {
             req.setOrderType("MARKET");
             req.setClientRequestId(UUID.randomUUID().toString());
             FuturesOrderResponse resp = SimOrderRetry.send(() -> simTradeClient.closePosition(simUserId, req));
+            reviseClose(positionId, BigDecimal.valueOf(quantity).stripTrailingZeros().toPlainString(), reason);
             return ok("close_position", args, JSON.toJSONString(resp));
         } catch (SimOrderRetry.UnknownOutcome e) {
             return unknown("close_position", args, e);
@@ -265,7 +268,7 @@ public class TradeTools {
     }
 
     @Tool(name = "set_stop_loss", description = """
-            Replace the stop-loss of an open position (positionId from get_account). The new stop
+            Replace the stop-loss of an open position (positionId from the [Account] block in your opening message, or get_account). The new stop
             always covers the WHOLE position — you do not pass a quantity. TIGHTEN ONLY:
             LONG stops may only move UP, SHORT stops only DOWN (relative to the current stop) —
             widening a stop means your thesis is shaken; check your invalidation condition instead.
@@ -273,7 +276,7 @@ public class TradeTools {
             in loss — that is a panic exit in disguise; if the thesis is invalidated, say so and use
             close_position instead. reason is REQUIRED and becomes part of the position's public
             plan revision history.""")
-    public String setStopLoss(@ToolParam(description = "Position id from get_account") long positionId,
+    public String setStopLoss(@ToolParam(description = "Position id from the [Account] block in your opening message (or get_account)") long positionId,
                               @ToolParam(description = "New stop-loss price") double stopLossPrice,
                               @ToolParam(description = "Why you move the stop now, e.g. 'price +2R, lock breakeven'") String reason) {
         JSONObject args = new JSONObject()
@@ -332,12 +335,12 @@ public class TradeTools {
     }
 
     @Tool(name = "set_take_profit", description = """
-            Replace the take-profit of an open position (positionId from get_account). The new target
+            Replace the take-profit of an open position (positionId from the [Account] block in your opening message, or get_account). The new target
             always covers the WHOLE position — you do not pass a quantity. AWAY ONLY:
             LONG targets may only move UP, SHORT targets only DOWN — lowering a LONG target toward
             price would be a disguised panic exit; to leave early, cite your invalidation condition
             and use close_position instead. reason is REQUIRED (public plan revision history).""")
-    public String setTakeProfit(@ToolParam(description = "Position id from get_account") long positionId,
+    public String setTakeProfit(@ToolParam(description = "Position id from the [Account] block in your opening message (or get_account)") long positionId,
                                 @ToolParam(description = "New take-profit price") double takeProfitPrice,
                                 @ToolParam(description = "Why you move the target now, e.g. 'trend accelerating, extend to next resistance'") String reason) {
         JSONObject args = new JSONObject()
@@ -393,10 +396,10 @@ public class TradeTools {
     }
 
     @Tool(name = "write_plan", description = """
-            Backfill a trading plan for an open position that has NO plan record (positionId from
-            get_account). Rejected if the position already has a plan — plans are immutable; the only
+            Backfill a trading plan for an open position that has NO plan record (positionId from the
+            [Account] block in your opening message, or get_account). Rejected if the position already has a plan — plans are immutable; the only
             legal ways to change a thesis are adding to the position or closing and reopening.""")
-    public String writePlan(@ToolParam(description = "Position id from get_account") long positionId,
+    public String writePlan(@ToolParam(description = "Position id from the [Account] block in your opening message (or get_account)") long positionId,
                             @ToolParam(description = "Thesis label: BREAKOUT/PULLBACK/REVERSAL/TREND_FOLLOW/RANGE/NEWS/FUNDING/OTHER") String playType,
                             @ToolParam(description = "One sentence citing concrete data behind holding this position") String signalsUsed,
                             @ToolParam(description = "Market condition that proves this thesis wrong (NOT a PnL number)") String invalidationCondition,
@@ -506,6 +509,19 @@ public class TradeTools {
         }
     }
 
+    /** 平仓/减仓留痕：平仓工具手里只有 positionId，按它找计划。交易已成交，留痕失败只记日志不回错——回错会诱导模型再平一次 */
+    private void reviseClose(long positionId, String change, String reason) {
+        try {
+            AiTraderPlan plan = planStore.findLiveByPositionId(ctx.traderId(), ctx.roundNo(), positionId);
+            // 旧仓可能没有计划，revisePlan 同款
+            if (plan != null) {
+                planStore.revise(plan, ctx.boundaryTime(), prompts.get(ctx.lang(), "trader.revise.close"), change, reason);
+            }
+        } catch (Exception e) {
+            log.warn("[TradeTools] 平仓留痕失败 traderId={} positionId={} msg={}", ctx.traderId(), positionId, e.getMessage());
+        }
+    }
+
     /** 本轮预算已耗尽：唤醒回路那边正在超时作废，这时候再下单就是给下一轮留没人认领的仓位。 */
     private boolean roundExpired() {
         return System.currentTimeMillis() > ctx.deadlineMs();
@@ -532,8 +548,8 @@ public class TradeTools {
         return "REJECTED: " + reason;
     }
 
-    @Tool(name = "cancel_order", description = "Cancel a pending limit order by orderId (from get_account pendingOrders).")
-    public String cancelOrder(@ToolParam(description = "Order id from get_account pendingOrders") long orderId) {
+    @Tool(name = "cancel_order", description = "Cancel a pending limit order by orderId (from the [Account] block's pendingOrders in your opening message, or get_account).")
+    public String cancelOrder(@ToolParam(description = "Order id from the [Account] block's pendingOrders in your opening message (or get_account)") long orderId) {
         JSONObject args = new JSONObject().fluentPut("orderId", orderId);
         if (roundExpired()) {
             return expired("cancel_order", args);

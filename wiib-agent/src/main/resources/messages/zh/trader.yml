@@ -23,6 +23,7 @@ trader:
     badInterval: K线级别仅支持 5m/15m/1h/4h
     windowNeverWakes: 唤醒时段内没有任何一根 {{interval}} K线收盘，等于永远不会醒；请放宽时段或换档位
     symbolRequired: 至少选择一个交易币种
+    tooManySymbols: 交易币种最多 {{max}} 个（一次唤醒的工具预算与注意力都按币摊）
     symbolNotAllowed: "币种超出可交易范围: {{whitelist}}"
     promptTooLong: 自定义提示词不超过4000字符
     customPromptRequired: 已取消平台系统提示词，自定义提示词不能为空

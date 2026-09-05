@@ -267,6 +267,7 @@
     "nextDay": "（次日）",
     "sameTime": "起止不能相同（全天请关闭时段）",
     "symbols": "交易币种",
+    "symbolsHint": "最多 {{max}} 个：工具预算与注意力按币摊",
     "specTitle": "仓位规格（强制执行，AI 不得篡改）",
     "specHint": "区间＝必须从中选，不是上限",
     "leverage": "杠杆区间（1~125 倍）",

@@ -145,8 +145,8 @@ tool:
   get_account: |-
     Get your full account state: available balance, open positions (with id, side, quantity,
     entry price, leverage, unrealized PnL, liquidation price, current stop-loss/take-profit)
-    and pending limit orders. This same state is already injected into your prompt every
-    round, so you normally do not need to call this; use it only to re-read positionIds or
+    and pending limit orders. This same state is already injected into your opening message
+    every round (the [Account] block), so you normally do not need to call this; use it only
     to confirm the account after your own trades within this round.
 
   open_position: |-
@@ -163,12 +163,12 @@ tool:
     number) — it becomes part of your position's plan and is your only ground for manual exit.
 
   close_position: |-
-    Close (part of) an open position by positionId (get it from get_account), at market price.
+    Close (part of) an open position by positionId (from the [Account] block in your opening message, or get_account), at market price.
     quantity: coins to close; pass the full position quantity to close it entirely.
     reason: one sentence on why you are closing now.
 
   set_stop_loss: |-
-    Replace the stop-loss of an open position (positionId from get_account). The new stop
+    Replace the stop-loss of an open position (positionId from the [Account] block in your opening message, or get_account). The new stop
     always covers the WHOLE position — you do not pass a quantity. TIGHTEN ONLY:
     LONG stops may only move UP, SHORT stops only DOWN (relative to the current stop) —
     widening a stop means your thesis is shaken; check your invalidation condition instead.
@@ -178,18 +178,18 @@ tool:
     plan revision history.
 
   set_take_profit: |-
-    Replace the take-profit of an open position (positionId from get_account). The new target
+    Replace the take-profit of an open position (positionId from the [Account] block in your opening message, or get_account). The new target
     always covers the WHOLE position — you do not pass a quantity. AWAY ONLY:
     LONG targets may only move UP, SHORT targets only DOWN — lowering a LONG target toward
     price would be a disguised panic exit; to leave early, cite your invalidation condition
     and use close_position instead. reason is REQUIRED (public plan revision history).
 
   write_plan: |-
-    Backfill a trading plan for an open position that has NO plan record (positionId from
-    get_account). Rejected if the position already has a plan — plans are immutable; the only
+    Backfill a trading plan for an open position that has NO plan record (positionId from the
+    [Account] block in your opening message, or get_account). Rejected if the position already has a plan — plans are immutable; the only
     legal ways to change a thesis are adding to the position or closing and reopening.
 
-  cancel_order: Cancel a pending limit order by orderId (from get_account pendingOrders).
+  cancel_order: Cancel a pending limit order by orderId (from the [Account] block's pendingOrders in your opening message, or get_account).
 
   # Behaviour analysis: one call = 10 internal data endpoints + one large deep-model call. Same shape
   # as run_deep_analysis; only the trigger phrases follow the language.

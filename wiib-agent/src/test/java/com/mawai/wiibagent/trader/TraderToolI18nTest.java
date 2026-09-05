@@ -46,7 +46,7 @@ class TraderToolI18nTest {
 
     private final TraderWakeupRunner runner = new TraderWakeupRunner(
             mock(TraderModelFactory.class),
-            new TraderPromptAssembler(mock(AiTraderMapper.class), prompts, mock(PlayStatsAssembler.class)),
+            new TraderPromptAssembler(mock(AiTraderMapper.class), prompts),
             mock(SimTradeClient.class), binance,
             new IndicatorToolkit(new KlineFetcher(binance, 60_000)),
             new MarketToolkit(mock(MarketDataService.class)),
@@ -57,11 +57,11 @@ class TraderToolI18nTest {
             new MessageCatalog(),
             new LocalizedToolCallbacks(prompts),
             mock(com.mawai.wiibagent.learning.ReviewMaterialAssembler.class),
-            mock(EconCalendarAssembler.class));
+            mock(EconCalendarAssembler.class), mock(PlayStatsAssembler.class));
 
     /** 只做反射扫描的壳：工具方法一个都不会被调起来，依赖给 null 即可 */
     private final TradeTools tradeTools = new TradeTools(
-            mock(SimTradeClient.class), 1L, Set.of("BTCUSDT"), BigDecimal.TEN,
+            mock(SimTradeClient.class), 1L, Set.of("BTCUSDT"), positions -> BigDecimal.TEN,
             sym -> BigDecimal.ONE,
             new TraderPlanStore(mock(AiTraderPlanMapper.class), prompts),
             new TradeTools.WakeCtx(1L, 1, 0L, Long.MAX_VALUE, null, AgentLang.ZH), prompts, new MessageCatalog());
