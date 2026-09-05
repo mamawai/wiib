@@ -3,8 +3,7 @@ import { Languages } from 'lucide-react';
 import { Button } from './ui/button';
 import { Card, CardContent } from './ui/card';
 import { cn } from '../lib/utils';
-import { currentLang, type Lang } from '../i18n';
-import { applyLanguage } from '../lib/language';
+import i18n, { currentLang, type Lang } from '../i18n';
 
 /**
  * 语言名一律用本族语写死，不跟着界面语言翻译——中文在英文界面里也该是"中文"，
@@ -12,11 +11,14 @@ import { applyLanguage } from '../lib/language';
  */
 const LANG_LABEL: Record<Lang, string> = { zh: '中文', en: 'English' };
 
-/** 当前语言与"点一下切到哪"。只有两门语言，点按直切，不做下拉 */
+/**
+ * 当前语言与"点一下切到哪"。只有两门语言，点按直切，不做下拉。
+ * 只切界面，不碰服务端：agent 提示词语言是另一个开关（配置页 AgentLangSetting）。
+ */
 function useLangToggle() {
   const current = currentLang();
   const next: Lang = current === 'zh' ? 'en' : 'zh';
-  return { current, next, toggle: () => applyLanguage(next) };
+  return { current, next, toggle: () => void i18n.changeLanguage(next) };
 }
 
 /**

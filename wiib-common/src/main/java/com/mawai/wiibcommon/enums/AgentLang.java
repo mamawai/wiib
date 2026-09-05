@@ -6,8 +6,8 @@ import java.util.Optional;
 /**
  * AI 产出语言：系统提示词、工具描述、模型回答一律跟它走——全中文就全中文，全英文就全英文。
  * <p>
- * 语言码与前端 i18n 的 Lang 逐字相同（zh/en），落库在 {@code user.lang} 列；
- * 前端 localStorage(wiib-lang) 是唯一事实源，登录/切换时推给服务端，服务端那份只决定 AI 产出。
+ * 语言码与前端 i18n 的 Lang 逐字相同（zh/en），落库在 {@code user.lang} 列。
+ * 与界面语言（前端 localStorage）是两个开关：建号时取当时的界面语言当初值，之后只在配置页改。
  * <p>
  * 【改名警告】code() 的字符串就是 user.lang 列里存的值，也是 prompts/&lt;code&gt;/ 词表目录名，
  * 上线后只准加新的，不准改名。

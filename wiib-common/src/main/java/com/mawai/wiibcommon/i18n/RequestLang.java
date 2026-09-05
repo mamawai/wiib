@@ -5,9 +5,9 @@ import com.mawai.wiibcommon.enums.AgentLang;
 /**
  * 当次请求的<b>界面语言</b>，由 {@link RequestLangFilter} 从 {@code X-Lang} 头填进来。
  * <p>
- * <b>为什么不查 user.lang 列</b>：{@link AgentLang} 说得明白——前端 localStorage 是语言的唯一
- * 事实源，服务端那一列只决定 AI 产出。而报错里有一大半发生在<b>没登录</b>的时候（登录失败、
- * 邀请码无效、限流），那时候根本没有 userId 可查。头是唯一在所有场景下都在的来源。
+ * <b>为什么不查 user.lang 列</b>：那一列是 agent 提示词语言，跟界面语言是两个开关（见 {@link AgentLang}）。
+ * 而且报错里有一大半发生在<b>没登录</b>的时候（登录失败、邀请码无效、限流），那时候根本没有
+ * userId 可查。头是唯一在所有场景下都在的来源。
  * <p>
  * <b>为什么用 ThreadLocal</b>：报错抛在 service 深处，异常一路冒到全局处理器才渲染成文案；
  * 沿途把语言当参数传一遍要动上百个方法签名，而它跟业务毫无关系。

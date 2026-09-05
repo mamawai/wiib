@@ -81,8 +81,8 @@ public class User {
     private Boolean profilePublic;
 
     /**
-     * AI 产出语言（{@link com.mawai.wiibcommon.enums.AgentLang} 的 code：zh/en），NULL=跟随中文。
-     * 只管后端 AI 的提示词与回答语言；界面语言在前端 localStorage，不从这里读。
+     * agent 提示词语言（{@link com.mawai.wiibcommon.enums.AgentLang} 的 code：zh/en），NULL=跟随中文。
+     * 建号时取当时的界面语言，之后只在配置页改；界面语言在前端 localStorage，两边互不影响。
      */
     private String lang;
 

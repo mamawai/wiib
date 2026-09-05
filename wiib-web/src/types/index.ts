@@ -988,8 +988,9 @@ export interface NewsFlashItem {
   url: string;
   /** 形如 "2026-07-09 00:30:12" */
   createTime: string;
-  /** true=标题/正文是机器译文（源是中文快讯）；取哪份由后端按用户语言定，前端只负责打标 */
-  translated: boolean;
+  /** 英文译文（源是中文快讯）；空=没译成，英文界面回落中文。前端按界面语言现选，切语言不重拉 */
+  titleEn: string | null;
+  plainEn: string | null;
 }
 
 // ========== 留言板与通知 ==========

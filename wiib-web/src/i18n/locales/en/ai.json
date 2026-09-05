@@ -19,6 +19,11 @@
   "tab": {
     "config": "Model config"
   },
+  "agentLang": {
+    "title": "Agent prompts language",
+    "desc": "Only the language of AI prompts and answers. Set it here; the top-bar interface language switch does not change it.",
+    "failed": "Save failed"
+  },
   "behavior": {
     "title": "Behavior analysis",
     "detail": "Breakdown",

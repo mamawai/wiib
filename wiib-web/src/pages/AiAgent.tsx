@@ -1,9 +1,10 @@
 import { useTranslation } from 'react-i18next';
+import { AgentLangSetting } from '../components/AgentLangSetting';
 import { ModelConfig } from '../components/ModelConfig';
 import { KeyRound } from 'lucide-react';
 
 /**
- * 「配置」页：只有 BYOK 模型端点这一件事，所以没有 tab 壳。
+ * 「配置」页：agent 提示词语言 + BYOK 模型端点，两块单列摆，没有 tab 壳。
  * 行为分析在对话里（analyze_my_behavior 工具，见 workbench/BehaviorReportCard）。
  */
 export function AiAgent() {
@@ -17,6 +18,8 @@ export function AiAgent() {
           <KeyRound className="w-4 h-4 text-primary" />
           {t('tab.config')}
         </div>
+        {/* agent 提示词语言：只在这里改，不随顶栏界面语言变 */}
+        <AgentLangSetting />
         {/* 模型配置（BYOK）：对话 agent + 交易员 agent 两份端点 */}
         <ModelConfig />
       </div>

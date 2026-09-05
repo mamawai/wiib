@@ -1,7 +1,7 @@
 import { cn, fmtNum, fmtDateTime } from '../lib/utils';
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
-import i18n from '../i18n';
+import i18n, { currentLang } from '../i18n';
 import {
   createChart, createSeriesMarkers, CrosshairMode, CandlestickSeries, HistogramSeries, LineSeries, LineStyle,
   type IChartApi, type ISeriesApi, type UTCTimestamp, type MouseEventParams,
@@ -861,11 +861,13 @@ export function CandleChart({ symbol, interval, limit = 300, visibleBars = 110, 
       { timeZone: 'Asia/Singapore', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
     const showPopup = (rect: { x: number; y: number; w: number }, events: NewsEventItem[]) => {
       const tip = newsTipRef.current; if (!tip || !events.length) return;
+      // 点开时按界面语言现选：英文界面有译文用译文，缺译文回落中文
+      const en = currentLang() === 'en';
       tip.innerHTML = events.map(e =>
         '<div style="padding:6px 0;border-bottom:1px solid rgba(0,0,0,.07)">'
         + `<div style="color:#6b7280;font-weight:700;margin-bottom:2px">${fmtClock(e.publishedAt)} · ${esc(e.tags)}</div>`
-        + `<div style="color:#1f2328;font-weight:700;margin-bottom:2px">${esc(e.title)}</div>`
-        + `<div style="color:#374151">${esc(clip(e.content ?? '', 160))}</div>`
+        + `<div style="color:#1f2328;font-weight:700;margin-bottom:2px">${esc(en && e.titleEn ? e.titleEn : e.title)}</div>`
+        + `<div style="color:#374151">${esc(clip((en && e.contentEn ? e.contentEn : e.content) ?? '', 160))}</div>`
         + (e.url ? `<a href="${esc(e.url)}" target="_blank" rel="noopener noreferrer" style="color:#2962ff;font-weight:700">${i18n.t('market:chart.newsSource')}</a>` : '')
         + '</div>').join('');
       tip.style.display = 'block';

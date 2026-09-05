@@ -104,7 +104,8 @@ export const userApi = {
   getProfilePublic: () => api.get<unknown, boolean>('/user/profile-public'),
   setProfilePublic: (profilePublic: boolean) =>
     api.post<unknown, void>('/user/profile-public', { profilePublic }),
-  /** 只写不读：界面语言以本地 localStorage 为准，服务端这份只决定 AI 产出（提示词/回答）的语言 */
+  /** agent 提示词语言（zh/en）：只在配置页改，与界面语言（localStorage）互不影响 */
+  getLang: () => api.get<unknown, Lang>('/user/lang'),
   setLang: (lang: Lang) => api.put<unknown, void>('/user/lang', { lang }),
 };
 
@@ -518,6 +519,9 @@ export interface NewsEventItem {
   id: number;
   title: string;
   content: string;
+  /** 英文译文；空=没译成，英文界面回落中文 */
+  titleEn: string | null;
+  contentEn: string | null;
   url: string;
   /** 发稿时刻 epoch 毫秒，按 K 线周期桶定位图标 */
   publishedAt: number;

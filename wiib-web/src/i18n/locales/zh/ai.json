@@ -19,6 +19,11 @@
   "tab": {
     "config": "模型配置"
   },
+  "agentLang": {
+    "title": "Agent 提示词语言",
+    "desc": "只管 AI 的提示词与回答用哪门语言，只在这里配置，不随顶栏的界面语言切换变。",
+    "failed": "保存失败"
+  },
   "behavior": {
     "title": "用户行为分析",
     "detail": "明细",

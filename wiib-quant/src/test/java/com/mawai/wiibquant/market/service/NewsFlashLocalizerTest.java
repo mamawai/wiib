@@ -2,6 +2,7 @@ package com.mawai.wiibquant.market.service;
 
 import com.mawai.wiibcommon.enums.AgentLang;
 import com.mawai.wiibquant.market.domain.news.NewsFlash;
+import com.mawai.wiibquant.market.service.NewsFlashLocalizer.BilingualFlash;
 import com.mawai.wiibquant.market.service.NewsFlashLocalizer.LocalizedFlash;
 import com.mawai.wiibquant.mapper.NewsEventMapper;
 import org.junit.jupiter.api.Test;
@@ -103,5 +104,19 @@ class NewsFlashLocalizerTest {
 
         assertThat(f.title()).isEqualTo("美联储维持利率");
         assertThat(f.translated()).isFalse();
+    }
+
+    @Test
+    void 双语取法中英一起给且缺译文留空() {
+        when(mapper.selectTranslations(List.of(1L, 2L)))
+                .thenReturn(List.of(translation(1L, "Fed holds rates", "Per CME data")));
+
+        List<BilingualFlash> out = localizer.bilingual(
+                List.of(flash(1, "美联储维持利率", "<p>据 CME 数据</p>"), flash(2, "旧快讯", "<p>旧正文</p>")));
+
+        assertThat(out).extracting(BilingualFlash::title).containsExactly("美联储维持利率", "旧快讯");
+        assertThat(out).extracting(BilingualFlash::plain).containsExactly("据 CME 数据", "旧正文");
+        assertThat(out).extracting(BilingualFlash::titleEn).containsExactly("Fed holds rates", null);
+        assertThat(out).extracting(BilingualFlash::plainEn).containsExactly("Per CME data", null);
     }
 }

@@ -9,6 +9,7 @@ import com.mawai.wiibcommon.entity.User;
 import com.mawai.wiibcommon.enums.ErrorCode;
 import com.mawai.wiibcommon.exception.BizException;
 import com.mawai.wiibcommon.i18n.MessageCatalog;
+import com.mawai.wiibcommon.i18n.RequestLang;
 import com.mawai.wiibsim.config.LinuxDoConfig;
 import com.mawai.wiibsim.dto.LinuxDoUserInfo;
 import com.mawai.wiibsim.mapper.InviteCodeMapper;
@@ -117,6 +118,8 @@ public class AuthServiceImpl implements AuthService {
                 user.setUsername(username);
                 user.setAvatar(avatar);
                 user.setBalance(initialBalance);
+                // agent 语言初值取建号那一刻的界面语言，之后只在配置页改
+                user.setLang(RequestLang.current().code());
                 try {
                     userService.save(user);
                     // 建号走 INSERT，记账切面（只切 atomic* 资金方法）抓不到，必须显式补这一笔，
@@ -229,6 +232,8 @@ public class AuthServiceImpl implements AuthService {
         user.setPasswordHash(BCrypt.hashpw(password));
         user.setInviteCodeId(codeId);
         user.setBalance(initialBalance);
+        // 同 OAuth 首登：agent 语言初值取界面语言
+        user.setLang(RequestLang.current().code());
         try {
             userService.save(user);
         } catch (DuplicateKeyException e) {
