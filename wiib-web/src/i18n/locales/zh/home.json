@@ -7,6 +7,15 @@
     "evening": "晚上好",
     "withName": "{{greeting}}，{{name}}"
   },
+  "hero": {
+    "paperMoney": "这里的一切都是模拟资金",
+    "totalAssets": "总资产 USD",
+    "profitPct": "累计收益率",
+    "balance": "可用余额",
+    "totalPnl": "总盈亏",
+    "positionValue": "持仓市值",
+    "startCapital": "起始资金 {{amount}}"
+  },
   "quick": {
     "stocks": "股票",
     "crypto": "Crypto",
@@ -14,28 +23,40 @@
     "ai": "配置",
     "arena": "AI竞技场",
     "games": "游戏",
-    "buff": "福利"
+    "buff": "福利",
+    "stocksDesc": "代币化美股现货",
+    "cryptoDesc": "现货与永续合约",
+    "predictionDesc": "BTC 五分钟涨跌",
+    "aiDesc": "BYOK 模型端点",
+    "arenaDesc": "看模型自己下单",
+    "gamesDesc": "21点 扑克 翻金币",
+    "buffDesc": "今日还没抽"
   },
-  "dashboard": {
-    "totalAssets": "总资产 · USD",
-    "availableBalance": "可用余额",
-    "totalPnl": "总盈亏",
-    "todayPnl": "今日盈亏",
-    "monthPnl": "月度盈亏",
-    "monthPnlHelp": "格子里的数来自每天 0 点的资产快照，含股票/币/合约/预测/游戏全部品类的浮盈浮亏。\n\n服务没运行的日子不会留下快照。日盈亏是拿当天快照减前一天快照算的，所以缺一天会让那天和它后一天都算不出来，格子一并空着。\n\n仅供参考，可能不全。当天的实时盈亏看上面的今日盈亏。",
-    "refreshed": "已刷新"
+  "entries": {
+    "title": "入口",
+    "sub": "七个去处"
   },
-  "guest": {
-    "badge": "模拟交易平台",
-    "headline": "模拟交易,<0/><1>随时随地!</1>",
-    "tagline": "体验\"如果当初买了会怎样\"。股票、BTC、合约全覆盖。",
-    "start": "开始交易",
-    "howToPlay": "玩法说明",
-    "statStocks": "股票",
-    "statCoins": "币种",
-    "statMarket": "BTC行情"
+  "trader": {
+    "title": "我的 Trader",
+    "todayPct": "{{pct}} 今天",
+    "roundDay": "本局 R{{round}} 第 {{day}} 天",
+    "equity": "权益",
+    "roundPnl": "本局收益",
+    "positions": "持仓",
+    "positionsValue": "{{n}} 个",
+    "nextWake": "下次唤醒",
+    "lastRound": "最近一轮：{{text}}",
+    "seeThinking": "看它怎么想",
+    "emptyTitle": "还没有 Trader。配上你的 API key，让模型替你盯盘。",
+    "step1": "1. 在「配置」里加一个模型端点",
+    "step2": "2. 选币种和唤醒节奏（5m 到 4h）",
+    "step3": "3. 启动，各带 10,000U 进竞技场",
+    "create": "创建我的 Trader",
+    "seeOthers": "先看看别人的"
   },
   "market": {
+    "title": "市场",
+    "sub": "每类两只代表，点行直达交易",
     "stocks": "股票",
     "stocksSub": "代币化美股",
     "crypto": "Crypto",
@@ -48,6 +69,7 @@
   },
   "news": {
     "title": "实时快讯",
+    "sub": "BlockBeats，60 秒一刷",
     "empty": "暂无快讯"
   },
   "trades": {
@@ -58,9 +80,9 @@
   },
   "force": {
     "title": "爆仓动态",
-    "longLiq": "多爆",
-    "shortLiq": "空爆",
-    "hint": "Binance 全网强平实时记录",
+    "longLiq": "多单被爆",
+    "shortLiq": "空单被爆",
+    "window": "过去 1 小时 {{count}} 笔",
     "viewAll": "查看全部"
   },
   "buff": {
@@ -82,6 +104,11 @@
     }
   },
   "grid": {
+    "title": "月度盈亏",
+    "foot": "每天 0 点快照相减，缺快照的日子空着",
+    "cellTitle": "{{day}}日 {{pnl}}",
+    "prevMonth": "上个月",
+    "nextMonth": "下个月",
     "mon": "一",
     "tue": "二",
     "wed": "三",
@@ -101,7 +128,8 @@
     "games": "游戏"
   },
   "faq": {
-    "title": "新手教学 · FAQ",
+    "title": "新手教学",
+    "sub": "先看这几条",
     "spotVsFutures": {
       "q": "现货和合约有什么区别？",
       "a": "现货是真的买入持有币（涨了卖出赚差价，最多亏掉买入的钱）；合约是保证金交易，不持有现货本身，可做多也可做空，用杠杆放大敞口，有强平风险。本站黄金/原油是纯合约标的（TradFi 永续），没有现货可买；代币化美股则是现货买卖。"

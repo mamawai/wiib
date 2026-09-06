@@ -348,7 +348,7 @@ const STRUCTURE_PREVIEW = `ETHUSDT 4h 结构
 /** 一轮的帧剧本；delay=距上一帧的毫秒。token 帧在播放时按字拆开发 */
 type Frame = { delay: number; event: string; data: Record<string, unknown> };
 
-const buildRun = (runId: string): Frame[] => {
+const buildRun = (): Frame[] => {
   const startedAt = now();
   return [
     {
@@ -462,6 +462,179 @@ const decisionTrace = () => {
   };
 };
 
+// ==================== 首页：资产 / 成交 / 快讯 / 爆仓 ====================
+
+const pad = (n: number) => String(n).padStart(2, '0');
+const r2 = (n: number) => Math.round(n * 100) / 100;
+/** 后端发的是本地时区的 'yyyy-MM-dd HH:mm:ss' 字符串，mock 照这个形状给 */
+const dateStr = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+const timeStr = (ms: number) => {
+  const d = new Date(ms);
+  return `${dateStr(d)} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+};
+
+const START_CAPITAL = 10000;
+
+/** 30 天净值：起手 10 万，中间有跌破本金的一段，收在 128,406.52 */
+const EQUITY_SERIES = [
+  10000, 10124, 9987, 9842, 9731, 9915, 10062, 10234, 10118, 9956,
+  9872, 10031, 10288, 10412, 10346, 10579, 10724, 10631, 10865, 11042,
+  10918, 11206, 11438, 11324, 11691, 11948, 11822, 12176, 11893, 11713.93,
+];
+
+/** 一天的资产快照：五分类按固定权重摊，够画拆解饼就行 */
+const snap = (date: string, total: number, daily: number) => {
+  const profit = total - START_CAPITAL;
+  return {
+    date, totalAssets: r2(total), profit: r2(profit), profitPct: r2(profit / START_CAPITAL * 100),
+    bstockProfit: r2(profit * 0.45), cryptoProfit: r2(profit * 0.3), commodityProfit: r2(profit * 0.1),
+    predictionProfit: r2(profit * 0.1), gameProfit: r2(profit * 0.05),
+    dailyProfit: r2(daily), dailyProfitPct: r2(daily / (total - daily) * 100),
+    dailyBstockProfit: r2(daily * 0.45), dailyCryptoProfit: r2(daily * 0.3), dailyCommodityProfit: r2(daily * 0.1),
+    dailyPredictionProfit: r2(daily * 0.1), dailyGameProfit: r2(daily * 0.05),
+  };
+};
+
+/** 快照写到昨天为止，今天那格由 asset-realtime 补 */
+const assetHistory = () => {
+  const last = new Date();
+  last.setDate(last.getDate() - 1);
+  return EQUITY_SERIES.map((v, i) => {
+    const d = new Date(last);
+    d.setDate(last.getDate() - (EQUITY_SERIES.length - 1 - i));
+    return snap(dateStr(d), v, v - (i === 0 ? START_CAPITAL : EQUITY_SERIES[i - 1]));
+  });
+};
+
+const assetRealtime = () => ({
+  ...snap(dateStr(new Date()), 11842.36, 128.43),
+  dailyProfitPct: 1.1,
+});
+
+/** 月度盈亏格子：null 的日子没快照，那条直接不给 */
+const MONTH_PNL: (number | null)[] = [
+  312, 128, -460, 890, 215, -90, 1240, 330, null, null, -720, 410, 95, -260, 1580, 240,
+  -130, 620, 305, -980, 150, 870, 44, -310, 1120, 520, -75, 390, 230, -640, 1005,
+];
+
+const assetDaily = (month: string) => {
+  const [y, m] = month.split('-').map(Number);
+  if (!y || !m) return [];
+  const today = new Date();
+  const daysInMonth = new Date(y, m, 0).getDate();
+  const isCurrent = y === today.getFullYear() && m === today.getMonth() + 1;
+  const last = Math.min(daysInMonth, isCurrent ? today.getDate() - 1 : daysInMonth);
+  const rows = [];
+  let total = START_CAPITAL;
+  for (let day = 1; day <= last; day++) {
+    const pnl = MONTH_PNL[day - 1];
+    if (pnl == null) continue;
+    total += pnl;
+    rows.push(snap(`${month}-${pad(day)}`, total, pnl));
+  }
+  return rows;
+};
+
+/** 现货成交（含代币化美股，共用一张表） */
+const cryptoLive = () => {
+  const t = now();
+  return [
+    { orderId: 70311, symbol: 'BTCUSDT', orderSide: 'BUY', orderType: 'MARKET', quantity: 0.12, leverage: 1, filledPrice: 109838.5, filledAmount: 13180.62, commission: 13.18, status: 'FILLED', createdAt: timeStr(t - 4 * MIN) },
+    { orderId: 70308, symbol: 'NVDAUSDT', orderSide: 'SELL', orderType: 'MARKET', quantity: 40, leverage: 1, filledPrice: 182.4, filledAmount: 7296, commission: 7.3, status: 'FILLED', createdAt: timeStr(t - 17 * MIN) },
+    { orderId: 70302, symbol: 'SOLUSDT', orderSide: 'BUY', orderType: 'MARKET', quantity: 25, leverage: 1, filledPrice: 209.6, filledAmount: 5240, commission: 5.24, status: 'FILLED', createdAt: timeStr(t - 43 * MIN) },
+  ];
+};
+
+/** 合约成交：三条都是 trader 下的，首页那行会挂 AI 角标 */
+const futuresLive = () => {
+  const t = now();
+  const base = { userId: 9001, orderType: 'MARKET', status: 'FILLED', isAiTrader: true };
+  return [
+    { ...base, orderId: 80412, positionId: 502, symbol: 'ETHUSDT', orderSide: 'OPEN_SHORT', quantity: 2.5, leverage: 3, filledPrice: 4312.48, filledAmount: 10781.2, marginAmount: 3593.73, commission: 4.31, createdAt: timeStr(t - 8 * MIN) },
+    { ...base, orderId: 80407, positionId: 505, symbol: 'XAUUSDT', orderSide: 'OPEN_LONG', quantity: 3, leverage: 5, filledPrice: 3486.2, filledAmount: 10458.6, marginAmount: 2091.72, commission: 4.18, createdAt: timeStr(t - 24 * MIN) },
+    { ...base, orderId: 80396, positionId: 506, symbol: 'SPCXUSDT', orderSide: 'OPEN_LONG', quantity: 20, leverage: 4, filledPrice: 412, filledAmount: 8240, marginAmount: 2060, commission: 3.3, createdAt: timeStr(t - 56 * MIN) },
+  ];
+};
+
+/** 快讯：中英两套一起给，切语言不重拉 */
+const news = () => {
+  const t = now();
+  return [
+    {
+      id: 61241, tags: 'MACRO', url: 'https://www.theblockbeats.info/news/61241', publishedAt: t - 3 * MIN,
+      title: '美联储官员：9 月降息概率上升，市场已定价 25bp',
+      content: '两位联储官员在讲话中暗示通胀回落速度快于预期，利率期货显示 9 月降息 25 个基点的概率升至 78%。',
+      titleEn: 'Fed officials: September cut odds climb, market prices in 25bp',
+      contentEn: 'Two Fed officials signalled inflation is cooling faster than expected; rate futures now put the odds of a 25bp cut in September at 78%.',
+    },
+    {
+      id: 61238, tags: 'BTC', url: 'https://www.theblockbeats.info/news/61238', publishedAt: t - 32 * MIN,
+      title: 'BTC 突破 11 万美元关口，24 小时全网爆仓 3.2 亿美元',
+      content: '突破发生在美股开盘后一小时内，空头爆仓占比超过七成，ETH、SOL 同步走强。',
+      titleEn: 'BTC breaks $110,000, $320M liquidated across the market in 24 hours',
+      contentEn: 'The breakout landed within an hour of the US equity open, with shorts making up more than 70% of liquidations. ETH and SOL rallied alongside.',
+    },
+    {
+      id: 61233, tags: 'NVDA', url: 'https://www.theblockbeats.info/news/61233', publishedAt: t - 67 * MIN,
+      title: '英伟达盘后涨 2%，数据中心营收再超预期',
+      content: '第二财季数据中心营收 411 亿美元，同比增长 56%，下季指引高于华尔街一致预期。',
+      titleEn: 'Nvidia up 2% after hours as data center revenue beats again',
+      contentEn: 'Data center revenue reached $41.1 billion in the second quarter, up 56% year over year, with next-quarter guidance above the Wall Street consensus.',
+    },
+    {
+      id: 61227, tags: 'ETH', url: 'https://www.theblockbeats.info/news/61227', publishedAt: t - 106 * MIN,
+      title: '以太坊现货 ETF 单日净流入 4.1 亿美元，创月内新高',
+      content: '贝莱德 ETHA 贡献了其中的 2.9 亿美元，连续第 11 个交易日净流入。',
+      titleEn: 'Spot Ether ETFs take in $410M in a day, a monthly high',
+      contentEn: "BlackRock's ETHA accounted for $290 million of that, its 11th straight session of net inflows.",
+    },
+  ];
+};
+
+/** 全网强平：最近 1 小时 20 笔，SELL（多单被爆）合计 1.24M、BUY（空单被爆）合计 0.42M */
+const LIQUIDATIONS = [
+  { side: 'SELL', amount: 182400, symbol: 'BTCUSDT', price: 109760.4 },
+  { side: 'BUY', amount: 88600, symbol: 'ETHUSDT', price: 4318.6 },
+  { side: 'SELL', amount: 96300, symbol: 'ETHUSDT', price: 4306.2 },
+  { side: 'SELL', amount: 148700, symbol: 'BTCUSDT', price: 109512.8 },
+  { side: 'BUY', amount: 54300, symbol: 'SOLUSDT', price: 210.4 },
+  { side: 'SELL', amount: 62150, symbol: 'SOLUSDT', price: 208.9 },
+  { side: 'SELL', amount: 210800, symbol: 'BTCUSDT', price: 109180.5 },
+  { side: 'BUY', amount: 112400, symbol: 'BTCUSDT', price: 109930.2 },
+  { side: 'SELL', amount: 74600, symbol: 'DOGEUSDT', price: 0.2408 },
+  { side: 'SELL', amount: 118900, symbol: 'ETHUSDT', price: 4288.4 },
+  { side: 'BUY', amount: 39700, symbol: 'DOGEUSDT', price: 0.2436 },
+  { side: 'SELL', amount: 55300, symbol: 'SOLUSDT', price: 207.6 },
+  { side: 'BUY', amount: 26800, symbol: 'XRPUSDT', price: 2.184 },
+  { side: 'SELL', amount: 132500, symbol: 'BTCUSDT', price: 108940.1 },
+  { side: 'BUY', amount: 45100, symbol: 'ETHUSDT', price: 4330.8 },
+  { side: 'SELL', amount: 47200, symbol: 'XRPUSDT', price: 2.166 },
+  { side: 'BUY', amount: 31200, symbol: 'SOLUSDT', price: 211.2 },
+  { side: 'SELL', amount: 68450, symbol: 'ETHUSDT', price: 4271.5 },
+  { side: 'BUY', amount: 21900, symbol: 'BTCUSDT', price: 110080.6 },
+  { side: 'SELL', amount: 42700, symbol: 'DOGEUSDT', price: 0.2391 },
+];
+
+const forceOrders = () => {
+  const t = now();
+  const records = LIQUIDATIONS.map((r, i) => {
+    const at = timeStr(t - i * 150_000);   // 2.5 分钟一笔，二十笔铺满 50 分钟
+    return {
+      id: 33000 - i, symbol: r.symbol, side: r.side, price: r.price, avgPrice: r.price,
+      quantity: r2(r.amount / r.price), amount: r.amount, status: 'FILLED', tradeTime: at, createdAt: at,
+    };
+  });
+  return { records, total: records.length, size: 200, current: 1, pages: 1 };
+};
+
+/** 下一个整 4 小时点 */
+const nextWake = () => {
+  const d = new Date();
+  d.setMinutes(0, 0, 0);
+  d.setHours(Math.floor(d.getHours() / 4) * 4 + 4);
+  return d.getTime();
+};
+
 // ==================== SSE 收发 ====================
 
 const sseOpen = (res: ServerResponse) => {
@@ -491,7 +664,7 @@ async function playLive(traderId: number, res: ServerResponse, alive: () => bool
     const frame = (event: string, data: Record<string, unknown>) =>
       send(res, event, { traderId, runId, seq: ++seq, ...data });
 
-    for (const f of buildRun(runId)) {
+    for (const f of buildRun()) {
       if (!alive()) return;
       await wait(f.delay);
       if (!alive()) return;
@@ -597,6 +770,37 @@ else if (location.search.includes('light')) localStorage.setItem('theme', 'light
           // 只有 1 号有现场，其余挂着不发（对应"没在唤醒"）
           if (liveMatch[1] === '1') void playLive(1, res, () => !closed);
           return;
+        }
+
+        // ---- 首页：这些要排在兜底前面 ----
+        if (path === '/api/user/asset-history') return ok(res, assetHistory());
+        if (path === '/api/user/asset-realtime') return ok(res, assetRealtime());
+        if (path === '/api/user/asset-daily') {
+          const month = new URLSearchParams(url.split('?')[1] ?? '').get('month') ?? dateStr(new Date()).slice(0, 7);
+          return ok(res, assetDaily(month));
+        }
+        if (path === '/api/crypto/order/live') return ok(res, cryptoLive());
+        if (path === '/api/futures/live') return ok(res, futuresLive());
+        if (path === '/api/futures/force-orders') return ok(res, forceOrders());
+        if (path === '/api/buff/status') return ok(res, { canDraw: true, todayBuff: null });
+        if (path === '/api/ai/quant/news') return ok(res, news());
+        if (path === '/api/ai/trader/mine') {
+          return ok(res, {
+            pub: TRADERS[0],
+            llmEndpointId: 12, customPrompt: null, useDefaultPrompt: true,
+            spec: { leverageMin: 2, leverageMax: 10, marginPctMin: 5, marginPctMax: 25, allowMultiPosition: true, allowHedge: false },
+            alertEnabled: true, alertThresholdMult: 1,
+            reviewEnabled: true, learningEnabled: true, wakeWindow: null,
+          });
+        }
+        if (path === '/api/ai/trader/action-panel') {
+          return ok(res, {
+            hasTrader: true, name: 'Kairos', status: 'RUNNING', pausedReason: null,
+            lastWakeAt: now() - 12 * MIN, nextWakeAt: nextWake(), wakeBlockedReason: null,
+            lastReviewAt: now() - 14 * HOUR, lastReviewStatus: 'OK',
+            hasReviewMaterial: true, reviewBlockedReason: null,
+            note: null, noteRounds: 1, noteMaxRounds: 24, noteMaxChars: 500,
+          });
         }
 
         // ---- 普通 GET ----

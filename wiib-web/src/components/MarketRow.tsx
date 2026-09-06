@@ -1,12 +1,10 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useTranslation } from 'react-i18next';
 import { cn } from '../lib/utils';
 import { formatCoinPrice, type CoinCfg } from '../lib/coinConfig';
-import { cryptoApi, futuresApi, bstockApi } from '../api';
+import { cryptoApi, futuresApi } from '../api';
 import { useCryptoStream } from '../hooks/useCryptoStream';
 import { Sparkline } from './fx/Sparkline';
-import type { BStock } from '../types';
 
 /**
  * 终端式行情表行：图标名称 | 价格(右对齐) | 走势线 | 涨跌幅。
@@ -91,49 +89,6 @@ export function CoinMarketRow({ cfg }: { cfg: CoinCfg }) {
       spark={spark}
       sparkColor={cfg.chartColor}
       onClick={() => navigate(`/coin/${cfg.symbol}`)}
-    />
-  );
-}
-
-/**
- * bStock 行：实时流价 + 1h×25 根K线（首根收盘=24h涨跌基准，整条作走势线），与币种行同口径。
- * bStock 的价并在 Spot 流里（BinanceProperties.getAllSpotSymbols = crypto ∪ stock），
- * 订阅方式与现货币种没有区别，不需要再走 /bstock/list 轮询要价。
- */
-export function BStockMarketRow({ stock }: { stock: BStock }) {
-  const navigate = useNavigate();
-  const { t } = useTranslation('home');
-  const tick = useCryptoStream(stock.symbol, 'spot');
-  const [closes, setCloses] = useState<number[]>([]);
-
-  useEffect(() => {
-    let cancelled = false;
-    bstockApi.klines(stock.symbol, '1h', 25)
-      .then(rows => { if (!cancelled && rows?.length) setCloses(rows.map(r => Number(r[4]))); })
-      .catch(() => {});
-    return () => { cancelled = true; };
-  }, [stock.symbol]);
-
-  // 流价优先；首帧还没推来时退回 list 带的快照价，避免闪一下空白
-  const livePrice = tick?.price ?? stock.price ?? null;
-  const spark = livePrice != null && closes.length ? [...closes.slice(0, -1), livePrice] : closes;
-  const price = livePrice ?? (closes.length ? closes[closes.length - 1] : null);
-  const base = closes.length ? closes[0] : null;
-  const pct = price != null && base ? ((price - base) / base) * 100 : (stock.changePct ?? null);
-
-  return (
-    <MarketRow
-      icon={(
-        <span className="w-6 h-6 rounded-md border border-border bg-card-2 flex items-center justify-center shrink-0 text-[8px] font-bold text-muted-foreground tracking-tight">
-          {stock.ticker?.slice(0, 4)}
-        </span>
-      )}
-      name={stock.name}
-      sub={`${stock.ticker} · ${t('market.usStock')}`}
-      price={price == null ? null : `$${Number(price).toLocaleString('en-US', { maximumFractionDigits: 2 })}`}
-      pct={pct}
-      spark={spark}
-      onClick={() => navigate(`/bstock/${stock.symbol}`)}
     />
   );
 }

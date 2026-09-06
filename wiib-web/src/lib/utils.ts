@@ -22,6 +22,16 @@ export function fmtNum(n: number | string | null | undefined, decimals = 2): str
   return v.toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
 }
 
+/** 带正负号的美元金额：+$1,284.30 / -$460.00。别拿 '$'+fmtNum 拼，负号会跑到 $ 后面。 */
+export function fmtSignedUsd(n: number, decimals = 2): string {
+  return `${n < 0 ? '-$' : '+$'}${fmtNum(Math.abs(n), decimals)}`;
+}
+
+/** 带正负号的百分比：+28.41% / -1.02%。 */
+export function fmtSignedPct(n: number, decimals = 2): string {
+  return `${n >= 0 ? '+' : ''}${n.toFixed(decimals)}%`;
+}
+
 /**
  * 新加坡时间 yyyy-MM-dd（不传参就是"今天"）。日历/网格切日、按日查接口走这里。
  * en-CA 的短日期格式就是 yyyy-MM-dd；不能用 toISOString().slice(0,10)——那是 UTC，东八区早 8 点前退到前一天。

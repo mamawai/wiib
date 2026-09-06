@@ -4,10 +4,10 @@ import { useEffect, useRef } from 'react';
  * 数字滚动：挂载时 0 → to，之后 to 变了就从当前画出的值补间过去，easeOutQuart。
  * <p>
  * 直接写 textContent 不走 state：一次滚动几十帧，每帧 setState 就是整页重渲染。
- * 用法 const ref = useCountUp(v, n => `$${fmtNum(n)}`); 再把 ref 挂到 span/b 上。
+ * 用法 const ref = useCountUp<HTMLSpanElement>(v, n => `$${fmtNum(n)}`); 再把 ref 挂到 span/b 上。
  */
-export function useCountUp(to: number, render: (v: number) => string, ms = 800) {
-  const ref = useRef<HTMLElement | null>(null);
+export function useCountUp<T extends HTMLElement = HTMLElement>(to: number, render: (v: number) => string, ms = 800) {
+  const ref = useRef<T | null>(null);
   const cur = useRef(0);          // 已经画出去的值，to 变了从这儿接着补
   const fmt = useRef(render);
 

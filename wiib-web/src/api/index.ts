@@ -368,8 +368,6 @@ export const futuresApi = {
   live: () => api.get<unknown, FuturesOrder[]>('/futures/live'),
   forceOrders: (symbol?: string, pageNum = 1, pageSize = 20) =>
     api.get<unknown, PageResult<ForceOrder>>('/futures/force-orders', { params: { symbol, pageNum, pageSize } }),
-  /** 首页卡片专用：只要最新一条，后端不发 COUNT(*)，别用 forceOrders(undefined,1,1) 代替 */
-  forceOrderLatest: () => api.get<unknown, ForceOrder | null>('/futures/force-orders/latest'),
 };
 
 // ========== BTC 5min 涨跌预测接口 ==========

@@ -1,81 +1,122 @@
-import { useEffect, useState, type ComponentType } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { Landmark, Bitcoin, Gem, Globe, ChevronRight, type LucideProps } from 'lucide-react';
 import { cn } from '../lib/utils';
-import { COIN_MAP, COMMODITY_LIST } from '../lib/coinConfig';
-import { CoinMarketRow, BStockMarketRow } from './MarketRow';
+import { COIN_MAP, COMMODITY_LIST, formatCoinPrice } from '../lib/coinConfig';
+import { useCoinQuote, useStockQuote } from '../hooks/useQuote';
+import { useStagger } from '../hooks/useStagger';
 import { Skeleton } from './ui/skeleton';
 import { bstockApi } from '../api';
 import type { BStock } from '../types';
 
-/** 分类头：整行可点，跳转对应市场页。title/subtitle 由调用方翻好了传进来，壳子只管「全部」 */
-function CategoryHeader({ icon: Icon, title, subtitle, iconColor, to }: {
-  icon: ComponentType<LucideProps>; title: string; subtitle: string;
-  iconColor: string; to: string;
-}) {
-  const navigate = useNavigate();
+const ROW = 'num hov grid grid-cols-[1fr_auto_72px] gap-3 items-baseline py-2 border-b border-border';
+const SYM = 'text-[15px] font-bold';
+const NAME = 'ml-1.5 text-[12px] text-muted-foreground';
+const PRICE = 'text-[17px] font-semibold font-stretch-[85%]';
+
+/** 涨跌幅列：没数就一个破折号，别画成 0% */
+function Chg({ pct }: { pct: number | null }) {
+  return (
+    <span className={cn('text-[13px] font-semibold text-right', pct == null ? 'mute' : pct >= 0 ? 'up' : 'dn')}>
+      {pct == null ? '—' : `${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%`}
+    </span>
+  );
+}
+
+/** 分类栏头：分类名 + 副标题 + 右侧「全部」 */
+function CatHead({ title, sub, to }: { title: string; sub: string; to: string }) {
   const { t } = useTranslation('common');
   return (
-    <button
-      onClick={() => navigate(to)}
-      className="flex items-center gap-2 w-full px-3 py-2.5 border-b border-border group cursor-pointer hover:bg-surface-hover transition-colors"
-    >
-      {/* 四列并排时这行只有 ~294px：主标题/图标/「全部」都锁死不缩，让副标题独自吃掉差额并省略号收尾，
-         否则 flex 会按比例一起压，主标题先折成两行 */}
-      <Icon className={cn('w-3.5 h-3.5 shrink-0', iconColor)} />
-      <span className="text-xs font-bold shrink-0">{title}</span>
-      <span className="text-[10px] text-muted-foreground min-w-0 truncate">{subtitle}</span>
-      <span className="ml-auto shrink-0 inline-flex items-center gap-0.5 text-[10px] font-semibold text-muted-foreground group-hover:text-primary transition-colors">
-        {t('all')} <ChevronRight className="w-3 h-3" />
+    <h3 className="flex items-baseline gap-2 m-0 pb-1.5 border-b border-border text-[15px] font-bold">
+      {title}
+      <span className="text-[12px] font-medium text-muted-foreground min-w-0 truncate">{sub}</span>
+      <Link to={to} className="ml-auto shrink-0 text-[12px] font-medium underline underline-offset-[3px]">{t('all')}</Link>
+    </h3>
+  );
+}
+
+/** 币种/商品/TradFi 一行：整行可点直达交易页 */
+function CoinRow({ symbol }: { symbol: string }) {
+  const cfg = COIN_MAP[symbol];
+  const q = useCoinQuote(symbol);
+  return (
+    <Link to={q.to} className={ROW}>
+      <span className="min-w-0 truncate">
+        <span className={SYM}>{cfg.name}</span>
+        <span className={NAME}>{cfg.pair}</span>
       </span>
-    </button>
+      <span className={PRICE}>{q.price == null ? '—' : formatCoinPrice(symbol, q.price)}</span>
+      <Chg pct={q.pct} />
+    </Link>
+  );
+}
+
+/** 代币化美股一行：代号当主名，公司名作灰字 */
+function StockRow({ stock }: { stock: BStock }) {
+  const q = useStockQuote(stock);
+  return (
+    <Link to={q.to} className={ROW}>
+      <span className="min-w-0 truncate">
+        <span className={SYM}>{stock.ticker}</span>
+        <span className={NAME}>{stock.name}</span>
+      </span>
+      <span className={PRICE}>
+        {q.price == null ? '—' : q.price.toLocaleString('en-US', { maximumFractionDigits: 2 })}
+      </span>
+      <Chg pct={q.pct} />
+    </Link>
   );
 }
 
 /**
- * 首页市场行情：bStock / Crypto / 大宗商品 / TradFi 合约四分类终端表，每类 2 个代表标的。
- * 点分类头去市场页，点行直达交易页。大屏四列并排，中屏两两成行，移动端纵向堆叠。
+ * 首页市场：股票 / Crypto / 大宗商品 / TradFi 四类各两只代表，点行直达交易页。
+ * 大屏四列并排，中屏两列，手机单列。
  */
 export function HomeMarketSection() {
   const { t } = useTranslation('home');
   const [topStocks, setTopStocks] = useState<BStock[]>([]);
+  const gridRef = useStagger<HTMLDivElement>();
 
   // 市值前 2 作代表。只拉一次：这里要的是"哪两只 + 名称"这类静态元数据，
-  // 价格和涨跌由 BStockMarketRow 自己走 Spot 流实时刷，不需要轮询
+  // 价格和涨跌由 StockRow 自己走 Spot 流实时刷，不需要轮询
   useEffect(() => {
     bstockApi.list()
       .then(list => setTopStocks([...list].sort((a, b) => (b.marketCap ?? 0) - (a.marketCap ?? 0)).slice(0, 2)))
       .catch(() => {});
   }, []);
 
-  const cryptoReps = [COIN_MAP.BTCUSDT, COIN_MAP.ETHUSDT];
-  // TradFi 代表：SpaceX（话题标的）+ SK海力士（成交最活跃）
-  const tradfiReps = [COIN_MAP.SPCXUSDT, COIN_MAP.SKHYNIXUSDT];
-
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-      <div className="@container pt-card rounded-lg overflow-hidden">
-        <CategoryHeader icon={Landmark} title={t('market.stocks')} subtitle={t('market.stocksSub')} iconColor="text-blue-500" to="/bstock" />
-        {topStocks.length
-          ? topStocks.map(s => <BStockMarketRow key={s.symbol} stock={s} />)
-          : Array.from({ length: 2 }).map((_, i) => <Skeleton key={i} className="h-[52px] m-2" />)}
+    <>
+      <div className="sec-h">
+        <h2>{t('market.title')}</h2>
+        <span>{t('market.sub')}</span>
       </div>
+      <div ref={gridRef} className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-8">
+        <div>
+          <CatHead title={t('market.stocks')} sub={t('market.stocksSub')} to="/bstock" />
+          {topStocks.length
+            ? topStocks.map(s => <StockRow key={s.symbol} stock={s} />)
+            : Array.from({ length: 2 }).map((_, i) => <Skeleton key={i} className="h-[34px] mt-px" />)}
+        </div>
 
-      <div className="@container pt-card rounded-lg overflow-hidden">
-        <CategoryHeader icon={Bitcoin} title={t('market.crypto')} subtitle={t('market.cryptoSub')} iconColor="text-amber-500" to="/coin" />
-        {cryptoReps.map(c => <CoinMarketRow key={c.symbol} cfg={c} />)}
-      </div>
+        <div>
+          <CatHead title={t('market.crypto')} sub={t('market.cryptoSub')} to="/coin" />
+          <CoinRow symbol="BTCUSDT" />
+          <CoinRow symbol="ETHUSDT" />
+        </div>
 
-      <div className="@container pt-card rounded-lg overflow-hidden">
-        <CategoryHeader icon={Gem} title={t('market.commodity')} subtitle={t('market.commoditySub')} iconColor="text-yellow-500" to="/commodity" />
-        {COMMODITY_LIST.map(c => <CoinMarketRow key={c.symbol} cfg={c} />)}
-      </div>
+        <div>
+          <CatHead title={t('market.commodity')} sub={t('market.commoditySub')} to="/commodity" />
+          {COMMODITY_LIST.map(c => <CoinRow key={c.symbol} symbol={c.symbol} />)}
+        </div>
 
-      <div className="@container pt-card rounded-lg overflow-hidden">
-        <CategoryHeader icon={Globe} title={t('market.tradfi')} subtitle={t('market.tradfiSub')} iconColor="text-sky-500" to="/tradfi" />
-        {tradfiReps.map(c => <CoinMarketRow key={c.symbol} cfg={c} />)}
+        <div>
+          <CatHead title={t('market.tradfi')} sub={t('market.tradfiSub')} to="/tradfi" />
+          {/* TradFi 代表：SpaceX（话题标的）+ SK海力士（成交最活跃） */}
+          <CoinRow symbol="SPCXUSDT" />
+          <CoinRow symbol="SKHYNIXUSDT" />
+        </div>
       </div>
-    </div>
+    </>
   );
 }
