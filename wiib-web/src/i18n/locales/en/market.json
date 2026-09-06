@@ -98,6 +98,7 @@
     "perp": "USDT perpetual",
     "perpShort": "Perp",
     "markPrice": "Mark price",
+    "fundingRate": "Funding",
     "h24": "24h",
     "high": "High",
     "low": "Low",

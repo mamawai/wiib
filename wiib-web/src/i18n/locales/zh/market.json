@@ -97,6 +97,7 @@
     "perp": "USDT 永续",
     "perpShort": "永续",
     "markPrice": "标记价",
+    "fundingRate": "资金费率",
     "h24": "24h",
     "high": "高",
     "low": "低",

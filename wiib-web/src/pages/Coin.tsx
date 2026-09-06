@@ -57,6 +57,20 @@ export function Coin({ symbol = DEFAULT_SYMBOL }: { symbol?: string }) {
       .catch(() => toast(t('coin.bracketsFailed'), 'error'));
   }, [toast, t]);
 
+  // 资金费率：后端只在 0/8/16 点拉一次写缓存，这里读的就是那份缓存。
+  // 一天才变三次，10 分钟重拉一次足够；无合约的标的后端返 null，整段不渲染
+  const [fundingRate, setFundingRate] = useState<number | null>(null);
+  useEffect(() => {
+    if (!isFuturesMode) return;
+    let cancelled = false;
+    const pull = () => futuresApi.fundingRate(symbol)
+      .then(r => { if (!cancelled) setFundingRate(r?.rate ?? null); })
+      .catch(() => { if (!cancelled) setFundingRate(null); });
+    pull();
+    const timer = setInterval(pull, 10 * 60 * 1000);
+    return () => { cancelled = true; clearInterval(timer); };
+  }, [symbol, isFuturesMode]);
+
   // 实物换算币种: USD/CNY 汇率
   const [usdCny, setUsdCny] = useState(0);
   useEffect(() => {
@@ -220,6 +234,14 @@ export function Coin({ symbol = DEFAULT_SYMBOL }: { symbol?: string }) {
             <span>BINANCE</span>
             {isFuturesMode && tick?.mp != null && (
               <span>{t('coin.markPrice')} <b className="num font-semibold text-foreground">{fmtPrice(tick.mp)}</b></span>
+            )}
+            {isFuturesMode && fundingRate != null && (
+              <span>
+                {t('coin.fundingRate')}{' '}
+                <b className="num font-semibold text-foreground">
+                  {fundingRate >= 0 ? '+' : ''}{(fundingRate * 100).toFixed(4)}%
+                </b> 8h
+              </span>
             )}
             {/* TradFi 标的：合约 7×24，但流动性跟着标的股票市场走，给个当前时段入口 */}
             {cfg.market && <MarketSessionBadge market={cfg.market} />}

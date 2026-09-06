@@ -11,6 +11,7 @@ import com.mawai.wiibcommon.market.ForceOrderService;
 import com.mawai.wiibcommon.market.TradeFilterDefaults;
 import com.mawai.wiibsim.dto.PositionHistoryDTO;
 import com.mawai.wiibsim.service.CrossMarginService;
+import com.mawai.wiibsim.service.FundingRateService;
 import com.mawai.wiibsim.service.FuturesRiskService;
 import com.mawai.wiibsim.service.FuturesTradingService;
 import com.mawai.wiibsim.service.KlineCacheService;
@@ -34,6 +35,7 @@ public class FuturesController {
     private final CrossMarginService crossMarginService;
     private final TradeFilterRegistry tradeFilterRegistry;
     private final PositionHistoryService positionHistoryService;
+    private final FundingRateService fundingRateService;
 
     /** 开仓 */
     @PostMapping("/open")
@@ -182,6 +184,15 @@ public class FuturesController {
     @GetMapping("/brackets")
     public Result<Map<String, List<FuturesLeverageBracketRegistry.Bracket>>> brackets() {
         return Result.ok(bracketRegistry.getAllBrackets());
+    }
+
+    /**
+     * 资金费率：只读结算点（0/8/16 点）写下的缓存，绝不回源 Binance。
+     * 无合约的标的（bStock 等）和缓存没命中都返回 null，前端不渲染这段。
+     */
+    @GetMapping("/funding-rate")
+    public Result<FundingRateService.FundingRateView> fundingRate(@RequestParam String symbol) {
+        return Result.ok(fundingRateService.query(symbol));
     }
 
     /** 交易过滤器（步长/最小数量/最小名义额，对齐Binance exchangeInfo，启动时刷新）：合约+现货两套 */

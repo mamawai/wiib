@@ -1,7 +1,6 @@
 package com.mawai.wiibsim.service.impl;
 
 import com.mawai.wiibcommon.cache.CacheService;
-import com.mawai.wiibcommon.market.BinanceRestClient;
 import com.mawai.wiibsim.config.FuturesLeverageBracketRegistry;
 import com.mawai.wiibsim.config.TradeFilterRegistry;
 import com.mawai.wiibsim.config.TradingConfig;
@@ -12,6 +11,7 @@ import com.mawai.wiibsim.service.BStockService;
 import com.mawai.wiibsim.service.BuffService;
 import com.mawai.wiibsim.service.CrossLiquidationService;
 import com.mawai.wiibsim.service.CrossMarginService;
+import com.mawai.wiibsim.service.FundingRateService;
 import com.mawai.wiibsim.service.CryptoPositionService;
 import com.mawai.wiibsim.service.FuturesPositionIndexService;
 import com.mawai.wiibsim.service.FuturesRiskService;
@@ -102,6 +102,6 @@ class LimitOrderIndexOrderingTest {
                 mock(FuturesPositionMapper.class), mock(FuturesOrderMapper.class), mock(TradingConfig.class),
                 mock(FuturesLeverageBracketRegistry.class), cacheService, mock(FuturesPositionIndexService.class),
                 mock(FuturesRiskService.class), mock(CrossMarginService.class), mock(CrossLiquidationService.class),
-                mock(RedisLockUtil.class), mock(BinanceRestClient.class));
+                mock(RedisLockUtil.class), mock(FundingRateService.class));
     }
 }

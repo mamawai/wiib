@@ -7,7 +7,7 @@
  */
 import type { Plugin } from 'vite';
 import type { ServerResponse } from 'node:http';
-import { basePrice, klines, livePrice, roundPrice } from './market';
+import { basePrice, hasFutures, klines, livePrice, roundPrice } from './market';
 import { handleQuotes } from './stompMock';
 
 const MIN = 60_000;
@@ -1012,6 +1012,13 @@ else if (location.search.includes('light')) localStorage.setItem('theme', 'light
         if (path === '/api/futures/trade-filters') return ok(res, TRADE_FILTERS);
         if (path === '/api/futures/cross-account') return ok(res, CROSS_ACCOUNT);
         if (path === '/api/futures/position-history') return ok(res, page([]));
+        // 资金费率：真后端只在 0/8/16 点拉一次写缓存，这里照那个节奏给时间戳；无合约的标的返 null
+        if (path === '/api/futures/funding-rate') {
+          const sym = q.get('symbol') || '';
+          if (!hasFutures(sym)) return ok(res, null);
+          const slot = Math.floor(now() / (8 * HOUR)) * 8 * HOUR;
+          return ok(res, { symbol: sym, rate: 0.0001, fetchedAt: slot, nextTime: slot + 8 * HOUR });
+        }
 
         // ---- 交易页：现货 ----
         if (path === '/api/crypto/price') {

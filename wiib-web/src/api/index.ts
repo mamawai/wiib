@@ -4,7 +4,7 @@ import type { TnOverview, TnTrade, TnDailyCell, TnEquityPoint, TnFillStats, TnMa
 import type { BacktestTaskStatus, BacktestEventsPage, BacktestKlinesPage, BacktestResultPayload, ReplayCoverage, HistoryKlinesPayload, ReplayCoachRequest, ReplayCoachEvent } from '../types';
 import type { LedgerEntry, LedgerBizTypeOption, PublicTrade, UserProfile, PositionHistoryItem, RankingSort } from '../types';
 import type { LlmEndpointView, LlmEndpointSaveRequest, LlmBindings, LlmPurpose } from '../types';
-import type { User, PageResult, RankingItem, CommentItem, NotificationItem, BuffStatus, UserBuff, BlackjackStatus, GameState, ConvertResult, MinesStatus, MinesGameState, VideoPokerStatus, VideoPokerGameState, CryptoPrice, CryptoOrderRequest, CryptoOrder, CryptoPosition, BStock, FuturesOpenRequest, FuturesCloseRequest, FuturesAddMarginRequest, FuturesReduceMarginRequest, FuturesStopLossRequest, FuturesTakeProfitRequest, FuturesAdjustLeverageRequest, FuturesCrossAccount, WalletTransferPreview, FuturesPosition, FuturesOrder, FuturesReverseResult, FuturesBracket, TradeFilterMap, PredictionRound, PredictionBet, PredictionBuyRequest, PredictionBetLive, PredictionPnl, AssetSnapshot, CategoryAverages, ForceOrder, AiKeyConfig, AiModelAssignment, InviteCode, ChatIntent, WorkbenchEvent, StrategyAccountView, TraderPublicView, TraderOwnerView, TraderDetailView, AiTraderDecisionView, TraderEquityPoint, TraderUpsertRequest, TraderSpec, StrategySignalState, FeedStreamHealth, WorkbenchSessionSummary, WorkbenchSessionStatus, WorkbenchChatMessage, TraderActionPanel, TraderActionResult, TradeRecordView, TraderLiveEvent, ArenaLiveEvent, WakeTrace } from '../types';
+import type { User, PageResult, RankingItem, CommentItem, NotificationItem, BuffStatus, UserBuff, BlackjackStatus, GameState, ConvertResult, MinesStatus, MinesGameState, VideoPokerStatus, VideoPokerGameState, CryptoPrice, CryptoOrderRequest, CryptoOrder, CryptoPosition, BStock, FuturesOpenRequest, FuturesCloseRequest, FuturesAddMarginRequest, FuturesReduceMarginRequest, FuturesStopLossRequest, FuturesTakeProfitRequest, FuturesAdjustLeverageRequest, FuturesCrossAccount, WalletTransferPreview, FuturesPosition, FuturesOrder, FuturesReverseResult, FuturesBracket, FundingRateView, TradeFilterMap, PredictionRound, PredictionBet, PredictionBuyRequest, PredictionBetLive, PredictionPnl, AssetSnapshot, CategoryAverages, ForceOrder, AiKeyConfig, AiModelAssignment, InviteCode, ChatIntent, WorkbenchEvent, StrategyAccountView, TraderPublicView, TraderOwnerView, TraderDetailView, AiTraderDecisionView, TraderEquityPoint, TraderUpsertRequest, TraderSpec, StrategySignalState, FeedStreamHealth, WorkbenchSessionSummary, WorkbenchSessionStatus, WorkbenchChatMessage, TraderActionPanel, TraderActionResult, TradeRecordView, TraderLiveEvent, ArenaLiveEvent, WakeTrace } from '../types';
 
 const api = axios.create({
   baseURL: '/api',
@@ -352,6 +352,8 @@ export const futuresApi = {
   // 全仓账户概览：净值/可用/占用/维持保证金
   crossAccount: () => api.get<unknown, FuturesCrossAccount>('/futures/cross-account'),
   brackets: () => api.get<unknown, Record<string, FuturesBracket[]>>('/futures/brackets'),
+  // 资金费率：后端只读结算点(0/8/16)写下的缓存，不回源交易所；无合约的标的返回 null
+  fundingRate: (symbol: string) => api.get<unknown, FundingRateView | null>('/futures/funding-rate', { params: { symbol } }),
   // 交易过滤器（步长/最小数量/最小名义额，合约+现货两套，后端已按官方exchangeInfo刷新）
   tradeFilters: () => api.get<unknown, TradeFilterMap>('/futures/trade-filters'),
   setStopLoss: (data: FuturesStopLossRequest) => api.post<unknown, void>('/futures/stop-loss', data),

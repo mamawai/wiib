@@ -276,6 +276,16 @@ export interface FuturesBracket {
   maintAmount: number;
 }
 
+/** 资金费率（GET /futures/funding-rate）：后端只读结算点缓存，无合约的标的返回 null。rate 是小数，0.0001=0.01% */
+export interface FundingRateView {
+  symbol: string;
+  rate: number;
+  /** 结算点拉取时刻 */
+  fetchedAt: number;
+  /** 下一个 0/8/16 点 */
+  nextTime: number;
+}
+
 // 币种级调杠杆（对齐Binance）：多空共用杠杆，一次调整作用于该币全部仓位
 export interface FuturesAdjustLeverageRequest {
   symbol: string;

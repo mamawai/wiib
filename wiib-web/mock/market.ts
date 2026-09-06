@@ -3,17 +3,25 @@
  * REST 的 /klines 和假 STOMP 流都从这儿取数，两边价格才对得上。
  */
 
-/** 各标的的"现价"：K 线末根收盘钉在这儿，实时流也绕着它抖 */
-const BASE_PRICE: Record<string, number> = {
+/** 有合约的标的现价（crypto + 大宗商品 + TradFi 永续）：K 线末根收盘钉在这儿，实时流也绕着它抖 */
+const FUTURES_PRICE: Record<string, number> = {
   BTCUSDT: 63720, ETHUSDT: 2418, SOLUSDT: 201.4, DOGEUSDT: 0.2412, XRPUSDT: 2.184, BNBUSDT: 612.5,
   XAUUSDT: 3486, CLUSDT: 63.4,
   // TradFi 永续
   SNDKUSDT: 118.6, SOXLUSDT: 28.42, SKHYNIXUSDT: 142.3, MUUSDT: 108.7, KORUUSDT: 62.1, SPCXUSDT: 412,
-  // 代币化美股
+};
+
+/** 代币化美股：纯现货，没有合约也没有资金费率 */
+const BSTOCK_PRICE: Record<string, number> = {
   NVDAUSDT: 182.4, TSLAUSDT: 341.2, QQQUSDT: 498.6, AAPLUSDT: 232.8,
 };
 
+const BASE_PRICE: Record<string, number> = { ...FUTURES_PRICE, ...BSTOCK_PRICE };
+
 export const basePrice = (symbol: string) => BASE_PRICE[symbol] ?? 100;
+
+/** 有没有合约：决定资金费率查得到查不到 */
+export const hasFutures = (symbol: string) => symbol in FUTURES_PRICE;
 
 /** 按标的价位档取小数位，假订单/假持仓的价格都过一道 */
 export const roundPrice = (symbol: string, v: number) => round(v, basePrice(symbol));
