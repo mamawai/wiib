@@ -4,24 +4,28 @@
     "detail": "Bankruptcies: {{times}} · Starting capital restored {{date}} 09:00",
     "nextTradingDay": "the next trading day"
   },
-  "panel": {
-    "chart": "Allocation",
-    "profit": "PnL",
-    "radar": "Skills",
-    "wallet": "Wallet"
+  "page": {
+    "title": "Portfolio",
+    "desc": "{{name}}'s paper account · trading equity marked at live prices",
+    "ledger": "Ledger",
+    "history": "Position history"
   },
-  "overview": {
-    "paperAccount": "Paper account",
-    "totalAssets": "Total assets",
+  "ov": {
+    "totalAssets": "Total assets USDT",
+    "since": "from {{amount}}",
     "balanceWallet": "Balance wallet",
     "gameWallet": "Game wallet",
-    "totalPnl": "Total PnL",
-    "marginLoan": "Margin loan",
-    "interestAccrued": "Accrued interest",
     "futuresMargin": "Futures margin",
     "futuresUnrealized": "Futures unrealized",
-    "ledgerEntry": "Ledger",
-    "historyEntry": "Position history"
+    "marginLoan": "Margin loan",
+    "interestAccrued": "Accrued interest",
+    "transfer": "Transfer",
+    "dist": "Allocation",
+    "distHint": "Market value by holding, cash included",
+    "profit": "PnL",
+    "profitHint": "Last 30 days, snapshot basis",
+    "ability": "Skills",
+    "abilityHint": "Percentile across five categories, last 30 days"
   },
   "toast": {
     "refreshed": "Refreshed",
@@ -33,7 +37,15 @@
   },
   "daily": {
     "title": "Today's PnL",
-    "crypto": "Crypto"
+    "hint": "Snapshot basis · all categories"
+  },
+  "alloc": {
+    "title": "Asset allocation",
+    "hint": "By market value, cash included",
+    "crypto": "Crypto spot",
+    "bstock": "bStock",
+    "futures": "Futures (margin + PnL)",
+    "cash": "Cash"
   },
   "cat": {
     "totalProfit": "Total PnL",
@@ -45,42 +57,44 @@
     "game": "Games"
   },
   "holdings": {
-    "title": "Holdings",
-    "crypto": "Crypto",
-    "futures": "Futures",
-    "empty": "No holdings",
-    "total": "Holdings total"
+    "empty": "No holdings"
   },
   "spot": {
     "cryptoTitle": "Crypto holdings",
     "cryptoCount_one": "{{count}} coin",
     "cryptoCount_other": "{{count}} coins",
+    "cryptoHint": "Click a row to trade",
+    "bstockTitle": "Stock holdings",
     "bstockCount_one": "{{count}} stock · bStock",
     "bstockCount_other": "{{count}} stocks · bStock",
-    "bstockTitle": "Stock holdings"
-  },
-  "row": {
-    "qty": "Holding {{qty}}",
-    "approx": "≈ {{value}} {{unit}}",
-    "unitHint": "1 unit = 1 oz ({{grams}}g)",
-    "avgCost": "Avg {{price}}",
-    "lastPrice": "Last {{price}}",
-    "shares": "{{qty}} shares"
+    "bstockHint": "Tokenized US equities, 24/7",
+    "colCoin": "Coin",
+    "colStock": "Stock",
+    "colQty": "Holding",
+    "colShares": "Shares",
+    "colAvg": "Avg cost",
+    "colLast": "Last",
+    "colValue": "Value",
+    "colPnl": "PnL",
+    "approx": "≈ {{value}} {{unit}}"
   },
   "prediction": {
     "title": "BTC price prediction",
+    "wallet": "Game wallet",
+    "hint": "A new round every 5 minutes, priced off live Polymarket odds",
+    "realized": "Realized PnL",
+    "totalBets": "Total bets",
+    "winRate": "Win rate",
+    "active": "Active",
     "bets_one": "{{count}} bet",
     "bets_other": "{{count}} bets",
-    "winRate": "Win rate {{rate}}%",
-    "active_one": "Active ({{count}} bet)",
-    "active_other": "Active ({{count}} bets)",
-    "cost": "Cost {{value}}",
-    "value": "Value {{value}}",
-    "record": "Won / Lost"
+    "record": "{{won}} won / {{lost}} lost",
+    "activeHint": "Cost {{cost}} · value {{value}}"
   },
   "reset": {
     "title": "Reset account",
-    "desc": "Clears all positions, orders, game records and asset history and restores the starting capital. Comments and mute status are untouched. One reset per calendar week, refreshed on Monday.",
+    "quota": "One per calendar week, refreshed on Monday",
+    "desc": "Clears all positions, orders, game records and asset history and restores the starting capital. Comments and mute status are untouched. An automatic bankruptcy recovery counts toward the same quota.",
     "action": "Reset my account",
     "dialogTitle": "Confirm account reset",
     "warnClears": "Cannot be undone. Clears: all spot and futures positions and orders, prediction bets, Blackjack / Mines / Video Poker records, asset history, daily buffs and wallet transfers.",
@@ -91,8 +105,6 @@
     "submit": "Confirm reset"
   },
   "wallet": {
-    "transfer": "Transfer",
-    "totalPosition": "Total positions",
     "balance": "Balance",
     "frozen": "Frozen",
     "game": "Game",

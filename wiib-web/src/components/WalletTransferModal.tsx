@@ -3,8 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { walletApi } from '../api';
 import { useUserStore } from '../stores/userStore';
 import { useToast } from './ui/use-toast';
-import { Button } from './ui/button';
-import { Input } from './ui/input';
+import { NumInput } from './coin/TradeFields';
 import { Dialog, DialogContent, DialogFooter, DialogHeader } from './ui/dialog';
 import { ArrowLeft, ArrowRight, Gamepad2, Wallet } from 'lucide-react';
 import { fmtNum } from '../lib/utils';
@@ -82,44 +81,44 @@ export function WalletTransferModal({ open, onClose, onSuccess }: Props) {
   };
 
   return (
-    <Dialog open={open} onClose={onClose}>
+    <Dialog open={open} onClose={onClose} className="bg-background border-foreground shadow-none">
       <DialogHeader>
-        <h2 className="text-lg font-bold">{t('wallet.title')}</h2>
+        <h2 className="text-[17px] font-extrabold">{t('wallet.title')}</h2>
       </DialogHeader>
       <DialogContent>
-        <div className="space-y-4">
+        <div className="flex flex-col gap-4">
           {/* 两个钱包 + 中间方向切换（转出/转入标签跟随方向翻转，按钮带"换向"提示） */}
           <div className="flex items-stretch gap-2">
-            <div className="relative flex-1 rounded-md border border-border bg-card-2 p-3 text-center">
-              <span className={`absolute top-1.5 right-1.5 text-[9px] font-bold px-1.5 py-0.5 rounded-full ${toGame ? 'bg-primary/10 text-primary' : 'bg-gain/10 text-gain'}`}>
+            <div className="relative flex-1 border border-border p-3 text-center">
+              <span className={`chip absolute top-1.5 right-1.5 ${toGame ? 'mute' : 'up'}`}>
                 {toGame ? t('wallet.out') : t('wallet.in')}
               </span>
-              <div className="text-xs text-muted-foreground flex items-center justify-center gap-1">
+              <div className="text-[12.5px] mute flex items-center justify-center gap-1">
                 <Wallet className="w-3 h-3" /> {t('wallet.balanceWallet')}
               </div>
-              <div className="text-base font-bold tabular-nums mt-1">{fmtNum(balance)}</div>
+              <div className="num text-[17px] font-bold mt-1">{fmtNum(balance)}</div>
             </div>
             <button
               onClick={() => setDirection(d => d === 'TO_GAME' ? 'TO_BALANCE' : 'TO_GAME')}
-              className="self-center px-2 py-1.5 rounded-full border border-border bg-card hover:bg-surface-hover text-primary transition-colors flex flex-col items-center gap-0.5"
+              className="self-center px-2 py-1.5 border border-foreground hover:bg-card-2 transition-colors flex flex-col items-center gap-0.5 cursor-pointer"
               title={t('wallet.switchDirTitle')}
               aria-label={t('wallet.switchDir')}
             >
-              {toGame ? <ArrowRight className="w-4 h-4" /> : <ArrowLeft className="w-4 h-4" />}
+              {toGame ? <ArrowRight className="ic" /> : <ArrowLeft className="ic" />}
               <span className="text-[9px] font-bold leading-none">{t('wallet.flip')}</span>
             </button>
-            <div className="relative flex-1 rounded-md border border-border bg-card-2 p-3 text-center">
-              <span className={`absolute top-1.5 right-1.5 text-[9px] font-bold px-1.5 py-0.5 rounded-full ${toGame ? 'bg-gain/10 text-gain' : 'bg-primary/10 text-primary'}`}>
+            <div className="relative flex-1 border border-border p-3 text-center">
+              <span className={`chip absolute top-1.5 right-1.5 ${toGame ? 'up' : 'mute'}`}>
                 {toGame ? t('wallet.in') : t('wallet.out')}
               </span>
-              <div className="text-xs text-muted-foreground flex items-center justify-center gap-1">
+              <div className="text-[12.5px] mute flex items-center justify-center gap-1">
                 <Gamepad2 className="w-3 h-3" /> {t('wallet.gameWallet')}
               </div>
-              <div className="text-base font-bold tabular-nums mt-1">{fmtNum(gameBalance)}</div>
+              <div className="num text-[17px] font-bold mt-1">{fmtNum(gameBalance)}</div>
             </div>
           </div>
 
-          <div className="text-xs text-muted-foreground text-center">
+          <div className="text-[12.5px] mute text-center">
             {toGame
               ? `${t('wallet.balanceWallet')} → ${t('wallet.gameWallet')}`
               : `${t('wallet.gameWallet')} → ${t('wallet.balanceWallet')}`}
@@ -127,26 +126,25 @@ export function WalletTransferModal({ open, onClose, onSuccess }: Props) {
 
           {/* 金额输入 + 全部（全部=源钱包全额，手续费从转出额里扣，不预留） */}
           <div className="flex gap-2">
-            <Input
-              type="number"
+            <NumInput
+              className="flex-1"
               min={0}
               placeholder={t('wallet.amountPlaceholder')}
               value={amount}
-              onChange={e => setAmount(e.target.value)}
-              className="flex-1 text-right font-mono tabular-nums"
+              onChange={setAmount}
+              unit="USDT"
             />
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-11 px-4"
+            <button
+              type="button"
+              className="btn"
               onClick={() => setAmount(String(Math.floor(sourceBalance * 100) / 100))}
             >
               {t('wallet.max')}
-            </Button>
+            </button>
           </div>
 
           {amt > 0 && (
-            <div className="text-xs text-muted-foreground text-center tabular-nums">
+            <div className="num text-[12.5px] mute text-center">
               {t('wallet.feeLine', { fee: fee.toFixed(2), received: receiveAmt.toFixed(2) })}
             </div>
           )}
@@ -154,30 +152,30 @@ export function WalletTransferModal({ open, onClose, onSuccess }: Props) {
           {/* 全仓占用预检：restricted=false（可转=全部余额）时什么都不显示 */}
           {toGame && preview?.restricted && (
             preview.allowed ? (
-              <div className="rounded-md border border-border bg-card-2 p-3 space-y-1.5 text-xs">
+              <div className="num border border-border p-3 flex flex-col gap-1.5 text-[12.5px]">
                 <div className="flex justify-between">
-                  <span className="text-muted-foreground">{t('wallet.equityAfter')}</span>
-                  <span className="font-mono tabular-nums">{fmtNum(preview.equityAfter)}</span>
+                  <span className="mute">{t('wallet.equityAfter')}</span>
+                  <span>{fmtNum(preview.equityAfter)}</span>
                 </div>
                 {preview.positions?.map(p => (
                   <div key={p.positionId} className="flex justify-between">
-                    <span className="text-muted-foreground">
+                    <span className="mute">
                       {t('wallet.newLiq', {
                         symbol: p.symbol,
                         dir: p.side === 'LONG' ? t('sideShort.long') : t('sideShort.short'),
                       })}
                     </span>
-                    <span className="font-mono tabular-nums text-yellow-500">
+                    <span className="wn">
                       {p.estLiqPrice > 0 ? formatCoinPrice(p.symbol, p.estLiqPrice) : 'N/A'}
                     </span>
                   </div>
                 ))}
                 {preview.maxTransferable != null && (
-                  <div className="flex justify-between items-center pt-1 border-t border-border/40">
-                    <span className="text-muted-foreground">{t('wallet.maxTransferable')}</span>
+                  <div className="flex justify-between items-center pt-1 border-t border-border">
+                    <span className="mute">{t('wallet.maxTransferable')}</span>
                     <button
                       type="button"
-                      className="font-mono tabular-nums text-primary hover:underline underline-offset-2"
+                      className="text-primary hover:underline underline-offset-2 cursor-pointer"
                       onClick={() => setAmount(String(preview.maxTransferable))}
                     >
                       {fmtNum(preview.maxTransferable)}
@@ -186,11 +184,11 @@ export function WalletTransferModal({ open, onClose, onSuccess }: Props) {
                 )}
               </div>
             ) : (
-              <div className="rounded-md border border-border bg-card-2 p-3 text-xs text-loss">
+              <div className="num border border-loss p-3 text-[12.5px] dn">
                 {t('wallet.overLimit')}{' '}
                 <button
                   type="button"
-                  className="font-mono tabular-nums text-primary hover:underline underline-offset-2"
+                  className="text-primary hover:underline underline-offset-2 cursor-pointer"
                   onClick={() => setAmount(String(preview.maxTransferable ?? 0))}
                 >
                   {fmtNum(preview.maxTransferable ?? 0)}
@@ -201,14 +199,15 @@ export function WalletTransferModal({ open, onClose, onSuccess }: Props) {
         </div>
       </DialogContent>
       <DialogFooter>
-        <Button variant="ghost" size="sm" onClick={onClose}>{t('common:cancel')}</Button>
-        <Button
-          size="sm"
+        <button type="button" className="btn sm" onClick={onClose}>{t('common:cancel')}</button>
+        <button
+          type="button"
+          className="btn sm fill disabled:opacity-40 disabled:cursor-default"
           onClick={handleSubmit}
           disabled={submitting || amt <= 0 || amt > sourceBalance || transferBlocked}
         >
           {submitting ? t('wallet.submitting') : t('wallet.transferTo', { target: targetWallet })}
-        </Button>
+        </button>
       </DialogFooter>
     </Dialog>
   );

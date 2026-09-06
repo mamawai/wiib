@@ -3,6 +3,7 @@ import { useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { CategoryAverages } from '../types';
 import { useIsDark } from '../hooks/useIsDark';
+import { chartUi, cssVar, rgba } from '../lib/chartTheme';
 
 interface Props {
   userData: CategoryAverages;
@@ -31,6 +32,9 @@ export function RadarChart({ userData }: Props) {
     chartInstanceRef.current = chart;
 
     const buildOption = (d: boolean) => {
+      const ui = chartUi(d);
+      const card2 = cssVar('--color-card-2', d ? '#1a1b1f' : '#f0f0ec');
+      const primary = cssVar('--color-primary', d ? '#f97316' : '#f25f0a');
       const userValues = INDICATORS.map(ind => userData[ind.key as keyof CategoryAverages] || 0);
       const avgVal = userValues.length ? userValues.reduce((a, b) => a + b, 0) / userValues.length : 0;
       return {
@@ -38,13 +42,12 @@ export function RadarChart({ userData }: Props) {
         legend: {
           data: [t('radar.betterThan', { pct: Math.round(avgVal) })],
           bottom: 0,
-          textStyle: { color: d ? '#878b96' : '#71737b', fontSize: 11 },
+          textStyle: { color: ui.axisLabel, fontSize: 11 },
+          icon: 'rect',
         },
         tooltip: {
           trigger: 'item',
-          backgroundColor: d ? '#13151a' : '#fff',
-          borderColor: d ? '#23262e' : '#e4e4df',
-          textStyle: { color: d ? '#eceef0' : '#17181a', fontSize: 12 },
+          ...ui.tooltip,
           formatter: (params: { value: number[] }) => {
             const vals = params.value;
             return INDICATORS.map((ind, i) =>
@@ -61,17 +64,18 @@ export function RadarChart({ userData }: Props) {
           center: ['50%', '45%'],
           radius: '65%',
           axisName: {
-            color: d ? '#878b96' : '#71737b',
+            color: ui.axisLabel,
             fontSize: 11,
           },
           splitLine: {
-            lineStyle: { color: d ? '#23262e' : '#e4e4df' },
+            lineStyle: { color: ui.gridLine },
           },
+          // 一圈深一圈浅，只在纸色和次层面色之间交替
           splitArea: {
-            areaStyle: { color: d ? ['#13151a', '#181b21', '#13151a', '#181b21', '#13151a'] : ['#fafaf8', '#f1f1ee', '#fafaf8', '#f1f1ee', '#fafaf8'] },
+            areaStyle: { color: [ui.card, card2, ui.card, card2, ui.card] },
           },
           axisLine: {
-            lineStyle: { color: d ? '#23262e' : '#e4e4df' },
+            lineStyle: { color: ui.gridLine },
           },
         },
         series: [
@@ -81,10 +85,10 @@ export function RadarChart({ userData }: Props) {
               {
                 value: userValues,
                 name: t('radar.betterThan', { pct: Math.round(avgVal) }),
-                lineStyle: { color: '#635bff', width: 2 },
-                areaStyle: { color: 'rgba(99, 91, 255, 0.3)' },
-                itemStyle: { color: '#635bff' },
-                symbol: 'circle',
+                lineStyle: { color: primary, width: 2 },
+                areaStyle: { color: rgba(primary, 0.22) },
+                itemStyle: { color: primary },
+                symbol: 'rect',
                 symbolSize: 6,
               },
             ],
@@ -105,15 +109,15 @@ export function RadarChart({ userData }: Props) {
 
   return (
     <div className="w-full">
-      <div ref={chartRef} className="w-full h-72 sm:h-96" />
+      <div ref={chartRef} className="w-full h-[320px]" />
       {/* 五分类百分位速览：免 hover 直读，值=胜过多少其他用户 */}
-      <div className="grid grid-cols-5 gap-1 mt-2 px-1">
+      <div className="grid grid-cols-5 gap-1 mt-2">
         {INDICATORS.map(ind => {
           const v = Number(userData[ind.key as keyof CategoryAverages] || 0);
           return (
             <div key={ind.key} className="text-center">
-              <div className="text-[10px] text-muted-foreground leading-tight">{t(ind.labelKey)}</div>
-              <div className={`text-xs font-bold tabular-nums ${v >= 50 ? 'text-green-400' : 'text-muted-foreground'}`}>
+              <div className="text-[11.5px] mute leading-tight">{t(ind.labelKey)}</div>
+              <div className={`num text-[13px] font-bold ${v >= 50 ? 'up' : 'mute'}`}>
                 {v.toFixed(0)}%
               </div>
             </div>

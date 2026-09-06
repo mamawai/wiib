@@ -2,13 +2,11 @@ import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Eye, EyeOff } from 'lucide-react';
 import { userApi } from '../api';
-import { Card, CardContent } from './ui/card';
 import { useToast } from './ui/use-toast';
 import { cn } from '../lib/utils';
 
 /**
- * 详情页公开开关。/me 与 /portfolio 各摆一处，两边按同一条界切开：底栏 lg:hidden，
- * ≥1024 没有「我的」页，桌面只能从持仓页进；1023 及以下反过来，持仓页那块 hidden lg:block 收起，走「我的」页。
+ * 详情页公开开关。/me 与 /portfolio 各摆一处，
  * 两处摆同一个组件而不是各写一份——两份状态逻辑迟早只改一边。
  */
 export function ProfilePublicToggle() {
@@ -42,33 +40,27 @@ export function ProfilePublicToggle() {
   const off = profilePublic === false;
 
   return (
-    <Card>
-      <CardContent className="pt-5">
-        <button
-          onClick={() => void toggle()}
-          disabled={profilePublic == null || saving}
-          className="flex items-start gap-3 w-full text-left cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
-        >
-          <div className="w-8 h-8 rounded-lg bg-surface-hover flex items-center justify-center shrink-0">
-            {off ? <EyeOff className="w-4 h-4 text-muted-foreground" /> : <Eye className="w-4 h-4 text-sky-400" />}
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="text-sm font-medium">{t('toggle.title')}</div>
-            <p className="mt-0.5 text-xs text-muted-foreground leading-relaxed">
-              {t('toggle.desc')}
-            </p>
-          </div>
-          <div className={cn(
-            'w-11 h-6 rounded-full relative transition-colors shrink-0 mt-0.5',
-            off ? 'bg-border' : 'bg-primary',
-          )}>
-            <div className={cn(
-              'absolute top-1 w-4 h-4 rounded-full bg-white shadow-sm transition-transform',
-              off ? 'translate-x-1' : 'translate-x-5.5',
+    <section className="sec">
+      <div className="sec-h">
+        <h2>{t('toggle.title')}</h2>
+      </div>
+      <button
+        onClick={() => void toggle()}
+        disabled={profilePublic == null || saving}
+        className="flex items-center flex-wrap gap-8 w-full text-left cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+      >
+        <p className="m-0 text-[14px] mute max-w-[70ch] leading-[1.6]">{t('toggle.desc')}</p>
+        <span className="ml-auto shrink-0 inline-flex items-center gap-2.5">
+          {off ? <EyeOff className="ic mute" /> : <Eye className="ic text-primary" />}
+          {/* 方形开关：关=空框墨滑块，开=墨底纸色滑块 */}
+          <span className={cn('relative w-11 h-6 border border-foreground transition-colors', off ? 'bg-transparent' : 'bg-foreground')}>
+            <span className={cn(
+              'absolute top-[3px] left-[3px] w-4 h-4 transition-transform',
+              off ? 'bg-foreground' : 'bg-background translate-x-5',
             )} />
-          </div>
-        </button>
-      </CardContent>
-    </Card>
+          </span>
+        </span>
+      </button>
+    </section>
   );
 }

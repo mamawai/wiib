@@ -399,40 +399,6 @@ html.dark .machined { box-shadow: inset 0 1px 0 rgba(255, 255, 255, .07); }
   .nav-dot{transition:none}
 }
 
-/* ===== 钱包卡包（PortfolioWallet）：口袋+卡片堆叠动画，styled-components 迁出版 ===== */
-.wallet-widget { display: flex; flex-direction: column; align-items: center; gap: 14px; }
-.wallet-widget .wallet { position: relative; width: 280px; height: var(--wallet-h, 230px); cursor: pointer; perspective: 1000px; display: flex; justify-content: center; align-items: flex-end; transition: transform .4s ease; }
-@keyframes wallet-slide-in { 0% { transform: translateY(-100px); opacity: 0; } 100% { transform: translateY(0); opacity: 1; } }
-.wallet-widget .wallet-back { position: absolute; bottom: 0; width: 280px; height: var(--back-h, 200px); background: #1e341e; border-radius: 22px 22px 60px 60px; z-index: 5; box-shadow: inset 0 25px 35px rgba(0,0,0,.4), inset 0 5px 15px rgba(0,0,0,.5); }
-.wallet-widget .card { position: absolute; width: 260px; height: 160px; left: 10px; border-radius: 16px; padding: 18px; color: white; box-shadow: inset 0 1px 1px rgba(255,255,255,.3), 0 -4px 15px rgba(0,0,0,.1); transition: transform .6s cubic-bezier(.34,1.56,.64,1), z-index 0s; animation: wallet-slide-in .8s cubic-bezier(.2,.8,.2,1) backwards; }
-.wallet-widget .card-inner { display: flex; flex-direction: column; justify-content: space-between; height: 100%; }
-.wallet-widget .card-top { display: flex; justify-content: space-between; align-items: center; font-size: 14px; text-transform: uppercase; letter-spacing: 1px; }
-.wallet-widget .chip { width: 32px; height: 24px; background: rgba(255,255,255,.2); border-radius: 4px; border: 1px solid rgba(255,255,255,.1); }
-.wallet-widget .card-bottom { display: flex; justify-content: space-between; align-items: flex-end; }
-.wallet-widget .label { font-size: 8px; opacity: .7; text-transform: uppercase; margin-bottom: 2px; display: block; }
-.wallet-widget .value { font-size: 10px; font-weight: 500; }
-.wallet-widget .card-number-wrapper { text-align: right; }
-.wallet-widget .hidden-stars { font-size: 15px; letter-spacing: 2px; font-weight: 600; }
-.wallet-widget .card-number { display: none; font-size: 14px; letter-spacing: 1px; font-family: var(--font-mono); }
-.wallet-widget .card-sub { font-size: 10px; opacity: .7; letter-spacing: 0; }
-.wallet-widget .pocket { position: absolute; bottom: 0; width: 280px; height: 160px; z-index: 40; filter: drop-shadow(0 15px 25px rgba(20,40,20,.4)); }
-.wallet-widget .pocket-content { position: absolute; top: 45px; width: 100%; text-align: center; z-index: 50; display: flex; flex-direction: column; align-items: center; gap: 8px; }
-.wallet-widget .balance-stars { color: #839e7b; font-size: 24px; letter-spacing: 4px; transition: .3s; }
-.wallet-widget .balance-real { color: #a7c59e; font-size: 22px; font-weight: 600; opacity: 0; position: absolute; top: 0; left: 50%; transform: translate(-50%, 10px); transition: .3s; font-family: var(--font-mono); }
-.wallet-widget .eye-icon-wrapper { margin-top: 8px; height: 20px; width: 20px; position: relative; opacity: .3; transition: .3s; }
-.wallet-widget .eye-icon { position: absolute; top: 0; left: 0; stroke: #3be60b; transition: .3s; }
-.wallet-widget .wallet:hover { transform: translateY(-5px); }
-.wallet-widget .wallet:hover .eye-icon-wrapper { opacity: 1; }
-.wallet-widget .wallet:hover .card { transform: translateY(var(--spread-y)) rotate(var(--spread-r)); }
-.wallet-widget .card:hover { z-index: 100 !important; transition-delay: 0s !important; }
-.wallet-widget .wallet:hover .card:hover { transform: translateY(var(--spread-y)) scale(1.05) rotate(0deg); }
-.wallet-widget .card:hover .hidden-stars { display: none; }
-.wallet-widget .card:hover .card-number { display: block; }
-.wallet-widget .wallet:hover .balance-stars { opacity: 0; }
-.wallet-widget .wallet:hover .balance-real { opacity: 1; transform: translate(-50%, 0); }
-.wallet-widget .wallet:hover .eye-slash { opacity: 0; transform: scale(.5); }
-.wallet-widget .wallet:hover .eye-open { opacity: 1; transform: scale(1.1); }
-
 /* 赌场麂皮牌桌 */
 .casino-felt {
   --felt: #1a7a3a;
