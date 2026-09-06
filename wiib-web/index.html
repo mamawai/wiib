@@ -20,17 +20,17 @@
     <link rel="preload" as="image" href="/logo.png" />
     <style>
       /* 连第一帧都不能白：html 背景先于 splash 元素解析 */
-      html { background: #f6f6f4 }
-      html.dark { background: #0b0c0f }
+      html { background: #fafaf7 }
+      html.dark { background: #0f1012 }
 
       #splash {
         position: fixed; inset: 0; z-index: 9999;
-        --c-bg: #f6f6f4; --c-cell: #dfdfd7;
-        --c-pri: #f97316; --c-mut: #71737b;
+        --c-bg: #fafaf7; --c-cell: #e7e7e2;
+        --c-pri: #f25f0a; --c-mut: #7a7e88;
       }
       html.dark #splash {
-        --c-bg: #0b0c0f; --c-cell: #1b1f27;
-        --c-pri: #f97316; --c-mut: #878b96;
+        --c-bg: #0f1012; --c-cell: #26282d;
+        --c-pri: #f97316; --c-mut: #8b8e97;
       }
       /* 退场：整块淡出，一开始就放行点击 */
       #splash.sp-out { pointer-events: none; opacity: 0; transition: opacity .5s ease }
@@ -74,7 +74,7 @@
         // 放这儿是因为晚到 React 挂载会先闪一下旧色。取值须同 index.css 的 --color-card
         if (pwa) {
           document.querySelector('meta[name="theme-color"]')
-            .setAttribute('content', dark ? '#13151a' : '#ffffff');
+            .setAttribute('content', dark ? '#0f1012' : '#fafaf7');
         }
       })();
     </script>

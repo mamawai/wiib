@@ -14,7 +14,6 @@ import { HomeFaq } from '../components/HomeFaq';
 import { Card, CardContent } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { useToast } from '../components/ui/use-toast';
-import { SpotlightCard } from '../components/fx/SpotlightCard';
 import { DecryptedText } from '../components/fx/DecryptedText';
 import { Sparkline } from '../components/fx/Sparkline';
 import { AnimNum } from '../components/fx/AnimNum';
@@ -162,7 +161,7 @@ export function Home() {
 
           {/* ====== 驾驶舱主行：总资产曲线 + 今日盈亏/AI 画像 ====== */}
           <div className="grid lg:grid-cols-[1.7fr_1fr] gap-4 items-stretch">
-            <SpotlightCard className="p-5 flex flex-col">
+            <div className="pt-card p-5 flex flex-col">
               <div className="flex items-center gap-2">
                 <span className="microlabel font-semibold">{t('dashboard.totalAssets')}</span>
                 <span className={cn(
@@ -225,7 +224,7 @@ export function Home() {
                   {buffStatus?.canDraw && <span className="led" />}
                 </EntryChip>
               </div>
-            </SpotlightCard>
+            </div>
 
             <div className="flex flex-col gap-4">
               <Card>

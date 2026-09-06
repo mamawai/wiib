@@ -30,10 +30,10 @@ export interface ChartUi {
 }
 
 export function chartUi(isDark: boolean): ChartUi {
-  const axisLabel = cssVar('--color-muted-foreground', isDark ? '#878b96' : '#71737b');
-  const gridLine = cssVar('--color-border', isDark ? '#23262e' : '#e4e4df');
-  const card = cssVar('--color-card', isDark ? '#13151a' : '#ffffff');
-  const fg = cssVar('--color-foreground', isDark ? '#eceef0' : '#17181a');
+  const axisLabel = cssVar('--color-muted-foreground', isDark ? '#8b8e97' : '#7a7e88');
+  const gridLine = cssVar('--color-border', isDark ? '#26282d' : '#e7e7e2');
+  const card = cssVar('--color-card', isDark ? '#0f1012' : '#fafaf7');
+  const fg = cssVar('--color-foreground', isDark ? '#f1f1ec' : '#121316');
   return {
     axisLabel,
     gridLine,
@@ -46,8 +46,8 @@ export function chartUi(isDark: boolean): ChartUi {
       padding: [8, 12],
       textStyle: { color: fg, fontSize: 11, fontFamily: cssVar('--font-sans', 'ui-sans-serif, sans-serif') },
       extraCssText: isDark
-        ? 'box-shadow: 0 6px 16px rgba(0,0,0,.45); border-radius: 8px;'
-        : 'box-shadow: 0 4px 12px rgba(0,0,0,.10); border-radius: 8px;',
+        ? 'box-shadow: 0 6px 16px rgba(0,0,0,.45); border-radius: 0;'
+        : 'box-shadow: 0 4px 12px rgba(0,0,0,.10); border-radius: 0;',
     },
   };
 }

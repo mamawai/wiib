@@ -74,7 +74,7 @@ export function Sparkline({ data, stroke, area = true, dot = true, className }: 
        不用 stroke-dasharray 那套：本组件为了线宽不被 preserveAspectRatio=none 拉变形，
        必须挂 vectorEffect=non-scaling-stroke，而它会让 dash 改按屏幕坐标算——
        user-space 的 pathLength 归一化当场失效，线要么全隐要么只画一半 */
-    <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className={cn('spark-reveal', className)}>
+    <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className={cn('reveal', className)}>
       {area && (
         <>
           <defs>
@@ -90,7 +90,7 @@ export function Sparkline({ data, stroke, area = true, dot = true, className }: 
         d={line} fill="none" stroke={c} strokeWidth="1.5"
         strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke"
       />
-      {dot && <circle cx={lx} cy={ly} r="2" fill={c} className="spark-dot" style={{ filter: `drop-shadow(0 0 2px ${c})` }} />}
+      {dot && <circle cx={lx} cy={ly} r="2" fill={c} className="reveal-late" />}
     </svg>
   );
 }

@@ -6,8 +6,8 @@
  * 浏览器里相反——这个色是拿去染地址栏的，维持品牌橙。
  */
 const BRAND = '#F97316';
-const CARD_LIGHT = '#ffffff';
-const CARD_DARK = '#13151a';
+const CARD_LIGHT = '#fafaf7';
+const CARD_DARK = '#0f1012';
 
 export function syncThemeColor(isDark: boolean) {
   const meta = document.querySelector('meta[name="theme-color"]');

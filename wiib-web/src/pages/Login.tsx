@@ -61,7 +61,7 @@ export function buildAuthorizeUrl(state: string): string {
 function LiveQuote({ symbol, name }: { symbol: string; name: string }) {
   const tick = useCryptoStream(symbol, 'spot');
   return (
-    <div className="flex items-center gap-2 px-3.5 py-2 rounded-md border border-border bg-card/70 backdrop-blur-sm">
+    <div className="flex items-center gap-2 px-3.5 py-2 rounded-md border border-border bg-card/70">
       <span className="led" />
       <span className="text-xs font-bold">{name}</span>
       {tick?.price != null

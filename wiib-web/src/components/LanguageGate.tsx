@@ -66,7 +66,7 @@ export function LanguageGate() {
   return (
     // 没有关闭键、不响应 ESC、点遮罩也不关：两个选项等权且都是一步到位，
     // 不存在"没看懂需要逃生"的情况；也只有这样"选过一次"才真的是选过
-    <div className="fixed inset-0 z-[300] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
+    <div className="fixed inset-0 z-[300] flex items-center justify-center p-4 bg-black/70">
       <div className="pt-card rounded-lg w-full max-w-2xl overflow-hidden">
         <div className="flex items-center gap-2 px-5 py-3 border-b border-border">
           <Languages className="w-3.5 h-3.5 text-primary" />

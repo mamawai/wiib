@@ -771,7 +771,7 @@ export function Portfolio() {
               const allTotal = cryptoTotal + bstockTotal + futuresTotal + (predictionPnl?.activeValue ?? 0);
               const up = allProfit >= 0;
               return (
-                <div className="lg:col-span-2 rounded-xl border border-dashed border-border/60 bg-card/50 backdrop-blur-sm px-4 py-3 flex items-center justify-between">
+                <div className="lg:col-span-2 rounded-xl border border-dashed border-border/60 bg-card/50 px-4 py-3 flex items-center justify-between">
                   <div className="flex items-center gap-2 text-sm text-muted-foreground">
                     <Briefcase className="w-3.5 h-3.5" />
                     <span>{t('holdings.total')}</span>

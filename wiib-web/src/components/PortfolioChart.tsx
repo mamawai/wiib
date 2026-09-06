@@ -95,7 +95,7 @@ export function PortfolioChart({ cryptoPositions = [], bstockRows = [], futuresR
       legend: {
         bottom: '0%',
         left: 'center',
-        textStyle: { color: textColor, fontSize: 11, fontFamily: "'Plus Jakarta Sans Variable', sans-serif" },
+        textStyle: { color: textColor, fontSize: 11, fontFamily: "'Archivo Variable', sans-serif" },
         itemWidth: 10,
         itemHeight: 10,
         itemGap: 12,
@@ -123,7 +123,7 @@ export function PortfolioChart({ cryptoPositions = [], bstockRows = [], futuresR
               fontSize: 14,
               fontWeight: 'bold',
               color: isDark ? '#eceef0' : '#17181a',
-              fontFamily: "'Plus Jakarta Sans Variable', sans-serif"
+              fontFamily: "'Archivo Variable', sans-serif"
             },
             itemStyle: {
               shadowBlur: 10,
