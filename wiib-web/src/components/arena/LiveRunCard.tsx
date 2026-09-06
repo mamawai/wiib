@@ -1,12 +1,17 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Activity } from 'lucide-react';
 import { useTraderLive } from '../../hooks/useTraderLive';
-import { cn } from '../../lib/utils';
+import { cn, fmtDateTime } from '../../lib/utils';
+import type { WakeKind } from '../../types';
 import { WakeTraceView } from './WakeTraceView';
 
+/** 是什么把它叫醒的：例行K线 / 哨兵警报 / 主人手动。存词表 key 不存文案 */
+const KIND_KEY: Record<WakeKind, string> = {
+  TRADE: 'decision.ok', ALERT: 'decision.alert', MANUAL: 'term.manualWake',
+};
+
 /**
- * 详情页的现场卡：唤醒进行中才出现，头部脉冲点 + 已用秒/预算每秒走字，主体是逐帧长出来的过程视图。
+ * 详情页的现场卡：唤醒进行中才出现，橙色顶线 + 脉冲徽章，已用秒/预算每秒走字，主体是逐帧长出来的过程视图。
  * 现场流的 hook 挂在这张卡里：token 帧只重渲染这张卡，不带着整页的曲线和时间线一起刷。
  * 一轮结束只把 endedAt 交给 onEnded，页面据此重拉；running=false 整卡不渲染（过程归时间线卡的"过程"按钮）
  */
@@ -27,14 +32,21 @@ export function LiveRunCard({ traderId, onEnded, className }: {
   if (!live || !running) return null;
   const used = Math.max(0, Math.round((now - live.startedAt) / 1000));
   return (
-    <div className={cn('rounded-lg pt-card p-4 flex flex-col gap-3', className)}>
-      <div className="flex items-center gap-2">
-        <Activity className="w-3 h-3 text-primary" />
-        <span className="microlabel">{t('live.title')}</span>
-        <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
-        {/* 超预算标红：后端到点会催模型收尾 */}
-        <span className={cn('ml-auto num text-[11px]', used > live.budgetSeconds ? 'text-loss' : 'text-muted-foreground')}>
-          {t('live.budget', { used, budget: live.budgetSeconds })}
+    <div className={cn('border-t-[3px] border-primary pt-3.5', className)}>
+      <div className="flex items-center gap-3 text-[14px] font-bold mb-3.5">
+        <span className="chip border-primary text-primary"><i className="dot pulse" />{t('live.scene')}</span>
+        {/* 第一次模型调用开帧之前 calls 还是空的，别显示"第 0 次" */}
+        <span>{t('live.callN', { n: live.calls.length || 1 })}</span>
+        <span className="mute font-medium">{t(KIND_KEY[live.kind])} · {fmtDateTime(live.wakeTime)}</span>
+        <span className="ml-auto flex items-center gap-2.5 text-[13px] font-normal mute">
+          {/* 超预算标红：后端到点会催模型收尾 */}
+          <span className={cn('num', used > live.budgetSeconds && 'text-loss')}>
+            {t('live.budget', { used, budget: live.budgetSeconds })}
+          </span>
+          <i className="block w-[120px] h-1 bg-border">
+            <b className="block h-full bg-primary"
+               style={{ width: `${Math.min(100, used / live.budgetSeconds * 100)}%` }} />
+          </i>
         </span>
       </div>
       <WakeTraceView trace={live} running />

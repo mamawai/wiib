@@ -1,16 +1,15 @@
 import { useTranslation } from 'react-i18next';
-import { ArrowDownRight, ArrowRight, ArrowUpRight, Eye, EyeOff } from 'lucide-react';
+import { ArrowRight, Eye, EyeOff } from 'lucide-react';
 import { cn, fmtDateTime, fmtDuration, fmtNum } from '../../lib/utils';
 import type { TradeDecisionRef, TradeRecordView } from '../../types';
 import { PlanBlock } from './PlanBlock';
 
 /**
- * 了结方式徽章色：止盈/止损是计划兑现，主动平仓是模型的手，强平是事故。
+ * 了结方式徽章的框色：止盈绿、止损/强平红、主动平仓素框（模型的手）。
  * 键是后端下发的语言无关码（ReviewMaterialAssembler.closeMannerKey），文案另查词表。
  */
-const CLOSE_MANNER_TONE: Record<string, string> = {
-  takeProfit: 'bg-gain/15 text-gain', stopLoss: 'bg-loss/15 text-loss',
-  manual: 'bg-primary/15 text-primary', liquidated: 'bg-loss/25 text-loss',
+const CLOSE_MANNER_CHIP: Record<string, string> = {
+  takeProfit: 'up', stopLoss: 'dn', manual: '', liquidated: 'dn',
 };
 
 /**
@@ -29,45 +28,39 @@ export function TradeCard({ r, onJump, onToggleStale }: {
   // stale 视觉与开关同门槛（仅主人）：忽略是主人对自家教材的私人治理，公开视角的已了结列表与常人无异
   const stale = r.plan?.stale === true && onToggleStale != null;
   return (
-    <div className={cn('rounded-md border border-border bg-card p-2.5 text-[11px] space-y-1.5', stale && 'opacity-60')}>
-      <div className="flex items-center gap-2 flex-wrap">
-        {isLong ? <ArrowUpRight className="w-3.5 h-3.5 text-gain" /> : <ArrowDownRight className="w-3.5 h-3.5 text-loss" />}
-        <span className="font-black text-xs">{r.symbol}</span>
-        <span className={cn('text-[10px] font-bold px-1.5 py-0.5 rounded', isLong ? 'bg-gain/15 text-gain' : 'bg-loss/15 text-loss')}>
-          {isLong ? t('term.long') : t('term.short')}{r.leverage != null && ` ${r.leverage}x`}
+    <div className={cn('py-5 border-b border-border', stale && 'opacity-60')}>
+      <div className="flex items-center gap-2.5 flex-wrap">
+        <b className="text-[17px] font-bold">{r.symbol}</b>
+        <span className={cn('chip fill', isLong ? 'up' : 'dn')}>
+          {t(isLong ? 'term.long' : 'term.short')}{r.leverage != null && ` ${r.leverage}x`}
         </span>
-        <span className={cn('text-[10px] font-bold px-1.5 py-0.5 rounded', CLOSE_MANNER_TONE[r.closeMannerKey] ?? 'bg-muted text-muted-foreground')}>
+        <span className={cn('chip', CLOSE_MANNER_CHIP[r.closeMannerKey] ?? 'mute')}>
           {t(`trade.closeManner.${r.closeMannerKey}`)}
         </span>
-        {stale && (
-          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
-            {t('trade.staleBadge')}
-          </span>
-        )}
-        <span className="text-muted-foreground num">{fmtNum(r.entryPrice)} → {r.closedPrice != null ? fmtNum(r.closedPrice) : '—'}</span>
-        <span className={cn('ml-auto num font-black', pnl == null ? 'text-muted-foreground' : pnl >= 0 ? 'text-gain' : 'text-loss')}>
+        {stale && <span className="chip mute">{t('trade.staleBadge')}</span>}
+        <span className="num mute">{fmtNum(r.entryPrice)} → {r.closedPrice != null ? fmtNum(r.closedPrice) : '—'}</span>
+        <b className={cn('ml-auto num text-[18px] font-bold', pnl == null ? 'mute' : pnl >= 0 ? 'up' : 'dn')}>
           {pnl == null ? '—' : `${pnl >= 0 ? '+' : ''}${fmtNum(pnl)}`}
-        </span>
+        </b>
         {onToggleStale && r.plan && (
-          <button type="button" title={t('trade.staleHint')} onClick={() => onToggleStale(r)}
-                  className="inline-flex items-center gap-1 text-[10px] font-bold text-muted-foreground hover:text-primary">
-            {stale ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
+          <button type="button" className="btn xs" title={t('trade.staleHint')} onClick={() => onToggleStale(r)}>
+            {stale ? <Eye className="ic" /> : <EyeOff className="ic" />}
             {stale ? t('trade.staleUnmark') : t('trade.staleMark')}
           </button>
         )}
       </div>
-      <div className="text-muted-foreground num flex flex-wrap gap-x-3 gap-y-0.5">
+      <div className="flex flex-wrap gap-x-3 gap-y-1 mt-2 text-[13px] mute num">
         <span>{t('trade.openedAt', { time: fmtDateTime(r.openedAt) })}</span>
         <span>{t('trade.closedAt', { time: fmtDateTime(r.closedAt) })}</span>
         <span>{t('trade.held', { d: fmtDuration(r.openedAt, r.closedAt) })}</span>
       </div>
-      {r.plan ? <PlanBlock plan={r.plan} /> : <p className="text-muted-foreground/70">{t('trade.noPlan')}</p>}
+      {r.plan ? <PlanBlock plan={r.plan} embedded /> : <p className="text-[13px] mute mt-2">{t('trade.noPlan')}</p>}
       {(r.openDecision || r.closeDecision) && (
-        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 leading-relaxed">
+        <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 mt-3 text-[13px]">
           {r.openDecision && <DecisionLink label={t('trade.openDecision')} d={r.openDecision} onJump={onJump} />}
           {r.closeDecision && <DecisionLink label={t('trade.closeDecision')} d={r.closeDecision} onJump={onJump} />}
           {/* 平仓那一轮的一句话理由：止损/止盈带走没有这一轮，头行的了结方式徽章已经说明 */}
-          {r.closeDecision?.reason && <span className="text-muted-foreground">—— {r.closeDecision.reason}</span>}
+          {r.closeDecision?.reason && <span className="mute">—— {r.closeDecision.reason}</span>}
         </div>
       )}
     </div>
@@ -76,9 +69,8 @@ export function TradeCard({ r, onJump, onToggleStale }: {
 
 function DecisionLink({ label, d, onJump }: { label: string; d: TradeDecisionRef; onJump: (d: TradeDecisionRef) => void }) {
   return (
-    <button type="button" onClick={() => onJump(d)}
-            className="inline-flex items-center gap-0.5 font-bold text-primary hover:underline">
-      {label} · <span className="num">{fmtDateTime(d.wakeTime)}</span><ArrowRight className="w-3 h-3" />
+    <button type="button" className="btn xs" onClick={() => onJump(d)}>
+      <span className="num">{label} · {fmtDateTime(d.wakeTime)}</span><ArrowRight className="ic" />
     </button>
   );
 }

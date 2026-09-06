@@ -1,24 +1,22 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import {
-  ArrowDownRight, ArrowUpRight, Bot, ChevronDown, ChevronLeft, ChevronRight, ClipboardList, GraduationCap, Loader2,
-  NotebookPen, RefreshCcw, X, type LucideIcon,
-} from 'lucide-react';
+import { ChevronLeft, Loader2, RefreshCw, X } from 'lucide-react';
 import { traderApi } from '../api';
 import { useToast } from '../components/ui/use-toast';
-import { STATUS_META } from './Arena';
-import { EquityChart } from '../components/EquityChart';
 import { Markdown } from '../components/Markdown';
 import { DecisionCard } from '../components/arena/DecisionCard';
+import { EquityCurve } from '../components/arena/EquityCurve';
 import { LiveRunCard } from '../components/arena/LiveRunCard';
 import { PlanBlock } from '../components/arena/PlanBlock';
 import { PositionsTable } from '../components/arena/PositionsTable';
 import { ScoreStrip } from '../components/arena/ScoreStrip';
+import { STATUS_META } from '../components/arena/traderStatus';
 import { TradeCard } from '../components/arena/TradeCard';
-import { cn, fmtDate, fmtDateTime, fmtNum, fmtTokens } from '../lib/utils';
+import { useCountUp } from '../hooks/useCountUp';
+import { useStagger } from '../hooks/useStagger';
+import { cn, fmtDate, fmtDateTime, fmtNum, fmtSignedPct, fmtTime, fmtTokens } from '../lib/utils';
 import type { AiTraderDecisionView, TradeDecisionRef, TradeRecordView, TraderDetailView, TraderEquityPoint } from '../types';
-import type { TnEquityPoint } from '../types/testnet';
 
 const REFRESH_MS = 60_000;
 const DAY_MS = 86_400_000;
@@ -28,24 +26,17 @@ const RANGES = [3, 7, 14, 30, 0] as const;
 type Range = typeof RANGES[number];
 type Tab = 'timeline' | 'trades';
 
+/** 块头：小标题 + 右边一句说明，和分节头同一套排版，只是间距紧一档 */
+const BLK_H = 'sec-h mb-4';
+
+/** 币种列表 BTCUSDT,ETHUSDT → BTC / ETH */
+const symbolList = (symbols: string) => symbols.split(',').map(s => s.replace('USDT', '')).join(' / ');
+
 /** 新加坡时区 yyyy-MM-dd 那一天的 [起, 止) 毫秒——时间线按天查询与 fmtDate/fmtDateTime 同一时区 */
 function dayBounds(day: string): { from: number; to: number } {
   const from = Date.parse(`${day}T00:00:00+08:00`);
   return { from, to: from + DAY_MS };
 }
-
-/** 局次 / 区间切换共用的小段选钮 */
-function SegButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) {
-  return (
-    <button type="button" onClick={onClick}
-            className={cn('px-1.5 h-6 rounded border text-[10px] font-bold num',
-              active ? 'border-primary/60 bg-card-2 text-primary' : 'border-border text-muted-foreground hover:text-foreground')}>
-      {children}
-    </button>
-  );
-}
-
-const ICON_BTN = 'w-6 h-6 rounded border border-border flex items-center justify-center text-muted-foreground hover:text-primary disabled:opacity-40 disabled:hover:text-muted-foreground';
 
 /**
  * 最大回撤%：净值从峰值回落的最大幅度，口径同后端 ReviewMaterialAssembler——
@@ -63,24 +54,12 @@ function maxDrawdownPct(points: TraderEquityPoint[]): number | null {
   return maxDd;
 }
 
-/** 主栏卡的 tab 头 */
-function TabButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) {
-  return (
-    <button type="button" onClick={onClick}
-            className={cn('px-2.5 pt-1.5 pb-2 -mb-px text-xs font-extrabold border-b-2 inline-flex items-center gap-1.5',
-              active ? 'text-foreground border-primary' : 'text-muted-foreground border-transparent hover:text-foreground')}>
-      {children}
-    </button>
-  );
-}
-
 /**
- * 笔记卡（记忆/学习）：默认一行——标题 + 首句预览 + 最近时间，点开才铺 markdown；两份笔记是参考资料，不跟实时数据抢版面。
- * PC 上展开封顶 50vh、正文卡内滚；手机不限高跟页面滚
+ * 笔记一行（记忆/学习）：标题 + 首句预览 + 最近时间，点开才铺 markdown。
+ * 两份笔记是参考资料，不跟实时数据抢版面。
  */
-function NotesCard({ icon: Icon, tone, title, time, content, empty, className }: {
-  icon: LucideIcon; tone: string; title: string; time: number | null | undefined; content: string | null | undefined;
-  empty: string; className?: string;
+function NotesCard({ title, time, content, empty }: {
+  title: string; time: number | null | undefined; content: string | null | undefined; empty: string;
 }) {
   const { t } = useTranslation('ai');
   const [open, setOpen] = useState(false);
@@ -88,31 +67,23 @@ function NotesCard({ icon: Icon, tone, title, time, content, empty, className }:
   // 预览是纯文本，去掉 markdown 符号免得一行井号
   const preview = text.replace(/[#*`>_-]/g, '').replace(/\s+/g, ' ').slice(0, 120);
   return (
-    <div className={cn('rounded-lg pt-card flex flex-col', open && 'lg:max-h-[50vh]', className)}>
+    <>
       <button type="button" onClick={() => text && setOpen(o => !o)} disabled={!text}
-              className="w-full flex items-center gap-2 px-4 py-3 text-left disabled:cursor-default shrink-0">
-        <Icon className={cn('w-3 h-3 shrink-0', tone)} />
-        <span className="microlabel shrink-0">{title}</span>
-        {text
-          ? <span className="flex-1 min-w-0 truncate text-[11px] text-muted-foreground">{preview}</span>
-          : <span className="flex-1 min-w-0 truncate text-[11px] text-muted-foreground/70">{empty}</span>}
+              className="w-full text-left py-3.5 border-b border-border flex items-center gap-3 text-[14px] disabled:cursor-default">
+        <b className="font-extrabold whitespace-nowrap">{title}</b>
+        <span className="mute flex-1 min-w-0 truncate">{text ? preview : empty}</span>
         {time != null && text && (
-          <span className="text-[10px] num text-muted-foreground/70 whitespace-nowrap">{t('detail.lastAt', { time: fmtDateTime(time) })}</span>
+          <em className="not-italic text-[12px] mute whitespace-nowrap">{t('detail.lastAt', { time: fmtDateTime(time) })}</em>
         )}
-        {text && <ChevronDown className={cn('w-3.5 h-3.5 shrink-0 text-muted-foreground transition-transform', open && 'rotate-180')} />}
       </button>
-      {open && (
-        <div className="px-4 pb-4 text-xs leading-relaxed text-foreground/90 lg:flex-1 lg:min-h-0 lg:overflow-y-auto">
-          <Markdown content={text} />
-        </div>
-      )}
-    </div>
+      {open && <div className="text-[14px] leading-[1.7] py-3"><Markdown content={text} /></div>}
+    </>
   );
 }
 
 /**
- * trader 详情：记分牌 → 六格仪表条 → 贯通两栏【主栏 净值曲线 + 决策时间线/已了结 ‖ 侧栏 实时持仓挂单 + 生效计划 + 记忆/学习笔记】。
- * PC（lg+）每张卡各有高度上限，内容多了卡内滚，卡的位置不随内容跑；手机不限高整页滚、卡序另排（见布局处注释）。
+ * trader 详情：记分牌 → 六格仪表条 → 左主栏（净值 + 现场 + 时间线）‖ 右侧栏（持仓 + 计划 + 两份笔记）。
+ * 决策时间线是这页的正餐，整页滚不封顶；窄屏两栏堆成一列，卡序另排（见布局处注释）。
  */
 export function ArenaDetail() {
   const { t } = useTranslation(['ai', 'common']);
@@ -136,6 +107,8 @@ export function ArenaDetail() {
   // 从已了结交易跳过来要找的那一条决策：描边 + 滚到它
   const [focusId, setFocusId] = useState<number | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  // 时间线/已了结共用一个逐项登场：两个列表同一时刻只有一个挂着
+  const staggerRef = useStagger<HTMLDivElement>();
   // 现场卡报上来的"刚跑完一轮"时刻：新决策行、净值点、持仓都在那一刻落库，据此立刻重拉
   const [endedAt, setEndedAt] = useState(0);
 
@@ -224,10 +197,6 @@ export function ArenaDetail() {
   // 区间内点不够画线（末点之前是长停工）就退到整局，按钮高亮跟着退
   const effectiveRange: Range = windowed.length > 1 ? range : 0;
   const visible = effectiveRange === 0 ? curve : windowed;
-  // 净值曲线复用 EquityChart（累计盈亏口径）：equity-10000 起点归零；区间只裁 x 轴，y 轴仍是整局口径
-  const chartPoints = useMemo<TnEquityPoint[]>(
-    () => visible.map(p => ({ time: p.wakeTime, cumPnl: p.equity - 10000 })),
-    [visible]);
   // 区间内变化：窗口首尾权益之差，百分比按窗口起点权益
   const windowDelta = visible.length > 1 ? visible[visible.length - 1].equity - visible[0].equity : null;
   const windowPct = windowDelta != null && visible[0].equity ? windowDelta / visible[0].equity * 100 : null;
@@ -235,6 +204,9 @@ export function ArenaDetail() {
   // tr=这只 trader（不叫 t，那是词表查询函数）
   const tr = detail?.trader;
   const st = tr ? (STATUS_META[tr.status] ?? STATUS_META.PAUSED) : null;
+  // 大数滚动：hook 不能挂在 tr 判空之后，值先兜 0
+  const pctRef = useCountUp<HTMLElement>(tr?.pnlPct ?? 0, fmtSignedPct);
+  const eqRef = useCountUp<HTMLElement>(tr?.equity ?? 0, v => fmtNum(v));
   // round=null 表示跟随当前局，落到显示时统一成具体数字
   const viewingRound = round ?? tr?.roundNo ?? 1;
   const viewingHistory = tr != null && viewingRound !== tr.roundNo;
@@ -242,6 +214,7 @@ export function ArenaDetail() {
   const rounds = tr
     ? Array.from({ length: Math.min(tr.roundNo, 10) }, (_, i) => Math.max(1, tr.roundNo - 9) + i)
     : [];
+  const roundLabel = viewingHistory ? `R${viewingRound}` : t('detail.thisRound');
 
   // 记分牌：第几天＝曲线首点到末点（末点就是最近一次唤醒）；笔数/胜率从已了结交易现算，只有当前局的
   const dayNo = curve.length > 0
@@ -251,65 +224,72 @@ export function ArenaDetail() {
   const winRate = closed.length > 0 ? Math.round(closed.filter(r => (r.closedPnl as number) > 0).length / closed.length * 100) : null;
   const maxDd = maxDrawdownPct(curve);
   // token 那格的微标签跟着时间线筛选走：翻到某天就是那天，没翻就是当前看的这一局
-  const tokenScope = day ? day.slice(5) : viewingHistory ? `R${viewingRound}` : t('detail.thisRound');
+  const tokenScope = day ? day.slice(5) : roundLabel;
+
+  const tabBtn = (on: boolean) => cn('pb-2.5 -mb-px inline-flex items-center gap-2 text-[15px] border-b-2 cursor-pointer',
+    on ? 'text-foreground font-extrabold border-foreground' : 'mute font-semibold border-transparent');
 
   return (
-    <div className="page-shell page-shell-wide p-4 md:p-6 space-y-4">
-      {/* 记分牌一行：身份在左，收益率·权益·四格·局次·刷新在右，窄屏右组整体换到下一行 */}
-      <div className="rounded-lg pt-card px-3 py-2 md:px-4 flex items-center gap-x-3 gap-y-2 flex-wrap">
-        <Link to="/arena" className="border border-border hover:bg-surface-hover w-8 h-8 rounded-lg flex items-center justify-center text-muted-foreground hover:text-primary" aria-label={t('term.backToArena')}>
-          <ChevronLeft className="w-4 h-4" />
-        </Link>
-        <Bot className="w-5 h-5 text-primary" />
-        <h1 className="text-base font-black">{tr?.name ?? '…'}</h1>
-        {tr && st && (
-          <>
-            <span className={cn('text-[10px] font-bold px-1.5 py-0.5 rounded', st.tone)}>{t(st.labelKey)}</span>
-            <span className="text-[11px] text-muted-foreground break-all">{tr.model ?? t('term.noModel')} · {tr.intervalCode}{tr.wakeWindow && ` · ${tr.wakeWindow}`}</span>
-          </>
-        )}
-        <div className="ml-auto flex items-center gap-x-4 gap-y-2 flex-wrap">
-          {tr && (
-            <>
-              <div className={cn('num text-2xl font-black leading-none tracking-tight', tr.pnlPct >= 0 ? 'text-gain' : 'text-loss')}>
-                {tr.pnlPct >= 0 ? '+' : ''}{tr.pnlPct.toFixed(2)}%
-              </div>
-              <div className="flex flex-col">
-                <span className="microlabel">{t('detail.equityLabel')}</span>
-                <b className="num text-sm font-extrabold leading-tight">{fmtNum(tr.equity)}</b>
-              </div>
-            </>
-          )}
-          {/* 局次：每局是独立子账户各自注资 10000，曲线与时间线同进同出；只有一局时不出现 */}
-          {rounds.length > 1 && (
-            <div className="flex items-center gap-1.5">
-              <span className="text-[11px] text-muted-foreground">{t('detail.round')}</span>
-              {rounds.map(r => (
-                <SegButton key={r} active={r === viewingRound} onClick={() => pickRound(r === tr?.roundNo ? null : r)}>R{r}</SegButton>
-              ))}
-            </div>
-          )}
-          <button
-            onClick={() => { load(); loadDecisions(); }}
-            className="border border-border hover:bg-surface-hover w-8 h-8 rounded-lg flex items-center justify-center text-muted-foreground hover:text-primary"
-            aria-label={t('common:refresh')}
-          >
-            <RefreshCcw className="w-3.5 h-3.5" />
-          </button>
+    <div className="wrap">
+      {/* 记分牌：左身份 + 局次，右收益率 + 权益 */}
+      <div className="grid grid-cols-1 xl:grid-cols-[1fr_auto] gap-8 items-end pt-8">
+        <div>
+          <Link to="/arena" className="inline-flex items-center gap-1 text-[13px] mute mb-2.5">
+            <ChevronLeft className="w-3.5 h-3.5" />{t('term.backToArena')}
+          </Link>
+          <div className="flex items-baseline gap-4 flex-wrap">
+            <b className="cond text-[56px] font-bold leading-none">{tr?.name ?? '…'}</b>
+            {tr && st && (
+              <span className={cn('chip', st.chip)}>
+                {tr.status === 'RUNNING' && <i className="dot pulse" />}{t(st.labelKey)}
+              </span>
+            )}
+            {tr?.mine && <span className="chip fill orange">{t('arena.mine')}</span>}
+            {tr && (
+              <span className="text-[14px] mute">
+                {tr.model ?? t('term.noModel')} · {tr.intervalCode} · {symbolList(tr.symbols)} · {tr.wakeWindow ?? t('detail.allDayWake')}
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-2.5 flex-wrap mt-3 text-[13px] mute">
+            {/* 局次：每局是独立子账户各自注资 10000，曲线与时间线同进同出；只有一局时不出现 */}
+            {rounds.length > 1 && (
+              <>
+                <span>{t('detail.round')}</span>
+                <div className="seg">
+                  {rounds.map(r => (
+                    <button key={r} type="button" className={cn('num', r === viewingRound && 'on')}
+                            onClick={() => pickRound(r === tr?.roundNo ? null : r)}>R{r}</button>
+                  ))}
+                </div>
+              </>
+            )}
+            <span>{t('detail.roundsHint')}</span>
+            <button type="button" className="ibtn" aria-label={t('common:refresh')}
+                    onClick={() => { load(); loadDecisions(); }}>
+              <RefreshCw className="ic" />
+            </button>
+          </div>
+        </div>
+        <div className="num xl:text-right">
+          <b ref={pctRef} className={cn('cond block text-[72px] font-bold leading-none', (tr?.pnlPct ?? 0) >= 0 ? 'up' : 'dn')} />
+          <div className="flex items-baseline gap-3.5 xl:justify-end mt-2 text-[14px] mute">
+            <span>{t('term.equity')} <b ref={eqRef} className="text-foreground text-[18px] font-semibold [font-stretch:85%]" /></span>
+            <span>{t('detail.initialLabel')}</span>
+          </div>
         </div>
       </div>
 
-      {/* 仪表条：六格平铺。原来这些挤在记分牌右侧，局次按钮最多十个，一多就换行挤成一团 */}
+      {/* 仪表条：六格平铺，窄屏三格两行 */}
       <ScoreStrip cells={[
-        { label: viewingHistory ? `R${viewingRound}` : t('detail.thisRound'),
-          value: dayNo != null ? t('detail.dayN', { n: dayNo }) : '—' },
+        { label: roundLabel, value: dayNo != null ? t('detail.dayN', { n: dayNo }) : '—' },
         { label: t('detail.closedCount'), value: t('detail.tradesN', { count: closed.length }) },
         { label: t('detail.winRate'), value: winRate != null ? `${winRate}%` : '—' },
         { label: t('detail.maxDd'),
-          tone: maxDd ? 'text-loss' : undefined,
+          tone: maxDd ? 'dn' : undefined,
           value: maxDd == null ? '—' : maxDd > 0 ? `-${maxDd.toFixed(2)}%` : '0.00%' },
         { label: effectiveRange === 0 ? t('detail.rangeAll') : t('detail.rangeDays', { n: effectiveRange }),
-          tone: windowDelta != null ? (windowDelta >= 0 ? 'text-gain' : 'text-loss') : undefined,
+          tone: windowDelta != null ? (windowDelta >= 0 ? 'up' : 'dn') : undefined,
           value: windowDelta != null && windowPct != null
             ? `${windowDelta >= 0 ? '+' : ''}${fmtNum(windowDelta)} · ${windowDelta >= 0 ? '+' : ''}${windowPct.toFixed(2)}%`
             : '—' },
@@ -318,70 +298,60 @@ export function ArenaDetail() {
       ]} />
 
       {tr?.pausedReason && (
-        <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-1.5 text-[11px] text-amber-600 font-bold">
-          {tr.pausedReason}
-        </div>
+        <div className="mt-3.5 border-l-4 border-warning pl-3 py-1 text-[13px] text-warning">{tr.pausedReason}</div>
       )}
       {/* 持仓/计划/已了结是实时现查当前账户的，看历史局时跟曲线不是同一局，一条横幅说清楚 */}
       {viewingHistory && (
-        <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-1.5 text-[11px] text-amber-600 font-bold">
+        <div className="mt-3.5 border-l-4 border-warning pl-3 py-1 text-[13px] text-warning">
           {t('detail.historyRoundBanner', { viewing: viewingRound, cur: tr.roundNo })}
         </div>
       )}
 
       {/* 贯通两栏：左主栏 曲线 + 现场（唤醒中才有）+ 时间线，右侧栏 持仓 + 计划 + 两份笔记。
-          窄屏两个栏 div 退成 contents，六张卡直接落进外层单列 grid，再靠 order 排成
+          窄屏两个栏 div 退成 contents，六块直接落进外层单列 grid，再靠 order 排成
           曲线 → 现场 → 持仓 → 计划 → 笔记 → 时间线：时间线能一直往下加载，压在最后才不会把别的挤没 */}
-      <div className="grid lg:grid-cols-5 gap-4 items-start">
-        <div className="contents lg:flex lg:col-span-3 lg:flex-col lg:gap-4">
-          <div className="order-1 lg:order-none rounded-lg pt-card p-4 flex flex-col gap-2">
-            <div className="flex items-center gap-2 flex-wrap shrink-0">
-              <span className="microlabel">
-                {t('detail.equityCurve', { round: viewingHistory ? `R${viewingRound}` : t('detail.thisRound') })}
-              </span>
-              <div className="ml-auto flex gap-1">
+      <div className="grid grid-cols-1 xl:grid-cols-12 gap-8 mt-10">
+        <div className="contents xl:flex xl:col-span-7 xl:flex-col xl:gap-11">
+          <div className="order-1 xl:order-none">
+            <div className={BLK_H}>
+              <h2>{t('detail.equityCurve', { round: roundLabel })}<small>{t('detail.curveSub')}</small></h2>
+              <div className="seg">
                 {RANGES.map(r => (
-                  <SegButton key={r} active={r === effectiveRange} onClick={() => setRange(r)}>
+                  <button key={r} type="button" className={cn(r === effectiveRange && 'on')} onClick={() => setRange(r)}>
                     {r === 0 ? t('detail.rangeAll') : t('detail.rangeDays', { n: r })}
-                  </SegButton>
+                  </button>
                 ))}
               </div>
             </div>
-            {chartPoints.length > 1
-              ? <EquityChart points={chartPoints} className="flex-1 min-h-[260px]" />
-              : <div className="flex-1 min-h-[260px] flex items-center justify-center text-xs text-muted-foreground">{t('detail.notEnoughPoints')}</div>}
+            {visible.length > 1
+              ? <EquityCurve points={visible} lastLabel={t('detail.lastWake', { time: fmtTime(visible[visible.length - 1].wakeTime) })} />
+              : <div className="h-[280px] flex items-center justify-center text-[14px] mute">{t('detail.notEnoughPoints')}</div>}
           </div>
 
           {/* 现场卡常挂着（里面的流要一直连着），唤醒中才渲染出来 */}
-          <LiveRunCard traderId={traderId} onEnded={setEndedAt} className="order-2 lg:order-none" />
+          <LiveRunCard traderId={traderId} onEnded={setEndedAt} className="order-2 xl:order-none" />
 
-
-          {/* 时间线封顶 75vh，列表卡内滚 */}
-          <div ref={listRef} className="order-7 lg:order-none rounded-lg pt-card p-4 flex flex-col gap-2.5 lg:max-h-[75vh] scroll-mt-16">
-            <div className="flex items-center gap-1 flex-wrap border-b border-border -mx-4 px-3 -mt-1 shrink-0">
-              <TabButton active={tab === 'timeline'} onClick={() => setTab('timeline')}>
+          <div ref={listRef} className="order-6 xl:order-none scroll-mt-16">
+            <div className="flex items-end gap-[22px] flex-wrap border-b border-foreground">
+              <button type="button" className={tabBtn(tab === 'timeline')} onClick={() => setTab('timeline')}>
                 {t('detail.timeline')}{viewingHistory && ` · R${viewingRound}`}
-              </TabButton>
-              <TabButton active={tab === 'trades'} onClick={() => setTab('trades')}>
+              </button>
+              <button type="button" className={tabBtn(tab === 'trades')} onClick={() => setTab('trades')}>
                 {t('detail.tradesTitle')}
-                <span className="num text-[10px] px-1 rounded bg-muted text-muted-foreground">{trades.length}</span>
-              </TabButton>
-              {/* 按天翻看：前后一天箭头 + 日期框；清掉回到不限日期。只属于时间线 */}
+                <span className="chip mute num text-[10.5px] px-[5px]">{trades.length}</span>
+              </button>
+              {/* 按天翻看：前后一天 + 日期框；清掉回到不限日期。只属于时间线 */}
               {tab === 'timeline' && (
-                <div className="ml-auto flex items-center gap-1 pb-1.5">
-                  <button type="button" className={ICON_BTN} aria-label={t('detail.prevDay')} onClick={() => shiftDay(-1)}>
-                    <ChevronLeft className="w-3.5 h-3.5" />
-                  </button>
+                <div className="ml-auto flex items-center gap-1.5 pb-2 text-[13px]">
+                  <button type="button" className="btn xs" onClick={() => shiftDay(-1)}>{t('detail.prevDay')}</button>
                   <input type="date" value={day ?? ''} max={today}
                          onChange={e => changeDay(e.target.value || null)}
-                         className="h-6 px-1.5 rounded border border-border bg-input text-[10px] num" />
-                  <button type="button" className={ICON_BTN} aria-label={t('detail.nextDay')}
-                          disabled={!day || day >= today} onClick={() => shiftDay(1)}>
-                    <ChevronRight className="w-3.5 h-3.5" />
-                  </button>
+                         className="input num h-7 px-2 text-[13px]" />
+                  <button type="button" className="btn xs disabled:opacity-40" disabled={!day || day >= today}
+                          onClick={() => shiftDay(1)}>{t('detail.nextDay')}</button>
                   {day && (
-                    <button type="button" className={ICON_BTN} aria-label={t('detail.allDays')} onClick={() => changeDay(null)}>
-                      <X className="w-3.5 h-3.5" />
+                    <button type="button" className="btn xs" aria-label={t('detail.allDays')} onClick={() => changeDay(null)}>
+                      <X className="w-3 h-3" />
                     </button>
                   )}
                 </div>
@@ -390,26 +360,26 @@ export function ArenaDetail() {
 
             {tab === 'timeline' ? (
               decisions.length === 0 ? (
-                <div className="flex-1 flex items-center justify-center py-10 text-xs text-muted-foreground">{day ? t('detail.noDecisionsDay') : t('detail.noDecisions')}</div>
+                <div className="py-10 text-center text-[14px] mute">{day ? t('detail.noDecisionsDay') : t('detail.noDecisions')}</div>
               ) : (
-                <div className="space-y-2.5 lg:flex-1 lg:min-h-0 lg:overflow-y-auto lg:pr-1">
-                  {decisions.map(d => <DecisionCard key={d.id} d={d} highlight={d.id === focusId} />)}
+                <>
+                  <div ref={staggerRef}>
+                    {decisions.map(d => <DecisionCard key={d.id} d={d} highlight={d.id === focusId} />)}
+                  </div>
                   {hasMore && (
-                    <button
-                      onClick={loadMore}
-                      disabled={loadingMore}
-                      className="w-full border border-border hover:bg-surface-hover rounded-lg py-2 text-xs font-bold text-muted-foreground hover:text-primary flex items-center justify-center gap-1.5"
-                    >
-                      {loadingMore && <Loader2 className="w-3.5 h-3.5 animate-spin" />} {t('detail.loadMore')}
-                    </button>
+                    <div className="py-4">
+                      <button type="button" onClick={loadMore} disabled={loadingMore} className="btn sm w-full disabled:opacity-40">
+                        {loadingMore && <Loader2 className="ic animate-spin" />}{t('detail.loadMore')}
+                      </button>
+                    </div>
                   )}
-                </div>
+                </>
               )
             ) : (
               trades.length === 0 ? (
-                <div className="flex-1 flex items-center justify-center py-10 text-xs text-muted-foreground">{t('detail.noTrades')}</div>
+                <div className="py-10 text-center text-[14px] mute">{t('detail.noTrades')}</div>
               ) : (
-                <div className="space-y-2 lg:flex-1 lg:min-h-0 lg:overflow-y-auto lg:pr-1">
+                <div ref={staggerRef}>
                   {trades.map(r => <TradeCard key={r.positionId} r={r} onJump={jumpToDecision}
                                               onToggleStale={detail?.trader.mine ? toggleStale : undefined} />)}
                 </div>
@@ -418,48 +388,38 @@ export function ArenaDetail() {
           </div>
         </div>
 
-        <div className="contents lg:flex lg:col-span-2 lg:flex-col lg:gap-4">
-          {/* 持仓封顶 26rem，表格卡内滚 */}
-          <div className="order-3 lg:order-none rounded-lg pt-card p-4 flex flex-col gap-2 lg:max-h-[26rem]">
-            <span className="microlabel shrink-0">{t('detail.positionsTitle')}</span>
-            {detail && (detail.positions.length === 0 && detail.pendingOrders.length === 0 ? (
-              <div className="flex-1 flex items-center justify-center py-6 text-xs text-muted-foreground">{t('detail.flat')}</div>
-            ) : (
-              <div className="lg:flex-1 lg:min-h-0 lg:overflow-y-auto lg:pr-1">
-                <PositionsTable positions={detail.positions} orders={detail.pendingOrders} />
-              </div>
-            ))}
+        <div className="contents xl:flex xl:col-span-5 xl:flex-col xl:gap-10">
+          <div className="order-3 xl:order-none">
+            <div className={BLK_H}>
+              <h2>{t('detail.positionsTitle')}</h2>
+              <span>{t('detail.positionsSub')}</span>
+            </div>
+            {detail && (detail.positions.length === 0 && detail.pendingOrders.length === 0
+              ? <div className="py-6 text-[14px] mute">{t('detail.flat')}</div>
+              : <PositionsTable positions={detail.positions} orders={detail.pendingOrders} />)}
           </div>
 
           {/* 计划是本局存活的，归档的配在已了结卡里；两份笔记跨局累积不随局次切换 */}
-          <div className="order-4 lg:order-none rounded-lg pt-card p-4 flex flex-col gap-2 lg:max-h-[45vh]">
-            <span className="microlabel inline-flex items-center gap-1 shrink-0"><ClipboardList className="w-3 h-3 text-primary" />{t('detail.plansTitle')}</span>
-            {detail && (detail.plans.length === 0 ? (
-              <div className="flex-1 flex items-center justify-center py-6 text-xs text-muted-foreground">{t('detail.noPlans')}</div>
-            ) : (
-              <div className="space-y-2 lg:flex-1 lg:min-h-0 lg:overflow-y-auto lg:pr-1">
-                {detail.plans.map(pl => {
-                  const isLong = pl.side === 'LONG';
-                  return (
-                    <div key={pl.id} className="text-[11px]">
-                      <div className="flex items-center gap-2">
-                        {isLong ? <ArrowUpRight className="w-3.5 h-3.5 text-gain" /> : <ArrowDownRight className="w-3.5 h-3.5 text-loss" />}
-                        <span className="font-black text-xs">{pl.symbol}</span>
-                        <span className={cn('text-[10px] font-bold px-1.5 py-0.5 rounded', isLong ? 'bg-gain/15 text-gain' : 'bg-loss/15 text-loss')}>
-                          {isLong ? t('term.long') : t('term.short')}
-                        </span>
-                      </div>
-                      <PlanBlock plan={pl} />
-                    </div>
-                  );
-                })}
-              </div>
-            ))}
+          <div className="order-4 xl:order-none">
+            <div className={BLK_H}>
+              <h2>{t('detail.plansTitle')}<small>{t('detail.plansActive', { n: detail?.plans.length ?? 0 })}</small></h2>
+              <span>{t('detail.plansSub')}</span>
+            </div>
+            {detail && (detail.plans.length === 0
+              ? <div className="py-6 text-[14px] mute">{t('detail.noPlans')}</div>
+              : detail.plans.map(pl => <PlanBlock key={pl.id} plan={pl} />))}
           </div>
-          <NotesCard className="order-5 lg:order-none" icon={NotebookPen} tone="text-violet-500" title={t('detail.memoryTitle')}
-                     time={detail?.lastReviewAt} content={detail?.memory} empty={t('detail.noMemory')} />
-          <NotesCard className="order-6 lg:order-none" icon={GraduationCap} tone="text-sky-500" title={t('detail.learnNotesTitle')}
-                     time={detail?.lastLearnAt} content={detail?.learningNotes} empty={t('detail.noLearnNotes')} />
+
+          <div className="order-5 xl:order-none">
+            <div className={BLK_H}>
+              <h2>{t('detail.notesTitle')}<small>{t('detail.notesSub')}</small></h2>
+              <span>{t('detail.notesHint')}</span>
+            </div>
+            <NotesCard title={t('detail.memoryShort')} time={detail?.lastReviewAt}
+                       content={detail?.memory} empty={t('detail.noMemory')} />
+            <NotesCard title={t('detail.learnShort')} time={detail?.lastLearnAt}
+                       content={detail?.learningNotes} empty={t('detail.noLearnNotes')} />
+          </div>
         </div>
       </div>
     </div>

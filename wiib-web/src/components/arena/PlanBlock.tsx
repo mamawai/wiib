@@ -1,12 +1,22 @@
 import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ClipboardList } from 'lucide-react';
-import { fmtDateTime, fmtNum } from '../../lib/utils';
+import { cn, fmtDateTime, fmtNum } from '../../lib/utils';
 import type { AiTraderPlanView, PlanRevision } from '../../types';
 
-/** 持仓的交易计划卡：论点/失效条件/原始快照 + 修订历史——退出纪律的公开凭证。 */
-export function PlanBlock({ plan }: { plan: AiTraderPlanView }) {
+/** 价位一格：标签 + 窄体大数，入场/原始止损/目标并排 */
+function Px({ label, value }: { label: string; value: number }) {
+  return (
+    <span>{label}<b className="text-foreground font-semibold text-[15px] [font-stretch:85%] ml-[5px]">{fmtNum(value)}</b></span>
+  );
+}
+
+/**
+ * 交易计划块：币对/方向/立的时刻 → 论点 + 依据 → 失效条件 → 原始价位 → 修订史。退出纪律的公开凭证。
+ * embedded=挂在已了结交易卡里，改用虚线接上去，不自带底线。
+ */
+export function PlanBlock({ plan, embedded }: { plan: AiTraderPlanView; embedded?: boolean }) {
   const { t } = useTranslation('ai');
+  const isLong = plan.side === 'LONG';
   const revisions = useMemo<PlanRevision[]>(() => {
     try {
       return plan.revisionsJson ? JSON.parse(plan.revisionsJson) as PlanRevision[] : [];
@@ -16,29 +26,36 @@ export function PlanBlock({ plan }: { plan: AiTraderPlanView }) {
   }, [plan.revisionsJson]);
 
   return (
-    <div className="mt-1.5 rounded border border-primary/25 bg-primary/5 px-2.5 py-2 space-y-1 text-[11px] leading-relaxed">
-      <div className="flex items-center gap-1.5 flex-wrap">
-        <ClipboardList className="w-3 h-3 text-primary" />
-        <span className="font-black text-primary">{t('plan.title')}</span>
-        {plan.playType && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-primary/15 text-primary">{plan.playType}</span>}
-        <span className="text-muted-foreground/80 num ml-auto">{t('plan.setAt', { time: fmtDateTime(plan.openedWakeTime) })}</span>
+    <div className={cn(embedded ? 'mt-3 pt-3 border-t border-dashed border-border' : 'py-4 border-b border-border')}>
+      <div className="flex items-center gap-2.5 flex-wrap">
+        <b className="text-[17px] font-bold">{plan.symbol}</b>
+        <span className={cn('chip fill', isLong ? 'up' : 'dn')}>{t(isLong ? 'term.long' : 'term.short')}</span>
+        <span className="text-[12.5px] mute">{t('plan.setAt', { time: fmtDateTime(plan.openedWakeTime) })}</span>
       </div>
-      {plan.signalsUsed && <p className="text-muted-foreground">{t('plan.basis', { s: plan.signalsUsed })}</p>}
-      <p><span className="font-bold text-foreground">{t('plan.invalidation')}</span>{plan.invalidationCondition}</p>
+      {(plan.playType || plan.signalsUsed) && (
+        <div className="text-[14px] mt-2">
+          {plan.playType && <b className="font-bold mr-2.5">{plan.playType}</b>}
+          {plan.signalsUsed && t('plan.basis', { s: plan.signalsUsed })}
+        </div>
+      )}
+      <div className="text-[13.5px] mute mt-1 leading-[1.6]">
+        <b className="text-foreground font-semibold mr-2.5">{t('plan.invalidation')}</b>{plan.invalidationCondition}
+      </div>
       {/* 间距走 gap 不用空格字符：末项缺席时不会拖着个尾巴，窄屏也能换行 */}
-      <p className="text-muted-foreground num flex flex-wrap gap-x-3 gap-y-0.5">
-        {plan.entryPrice != null && <span>{t('plan.entry')} {fmtNum(plan.entryPrice)}</span>}
-        {plan.stopLossPrice != null && <span>{t('plan.origSl')} {fmtNum(plan.stopLossPrice)}</span>}
-        {plan.takeProfitPrice != null && <span>{t('plan.target')} {fmtNum(plan.takeProfitPrice)}</span>}
-      </p>
+      <div className="num flex flex-wrap gap-x-[22px] gap-y-1 mt-2.5 text-[13px] mute">
+        {plan.entryPrice != null && <Px label={t('plan.entry')} value={plan.entryPrice} />}
+        {plan.stopLossPrice != null && <Px label={t('plan.origSl')} value={plan.stopLossPrice} />}
+        {plan.takeProfitPrice != null && <Px label={t('plan.target')} value={plan.takeProfitPrice} />}
+      </div>
       {revisions.length > 0 && (
-        <div className="border-t border-primary/15 pt-1 space-y-0.5">
+        <div className="text-[12.5px] mute mt-2 pt-2 border-t border-dashed border-border">
           {revisions.map((r, i) => (
-            <p key={i} className="text-muted-foreground">
-              <span className="num text-muted-foreground/70">{fmtDateTime(r.time)}</span>
-              <span className="font-bold text-foreground/80 mx-1">{r.type}</span>
-              {r.change && <span className="num">{r.change}</span>}
-              {r.reason && <span> —— {r.reason}</span>}
+            // 改了几次是这块的抬头，接在第一条前面，后面每条各占一行
+            <p key={i}>
+              {i === 0 && `${t('plan.revisions', { count: revisions.length })} · `}
+              <span className="num">{fmtDateTime(r.time)}</span> {r.type}
+              {r.change && <span className="num"> {r.change}</span>}
+              {r.reason && `，${r.reason}`}
             </p>
           ))}
         </div>
