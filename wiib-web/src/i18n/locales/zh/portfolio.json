@@ -6,7 +6,6 @@
   },
   "page": {
     "title": "持仓",
-    "desc": "{{name}} 的模拟账户 · 交易侧净资产按实时价计",
     "ledger": "资金账单",
     "history": "合约持仓历史"
   },
@@ -21,11 +20,8 @@
     "interestAccrued": "应计利息",
     "transfer": "划转",
     "dist": "分布",
-    "distHint": "各标的市值占比，含现金",
     "profit": "收益",
-    "profitHint": "近 30 天，快照口径",
-    "ability": "能力",
-    "abilityHint": "五分类百分位，近 30 天"
+    "ability": "能力"
   },
   "toast": {
     "refreshed": "已刷新",
@@ -36,12 +32,10 @@
     "loadMoreFailed": "加载更多失败"
   },
   "daily": {
-    "title": "今日收益",
-    "hint": "快照口径 · 全部品类"
+    "title": "今日收益"
   },
   "alloc": {
     "title": "资产分布",
-    "hint": "按市值，含现金",
     "crypto": "币种现货",
     "bstock": "bStock",
     "futures": "合约（保证金+浮盈）",
@@ -62,10 +56,8 @@
   "spot": {
     "cryptoTitle": "币种持仓",
     "cryptoCount_other": "{{count}} 种",
-    "cryptoHint": "点行直达交易",
     "bstockTitle": "股票持仓",
     "bstockCount_other": "{{count}} 只 · bStock",
-    "bstockHint": "代币化美股，24/7",
     "colCoin": "币种",
     "colStock": "股票",
     "colQty": "持有",
@@ -79,7 +71,6 @@
   "prediction": {
     "title": "BTC 涨跌预测",
     "wallet": "游戏钱包",
-    "hint": "每 5 分钟一轮，Polymarket 实时概率定价",
     "realized": "已实现盈亏",
     "totalBets": "总下注",
     "winRate": "胜率",
@@ -90,7 +81,6 @@
   },
   "reset": {
     "title": "重置账户",
-    "quota": "每自然周限 1 次，周一刷新",
     "desc": "清空全部持仓、订单、游戏记录与资产历史，余额恢复为初始资金。留言与禁言状态不受影响。破产自动恢复也计入次数。",
     "action": "重置我的账户",
     "dialogTitle": "确认重置账户",

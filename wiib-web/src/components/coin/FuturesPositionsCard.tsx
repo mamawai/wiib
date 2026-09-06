@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import { Loader2 } from 'lucide-react';
+import { Loader2, RefreshCw } from 'lucide-react';
 import { futuresApi } from '../../api';
 import { useUserStore } from '../../stores/userStore';
 import { useCryptoStream } from '../../hooks/useCryptoStream';
@@ -15,9 +15,12 @@ import { useTradeFilter } from '../../lib/tradeFilters';
 import type { FuturesPosition, FuturesBracket } from '../../types';
 import { SLTPEditor } from './SLTPEditor';
 import { NumInput, PctRow } from './TradeFields';
-import { FUTURES_LEVERAGE_OPTIONS, POSITION_PCTS, qtyByPct, type SLTPRow } from './futuresMath';
+import { FUTURES_LEVERAGE_OPTIONS, POSITION_PCTS, findFuturesBracket, formatRate, qtyByPct, type SLTPRow } from './futuresMath';
 
 type PosActionType = 'close' | 'margin' | 'reduceMargin' | 'stoploss' | 'leverage';
+
+/** .m 格里的次级小标签（资金费的"每期/累计"），比值小一号、灰 */
+const SUBLABEL = 'not-italic text-[11.5px] font-medium text-muted-foreground mr-1 [font-stretch:100%]';
 
 // 档位表运行期不变，模块级缓存：Coin/Portfolio 多处挂载全站只打一次接口
 let bracketsCache: Record<string, FuturesBracket[]> | null = null;
@@ -53,12 +56,14 @@ export function FuturesPositionsCard({ symbol, refreshKey, onOrdersChanged, onPo
 
   const [positions, setPositions] = useState<FuturesPosition[]>([]);
   const [bracketsMap, setBracketsMap] = useState<Record<string, FuturesBracket[]>>({});
+  const [loading, setLoading] = useState(false);
   const [closingAll, setClosingAll] = useState(false);
   const [confirmCloseAll, setConfirmCloseAll] = useState(false);
 
   useEffect(() => { loadBrackets().then(setBracketsMap).catch(() => { /* 杠杆上限降级显示 */ }); }, []);
 
   const fetchPositions = useCallback(async () => {
+    setLoading(true);
     try {
       const list = await futuresApi.positions(symbol);
       setPositions(list);
@@ -67,6 +72,8 @@ export function FuturesPositionsCard({ symbol, refreshKey, onOrdersChanged, onPo
       console.error('查询合约仓位失败', e);
       setPositions([]);
       onPositions?.([]);
+    } finally {
+      setLoading(false);
     }
   }, [symbol, onPositions]);
 
@@ -107,7 +114,7 @@ export function FuturesPositionsCard({ symbol, refreshKey, onOrdersChanged, onPo
 
   if (positions.length === 0) return null;
 
-  // 副标题：币种（或"全部"）· 几个 · 保证金模式（跨币可能两种模式都有，一起列）
+  // 副标题：Coin 页带币种前缀，Portfolio 页只有"几个 · 保证金模式"（跨币可能两种模式都有，一起列）
   const modeText = [...new Set(positions.map(p => p.marginMode))]
     .map(m => t(m === 'CROSS' ? 'marginMode.cross' : 'marginMode.isolated'))
     .join(' / ');
@@ -117,10 +124,14 @@ export function FuturesPositionsCard({ symbol, refreshKey, onOrdersChanged, onPo
       <div className="sec-h">
         <h2>
           {t('pos.titleAll')}
-          <small>{symbol ?? t('pos.allSymbols')} · {t('pos.count', { n: positions.length })} · {modeText}</small>
+          <small>{symbol ? `${symbol} · ` : ''}{t('pos.count', { n: positions.length })} · {modeText}</small>
+          <HelpTip text={`${t(symbol ? 'pos.helpSymbol' : 'pos.helpAll')}\n${t('pos.helpRealized')}`} />
         </h2>
-        {showCloseAll && (
-          <span>
+        <span className="inline-flex items-center gap-3">
+          <button type="button" className="ibtn" disabled={loading} onClick={fetchPositions} aria-label={t('pos.refresh')} title={t('pos.refresh')}>
+            <RefreshCw className={cn('w-[15px] h-[15px]', loading && 'animate-spin')} />
+          </button>
+          {showCloseAll && (
             <button
               type="button"
               disabled={closingAll}
@@ -129,8 +140,8 @@ export function FuturesPositionsCard({ symbol, refreshKey, onOrdersChanged, onPo
             >
               {closingAll ? <Loader2 className="w-3 h-3 animate-spin" /> : confirmCloseAll ? t('pos.closeAllConfirm') : t('pos.closeAll')}
             </button>
-          </span>
-        )}
+          )}
+        </span>
       </div>
       <div ref={gridRef} className="pos-grid">
         {positions.map(pos => (
@@ -326,13 +337,16 @@ function PositionItem({ pos, brackets, onCoinPage, onMutated }: {
     void submit(() => futuresApi.setTakeProfit({ positionId: pos.id, takeProfits: [] }), 'toast.tpCleared', 'toast.tpClearFailed', false);
   };
 
-  /** 多档止损/止盈在块里只露一档：离标记价最近的那档，先被触发的就是它 */
-  const nearest = (items?: { price: number }[]) => {
-    if (!items?.length) return null;
-    return items.reduce((a, b) => Math.abs(b.price - mp) < Math.abs(a.price - mp) ? b : a).price;
+  /** 止损/止盈全档一行列完，多档用 " / " 连；某档不是满仓平就在价格后括个数量 */
+  const levelsText = (items?: { price: number; quantity: number }[]) => {
+    if (!items?.length) return '—';
+    return items
+      .map(it => fmtPrice(it.price) + (Math.abs(it.quantity - pos.quantity) < 1e-9 ? '' : ` (${it.quantity})`))
+      .join(' / ');
   };
-  const nearSL = nearest(pos.stopLosses);
-  const nearTP = nearest(pos.takeProfits);
+  // 维持保证金率的档位按当前仓位名义价值查
+  const currentBracket = findFuturesBracket(brackets, mp * pos.quantity);
+  const realizedPnl = pos.realizedPnl ?? 0;
 
   const closePct = pos.quantity > 0 ? (parseFloat(closeQty) || 0) / pos.quantity : 0;
   const closeActivePct = POSITION_PCTS.find(p => Math.abs(p - closePct) < 1e-9) ?? null;
@@ -357,8 +371,15 @@ function PositionItem({ pos, brackets, onCoinPage, onMutated }: {
         <div><i>{t('metric.entry')}</i>{fmtPrice(pos.entryPrice)}</div>
         <div><i>{t('metric.mark')}</i>{fmtPrice(mp)}</div>
         <div><i>{t('metric.liq')}</i><span className="wn">{pos.liquidationPrice > 0 ? fmtPrice(pos.liquidationPrice) : '—'}</span></div>
-        <div><i>{t('sltp.sl')}</i><span className="dn">{nearSL != null ? fmtPrice(nearSL) : '—'}</span></div>
-        <div><i>{t('sltp.tp')}</i><span className="up">{nearTP != null ? fmtPrice(nearTP) : '—'}</span></div>
+        <div><i>{t('sltp.sl')}</i><span className="dn">{levelsText(pos.stopLosses)}</span></div>
+        <div><i>{t('sltp.tp')}</i><span className="up">{levelsText(pos.takeProfits)}</span></div>
+        <div>
+          <i>{t('metric.funding')}</i>
+          <span className="whitespace-nowrap"><em className={SUBLABEL}>{t('metric.fundingPer')}</em>{fmtNum(pos.fundingFeePerCycle)}</span>{' '}
+          <span className="whitespace-nowrap"><em className={SUBLABEL}>{t('metric.fundingSum')}</em>{fmtNum(pos.fundingFeeTotal)}</span>
+        </div>
+        <div><i>{t('metric.mmr')}</i>{currentBracket ? t('metric.tier', { tier: currentBracket.tier, rate: formatRate(currentBracket.mmr) }) : '—'}</div>
+        <div><i>{t('metric.realizedPnl')}</i><span className={realizedPnl >= 0 ? 'up' : 'dn'}>{realizedPnl >= 0 ? '+' : ''}{fmtNum(realizedPnl)}</span></div>
       </div>
       {/* 加仓无独立入口（对齐Binance）：同方向再下一单即自动并入仓位，走开仓面板 */}
       <div className="acts flex-wrap">
@@ -372,6 +393,7 @@ function PositionItem({ pos, brackets, onCoinPage, onMutated }: {
           <button
             className={cn('btn xs', confirmReverse && 'loss')}
             disabled={reversing}
+            title={t('pos.reverseHelp')}
             onClick={() => confirmReverse ? void handleReverse() : setConfirmReverse(true)}
           >
             {reversing ? <Loader2 className="w-3 h-3 animate-spin" /> : confirmReverse ? t('pos.reverseConfirm') : t('pos.reverse')}

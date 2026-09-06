@@ -4,7 +4,7 @@ import { Timer } from 'lucide-react';
 import { cn, fmtDateTime, fmtNum, fmtTokens } from '../../lib/utils';
 import type { WakeCall, WakeToolCall, WakeToolResult, WakeTrace } from '../../types';
 import { Markdown } from '../Markdown';
-import { TRADE_TOOL_SET, toolName, tradeArgsSummary } from './traderTools';
+import { TRADE_TOOL_SET, dataArgsSummary, toolName, tradeArgsSummary } from './traderTools';
 
 /** 提示词 / 回执预览的等宽块 */
 const PRE = 'font-mono text-[13px] leading-[1.5] whitespace-pre-wrap break-words';
@@ -38,7 +38,8 @@ function CallTools({ call, running }: { call: WakeCall; running: boolean }) {
         {call.toolCalls.map(tc => {
           const result = previewOf(tc);
           const args = typeof tc.args === 'string' ? tc.args
-            : TRADE_TOOL_SET.has(tc.name) ? tradeArgsSummary({ tool: tc.name, args: tc.args }) : kvArgs(tc.args);
+            : TRADE_TOOL_SET.has(tc.name) ? tradeArgsSummary({ tool: tc.name, args: tc.args })
+            : dataArgsSummary(tc.name, tc.args) ?? kvArgs(tc.args);
           const failed = result != null && result.status !== 'ok';
           return (
             <button key={tc.id} type="button"

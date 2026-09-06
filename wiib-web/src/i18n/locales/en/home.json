@@ -8,7 +8,7 @@
     "withName": "{{greeting}}, {{name}}"
   },
   "hero": {
-    "paperMoney": "Everything here is paper money",
+    "howToPlay": "How it works",
     "totalAssets": "Total assets USD",
     "profitPct": "Total return",
     "balance": "Available balance",
@@ -33,8 +33,7 @@
     "buffDesc": "Not drawn today"
   },
   "entries": {
-    "title": "Entries",
-    "sub": "Seven places to go"
+    "title": "Entries"
   },
   "trader": {
     "title": "My trader",
@@ -56,7 +55,6 @@
   },
   "market": {
     "title": "Markets",
-    "sub": "Two picks per class, tap a row to trade",
     "stocks": "Stocks",
     "stocksSub": "Tokenized US equities",
     "crypto": "Crypto",
@@ -69,7 +67,6 @@
   },
   "news": {
     "title": "Live news",
-    "sub": "BlockBeats, refreshed every 60s",
     "empty": "No news yet"
   },
   "trades": {
@@ -106,7 +103,6 @@
   },
   "grid": {
     "title": "Monthly PnL",
-    "foot": "Midnight snapshots subtracted; days without one stay blank",
     "cellTitle": "Day {{day}} · {{pnl}}",
     "prevMonth": "Previous month",
     "nextMonth": "Next month",
@@ -131,7 +127,6 @@
   },
   "faq": {
     "title": "Getting started",
-    "sub": "Start with these",
     "spotVsFutures": {
       "q": "Spot vs futures: what's the difference?",
       "a": "Spot means you own the asset — sell higher to profit, and you can only lose what you paid. Futures is margin trading: you never hold the underlying, you can go long or short, leverage amplifies exposure, and you can be liquidated. Gold and oil here are futures-only (TradFi perpetuals) with no spot to buy; tokenized US equities are spot."

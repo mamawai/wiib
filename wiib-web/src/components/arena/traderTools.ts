@@ -67,3 +67,30 @@ export function tradeArgsSummary(a: ActionRow): string {
       return '';
   }
 }
+
+/**
+ * 数据工具的参数说人话：「BTCUSDT 4h · 200 根」而不是 symbol=BTCUSDT interval=4h limit=200。
+ * 认不出的工具回 null，调用方退回 k=v 原样显示。
+ */
+export function dataArgsSummary(tool: string, args: Record<string, unknown>): string | null {
+  const g = (k: string) => args[k] != null ? String(args[k]) : '';
+  switch (tool) {
+    case 'klines':
+    case 'indicators':
+    case 'kline_structure': {
+      // 根数是模型自己加的参数，后端这三个工具都固定取 192 根；给了才拼上
+      const n = g('limit') || g('bars');
+      return [[g('symbol'), g('interval')].filter(Boolean).join(' '),
+        n && i18n.t('ai:live.bars', { count: Number(n) })].filter(Boolean).join(' · ');
+    }
+    case 'market_snapshot':
+    case 'option_iv':
+    case 'funding_history':
+    case 'orderbook_depth':
+      return g('symbol');
+    case 'news_search':
+      return '';
+    default:
+      return null;
+  }
+}

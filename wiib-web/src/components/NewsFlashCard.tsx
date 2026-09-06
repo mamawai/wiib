@@ -32,7 +32,6 @@ export function NewsFlashCard() {
     <>
       <div className="sec-h">
         <h2>{t('news.title')}</h2>
-        <span>{t('news.sub')}</span>
       </div>
       {shown == null ? (
         <div className="space-y-4">

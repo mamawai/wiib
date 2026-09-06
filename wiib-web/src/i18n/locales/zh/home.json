@@ -8,7 +8,7 @@
     "withName": "{{greeting}}，{{name}}"
   },
   "hero": {
-    "paperMoney": "这里的一切都是模拟资金",
+    "howToPlay": "玩法说明",
     "totalAssets": "总资产 USD",
     "profitPct": "累计收益率",
     "balance": "可用余额",
@@ -33,8 +33,7 @@
     "buffDesc": "今日还没抽"
   },
   "entries": {
-    "title": "入口",
-    "sub": "七个去处"
+    "title": "入口"
   },
   "trader": {
     "title": "我的 Trader",
@@ -56,7 +55,6 @@
   },
   "market": {
     "title": "市场",
-    "sub": "每类两只代表，点行直达交易",
     "stocks": "股票",
     "stocksSub": "代币化美股",
     "crypto": "Crypto",
@@ -69,7 +67,6 @@
   },
   "news": {
     "title": "实时快讯",
-    "sub": "BlockBeats，60 秒一刷",
     "empty": "暂无快讯"
   },
   "trades": {
@@ -105,7 +102,6 @@
   },
   "grid": {
     "title": "月度盈亏",
-    "foot": "每天 0 点快照相减，缺快照的日子空着",
     "cellTitle": "{{day}}日 {{pnl}}",
     "prevMonth": "上个月",
     "nextMonth": "下个月",
@@ -129,7 +125,6 @@
   },
   "faq": {
     "title": "新手教学",
-    "sub": "先看这几条",
     "spotVsFutures": {
       "q": "现货和合约有什么区别？",
       "a": "现货是真的买入持有币（涨了卖出赚差价，最多亏掉买入的钱）；合约是保证金交易，不持有现货本身，可做多也可做空，用杠杆放大敞口，有强平风险。本站黄金/原油是纯合约标的（TradFi 永续），没有现货可买；代币化美股则是现货买卖。"

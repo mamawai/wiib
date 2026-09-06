@@ -214,7 +214,7 @@ export function Home() {
               <span>{dateStr}</span>
             </div>
             {/* 玩法说明页入口 */}
-            <Link to="/intro" className="hover:text-foreground transition-colors">{t('hero.paperMoney')}</Link>
+            <Link to="/intro" className="hover:text-foreground transition-colors">{t('hero.howToPlay')}</Link>
           </div>
 
           <HeroMain user={user!} history={history} realtime={realtime} />
@@ -234,7 +234,6 @@ export function Home() {
       <section className="sec tight mt-8 pt-3.5 [&_.sec-h]:mb-3">
         <div className="sec-h">
           <h2>{t('entries.title')}</h2>
-          <span>{t('entries.sub')}</span>
         </div>
         <div ref={entriesRef} className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7">
           {ENTRIES.map(({ icon: Icon, k, to }, i) => (

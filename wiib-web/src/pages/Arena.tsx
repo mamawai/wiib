@@ -61,7 +61,6 @@ export function Arena() {
     <div className="wrap">
       <div className="page-h flex-wrap">
         <h1>{t('arena.title')}</h1>
-        <span className="d">{t('arena.desc')}</span>
         <div className="r">
           <button type="button" className="btn sm" onClick={load}>
             <RefreshCw className={cn('ic', loading && 'animate-spin')} />{t('common:refresh')}
@@ -135,7 +134,6 @@ export function Arena() {
         <section className="sec">
           <div className="sec-h">
             <h2>{t('arena.noTraderTitle')}</h2>
-            <span>{t('arena.noTraderSub')}</span>
           </div>
           <div className="grid grid-cols-1 xl:grid-cols-3 gap-10">
             {([1, 2, 3] as const).map(n => (
@@ -147,7 +145,6 @@ export function Arena() {
           </div>
           <div className="flex items-center gap-[18px] mt-7 flex-wrap">
             <Link className="btn orange" to="/my-trader">{t('arena.create')}</Link>
-            <span className="text-[13px] mute">{t('arena.ctaHint')}</span>
           </div>
         </section>
       )}

@@ -36,7 +36,6 @@ export function HomeFaq() {
     <>
       <div className="sec-h">
         <h2>{t('faq.title')}</h2>
-        <span>{t('faq.sub')}</span>
       </div>
       <div ref={gridRef} className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-x-11 gap-y-0">
         {FAQ_ITEMS.map(item => (

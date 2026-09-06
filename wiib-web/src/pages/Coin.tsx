@@ -115,6 +115,7 @@ export function Coin({ symbol = DEFAULT_SYMBOL }: { symbol?: string }) {
           timeMs: new Date(o.createdAt).getTime(),
           side: (o.orderSide === 'OPEN_LONG' || o.orderSide === 'CLOSE_SHORT') ? 'B' as const : 'S' as const,
           price: o.filledPrice as number,
+          quantity: o.quantity,
         })));
     }).catch(() => {});
     return () => { cancelled = true; };

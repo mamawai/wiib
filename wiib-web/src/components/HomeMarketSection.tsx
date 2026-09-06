@@ -89,7 +89,6 @@ export function HomeMarketSection() {
     <>
       <div className="sec-h">
         <h2>{t('market.title')}</h2>
-        <span>{t('market.sub')}</span>
       </div>
       <div ref={gridRef} className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-8">
         <div>

@@ -58,9 +58,7 @@ export function FuturesOpenPanel({ symbol, currentPrice, brackets, positionsKey,
   const [limitPrice, setLimitPrice] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [actionSuccess, setActionSuccess] = useState(false);
-  const [slEnabled, setSlEnabled] = useState(false);
   const [slRows, setSlRows] = useState<SLTPRow[]>([{ price: '', quantity: '' }]);
-  const [tpEnabled, setTpEnabled] = useState(false);
   const [tpRows, setTpRows] = useState<SLTPRow[]>([{ price: '', quantity: '' }]);
   const [crossAcct, setCrossAcct] = useState<FuturesCrossAccount | null>(null);
   // 开仓/调杠杆成功后 +1 触发全仓账户与持仓快照重拉（可用/净值/杠杆都可能变了）
@@ -126,7 +124,7 @@ export function FuturesOpenPanel({ symbol, currentPrice, brackets, positionsKey,
   const fullSltpRow = (): SLTPRow => ({ price: '', quantity: orderQty > 0 ? String(orderQty) : '' });
 
   // 开仓量随数量/单位/杠杆变，已设档位按各自百分比跟着重算——用户表达的是"平多少比例"，
-  // 改开仓量不该把比例冲掉。数量还空着的行（含刚打开开关那条）补满 100%
+  // 改开仓量不该把比例冲掉。数量还空着的行补满 100%
   const prevOrderQty = useRef(orderQty);
   useEffect(() => {
     const prev = prevOrderQty.current;
@@ -169,12 +167,13 @@ export function FuturesOpenPanel({ symbol, currentPrice, brackets, positionsKey,
     if (priceForCalc > 0 && orderQty * priceForCalc < filter.minNotional) {
       toast(t('toast.minNotional', { amount: filter.minNotional }), 'error'); return;
     }
-    const slItems: FuturesSLItem[] = slEnabled
-      ? slRows.filter(r => parseFloat(r.price) > 0 && parseFloat(r.quantity) > 0).map(r => ({ price: parseFloat(r.price), quantity: parseFloat(r.quantity) }))
-      : [];
-    const tpItems: FuturesTPItem[] = tpEnabled
-      ? tpRows.filter(r => parseFloat(r.price) > 0 && parseFloat(r.quantity) > 0).map(r => ({ price: parseFloat(r.price), quantity: parseFloat(r.quantity) }))
-      : [];
+    // 价格留空的档位=没设，直接滤掉；一档都不填就是不带止损/止盈开仓
+    const slItems: FuturesSLItem[] = slRows
+      .filter(r => parseFloat(r.price) > 0 && parseFloat(r.quantity) > 0)
+      .map(r => ({ price: parseFloat(r.price), quantity: parseFloat(r.quantity) }));
+    const tpItems: FuturesTPItem[] = tpRows
+      .filter(r => parseFloat(r.price) > 0 && parseFloat(r.quantity) > 0)
+      .map(r => ({ price: parseFloat(r.price), quantity: parseFloat(r.quantity) }));
     const slTotal = slItems.reduce((s, r) => s + r.quantity, 0);
     const tpTotal = tpItems.reduce((s, r) => s + r.quantity, 0);
     if (slTotal > orderQty + 1e-9) { toast(t('toast.slOverQty'), 'error'); return; }
@@ -198,9 +197,7 @@ export function FuturesOpenPanel({ symbol, currentPrice, brackets, positionsKey,
       // USDT 模式别把最小币数当金额填回去
       setQuantity(marginUnit === 'USDT' ? '' : String(MIN_QTY));
       setLimitPrice('');
-      setSlEnabled(false);
       setSlRows([fullSltpRow()]);
-      setTpEnabled(false);
       setTpRows([fullSltpRow()]);
       setAcctTick(t => t + 1);
       onTraded();
@@ -398,33 +395,23 @@ export function FuturesOpenPanel({ symbol, currentPrice, brackets, positionsKey,
         </div>
       )}
 
-      {/* 开仓止损/止盈：手机单列（双列时价格/数量输入被挤到不可用），≥sm 恢复双列 */}
+      {/* 开仓止损/止盈：常显，价格留空就是不设。手机单列（双列时价格/数量输入被挤到不可用），≥sm 恢复双列 */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
         <div className="field">
           <label>
             <span className="flex items-center gap-1">{t('sltp.sl')} <HelpTip text={t('sltp.slHelpOpen')} /></span>
-            <button type="button" className={cn('chip', slEnabled && 'fill')} onClick={() => { setSlEnabled(!slEnabled); setSlRows([fullSltpRow()]); }}>
-              {t(slEnabled ? 'sltp.on' : 'sltp.off')}
-            </button>
           </label>
-          {slEnabled && (
-            <SLTPEditor rows={slRows} onChange={setSlRows} kind="SL" posQty={orderQty} minQty={MIN_QTY}
-              entryPrice={priceForCalc || currentPrice} margin={openEstimate?.margin ?? 0} side={side} unit={cfg.name}
-              minPriceStep={PRICE_STEP} priceFormatter={fmtPrice} />
-          )}
+          <SLTPEditor rows={slRows} onChange={setSlRows} kind="SL" posQty={orderQty} minQty={MIN_QTY}
+            entryPrice={priceForCalc || currentPrice} margin={openEstimate?.margin ?? 0} side={side} unit={cfg.name}
+            minPriceStep={PRICE_STEP} priceFormatter={fmtPrice} />
         </div>
         <div className="field">
           <label>
             <span className="flex items-center gap-1">{t('sltp.tp')} <HelpTip text={t('sltp.tpHelpOpen')} /></span>
-            <button type="button" className={cn('chip', tpEnabled && 'fill')} onClick={() => { setTpEnabled(!tpEnabled); setTpRows([fullSltpRow()]); }}>
-              {t(tpEnabled ? 'sltp.on' : 'sltp.off')}
-            </button>
           </label>
-          {tpEnabled && (
-            <SLTPEditor rows={tpRows} onChange={setTpRows} kind="TP" posQty={orderQty} minQty={MIN_QTY}
-              entryPrice={priceForCalc || currentPrice} margin={openEstimate?.margin ?? 0} side={side} unit={cfg.name}
-              minPriceStep={PRICE_STEP} priceFormatter={fmtPrice} />
-          )}
+          <SLTPEditor rows={tpRows} onChange={setTpRows} kind="TP" posQty={orderQty} minQty={MIN_QTY}
+            entryPrice={priceForCalc || currentPrice} margin={openEstimate?.margin ?? 0} side={side} unit={cfg.name}
+            minPriceStep={PRICE_STEP} priceFormatter={fmtPrice} />
         </div>
       </div>
 

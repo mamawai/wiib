@@ -6,7 +6,6 @@
   },
   "page": {
     "title": "Portfolio",
-    "desc": "{{name}}'s paper account · trading equity marked at live prices",
     "ledger": "Ledger",
     "history": "Position history"
   },
@@ -21,11 +20,8 @@
     "interestAccrued": "Accrued interest",
     "transfer": "Transfer",
     "dist": "Allocation",
-    "distHint": "Market value by holding, cash included",
     "profit": "PnL",
-    "profitHint": "Last 30 days, snapshot basis",
-    "ability": "Skills",
-    "abilityHint": "Percentile across five categories, last 30 days"
+    "ability": "Skills"
   },
   "toast": {
     "refreshed": "Refreshed",
@@ -36,12 +32,10 @@
     "loadMoreFailed": "Failed to load more"
   },
   "daily": {
-    "title": "Today's PnL",
-    "hint": "Snapshot basis · all categories"
+    "title": "Today's PnL"
   },
   "alloc": {
     "title": "Asset allocation",
-    "hint": "By market value, cash included",
     "crypto": "Crypto spot",
     "bstock": "bStock",
     "futures": "Futures (margin + PnL)",
@@ -63,11 +57,9 @@
     "cryptoTitle": "Crypto holdings",
     "cryptoCount_one": "{{count}} coin",
     "cryptoCount_other": "{{count}} coins",
-    "cryptoHint": "Click a row to trade",
     "bstockTitle": "Stock holdings",
     "bstockCount_one": "{{count}} stock · bStock",
     "bstockCount_other": "{{count}} stocks · bStock",
-    "bstockHint": "Tokenized US equities, 24/7",
     "colCoin": "Coin",
     "colStock": "Stock",
     "colQty": "Holding",
@@ -81,7 +73,6 @@
   "prediction": {
     "title": "BTC price prediction",
     "wallet": "Game wallet",
-    "hint": "A new round every 5 minutes, priced off live Polymarket odds",
     "realized": "Realized PnL",
     "totalBets": "Total bets",
     "winRate": "Win rate",
@@ -93,7 +84,6 @@
   },
   "reset": {
     "title": "Reset account",
-    "quota": "One per calendar week, refreshed on Monday",
     "desc": "Clears all positions, orders, game records and asset history and restores the starting capital. Comments and mute status are untouched. An automatic bankruptcy recovery counts toward the same quota.",
     "action": "Reset my account",
     "dialogTitle": "Confirm account reset",

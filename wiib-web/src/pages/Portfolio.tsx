@@ -259,7 +259,6 @@ export function Portfolio() {
     <div className="wrap">
       <div className="page-h flex-wrap">
         <h1>{t('page.title')}</h1>
-        <span className="d">{t('page.desc', { name: user.username })}</span>
         <div className="r">
           <button type="button" className="btn sm" onClick={() => navigate('/ledger')}>{t('page.ledger')}</button>
           <button type="button" className="btn sm" onClick={() => navigate('/portfolio/history')}>{t('page.history')}</button>
@@ -316,7 +315,6 @@ export function Portfolio() {
             <>
               <div className="flex items-baseline justify-between mb-3">
                 <b className="text-[15px] font-extrabold">{t(`ov.${panel}`)}</b>
-                <span className="mute text-[13px]">{t(`ov.${panel}Hint`)}</span>
               </div>
               {panel === 'dist' && (
                 <div className="h-[320px]">
@@ -337,7 +335,6 @@ export function Portfolio() {
               <div>
                 <div className="flex items-baseline justify-between">
                   <b className="text-[15px] font-extrabold">{t('daily.title')}</b>
-                  <span className="mute text-[13px]">{t('daily.hint')}</span>
                 </div>
                 <div className={cn('num cond mt-2.5 text-[44px] font-bold leading-none', rt == null ? 'mute' : dailyProfit >= 0 ? 'up' : 'dn')}>
                   <span ref={dailyRef} />
@@ -356,7 +353,6 @@ export function Portfolio() {
               <div className="mt-[30px]">
                 <div className="flex items-baseline justify-between mb-3">
                   <b className="text-[15px] font-extrabold">{t('alloc.title')}</b>
-                  <span className="mute text-[13px]">{t('alloc.hint')}</span>
                 </div>
                 <div className="flex h-[22px] gap-0.5">
                   {alloc.map(a => <i key={a.k} className="block h-full" style={{ width: `${a.pct}%`, background: a.c }} />)}
@@ -400,7 +396,6 @@ export function Portfolio() {
               <div>
                 <div className="sec-h">
                   <h2>{t('spot.cryptoTitle')}<small>{t('spot.cryptoCount', { count: cryptoRows.length })}</small></h2>
-                  <span>{t('spot.cryptoHint')}</span>
                 </div>
                 <div className="overflow-x-auto">
                   <table className="tbl num min-w-[560px]">
@@ -448,7 +443,6 @@ export function Portfolio() {
               <div>
                 <div className="sec-h">
                   <h2>{t('spot.bstockTitle')}<small>{t('spot.bstockCount', { count: bstockRows.length })}</small></h2>
-                  <span>{t('spot.bstockHint')}</span>
                 </div>
                 <div className="overflow-x-auto">
                   <table className="tbl num min-w-[560px]">
@@ -496,7 +490,6 @@ export function Portfolio() {
         <section className="sec">
           <div className="sec-h">
             <h2>{t('prediction.title')}<small>{t('prediction.wallet')}</small></h2>
-            <span>{t('prediction.hint')}</span>
           </div>
           <div className="strip num grid-cols-2 md:grid-cols-4 cursor-pointer" onClick={() => navigate('/prediction')}>
             <div>
@@ -531,7 +524,6 @@ export function Portfolio() {
       <section className="sec">
         <div className="sec-h">
           <h2>{t('reset.title')}</h2>
-          <span>{t('reset.quota')}</span>
         </div>
         <div className="flex items-center flex-wrap gap-8">
           <p className="m-0 text-[14px] mute max-w-[70ch] leading-[1.6]">{t('reset.desc')}</p>

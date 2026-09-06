@@ -100,9 +100,12 @@ export function SLTPEditor({ rows, onChange, kind, posQty, minQty, entryPrice, m
         {rows.length < 4
           ? <button type="button" className="btn xs" onClick={() => onChange([...rows, { price: '', quantity: '' }])}>{t('sltp.add')}</button>
           : <span />}
-        <span className={`text-[12px] ${over ? 'dn' : 'text-muted-foreground'}`}>
-          {t('sltp.allocated', { used: fmtNum(total * entryPrice), total: fmtNum(posQty * entryPrice) })}
-        </span>
+        {/* 开仓面板里数量还没填时没有可分配的量，这行显示 0/0 纯噪音 */}
+        {posQty > 0 && (
+          <span className={`text-[12px] ${over ? 'dn' : 'text-muted-foreground'}`}>
+            {t('sltp.allocated', { used: fmtNum(total * entryPrice), total: fmtNum(posQty * entryPrice) })}
+          </span>
+        )}
       </div>
     </div>
   );

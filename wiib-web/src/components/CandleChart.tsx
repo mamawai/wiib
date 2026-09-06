@@ -36,6 +36,10 @@ const toBar = (k: number[]): Bar => ({
   open: +k[1], high: +k[2], low: +k[3], close: +k[4], volume: +k[5], quote: +k[7],
 });
 
+/** 成交弹窗里每笔的时刻，只要时分（哪一天由弹窗标题那根 K 线交代） */
+const fmtFillTime = (ms: number) =>
+  new Date(ms).toLocaleTimeString('zh-CN', { timeZone: 'Asia/Singapore', hour: '2-digit', minute: '2-digit', hour12: false });
+
 /** 日线标签只显示日期：1d 的 bar 开在 UTC 0 点(=新加坡 08:00)，挂个 08:00 纯噪音 */
 const fmtBarTime = (d: Date, interval: string) =>
   interval === '1d'
@@ -257,7 +261,11 @@ export interface TradeMark {
   timeMs: number;
   side: 'B' | 'S';
   price: number;
+  quantity: number;
 }
+
+/** 落进同一根 K 线的一笔成交，点开角标弹窗时按时刻+价格逐笔列 */
+type Fill = { timeMs: number; price: number; quantity: number };
 
 // ========== 向左翻历史的三个阈值 ==========
 /** 每次往回翻的根数，与首屏同量级 */
@@ -375,7 +383,7 @@ export function CandleChart({
 
   // 历史成交 B/S 标记：默认关（打开一次记住）。marksByTimeRef 供点击弹窗按 bar 查成交
   const [showMarks, setShowMarks] = useState(() => localStorage.getItem('wiib-chart-trade-marks') === '1');
-  const marksByTimeRef = useRef<Map<number, { b: number[]; s: number[] }>>(new Map());
+  const marksByTimeRef = useRef<Map<number, { b: Fill[]; s: Fill[] }>>(new Map());
   const markTipRef = useRef<HTMLDivElement>(null);
   // 新闻标记：默认开（关一次记住）。globe 画在主图画布上（NewsMarkersLayer），随蜡烛同帧移动
   const [showNews, setShowNews] = useState(() => localStorage.getItem('wiib-chart-news') !== '0');
@@ -637,14 +645,16 @@ export function CandleChart({
       const time = param.time as number | undefined;
       const g = time != null ? marksByTimeRef.current.get(time) : undefined;
       if (!g || !param.point) { tipEl.style.display = 'none'; return; }
-      const row = (side: string, cls: string, prices: number[]) => prices.map(p =>
-        `<div style="display:flex;gap:16px;justify-content:space-between"><span class="${cls}" style="font-weight:700">${side}</span>`
-        + `<span class="num" style="font-weight:700">${fmtNum(p, decimals)}</span></div>`).join('');
+      const row = (side: string, cls: string, fills: Fill[]) => fills.map(f =>
+        `<div style="display:flex;gap:10px;align-items:baseline"><span class="${cls}" style="font-weight:700">${side}</span>`
+        + `<span class="mute num" style="margin-left:auto">${fmtFillTime(f.timeMs)}</span>`
+        + `<span class="num">${f.quantity}</span>`
+        + `<span class="num" style="font-weight:700">${fmtNum(f.price, decimals)}</span></div>`).join('');
       // 弹窗每次点击现拼，词表走 i18n 实例（建图 effect 不该因为切语言整个重建）
       tipEl.innerHTML =
         `<div class="mute" style="font-weight:700;margin-bottom:4px;padding-bottom:4px;border-bottom:1px solid var(--color-border)">${i18n.t('market:chart.fillsAt', { time: fmtBarTime(barDate(time as number), interval) })}</div>`
         + row(i18n.t('market:chart.buy'), 'up', g.b) + row(i18n.t('market:chart.sell'), 'dn', g.s);
-      tipEl.style.left = `${Math.min(param.point.x + 12, host.clientWidth - 150)}px`;
+      tipEl.style.left = `${Math.min(param.point.x + 12, host.clientWidth - 180)}px`;
       tipEl.style.top = `${Math.min(param.point.y + 12, host.clientHeight - 30 * (g.b.length + g.s.length) - 40)}px`;
       tipEl.style.display = 'block';
     });
@@ -843,8 +853,8 @@ export function CandleChart({
     // t 进依赖：切语言时 t 换新引用，小签（"多10x 入场 63000"）跟着重画；isDark 换主题色
   }, [positionOverlays, showPosLines, hiddenPosIds, decimals, chartEpoch, chartType, isDark, t]);
 
-  // 历史成交 B/S 标记：同一根 K 线内聚合成一个角标（B³S² 这种），点开看逐笔价格。
-  // 方块贴在那根最低价下方（快讯 globe 在最高价上方，两边不打架）；全买=涨色、全卖=跌色、混合=主色
+  // 历史成交 B/S 标记：角标只说这根有买/有卖，不带笔数，逐笔价格点开弹窗看。
+  // 方块贴在那根最低价下方（快讯 globe 在最高价上方，两边不打架）；买绿卖红，都有就上下叠两个
   useEffect(() => {
     const series = candleRef.current;
     const markTip = markTipRef.current;
@@ -852,27 +862,26 @@ export function CandleChart({
     const th = lwcTheme();
 
     const bucketMs = BUCKET_MS[interval];
-    const byTime = new Map<number, { b: number[]; s: number[] }>();
+    const byTime = new Map<number, { b: Fill[]; s: Fill[] }>();
     for (const m of tradeMarks) {
       const time = toBarTime(Math.floor(m.timeMs / bucketMs) * bucketMs);
       const g = byTime.get(time) ?? { b: [], s: [] };
-      (m.side === 'B' ? g.b : g.s).push(m.price);
+      (m.side === 'B' ? g.b : g.s).push({ timeMs: m.timeMs, price: m.price, quantity: m.quantity });
       byTime.set(time, g);
+    }
+    for (const g of byTime.values()) {
+      g.b.sort((x, y) => x.timeMs - y.timeMs);
+      g.s.sort((x, y) => x.timeMs - y.timeMs);
     }
     marksByTimeRef.current = byTime;
 
-    // 笔数走上标角标：B³S²（canvas 文本没有富文本，Unicode 上标数字顶上）
-    const SUP = ['⁰', '¹', '²', '³', '⁴', '⁵', '⁶', '⁷', '⁸', '⁹'];
-    const sup = (n: number) => n > 1 ? String(n).split('').map(d => SUP[+d]).join('') : '';
+    // 同一根放两个 marker，LWC 会自己往下错开叠放
     const markers: SeriesMarker<UTCTimestamp>[] = [...byTime.entries()]
       .sort((a, b) => a[0] - b[0])
-      .map(([time, g]) => ({
-        time: time as UTCTimestamp,
-        position: 'belowBar',
-        color: g.b.length && g.s.length ? th.primary : g.b.length ? th.gain : th.loss,
-        shape: 'square',
-        text: (g.b.length ? 'B' + sup(g.b.length) : '') + (g.s.length ? 'S' + sup(g.s.length) : ''),
-      }));
+      .flatMap(([time, g]) => ([
+        ...(g.b.length ? [{ time: time as UTCTimestamp, position: 'belowBar', color: th.gain, shape: 'square', text: 'B' } as const] : []),
+        ...(g.s.length ? [{ time: time as UTCTimestamp, position: 'belowBar', color: th.loss, shape: 'square', text: 'S' } as const] : []),
+      ]));
     const plugin = createSeriesMarkers(series, markers);
 
     return () => {

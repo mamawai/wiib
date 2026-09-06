@@ -107,8 +107,7 @@ export function HomeMonthGrid({ cells, month, onMonthChange, selectedDate, onSel
         })}
       </div>
 
-      <div className="flex justify-between gap-3 mt-auto pt-2.5 text-[12px] text-muted-foreground">
-        <span>{t('grid.foot')}</span>
+      <div className="flex justify-end mt-auto pt-2.5 text-[12px]">
         {/* 整月一格都没有时给「—」不给 +$0.00；滚数那颗一直挂着，没数就藏起来 */}
         <b className="num font-bold text-foreground whitespace-nowrap">
           <span ref={totalRef} className={cn(!cells.length && 'hidden')} />

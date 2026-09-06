@@ -26,7 +26,7 @@ const RANGES = [3, 7, 14, 30, 0] as const;
 type Range = typeof RANGES[number];
 type Tab = 'timeline' | 'trades';
 
-/** 块头：小标题 + 右边一句说明，和分节头同一套排版，只是间距紧一档 */
+/** 块头：和分节头同一套排版，只是间距紧一档 */
 const BLK_H = 'sec-h mb-4';
 
 /** 币种列表 BTCUSDT,ETHUSDT → BTC / ETH */
@@ -264,7 +264,6 @@ export function ArenaDetail() {
                 </div>
               </>
             )}
-            <span>{t('detail.roundsHint')}</span>
             <button type="button" className="ibtn" aria-label={t('common:refresh')}
                     onClick={() => { load(); loadDecisions(); }}>
               <RefreshCw className="ic" />
@@ -314,7 +313,7 @@ export function ArenaDetail() {
         <div className="contents xl:flex xl:col-span-7 xl:flex-col xl:gap-11">
           <div className="order-1 xl:order-none">
             <div className={BLK_H}>
-              <h2>{t('detail.equityCurve', { round: roundLabel })}<small>{t('detail.curveSub')}</small></h2>
+              <h2>{t('detail.equityCurve', { round: roundLabel })}</h2>
               <div className="seg">
                 {RANGES.map(r => (
                   <button key={r} type="button" className={cn(r === effectiveRange && 'on')} onClick={() => setRange(r)}>
@@ -329,7 +328,8 @@ export function ArenaDetail() {
           </div>
 
           {/* 现场卡常挂着（里面的流要一直连着），唤醒中才渲染出来 */}
-          <LiveRunCard traderId={traderId} onEnded={setEndedAt} className="order-2 xl:order-none" />
+          <LiveRunCard traderId={traderId} intervalCode={tr?.intervalCode} onEnded={setEndedAt}
+                       className="order-2 xl:order-none" />
 
           <div ref={listRef} className="order-6 xl:order-none scroll-mt-16">
             <div className="flex items-end gap-[22px] flex-wrap border-b border-foreground">
@@ -392,7 +392,6 @@ export function ArenaDetail() {
           <div className="order-3 xl:order-none">
             <div className={BLK_H}>
               <h2>{t('detail.positionsTitle')}</h2>
-              <span>{t('detail.positionsSub')}</span>
             </div>
             {detail && (detail.positions.length === 0 && detail.pendingOrders.length === 0
               ? <div className="py-6 text-[14px] mute">{t('detail.flat')}</div>
@@ -403,7 +402,6 @@ export function ArenaDetail() {
           <div className="order-4 xl:order-none">
             <div className={BLK_H}>
               <h2>{t('detail.plansTitle')}<small>{t('detail.plansActive', { n: detail?.plans.length ?? 0 })}</small></h2>
-              <span>{t('detail.plansSub')}</span>
             </div>
             {detail && (detail.plans.length === 0
               ? <div className="py-6 text-[14px] mute">{t('detail.noPlans')}</div>
@@ -412,8 +410,7 @@ export function ArenaDetail() {
 
           <div className="order-5 xl:order-none">
             <div className={BLK_H}>
-              <h2>{t('detail.notesTitle')}<small>{t('detail.notesSub')}</small></h2>
-              <span>{t('detail.notesHint')}</span>
+              <h2>{t('detail.notesTitle')}</h2>
             </div>
             <NotesCard title={t('detail.memoryShort')} time={detail?.lastReviewAt}
                        content={detail?.memory} empty={t('detail.noMemory')} />
