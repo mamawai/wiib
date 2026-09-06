@@ -84,7 +84,7 @@ function HeroMain({ user, history, realtime }: { user: User; history: AssetSnaps
   const cell = (i: number) => cn('stat', i === 0 ? 'md:pr-[22px]' : 'md:px-[22px] md:border-l md:border-border');
 
   return (
-    <div className="col-span-12 xl:col-span-6 flex flex-col">
+    <div className="xl:col-span-6 flex flex-col">
       <p className="m-0 text-[13px] text-muted-foreground">{t('hero.totalAssets')}</p>
       <h1 className="num cond mt-0.5 text-[clamp(56px,5.4vw,96px)] font-bold leading-[0.96]">
         <span className="text-[0.36em] font-medium text-muted-foreground align-[1em] mr-[0.06em] [font-stretch:90%] tracking-normal">$</span>
@@ -205,8 +205,8 @@ export function Home() {
 
       {/* ====== 开屏：问候 / 总资产 / 我的 Trader / 月度盈亏 ====== */}
       {ready && (
-        <section className="grid grid-cols-12 gap-8 pt-[26px]">
-          <div className="col-span-12 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 text-[14px] text-muted-foreground">
+        <section className="grid grid-cols-1 xl:grid-cols-12 gap-8 pt-[26px]">
+          <div className="xl:col-span-12 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 text-[14px] text-muted-foreground">
             <div>
               <b className="text-[20px] font-bold text-foreground mr-3.5">
                 {t('greeting.withName', { greeting: t(greetingKey()), name: user!.username })}
@@ -218,9 +218,9 @@ export function Home() {
           </div>
 
           <HeroMain user={user!} history={history} realtime={realtime} />
-          <HomeTraderBlock className="col-span-12 xl:col-span-3" />
+          <HomeTraderBlock className="xl:col-span-3" />
           <HomeMonthGrid
-            className="col-span-12 xl:col-span-3"
+            className="xl:col-span-3"
             cells={gridCells}
             month={gridMonth}
             onMonthChange={setGridMonth}

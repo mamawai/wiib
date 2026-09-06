@@ -7,6 +7,8 @@
  */
 import type { Plugin } from 'vite';
 import type { ServerResponse } from 'node:http';
+import { basePrice, klines, livePrice, roundPrice } from './market';
+import { handleQuotes } from './stompMock';
 
 const MIN = 60_000;
 const HOUR = 3_600_000;
@@ -635,6 +637,166 @@ const nextWake = () => {
   return d.getTime();
 };
 
+// ==================== 交易页 / 持仓页：合约与现货 ====================
+
+/** 分页壳：假数据一页装得下，records 直接全给 */
+const page = <T,>(records: T[], size = 10) => ({
+  records, total: records.length, size, current: 1, pages: 1,
+});
+
+/**
+ * 合约委托：按当前 symbol 现算 6 条，挂单中/已成交/止盈/止损/已撤销各来一份。
+ * 每个币种页都有单可看，图上的 B/S 标记也是靠这些成交价画的
+ */
+const futuresOrders = (symbol: string) => {
+  const t = now();
+  const p = basePrice(symbol);
+  const px = (k: number) => roundPrice(symbol, p * k);
+  const qty = Number((10000 / p).toFixed(3));      // 一万美金名义额折出来的数量
+  const base = { userId: 9001, symbol, leverage: 5, isAiTrader: false };
+  return [
+    {
+      ...base, orderId: 80520, orderSide: 'OPEN_LONG', orderType: 'LIMIT', quantity: qty,
+      limitPrice: px(0.985), frozenAmount: 2000, status: 'PENDING', createdAt: timeStr(t - 6 * MIN),
+    },
+    {
+      ...base, orderId: 80512, positionId: 501, orderSide: 'OPEN_LONG', orderType: 'MARKET', quantity: qty,
+      filledPrice: px(0.972), filledAmount: r2(qty * px(0.972)), marginAmount: 1944, commission: 3.89,
+      status: 'FILLED', createdAt: timeStr(t - 26 * HOUR), isAiTrader: true,
+    },
+    {
+      ...base, orderId: 80498, positionId: 501, orderSide: 'OPEN_LONG', orderType: 'MARKET',
+      quantity: Number((qty * 0.5).toFixed(3)),
+      filledPrice: px(1.004), filledAmount: r2(qty * 0.5 * px(1.004)), marginAmount: 1004, commission: 2.01,
+      status: 'FILLED', createdAt: timeStr(t - 9 * HOUR), isAiTrader: true,
+    },
+    {
+      ...base, orderId: 80471, positionId: 494, orderSide: 'CLOSE_LONG', orderType: 'LIMIT', quantity: qty,
+      filledPrice: px(1.043), filledAmount: r2(qty * px(1.043)), commission: 4.17, realizedPnl: 386.4,
+      status: 'TAKE_PROFIT', createdAt: timeStr(t - 2 * DAY),
+    },
+    {
+      ...base, orderId: 80455, positionId: 488, orderSide: 'CLOSE_SHORT', orderType: 'MARKET', quantity: qty,
+      filledPrice: px(1.021), filledAmount: r2(qty * px(1.021)), commission: 4.08, realizedPnl: -212.7,
+      status: 'STOP_LOSS', createdAt: timeStr(t - 3 * DAY),
+    },
+    {
+      ...base, orderId: 80430, orderSide: 'OPEN_SHORT', orderType: 'LIMIT', quantity: qty,
+      limitPrice: px(1.062), frozenAmount: 2000, status: 'CANCELLED', createdAt: timeStr(t - 4 * DAY),
+    },
+  ];
+};
+
+/** 现货委托：同样按当前 symbol 现算，成交 / 挂单 / 已撤各一条 */
+const spotOrders = (symbol: string) => {
+  const t = now();
+  const p = basePrice(symbol);
+  const px = (k: number) => roundPrice(symbol, p * k);
+  const qty = Number((4000 / p).toFixed(5));
+  return [
+    {
+      orderId: 70420, symbol, orderSide: 'BUY', orderType: 'MARKET', quantity: qty, leverage: 1,
+      filledPrice: px(0.961), filledAmount: r2(qty * px(0.961)), commission: r2(qty * px(0.961) * 0.001),
+      status: 'FILLED', createdAt: timeStr(t - 31 * HOUR),
+    },
+    {
+      orderId: 70415, symbol, orderSide: 'BUY', orderType: 'LIMIT', quantity: Number((qty * 0.5).toFixed(5)),
+      leverage: 1, limitPrice: px(0.942), status: 'PENDING', createdAt: timeStr(t - 52 * MIN),
+    },
+    {
+      orderId: 70402, symbol, orderSide: 'SELL', orderType: 'LIMIT', quantity: Number((qty * 0.3).toFixed(5)),
+      leverage: 1, limitPrice: px(1.088), status: 'CANCELLED', createdAt: timeStr(t - 2 * DAY),
+    },
+  ];
+};
+
+/** 档位表：一条标准梯子按各币最大杠杆缩放，够开仓面板算强平价、持仓卡显示 MMR */
+const ladder = (maxLev: number) => [
+  { tier: 1, notionalFloor: 0, notionalCap: 50_000, maxLeverage: maxLev, mmr: 0.004, maintAmount: 0 },
+  { tier: 2, notionalFloor: 50_000, notionalCap: 250_000, maxLeverage: Math.min(maxLev, 50), mmr: 0.005, maintAmount: 50 },
+  { tier: 3, notionalFloor: 250_000, notionalCap: 1_000_000, maxLeverage: Math.min(maxLev, 25), mmr: 0.01, maintAmount: 1300 },
+  { tier: 4, notionalFloor: 1_000_000, notionalCap: 5_000_000, maxLeverage: Math.min(maxLev, 10), mmr: 0.025, maintAmount: 16_300 },
+];
+
+const BRACKETS: Record<string, ReturnType<typeof ladder>> = {
+  BTCUSDT: ladder(125), ETHUSDT: ladder(100), SOLUSDT: ladder(75),
+  XAUUSDT: ladder(50), CLUSDT: ladder(50), DOGEUSDT: ladder(75),
+};
+
+/** 交易过滤器：前端本地有同名兜底表，这里给同一份口径 */
+const TRADE_FILTERS = {
+  futures: {
+    BTCUSDT: { stepSize: 0.001, minQty: 0.001, minNotional: 50 },
+    ETHUSDT: { stepSize: 0.001, minQty: 0.001, minNotional: 20 },
+    SOLUSDT: { stepSize: 0.01, minQty: 0.01, minNotional: 5 },
+    DOGEUSDT: { stepSize: 1, minQty: 1, minNotional: 5 },
+    XAUUSDT: { stepSize: 0.001, minQty: 0.001, minNotional: 5 },
+    CLUSDT: { stepSize: 0.01, minQty: 0.01, minNotional: 5 },
+  },
+  spot: {
+    BTCUSDT: { stepSize: 0.00001, minQty: 0.00001, minNotional: 5 },
+    ETHUSDT: { stepSize: 0.0001, minQty: 0.0001, minNotional: 5 },
+    SOLUSDT: { stepSize: 0.001, minQty: 0.001, minNotional: 5 },
+    DOGEUSDT: { stepSize: 1, minQty: 1, minNotional: 1 },
+  },
+};
+
+/** 全仓账户：可用 = 余额 − 占用 − 挂单冻结，净值 = 余额 + 浮盈，跟 POSITIONS 对得上 */
+const CROSS_ACCOUNT = {
+  balance: 11655.21, unrealizedPnl: 187.15, equity: 11842.36, available: 7886.91,
+  usedMargin: 3042.9, pendingReserved: 725.4, maintenanceMargin: 69.47, positionCount: 2,
+};
+
+/** 现货持仓（crypto_position 一张表混着币和代币化美股，持仓页按 bstock 列表拆） */
+const SPOT_POSITIONS = [
+  { id: 1101, symbol: 'BTCUSDT', quantity: 0.24, frozenQuantity: 0, avgCost: 61240, totalDiscount: 38.5 },
+  { id: 1102, symbol: 'ETHUSDT', quantity: 3.2, frozenQuantity: 0.4, avgCost: 2288.6, totalDiscount: 0 },
+  { id: 1103, symbol: 'NVDAUSDT', quantity: 40, frozenQuantity: 0, avgCost: 168.2, totalDiscount: 12.4 },
+  { id: 1104, symbol: 'TSLAUSDT', quantity: 12, frozenQuantity: 0, avgCost: 352.6, totalDiscount: 0 },
+];
+
+/** 代币化美股：symbol 带 USDT 后缀，ticker 才是股票代号（行情条按市值取前四） */
+const BSTOCKS = [
+  {
+    id: 1, symbol: 'NVDAUSDT', ticker: 'NVDA', name: '英伟达', nameEn: 'NVIDIA', industry: '半导体',
+    marketCap: 4.42e12, peRatio: 52.4, week52High: 195.6, week52Low: 86.2,
+  },
+  {
+    id: 2, symbol: 'AAPLUSDT', ticker: 'AAPL', name: '苹果', nameEn: 'Apple', industry: '消费电子',
+    marketCap: 3.51e12, peRatio: 34.1, week52High: 248.4, week52Low: 169.2,
+  },
+  {
+    id: 3, symbol: 'TSLAUSDT', ticker: 'TSLA', name: '特斯拉', nameEn: 'Tesla', industry: '汽车',
+    marketCap: 1.09e12, peRatio: 78.6, week52High: 412.8, week52Low: 214.3,
+  },
+  {
+    id: 4, symbol: 'QQQUSDT', ticker: 'QQQ', name: '纳指100ETF', nameEn: 'Invesco QQQ Trust', industry: 'ETF',
+    marketCap: 3.2e11, peRatio: 32.8, week52High: 512.4, week52Low: 402.1,
+  },
+];
+
+/** 列表带实时价：价格和涨跌幅现算，行情条拿到就能显示 */
+const bstockList = () => BSTOCKS.map(b => {
+  const p = livePrice(b.symbol);
+  return {
+    ...b, price: p, changePct: r2((p / basePrice(b.symbol) - 1) * 100 + 1.2),
+    high: roundPrice(b.symbol, p * 1.018), low: roundPrice(b.symbol, p * 0.982),
+    volume: Math.round(8_000_000 + b.id * 3_100_000),
+  };
+});
+
+/** 持仓页五分类 30 日均值 */
+const CATEGORY_AVERAGES = {
+  bstockProfit: 612.4, cryptoProfit: 408.9, commodityProfit: 136.3,
+  predictionProfit: 138.7, gameProfit: 68.2,
+};
+
+const PREDICTION_PNL = {
+  totalBets: 42, activeBets: 2, wonBets: 24, lostBets: 16,
+  totalCost: 1260, realizedPnl: 184.6, activeCost: 60, activeValue: 71.2,
+  totalPnl: 195.8, winRate: 57.14,
+};
+
 // ==================== SSE 收发 ====================
 
 const sseOpen = (res: ServerResponse) => {
@@ -751,8 +913,11 @@ else if (location.search.includes('light')) localStorage.setItem('theme', 'light
     configureServer(server) {
       server.middlewares.use((req, res, next) => {
         const url = req.url || '';
+        // 假行情流：SockJS 那几条不在 /api 底下，先让它挑走
+        if (handleQuotes(req, res)) return;
         if (!url.startsWith('/api/')) return next();
         const path = url.split('?')[0];
+        const q = new URLSearchParams(url.split('?')[1] ?? '');
 
         // ---- 两条 SSE ----
         if (path === '/api/ai/trader/live') {
@@ -776,8 +941,7 @@ else if (location.search.includes('light')) localStorage.setItem('theme', 'light
         if (path === '/api/user/asset-history') return ok(res, assetHistory());
         if (path === '/api/user/asset-realtime') return ok(res, assetRealtime());
         if (path === '/api/user/asset-daily') {
-          const month = new URLSearchParams(url.split('?')[1] ?? '').get('month') ?? dateStr(new Date()).slice(0, 7);
-          return ok(res, assetDaily(month));
+          return ok(res, assetDaily(q.get('month') ?? dateStr(new Date()).slice(0, 7)));
         }
         if (path === '/api/crypto/order/live') return ok(res, cryptoLive());
         if (path === '/api/futures/live') return ok(res, futuresLive());
@@ -834,12 +998,92 @@ else if (location.search.includes('light')) localStorage.setItem('theme', 'light
           });
         }
 
+        // ---- 交易页：合约 ----
+        if (path === '/api/futures/positions') {
+          const sym = q.get('symbol');
+          return ok(res, sym ? POSITIONS.filter(p => p.symbol === sym) : POSITIONS);
+        }
+        if (path === '/api/futures/orders') {
+          const status = q.get('status'), sym = q.get('symbol') || 'BTCUSDT';
+          const rows = futuresOrders(sym).filter(o => !status || o.status === status);
+          return ok(res, page(rows, Number(q.get('pageSize')) || 10));
+        }
+        if (path === '/api/futures/brackets') return ok(res, BRACKETS);
+        if (path === '/api/futures/trade-filters') return ok(res, TRADE_FILTERS);
+        if (path === '/api/futures/cross-account') return ok(res, CROSS_ACCOUNT);
+        if (path === '/api/futures/position-history') return ok(res, page([]));
+
+        // ---- 交易页：现货 ----
+        if (path === '/api/crypto/price') {
+          const sym = q.get('symbol') || 'BTCUSDT';
+          return ok(res, { price: String(livePrice(sym)), ts: String(now()) });
+        }
+        if (path === '/api/crypto/order/position') {
+          const sym = q.get('symbol') || 'BTCUSDT';
+          return ok(res, SPOT_POSITIONS.find(p => p.symbol === sym) ?? null);
+        }
+        if (path === '/api/crypto/order/positions') return ok(res, SPOT_POSITIONS);
+        if (path === '/api/crypto/order/list' || path === '/api/bstock/order/list') {
+          const status = q.get('status'), sym = q.get('symbol') || 'BTCUSDT';
+          const rows = spotOrders(sym).filter(o => !status || o.status === status);
+          return ok(res, page(rows, Number(q.get('pageSize')) || 10));
+        }
+        if (path === '/api/bstock/order/positions') {
+          return ok(res, SPOT_POSITIONS.filter(p => BSTOCKS.some(b => b.symbol === p.symbol)));
+        }
+
+        // ---- 代币化美股 ----
+        if (path === '/api/bstock/list') return ok(res, bstockList());
+        if (path === '/api/bstock/price') return ok(res, livePrice(q.get('symbol') || 'NVDAUSDT'));
+        const bstockMatch = path.match(/^\/api\/bstock\/([A-Z0-9]+)$/);
+        if (bstockMatch) {
+          return ok(res, bstockList().find(b => b.symbol === bstockMatch[1]) ?? bstockList()[0]);
+        }
+
+        // ---- 持仓页 ----
+        if (path === '/api/user/portfolio') {
+          return ok(res, {
+            id: 9001, username: 'mock', balance: 8799.46, gameBalance: 0, frozenBalance: 725.4,
+            positionMarketValue: 13893.6, marginLoanPrincipal: 0, marginInterestAccrued: 0,
+            bankrupt: false, bankruptCount: 0, totalAssets: 11842.36, profit: 1842.36, profitPct: 18.42,
+          });
+        }
+        if (path === '/api/user/category-averages') return ok(res, CATEGORY_AVERAGES);
+        if (path === '/api/prediction/pnl') return ok(res, PREDICTION_PNL);
+        // K 线上的快讯标记：跟快讯用同一批，publishedAt 已经贴着现在
+        if (path === '/api/ai/quant/news-events') return ok(res, news());
+
         // K 线不走业务包装（rawKlines 直接吃 res.data），要裸数组；
         // 给成 {code,data} 的话行情条那句 [...list] 会在 then 里抛，控制台一片红
         if (path.endsWith('/klines')) {
+          const end = Number(q.get('endTime')) || undefined;
+          const rows = klines(q.get('symbol') || 'BTCUSDT', q.get('interval') || '1h', Number(q.get('limit')) || 500, end);
           res.setHeader('Content-Type', 'application/json; charset=utf-8');
-          return res.end('[]');
+          return res.end(JSON.stringify(rows));
         }
+
+        // ---- 写操作：一律成功，不改内存状态；两个要读返回值的给最小形状 ----
+        if (req.method !== 'GET') {
+          if (path === '/api/futures/close-all') return ok(res, { closedCount: POSITIONS.length, failures: [] });
+          const reverseMatch = path.match(/^\/api\/futures\/reverse\/(\d+)$/);
+          if (reverseMatch) {
+            const pos = POSITIONS.find(p => p.id === Number(reverseMatch[1])) ?? POSITIONS[0];
+            const flip = pos.side === 'LONG' ? 'SHORT' : 'LONG';
+            const mk = (orderId: number, orderSide: string, realizedPnl?: number) => ({
+              orderId, userId: 9001, positionId: pos.id, symbol: pos.symbol, orderSide,
+              orderType: 'MARKET', quantity: pos.quantity, leverage: pos.leverage,
+              filledPrice: pos.markPrice, filledAmount: r2(pos.quantity * pos.markPrice),
+              commission: 2.3, realizedPnl, status: 'FILLED', createdAt: timeStr(now()),
+            });
+            return ok(res, {
+              closed: mk(90001, `CLOSE_${pos.side}`, pos.unrealizedPnl),
+              opened: mk(90002, `OPEN_${flip}`),
+              openError: null,
+            });
+          }
+          return ok(res, null);
+        }
+
         // 兜底：Layout 的顶栏/通知/行情条那些接口，给个空的就行
         return ok(res, path.endsWith('/list') ? [] : null);
       });

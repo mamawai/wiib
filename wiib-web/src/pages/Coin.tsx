@@ -1,14 +1,15 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { TrendingUp, TrendingDown, ChevronRight, ChevronLeft } from 'lucide-react';
+import { ChevronRight, ChevronLeft, Target } from 'lucide-react';
 import { cryptoApi, cryptoOrderApi, futuresApi } from '../api';
 import { useUserStore } from '../stores/userStore';
 import { useCryptoStream } from '../hooks/useCryptoStream';
+import { useCountUp } from '../hooks/useCountUp';
 import { useToast } from '../components/ui/use-toast';
-import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Skeleton } from '../components/ui/skeleton';
-import { CandleChart, newsTagForSymbol, type PositionOverlay, type TradeMark } from '../components/CandleChart';
+import { CandleChart, type PositionOverlay, type TradeMark } from '../components/CandleChart';
+import { newsTagForSymbol } from '../components/chart/newsTag';
 import TradingViewWidget from '../components/TradingViewWidget';
 import { SpotTradePanel } from '../components/coin/SpotTradePanel';
 import { FuturesOpenPanel } from '../components/coin/FuturesOpenPanel';
@@ -19,24 +20,13 @@ import { fmtNum } from '../lib/utils';
 import { COIN_MAP, getCoin, DEFAULT_SYMBOL, formatCoinPrice } from '../lib/coinConfig';
 import type { CryptoPosition, FuturesBracket, FuturesPosition } from '../types';
 
-/** 图表周期：现货/合约统一 K 线（各拉 500 根：5m≈41h / 15m≈5天 / 1h≈20天 / 4h≈83天 / 1d≈1.4年）；TABS 之后一位 = TradingView 高级图 */
-const TABS = [
-  { label: '5m', interval: '5m' as const, limit: 500 },
-  { label: '15m', interval: '15m' as const, limit: 500 },
-  { label: '1h', interval: '1h' as const, limit: 500 },
-  { label: '4h', interval: '4h' as const, limit: 500 },
-  { label: '1d', interval: '1d' as const, limit: 500 },
-];
-const TV_TAB = TABS.length;
+/** 图表周期：现货/合约统一 K 线，各拉 500 根（5m≈41h / 15m≈5天 / 1h≈20天 / 4h≈83天 / 1d≈1.4年） */
+const INTERVALS = ['5m', '15m', '1h', '4h', '1d'] as const;
+type ChartInterval = (typeof INTERVALS)[number];
+const IV_KEY = 'wiib-chart-interval';
 
 /** feed 只为这三档开了 WS 广播（Kline5m/15m/1h StreamHandler）；不在表里的走价格 tick 驱动最后一根 */
 const KLINE_BROADCAST: readonly string[] = ['5m', '15m', '1h'];
-
-/** 周期 tab 按钮样式：激活=顶部主色内阴影。extra 给周期档位加 num 字体 */
-const tabCls = (on: boolean, extra = '') =>
-  `${extra} px-2 sm:px-3.5 py-2 sm:py-1.5 text-[11px] sm:text-xs font-semibold transition-colors cursor-pointer ${
-    on ? 'bg-card-2 text-foreground shadow-[inset_0_2px_0_var(--color-primary)]'
-       : 'text-muted-foreground hover:bg-surface-hover hover:text-foreground'}`;
 
 export function CoinRoute() {
   const { symbol } = useParams<{ symbol: string }>();
@@ -47,7 +37,6 @@ export function CoinRoute() {
 export function Coin({ symbol = DEFAULT_SYMBOL }: { symbol?: string }) {
   const { t } = useTranslation('market');
   const cfg = getCoin(symbol);
-  const Icon = cfg.icon;
   // 返回目标写死对应列表页而不是 navigate(-1)：后者在直接打开深链时会一路退出 App
   const backTo = cfg.category === 'commodity' ? '/commodity' : cfg.category === 'tradfi' ? '/tradfi' : '/coin';
   const fmtPrice = useCallback((n?: number | null) => formatCoinPrice(symbol, n), [symbol]);
@@ -103,14 +92,19 @@ export function Coin({ symbol = DEFAULT_SYMBOL }: { symbol?: string }) {
     setFuturesOrdersKey(k => k + 1);
   };
 
-  const [activeTab, setActiveTab] = useState(0);
+  // 周期：图表顶栏切，记本地，下次进页沿用
+  const [chartIv, setChartIv] = useState<ChartInterval>(() => {
+    const saved = localStorage.getItem(IV_KEY) ?? '';
+    return (INTERVALS as readonly string[]).includes(saved) ? saved as ChartInterval : '4h';
+  });
+  useEffect(() => { localStorage.setItem(IV_KEY, chartIv); }, [chartIv]);
 
   // 历史成交 B/S 标记：本 symbol 最近 200 笔终态委托的成交价（图上可见范围足够覆盖）。
   // B=买入方向（开多/平空），S=卖出方向（开空/平多）。时间取 createdAt：市价单即成交时刻，
   // 限价单是挂单时刻（成交时刻接口没给），偏差最多一根 K 线，接受
   const [tradeMarks, setTradeMarks] = useState<TradeMark[]>([]);
   useEffect(() => {
-    if (!isFuturesMode) { setTradeMarks([]); return; }
+    if (!isFuturesMode) return;
     let cancelled = false;
     const TERMINAL = new Set(['FILLED', 'STOP_LOSS', 'TAKE_PROFIT', 'LIQUIDATED']);
     futuresApi.orders(undefined, 1, 200, symbol).then(page => {
@@ -155,172 +149,155 @@ export function Coin({ symbol = DEFAULT_SYMBOL }: { symbol?: string }) {
   }, [symbol, isFuturesMode]);
   const currentPrice = livePrice ?? restPrice;
 
-  // 24h 涨跌基准：1h×25 首根收盘（与首页行情卡同口径）
-  const [base24h, setBase24h] = useState(0);
+  // 24h 基准与高低：1h×25 根，首根收盘当基准（与首页行情卡同口径），25 根里取最高/最低
+  const [day, setDay] = useState({ base: 0, high: 0, low: 0 });
   useEffect(() => {
     let cancelled = false;
     const fn = isFuturesMode ? futuresApi.klines : cryptoApi.klines;
     fn(symbol, '1h', 25)
-      .then(rows => { if (!cancelled && rows?.length) setBase24h(Number(rows[0][4])); })
+      .then(rows => {
+        if (cancelled || !rows?.length) return;
+        setDay({
+          base: Number(rows[0][4]),
+          high: Math.max(...rows.map(r => Number(r[2]))),
+          low: Math.min(...rows.map(r => Number(r[3]))),
+        });
+      })
       .catch(() => {});
     return () => { cancelled = true; };
   }, [symbol, isFuturesMode]);
-  const change = base24h > 0 && currentPrice > 0 ? currentPrice - base24h : 0;
-  const changePct = base24h > 0 ? (change / base24h) * 100 : 0;
+  const change = day.base > 0 && currentPrice > 0 ? currentPrice - day.base : 0;
+  const changePct = day.base > 0 ? (change / day.base) * 100 : 0;
   const isUp = change >= 0;
+
+  // 大数滚动：挂载 0→现价，之后每次报价变化补间过去
+  const priceRef = useCountUp<HTMLElement>(currentPrice, v => `$${fmtPrice(v)}`);
 
   // K线实时驱动分派：crypto 合约 5m/15m/1h 有后端广播（含量/额），4h/1d 没有；
   // 大宗商品/美股永续只有 5m 广播；现货全部由价格 tick 驱动最后一根。
   // 无广播的档位量/额停在进页时的 REST 快照，只有 OHLC 随价格流跳
-  const chartInterval = activeTab < TABS.length ? TABS[activeTab].interval : null;
-  const klineLive = isFuturesMode && chartInterval != null
-    && (cfg.futuresOnly ? chartInterval === '5m' : KLINE_BROADCAST.includes(chartInterval));
+  const klineLive = isFuturesMode && (cfg.futuresOnly ? chartIv === '5m' : KLINE_BROADCAST.includes(chartIv));
   const chartTick = useMemo(() => {
     if (tick?.ts == null) return null;
     const p = isFuturesMode ? (tick.fp ?? tick.price) : tick.price;
     return p != null ? { price: p, ts: tick.ts } : null;
   }, [tick, isFuturesMode]);
 
+  /** 行情灯：本模式的那颗按连线状态亮绿/闪红，另一模式那颗压成灰方块 */
+  const feed = (active: boolean, connected: boolean) => ({
+    dot: `inline-block w-[7px] h-[7px] mr-1.5 align-[1px] ${!active ? 'bg-border' : connected ? 'bg-gain' : 'bg-loss animate-pulse'}`,
+    text: active ? '' : 'mute',
+  });
+  const spotFeed = feed(!isFuturesMode, !!tick?.ws);
+  const futFeed = feed(isFuturesMode, !!tick?.fws);
+
   return (
-    <div className="page-shell p-4 md:p-6 space-y-5">
-      {/* 页头：去卡片化的终端报价行 */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <div className="flex items-center gap-3 min-w-0">
+    <div className="wrap">
+      {/* ====== 页头：币对 / 行情灯 / 报价大数 ====== */}
+      <div className="grid grid-cols-1 xl:grid-cols-[1fr_auto] gap-8 items-end pt-8">
+        <div>
           {/* 返回列表：装成 PWA 后 iOS 没有浏览器返回键，底部 Tab 的"市场"只通向股票列表，
               不给入口就退不回币种/大宗/TradFi 列表 */}
           <button
             type="button"
             onClick={() => navigate(backTo)}
-            aria-label={t('coin.backToList')}
-            className="shrink-0 h-9 w-9 -ml-1.5 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-surface-hover transition-colors"
+            className="inline-flex items-center gap-1 mb-2.5 text-[13px] mute hover:text-foreground transition-colors cursor-pointer"
           >
-            <ChevronLeft className="w-5 h-5" />
+            <ChevronLeft className="w-3.5 h-3.5" />{t('coin.backToList')}
           </button>
-          <Icon className={`w-8 h-8 sm:w-9 sm:h-9 shrink-0 ${cfg.colorClass}`} />
-          <div className="space-y-1 min-w-0">
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-lg sm:text-xl font-extrabold tracking-tight">{cfg.pair}</span>
-              <div className="flex items-center gap-2 px-2.5 py-0.5 rounded-full border border-border bg-card text-[10px]">
-                <span className="flex items-center gap-1.5" title={t('coin.spotFeed')}>
-                  <span className={`inline-block w-1.5 h-1.5 rounded-full ${isFuturesMode ? 'bg-muted-foreground/35' : (tick?.ws ? 'led' : 'bg-destructive animate-pulse')}`} />
-                  <span className={`font-semibold ${isFuturesMode ? 'text-muted-foreground' : 'text-foreground'}`}>{t('coin.spot')}</span>
-                </span>
-                <span className="w-px h-2.5 bg-border" />
-                <span className="flex items-center gap-1.5" title={t('coin.futuresFeed')}>
-                  <span className={`inline-block w-1.5 h-1.5 rounded-full ${isFuturesMode ? (tick?.fws ? 'led' : 'bg-destructive animate-pulse') : 'bg-muted-foreground/35'}`} />
-                  <span className={`font-semibold ${isFuturesMode ? 'text-foreground' : 'text-muted-foreground'}`}>{t('coin.futures')}</span>
-                </span>
-              </div>
-            </div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="microlabel font-semibold">BINANCE</span>
-              {/* TradFi 标的：合约 7×24，但流动性跟着标的股票市场走，给个当前时段入口 */}
-              {cfg.market && <MarketSessionBadge market={cfg.market} />}
-              {cfg.unitLabel && (
-                <span className="text-[11px] text-warning font-semibold">{t('coin.goldUnit', { factor: cfg.unitFactor, unit: cfg.unitLabel })}</span>
-              )}
-            </div>
+
+          <div className="flex items-baseline gap-4 flex-wrap">
+            <b className="cond text-[44px] font-bold leading-none">{symbol}</b>
+            <span className="text-[15px] mute">{cfg.pair} · {isFuturesMode ? t('coin.perp') : t('coin.spot')}</span>
+            <span className="inline-flex gap-3.5 self-center text-[12.5px] font-semibold">
+              <span className={spotFeed.text} title={t('coin.spotFeed')}><i className={spotFeed.dot} />{t('coin.spot')}</span>
+              <span className={futFeed.text} title={t('coin.futuresFeed')}><i className={futFeed.dot} />{t('coin.futures')}</span>
+            </span>
+          </div>
+
+          <div className="flex items-center gap-4 flex-wrap mt-2 text-[12px] mute">
+            <span>BINANCE</span>
+            {isFuturesMode && tick?.mp != null && (
+              <span>{t('coin.markPrice')} <b className="num font-semibold text-foreground">{fmtPrice(tick.mp)}</b></span>
+            )}
+            {/* TradFi 标的：合约 7×24，但流动性跟着标的股票市场走，给个当前时段入口 */}
+            {cfg.market && <MarketSessionBadge market={cfg.market} />}
+            {cfg.unitLabel && (
+              <span className="wn font-semibold">{t('coin.goldUnit', { factor: cfg.unitFactor, unit: cfg.unitLabel })}</span>
+            )}
           </div>
         </div>
-        <div className="text-left sm:text-right">
+
+        <div className="num text-left xl:text-right">
           {currentPrice > 0 ? (
-            <div className="flex flex-col items-start sm:items-end gap-1">
-              <span className="num text-2xl sm:text-3xl font-bold tracking-tight">
-                ${fmtPrice(currentPrice)}
-              </span>
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className={`num inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-md ${isUp ? 'bg-gain/10 text-gain' : 'bg-loss/10 text-loss'}`}>
-                  {isUp ? <TrendingUp className="w-3.5 h-3.5" /> : <TrendingDown className="w-3.5 h-3.5" />}
-                  {t('coin.changeBadge', {
+            <>
+              <b ref={priceRef} className="cond block text-[64px] font-bold leading-none" />
+              <div className="flex items-baseline flex-wrap gap-3 mt-2 text-[15px] font-semibold justify-start xl:justify-end">
+                <span className={isUp ? 'up' : 'dn'}>
+                  {t('coin.change', {
                     change: `${isUp ? '+' : ''}${fmtPrice(change)}`,
                     pct: `${isUp ? '+' : ''}${changePct.toFixed(2)}`,
                   })}
                 </span>
+                <span className="mute font-medium text-[13px]">{t('coin.h24')}</span>
+                <span className="mute font-medium text-[13px]">{t('coin.high')} <b className="text-foreground">{day.high > 0 ? fmtPrice(day.high) : '-'}</b></span>
+                <span className="mute font-medium text-[13px]">{t('coin.low')} <b className="text-foreground">{day.low > 0 ? fmtPrice(day.low) : '-'}</b></span>
                 {cfg.unitLabel && usdCny > 0 && (
-                  <span className="num text-xs text-warning font-semibold">
+                  <span className="wn font-semibold text-[13px]">
                     ¥{(currentPrice * usdCny / cfg.unitFactor!).toFixed(2)}/{cfg.unitLabel}
                   </span>
                 )}
               </div>
-            </div>
+            </>
           ) : (
-            <div className="space-y-2 flex flex-col items-start sm:items-end">
-              <Skeleton className="h-9 w-40" />
-              <Skeleton className="h-5 w-24" />
+            <div className="flex flex-col items-start xl:items-end gap-2">
+              <Skeleton className="h-16 w-56" />
+              <Skeleton className="h-5 w-40" />
             </div>
           )}
         </div>
       </div>
 
-      {/* PC 左图右面板（items-stretch 等高：图表卡 flex 填满左列，右面板内容变化时两列始终同高），移动端自然上下堆叠 */}
-      <div className="grid lg:grid-cols-5 gap-5 items-stretch">
-        {/* 左：图表 + BTC预测入口 */}
-        <div className="lg:col-span-3 flex flex-col gap-5">
-          {/* 手机上图表卡吃掉大部分页边距（留 8px 呼吸），保留边框和小圆角；PC 端(md+)完全保持原样 */}
-          <Card className="flex-1 flex flex-col -mx-2 md:mx-0 rounded-md md:rounded-lg">
-            <CardHeader className="pb-2 pt-4 px-4">
-              <div className="flex items-center justify-between">
-                <CardTitle>{t('coin.chartTitle')}</CardTitle>
-                {/* 6 个档位并排（5 周期 + 高级）：手机端收窄 padding/字号硬塞进一行，不换行；sm 以上恢复原尺寸。
-                    py-2 不动，触摸高度保持 32px */}
-                <div className="flex rounded-md border border-border overflow-hidden divide-x divide-border">
-                  {TABS.map((tab, i) => (
-                    <button key={tab.label} onClick={() => setActiveTab(i)} className={tabCls(activeTab === i, 'num')}>
-                      {tab.label}
-                    </button>
-                  ))}
-                  <button onClick={() => setActiveTab(TV_TAB)} className={tabCls(activeTab === TV_TAB)}>
-                    {t('coin.advanced')}
-                  </button>
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent className="p-0 md:p-2 flex-1 flex flex-col">
-              {/* 现货/合约统一 K 线：合约走后端K线广播，现货由价格流驱动最后一根；
-                  高度跟随右侧面板拉伸。主图:MACD:RSI=3:1:1，比纯 K 线时多要了两格，
-                  所以底线抬到 PC 720 / 手机 520，否则主图蜡烛被压得看不清。
-                  矮视口(手机横屏)按视口高度收，否则 520 的底线会把图顶出屏幕外要滚动才看得全 */}
-              {activeTab < TABS.length && (
-                <div className="flex-1 min-h-[520px] md:min-h-[720px] [@media(max-height:600px)]:min-h-[300px]">
-                  <CandleChart
-                    key={mode}
-                    symbol={symbol}
-                    interval={TABS[activeTab].interval}
-                    limit={TABS[activeTab].limit}
-                    onIntervalChange={iv => setActiveTab(TABS.findIndex(t => t.interval === iv))}
-                    positionOverlays={positionOverlays}
-                    tradeMarks={isFuturesMode ? tradeMarks : undefined}
-                    newsTag={newsTagForSymbol(symbol)}
-                    klinesFn={isFuturesMode ? futuresApi.klines : cryptoApi.klines}
-                    streamLive={klineLive}
-                    tick={klineLive ? null : chartTick}
-                    indicators
-                  />
-                </div>
-              )}
-              {/* 高级：TradingView（合约/现货各自 symbol） */}
-              {activeTab === TV_TAB && <div className="flex-1 min-h-[400px] md:min-h-[560px] [@media(max-height:600px)]:min-h-[300px]"><TradingViewWidget symbol={isFuturesMode ? cfg.futuresTvSymbol : cfg.tvSymbol} label={cfg.name} /></div>}
-            </CardContent>
-          </Card>
+      {/* ====== 图 + 下单面板 ====== */}
+      <div className="grid grid-cols-1 xl:grid-cols-12 gap-8 mt-7 border-t-2 border-foreground pt-[18px]">
+        <div className="xl:col-span-8 flex flex-col gap-5">
+          {/* 周期/图型/指标/画线全在图表组件里；「高级」档把 plot 区换成 TradingView。
+              矮视口(手机横屏)收到 360，否则整张图顶出屏幕外 */}
+          <div className="h-[600px] xl:h-[822px] [@media(max-height:600px)]:h-[360px]">
+            <CandleChart
+              key={mode}
+              symbol={symbol}
+              interval={chartIv}
+              limit={500}
+              onIntervalChange={setChartIv}
+              marketLabel={`BINANCE ${isFuturesMode ? t('coin.perpShort') : t('coin.spot')}`}
+              advanced={<TradingViewWidget symbol={isFuturesMode ? cfg.futuresTvSymbol : cfg.tvSymbol} label={cfg.name} />}
+              positionOverlays={positionOverlays}
+              tradeMarks={isFuturesMode ? tradeMarks : undefined}
+              newsTag={newsTagForSymbol(symbol)}
+              klinesFn={isFuturesMode ? futuresApi.klines : cryptoApi.klines}
+              streamLive={klineLive}
+              tick={klineLive ? null : chartTick}
+              indicators
+            />
+          </div>
 
           {/* BTC涨跌预测入口 */}
           {symbol === 'BTCUSDT' && (
-            <button onClick={() => navigate('/prediction')}
-                    className="w-full flex items-center justify-between px-4 py-3 rounded-lg pt-card hover:bg-surface-hover hover:border-primary/40 transition-colors group cursor-pointer">
-              <div className="flex items-center gap-3">
-                <span className="text-lg">🔮</span>
-                <div className="text-left">
-                  <div className="text-sm font-semibold">{t('coin.predictTitle')} <span className="text-[10px] font-bold text-primary ml-1">NEW</span></div>
-                  <div className="text-[11px] text-muted-foreground">{t('coin.predictDesc')}</div>
+            <Link to="/prediction" className="hov group flex items-center gap-3 py-3 border-t border-border">
+              <Target className="ic mute group-hover:text-primary transition-colors" />
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2 text-[15px] font-bold">
+                  {t('coin.predictTitle')}<span className="chip fill orange">NEW</span>
                 </div>
+                <div className="text-[12px] mute">{t('coin.predictDesc')}</div>
               </div>
-              <ChevronRight className="w-4 h-4 text-muted-foreground group-hover:text-foreground transition-colors" />
-            </button>
+              <ChevronRight className="ic mute" />
+            </Link>
           )}
         </div>
 
-        {/* 右：交易面板（含现货持仓信息块），2/5 宽 */}
-        <Card className="lg:col-span-2 self-start lg:self-auto flex flex-col">
+        <aside className="xl:col-span-4 flex flex-col gap-[18px]">
           {/* 现货持仓信息（两种模式都显示） */}
           {position && (position.quantity > 0 || position.frozenQuantity > 0) && (() => {
             const pnlPct = position.avgCost > 0 && currentPrice > 0
@@ -329,35 +306,30 @@ export function Coin({ symbol = DEFAULT_SYMBOL }: { symbol?: string }) {
               ? (currentPrice - position.avgCost) * position.quantity : 0;
             const isPnlUp = pnlPct >= 0;
             return (
-              <div className="px-4 pt-4">
-                <div className="rounded-lg border border-border bg-card-2 p-4 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <Icon className={`w-6 h-6 ${cfg.colorClass}`} />
-                      <div>
-                        <span className="text-base font-bold">{cfg.name}</span>
-                        <span className="num text-sm font-semibold text-muted-foreground ml-2">{t('coin.units', { qty: position.quantity })}</span>
-                        {cfg.unitLabel && (
-                          <span className="text-xs font-semibold text-warning ml-1.5">{t('coin.approxUnit', { value: (position.quantity * cfg.unitFactor!).toFixed(1), unit: cfg.unitLabel })}</span>
-                        )}
-                      </div>
-                    </div>
-                    <div className="text-right">
-                      <div className={`num text-base font-bold tracking-tight ${isPnlUp ? 'text-gain' : 'text-loss'}`}>
-                        {isPnlUp ? '+' : ''}{pnlPct.toFixed(2)}%
-                      </div>
-                      <div className={`num text-xs font-semibold mt-0.5 ${isPnlUp ? 'text-gain' : 'text-loss'}`}>
-                        {isPnlUp ? '+' : ''}${fmtNum(pnlAmount)}
-                      </div>
-                    </div>
+              <div className="border-t-2 border-foreground pt-3.5">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <b className="text-[16px] font-bold">{cfg.name}</b>
+                    <span className="num ml-2 text-[13px] font-semibold mute">{t('coin.units', { qty: position.quantity })}</span>
+                    {cfg.unitLabel && (
+                      <span className="ml-1.5 text-[12px] font-semibold wn">{t('coin.approxUnit', { value: (position.quantity * cfg.unitFactor!).toFixed(1), unit: cfg.unitLabel })}</span>
+                    )}
                   </div>
-                  <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-xs font-semibold text-muted-foreground pt-1">
-                    <span>{t('coin.avgCost')} <span className="num text-foreground">${fmtPrice(position.avgCost)}</span></span>
-                    <span>{t('coin.lastPrice')} <span className="num text-foreground">${fmtPrice(currentPrice)}</span></span>
-                    <span>{t('coin.marketValue')} <span className="num text-foreground">${fmtNum(currentPrice * position.quantity)}</span></span>
-                    {position.frozenQuantity > 0 && <span>{t('coin.frozen')} <span className="num text-warning">{position.frozenQuantity}</span></span>}
-                    {position.totalDiscount > 0 && <span>{t('coin.saved')} <span className="num text-warning">${fmtNum(position.totalDiscount)}</span></span>}
+                  <div className={`num shrink-0 text-right ${isPnlUp ? 'up' : 'dn'}`}>
+                    <div className="text-[16px] font-bold">{isPnlUp ? '+' : ''}{pnlPct.toFixed(2)}%</div>
+                    <div className="text-[12px] font-semibold">{isPnlUp ? '+' : ''}${fmtNum(pnlAmount)}</div>
                   </div>
+                </div>
+                <div className="num mt-3">
+                  <div className="kv"><span className="k">{t('coin.avgCost')}</span><span className="v">${fmtPrice(position.avgCost)}</span></div>
+                  <div className="kv"><span className="k">{t('coin.lastPrice')}</span><span className="v">${fmtPrice(currentPrice)}</span></div>
+                  <div className="kv"><span className="k">{t('coin.marketValue')}</span><span className="v">${fmtNum(currentPrice * position.quantity)}</span></div>
+                  {position.frozenQuantity > 0 && (
+                    <div className="kv"><span className="k">{t('coin.frozen')}</span><span className="v wn">{position.frozenQuantity}</span></div>
+                  )}
+                  {position.totalDiscount > 0 && (
+                    <div className="kv"><span className="k">{t('coin.saved')}</span><span className="v wn">${fmtNum(position.totalDiscount)}</span></div>
+                  )}
                 </div>
               </div>
             );
@@ -381,13 +353,14 @@ export function Coin({ symbol = DEFAULT_SYMBOL }: { symbol?: string }) {
               onTraded={handleSpotTraded}
             />
           )}
-        </Card>
+        </aside>
       </div>
 
-      {/* 合约持仓（独立Card，空仓时自隐藏；卡内自订 WS 流与档位表） */}
+      {/* 合约持仓（空仓时自隐藏；卡内自订 WS 流与档位表） */}
       {isFuturesMode && (
         <FuturesPositionsCard
           symbol={symbol}
+          showCloseAll
           refreshKey={futuresPositionsKey}
           onOrdersChanged={() => setFuturesOrdersKey(k => k + 1)}
           onPositionsChanged={() => setFuturesPanelKey(k => k + 1)}
@@ -395,7 +368,6 @@ export function Coin({ symbol = DEFAULT_SYMBOL }: { symbol?: string }) {
         />
       )}
 
-      {/* 订单列表 */}
       <CoinOrdersCard
         symbol={symbol}
         mode={mode}

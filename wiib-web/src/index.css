@@ -74,8 +74,11 @@ html.dark {
   --color-surface-hover: #1a1b1f;
 }
 
-* {
-  border-color: var(--color-border);
+/* 放 base 层：不分层的规则会压过 components/utilities 里的墨线 */
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
 }
 
 html {
@@ -377,7 +380,7 @@ html.dark .machined { box-shadow: inset 0 1px 0 rgba(255, 255, 255, .07); }
   .strip .v small{font-size:12.5px;color:var(--color-muted-foreground);font-weight:500;font-stretch:100%;letter-spacing:0;margin-left:6px}
 
   footer.pt{padding:80px 0 44px;font-size:12.5px;color:var(--color-muted-foreground);display:flex;justify-content:space-between}
-  @media (max-width:1200px){.g12>*{grid-column:1/-1 !important}}
+  @media (max-width:1200px){.g12{grid-template-columns:1fr}.g12>*{grid-column:1/-1 !important}}
   @media (max-width:760px){.wrap{padding:0 20px}}
 }
 
@@ -394,103 +397,6 @@ html.dark .machined { box-shadow: inset 0 1px 0 rgba(255, 255, 255, .07); }
   .reveal,.reveal-late,.stagger>*{animation:none;opacity:1;clip-path:none}
   .ticker .track{animation:none}
   .nav-dot{transition:none}
-}
-
-/* ===== 滑杆（Leverage/Pct 共用视觉层；交互层是透明原生 range，见组件注释） ===== */
-.wiib-slider { position: relative; padding: 0 10px; --slider-color: var(--color-primary); }
-.wiib-slider.disabled { opacity: .45; }
-.wiib-slider .slider-area { position: relative; padding: 10px 0; }
-.wiib-slider .native { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; -webkit-appearance: none; appearance: none; touch-action: none; }
-.wiib-slider .native:disabled { cursor: default; }
-.wiib-slider .native::-webkit-slider-thumb { -webkit-appearance: none; width: 28px; height: 28px; }
-.wiib-slider .native::-moz-range-thumb { width: 28px; height: 28px; border: 0; }
-/* 机加工细槽：边框 + 浅内影 */
-.wiib-slider .track { position: relative; height: 7px; border-radius: 999px; background: var(--color-secondary); border: 1px solid var(--color-border); box-shadow: inset 0 1px 2px rgba(0,0,0,.10); }
-html.dark .wiib-slider .track { box-shadow: inset 0 1px 2px rgba(0,0,0,.45); }
-.wiib-slider .fill { position: absolute; inset: -1px auto -1px -1px; border-radius: 999px; background: var(--slider-color); box-shadow: inset 0 1px 0 rgba(255,255,255,.3); transition: width .18s ease-out, background-color .2s ease; }
-.wiib-slider.dragging .fill { transition: background-color .2s ease; }
-.wiib-slider .tick-notch { position: absolute; left: 0; top: 50%; width: 1.5px; height: 4px; border-radius: 1px; transform: translate(-50%,-50%); background: color-mix(in srgb, var(--color-muted-foreground) 45%, transparent); transition: background .2s; pointer-events: none; }
-.wiib-slider .tick-notch.passed { background: rgba(255,255,255,.8); }
-.wiib-slider .thumb { position: absolute; top: 50%; width: 18px; height: 18px; border-radius: 50%; transform: translate(-50%,-50%); background: #fff; border: 2px solid var(--slider-color); box-shadow: 0 1px 3px rgba(0,0,0,.25); pointer-events: none; z-index: 1; transition: left .18s ease-out, border-color .2s ease, transform .15s ease; }
-.wiib-slider.sm .thumb { width: 16px; height: 16px; }
-.wiib-slider .slider-area:hover .thumb { transform: translate(-50%,-50%) scale(1.12); }
-.wiib-slider .slider-area:has(.native:focus-visible) .thumb { box-shadow: 0 0 0 3px color-mix(in srgb, var(--slider-color) 30%, transparent), 0 1px 3px rgba(0,0,0,.25); }
-.wiib-slider.dragging .thumb { transform: translate(-50%,-50%) scale(1.18); transition-property: border-color, transform; }
-.wiib-slider .thumb.at-max { border-color: var(--color-loss); }
-.wiib-slider .bubble { position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%); padding: 2px 8px; border-radius: 6px; font-size: 11px; font-weight: 700; line-height: 1.4; white-space: nowrap; color: #fff; background: var(--slider-color); box-shadow: 0 2px 6px color-mix(in srgb, var(--slider-color) 40%, transparent); font-variant-numeric: tabular-nums; font-family: var(--font-mono); pointer-events: none; animation: wiib-slider-pop .16s ease-out; }
-.wiib-slider .bubble::after { content: ''; position: absolute; top: 100%; left: 50%; transform: translateX(-50%); border: 4px solid transparent; border-top-color: var(--slider-color); }
-.wiib-slider .bubble.max { background: var(--color-loss); letter-spacing: .05em; }
-.wiib-slider .bubble.max::after { border-top-color: var(--color-loss); }
-.wiib-slider .tick-labels { position: relative; height: 18px; margin-top: 3px; }
-.wiib-slider .tick-label { position: absolute; top: 0; padding: 1px 5px; border: 0; border-radius: 999px; background: transparent; transform: translateX(-50%); font-size: 10px; font-weight: 600; color: var(--color-muted-foreground); cursor: pointer; transition: color .2s, background .2s; font-variant-numeric: tabular-nums; font-family: var(--font-mono); line-height: 1.5; }
-.wiib-slider .tick-label:hover { color: var(--color-foreground); }
-.wiib-slider .tick-label.active { color: var(--slider-color); font-weight: 700; background: var(--color-secondary); box-shadow: inset 0 0 0 1px var(--color-border); }
-@keyframes wiib-slider-pop { 0% { transform: translateX(-50%) scale(.5); opacity: 0; } 100% { transform: translateX(-50%) scale(1); opacity: 1; } }
-
-/* ===== 下单动画按钮（FuturesActionButton）：刷卡机动画，styled-components 迁出版 =====
-   强调色由组件内联 --accent 系列变量注入；底面走主题 token，暗色不刺眼 */
-.fab-btn {
-  position: relative; display: flex; width: 100%; height: 56px; margin: 0 auto; padding: 0;
-  border: 1px solid var(--color-border); border-radius: 6px; overflow: hidden;
-  background: var(--color-card); color: var(--color-foreground);
-  transition: transform .3s ease, box-shadow .3s ease, opacity .2s ease, background-color .3s ease;
-  box-shadow: 0 2px 8px rgba(0,0,0,.06); cursor: pointer;
-}
-html.dark .fab-btn { box-shadow: none; }
-.fab-btn:disabled { cursor: not-allowed; }
-.fab-btn .content { display: flex; width: 100%; height: 100%; opacity: 1; transform: scale(1); transition: opacity .24s ease, transform .24s ease; }
-.fab-btn.success .content { opacity: 0; transform: scale(.96); }
-.fab-btn.success { background: var(--color-surface-hover); }
-.fab-btn .success-layer { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; opacity: 0; pointer-events: none; transition: opacity .2s ease; }
-.fab-btn.success .success-layer { opacity: 1; }
-.fab-btn .success-icon { width: 40px; height: 40px; }
-.fab-btn .success-circle, .fab-btn .success-check { fill: none; stroke: var(--accent-dark); stroke-linecap: round; stroke-linejoin: round; }
-.fab-btn .success-circle { stroke-width: 2.5; stroke-dasharray: 126; stroke-dashoffset: 126; transition: stroke-dashoffset .38s ease; }
-.fab-btn.success .success-circle { stroke-dashoffset: 0; }
-.fab-btn .success-check { stroke-width: 3; stroke-dasharray: 28; stroke-dashoffset: 28; transition: stroke-dashoffset .28s ease .28s; }
-.fab-btn.success .success-check { stroke-dashoffset: 0; }
-.fab-btn .left-side {
-  position: relative; display: flex; width: 132px; height: 100%; flex-shrink: 0;
-  align-items: center; justify-content: center; overflow: hidden; border-radius: 5px 0 0 5px;
-  background: linear-gradient(135deg, var(--accent) 0%, color-mix(in srgb, var(--accent) 76%, white) 100%);
-  transition: width .3s ease;
-}
-.fab-btn .right-side { display: flex; min-width: 0; flex: 1; align-items: center; justify-content: center; padding: 0 18px; background: transparent; transition: background-color .3s ease; }
-@media (hover: hover) and (pointer: fine) {
-  .fab-btn:hover:not(:disabled) { transform: scale(1.02); box-shadow: 0 4px 14px rgba(0,0,0,.10); }
-  .fab-btn:hover:not(:disabled) .left-side { width: 100%; }
-  .fab-btn:hover:not(:disabled) .card { animation: fab-slide-top 1.2s cubic-bezier(.645,.045,.355,1) both; }
-  .fab-btn:hover:not(:disabled) .post { animation: fab-slide-post 1s cubic-bezier(.165,.84,.44,1) both; }
-  .fab-btn:hover:not(:disabled) .dollar { animation: fab-fade-in-fwd .3s 1s backwards; }
-  .fab-btn:hover:not(:disabled) .right-side { background: var(--color-surface-hover); }
-}
-.fab-btn.activated:not(:disabled) .left-side { width: 100%; }
-.fab-btn.activated:not(:disabled) .card { animation: fab-slide-top 1.2s cubic-bezier(.645,.045,.355,1) both; }
-.fab-btn.activated:not(:disabled) .post { animation: fab-slide-post 1s cubic-bezier(.165,.84,.44,1) both; }
-.fab-btn.activated:not(:disabled) .dollar { animation: fab-fade-in-fwd .3s 1s backwards; }
-.fab-btn.activated:not(:disabled) .right-side { background: var(--color-surface-hover); }
-.fab-btn .label { font-size: 18px; font-weight: 800; letter-spacing: .02em; white-space: nowrap; }
-.fab-btn .spinner { width: 20px; height: 20px; animation: fab-spin 1s linear infinite; }
-.fab-btn .card { position: absolute; z-index: 10; display: flex; width: 66px; height: 42px; flex-direction: column; align-items: center; border-radius: 8px; background: var(--accent-soft); box-shadow: 8px 8px 18px -6px var(--accent-shadow); }
-.fab-btn .card-line { width: 58px; height: 10px; margin-top: 7px; border-radius: 999px; background: var(--accent-line); }
-.fab-btn .buttons { width: 7px; height: 7px; margin: 9px 0 0 -24px; border-radius: 50%; transform: rotate(90deg); background: var(--accent-dark); box-shadow: 0 -9px 0 0 color-mix(in srgb, var(--accent-dark) 82%, black), 0 9px 0 0 color-mix(in srgb, var(--accent-dark) 78%, white); }
-.fab-btn .post { position: absolute; top: 56px; z-index: 11; width: 58px; height: 68px; overflow: hidden; border-radius: 8px; background: #d4d4d8; }
-.fab-btn .post-line { position: absolute; top: 7px; right: 7px; width: 44px; height: 8px; border-radius: 0 0 3px 3px; background: #52525b; }
-.fab-btn .post-line::before { content: ''; position: absolute; top: -7px; width: 44px; height: 8px; background: #71717a; }
-.fab-btn .screen { position: absolute; top: 20px; right: 7px; width: 44px; height: 21px; border-radius: 4px; background: #ffffff; }
-.fab-btn .dollar { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--accent-dark); font-size: 15px; font-weight: 900; }
-.fab-btn .numbers, .fab-btn .numbers-line2 { position: absolute; left: 22px; width: 11px; height: 11px; border-radius: 2px; transform: rotate(90deg); }
-.fab-btn .numbers { top: 47px; background: #71717a; box-shadow: 0 -16px 0 0 #71717a, 0 16px 0 0 #71717a; }
-.fab-btn .numbers-line2 { top: 61px; background: #a1a1aa; box-shadow: 0 -16px 0 0 #a1a1aa, 0 16px 0 0 #a1a1aa; }
-@keyframes fab-slide-top { 0% { transform: translateY(0); } 50%, 60% { transform: translateY(-33px) rotate(90deg); } 100% { transform: translateY(-4px) rotate(90deg); } }
-@keyframes fab-slide-post { 50% { transform: translateY(0); } 100% { transform: translateY(-42px); } }
-@keyframes fab-fade-in-fwd { 0% { opacity: 0; transform: translateY(-5px); } 100% { opacity: 1; transform: translateY(0); } }
-@keyframes fab-spin { to { transform: rotate(360deg); } }
-/* 手机：上下更扁、左右占满 */
-@media (max-width: 480px) {
-  .fab-btn { height: 46px; }
-  .fab-btn .left-side { width: 110px; }
-  .fab-btn .label { font-size: 15px; }
 }
 
 /* ===== 钱包卡包（PortfolioWallet）：口袋+卡片堆叠动画，styled-components 迁出版 ===== */

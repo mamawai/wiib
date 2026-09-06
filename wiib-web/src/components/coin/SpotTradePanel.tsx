@@ -1,23 +1,21 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Wallet, Warehouse, Scale, Sparkles } from 'lucide-react';
 import { cryptoOrderApi } from '../../api';
 import { useUserStore } from '../../stores/userStore';
 import { useDiscountBuff } from '../../hooks/useDiscountBuff';
 import { useToast } from '../ui/use-toast';
-import { CardContent } from '../ui/card';
-import { Button } from '../ui/button';
-import { Input } from '../ui/input';
-import { Badge } from '../ui/badge';
 import { FuturesActionButton } from '../FuturesActionButton';
-import { NeuToggle } from '../NeuToggle';
-import { fmtNum } from '../../lib/utils';
+import { LeverageSlider } from '../LeverageSlider';
+import { cn, fmtNum } from '../../lib/utils';
 import { getCoin, getCoinPriceDecimals, getCoinPriceStep } from '../../lib/coinConfig';
 import { useTradeFilter } from '../../lib/tradeFilters';
 import type { CryptoPosition } from '../../types';
 import { TradeModeSwitch } from './TradeModeSwitch';
+import { NumInput, PctRow } from './TradeFields';
 import { useQuantityAnimation } from './useQuantityAnimation';
 import { COMMISSION_RATE, POSITION_PCTS, SPOT_LEVERAGE_OPTIONS, floorToStep } from './futuresMath';
+
+const SPOT_MAX_LEVERAGE = SPOT_LEVERAGE_OPTIONS[SPOT_LEVERAGE_OPTIONS.length - 1];
 
 /**
  * 现货交易面板：买卖方向、市价/限价、数量/仓位、现货杠杆、折扣券、预估与提交。
@@ -60,7 +58,7 @@ export function SpotTradePanel({ symbol, currentPrice, position, onModeChange, o
 
   useEffect(() => {
     if (!actionSuccess) return;
-    const timer = window.setTimeout(() => setActionSuccess(false), 1600);
+    const timer = window.setTimeout(() => setActionSuccess(false), 800);
     return () => window.clearTimeout(timer);
   }, [actionSuccess]);
 
@@ -70,6 +68,7 @@ export function SpotTradePanel({ symbol, currentPrice, position, onModeChange, o
   const unitPrice = orderType === 'LIMIT' ? (parseFloat(limitPrice) || 0) : currentPrice;
   const unitFactor = unitPrice * (1 + COMMISSION_RATE * unitLv);
   const isUsdtInput = side === 'BUY' && buyUnit === 'USDT';
+  const isBuyMarket = side === 'BUY' && orderType === 'MARKET';
 
   /** 切换单位时把已输入的值按当前价换算过去，不清空 */
   const switchUnit = (u: 'COIN' | 'USDT') => {
@@ -99,7 +98,7 @@ export function SpotTradePanel({ symbol, currentPrice, position, onModeChange, o
     // ×杠杆会产生浮点尾差，按步长向下对齐；全量卖出保留精确持仓量（后端豁免步长，尘埃能清干净）
     const isFullSell = side === 'SELL' && qty === (position?.quantity ?? -1);
     const price = orderType === 'LIMIT' ? parseFloat(limitPrice) : currentPrice;
-    let actualQty = side === 'BUY' && orderType === 'MARKET' && leverage > 1 ? qty * leverage : qty;
+    let actualQty = isBuyMarket && leverage > 1 ? qty * leverage : qty;
     if (!isFullSell) actualQty = floorToStep(actualQty, filter.stepSize);
     // 买入需过最小名义额（对齐Binance；卖出为减持豁免）
     if (side === 'BUY' && price > 0 && actualQty * price < filter.minNotional) {
@@ -112,8 +111,8 @@ export function SpotTradePanel({ symbol, currentPrice, position, onModeChange, o
         quantity: actualQty,
         orderType,
         ...(orderType === 'LIMIT' ? { limitPrice: parseFloat(limitPrice) } : {}),
-        ...(side === 'BUY' && orderType === 'MARKET' && leverage > 1 ? { leverageMultiple: leverage } : {}),
-        ...(side === 'BUY' && orderType === 'MARKET' && useBuff && discountBuff ? { useBuffId: discountBuff.id } : {}),
+        ...(isBuyMarket && leverage > 1 ? { leverageMultiple: leverage } : {}),
+        ...(isBuyMarket && useBuff && discountBuff ? { useBuffId: discountBuff.id } : {}),
       };
       if (side === 'BUY') {
         await cryptoOrderApi.buy(req);
@@ -139,221 +138,182 @@ export function SpotTradePanel({ symbol, currentPrice, position, onModeChange, o
   const qtyNum = isUsdtInput ? (unitFactor > 0 ? inputNum / unitFactor : 0) : inputNum;
   const priceForCalc = unitPrice;
   const discountRate = useBuff && discountBuff && orderType === 'MARKET' ? Number(discountBuff.buffType.match(/DISCOUNT_(\d+)/)?.[1] ?? 100) / 100 : 1;
-  const leveragedQty = side === 'BUY' && orderType === 'MARKET' && leverage > 1 ? qtyNum * leverage : qtyNum;
+  const leveragedQty = isBuyMarket && leverage > 1 ? qtyNum * leverage : qtyNum;
   const estimatedAmount = leveragedQty * priceForCalc;
   const marginAmount = qtyNum * priceForCalc; // 保证金部分
   const estimatedCommission = estimatedAmount * COMMISSION_RATE;
 
+  /** 仓位 % 按钮的目标值：买入吃余额、卖出吃持仓；口径与提交一致 */
+  const pctTarget = (pct: number) => {
+    if (side === 'SELL') {
+      // 卖出100%：精确全量（尘埃也能清干净，后端对全量卖豁免步长），不做步长取整
+      const full = position?.quantity ?? 0;
+      return pct >= 1 ? full : Math.max(MIN_QTY, floorToStep(full * pct, MIN_QTY));
+    }
+    const balance = user?.balance ?? 0;
+    if (isUsdtInput) return Math.max(0, Number((balance * pct).toFixed(2)));
+    // 限价还没填价时退回现价，别让百分比按钮点了没反应
+    const factor = (unitPrice || currentPrice) * (1 + COMMISSION_RATE * unitLv);
+    if (!(factor > 0)) return 0;
+    const raw = (balance * pct) / factor;
+    const qty = Math.max(MIN_QTY, floorToStep(raw, MIN_QTY));
+    return qty <= MIN_QTY && raw < MIN_QTY ? MIN_QTY : qty;
+  };
+  const activePct = inputNum > 0 && currentPrice > 0
+    ? (POSITION_PCTS.find(p => Math.abs(pctTarget(p) - inputNum) < 1e-9) ?? null)
+    : null;
+  const handlePct = (pct: number) => {
+    const target = pctTarget(pct);
+    if (!(target > 0)) return;
+    // 卖出全量直接落精确值，别让缓动把尾数抹了
+    if (side === 'SELL' && pct >= 1) { setQuantity(String(target)); return; }
+    animateQuantity(target, isUsdtInput ? 0.01 : MIN_QTY);
+  };
+
   return (
     <>
-      {/* 买卖切换 + 现货/合约 + 爆仓 */}
-      <div className="px-5 pt-5 flex flex-wrap items-center gap-3">
-        <div className="flex flex-1 min-w-[140px] rounded-md border border-border overflow-hidden divide-x divide-border">
-          <button onClick={() => setSide('BUY')} className={`flex-1 py-2.5 text-sm font-bold transition-colors cursor-pointer ${side === 'BUY' ? 'bg-gain text-white' : 'text-muted-foreground hover:bg-surface-hover hover:text-foreground'}`}>{t('side.buy')}</button>
-          <button onClick={() => setSide('SELL')} className={`flex-1 py-2.5 text-sm font-bold transition-colors cursor-pointer ${side === 'SELL' ? 'bg-loss text-white' : 'text-muted-foreground hover:bg-surface-hover hover:text-foreground'}`}>{t('side.sell')}</button>
-        </div>
+      {/* 合约/现货 + 可用 */}
+      <div className="flex justify-between items-center">
         <TradeModeSwitch mode="spot" futuresOnly={cfg.futuresOnly} onModeChange={onModeChange} />
+        {user && (
+          <span className="text-[12.5px] text-muted-foreground">
+            {t('open.availLabel')}{' '}
+            <b className="num text-foreground font-semibold">{side === 'BUY' ? fmtNum(user.balance) : (position?.quantity ?? 0)}</b>{' '}
+            {side === 'BUY' ? 'USDT' : cfg.name}
+          </span>
+        )}
       </div>
 
-      {/* flex-1 + 预估提交区 mt-auto：面板随左侧图表卡等高，条件块（限价/杠杆/折扣券）出现时消耗预留空档 */}
-      <CardContent className="p-5 mt-2 flex-1 flex flex-col gap-6">
-        {/* 执行方式：市价/限价 */}
-        <div className="flex items-center gap-2">
-          <NeuToggle
-            label={t('orderType.label')}
-            value={orderType}
-            onChange={setOrderType}
-            options={[{ value: 'MARKET', label: t('orderType.market') }, { value: 'LIMIT', label: t('orderType.limit') }]}
-          />
-        </div>
-        {/* 限价输入 */}
-        {orderType === 'LIMIT' && (
-          <div className="space-y-1.5">
-            <label className="text-xs font-bold text-muted-foreground">{t('open.limitLabel')}</label>
-            <Input type="number" placeholder={t('open.limitPlaceholder')} value={limitPrice} onChange={e => setLimitPrice(e.target.value)} step={PRICE_STEP_TEXT} min="0" />
-          </div>
-        )}
+      {/* 买入 / 卖出 */}
+      <div className="grid grid-cols-2 border-[1.5px] border-foreground">
+        <button
+          onClick={() => setSide('BUY')}
+          className={cn('h-12 text-[17px] font-extrabold cursor-pointer transition-colors', side === 'BUY' ? 'bg-gain text-white' : 'text-muted-foreground hover:text-foreground')}
+        >{t('side.buy')}</button>
+        <button
+          onClick={() => setSide('SELL')}
+          className={cn('h-12 text-[17px] font-extrabold cursor-pointer transition-colors', side === 'SELL' ? 'bg-loss text-white' : 'text-muted-foreground hover:text-foreground')}
+        >{t('side.sell')}</button>
+      </div>
 
-        {/* 数量 + 余额 */}
-        <div className="space-y-1.5">
-          <div className="flex items-center justify-between">
-            {side === 'BUY' ? (
-              <div className="flex items-center gap-2">
-                <label className="text-xs font-bold text-muted-foreground">{buyUnit === 'USDT' ? t('spot.amount') : t('spot.quantity')}</label>
-                {/* 输入单位切换：按币数量买 / 按 USDT 预算买 */}
-                <div className="flex rounded border border-border overflow-hidden divide-x divide-border">
-                  {(['COIN', 'USDT'] as const).map(u => (
-                    <button
-                      key={u}
-                      type="button"
-                      onClick={() => switchUnit(u)}
-                      className={`px-2 py-0.5 text-[10px] font-bold transition-colors cursor-pointer ${buyUnit === u ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
-                    >
-                      {u === 'COIN' ? cfg.name : 'USDT'}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ) : (
-              <label className="text-xs font-bold text-muted-foreground">{t('spot.quantityUnit', { unit: cfg.name })}</label>
-            )}
-            {user && (
-              <span className="text-xs font-bold text-muted-foreground flex items-center gap-1">
-                <Wallet className="w-3.5 h-3.5" />
-                {side === 'BUY'
-                  ? <>{fmtNum(user.balance)} USDT</>
-                  : <>{position?.quantity ?? 0} {cfg.name}</>
-                }
-              </span>
-            )}
-          </div>
-          <Input
-            type="number"
-            placeholder={isUsdtInput ? t('spot.spendPlaceholder') : String(MIN_QTY)}
-            value={quantity}
-            onChange={e => setQuantity(e.target.value)}
-            step={isUsdtInput ? '0.01' : String(MIN_QTY)}
-            min={isUsdtInput ? 0 : MIN_QTY}
-          />
-          {currentPrice > 0 && (
-            <div className="space-y-1.5 pt-1">
-              <label className="text-xs font-bold text-muted-foreground flex items-center gap-1.5">
-                <Warehouse className="w-3.5 h-3.5" /> {t('spot.positionPcts')}
-              </label>
-              <div className="flex gap-1.5">
-                {POSITION_PCTS.map(pct => {
-                const handlePct = () => {
-                  // 卖出100%：精确全量（尘埃也能清干净，后端对全量卖豁免步长），不做步长取整
-                  if (side === 'SELL' && pct >= 1) {
-                    const full = position?.quantity ?? 0;
-                    if (full > 0) setQuantity(String(full));
-                    return;
-                  }
-                  // USDT 模式：% 直接取余额的百分比当预算，换算成数量的事留给预估/提交
-                  if (isUsdtInput) {
-                    animateQuantity(Math.max(0, (user?.balance ?? 0) * pct), 0.01);
-                    return;
-                  }
-                  let raw: number;
-                  if (side === 'BUY') {
-                    const balance = user?.balance ?? 0;
-                    const lv = orderType === 'MARKET' ? leverage : 1;
-                    raw = (balance * pct) / (currentPrice * (1 + COMMISSION_RATE * lv));
-                  } else {
-                    raw = (position?.quantity ?? 0) * pct;
-                  }
-                  const qty = Math.max(MIN_QTY, floorToStep(raw, MIN_QTY));
-                  const target = qty <= MIN_QTY && raw < MIN_QTY ? MIN_QTY : qty;
-                  animateQuantity(target, MIN_QTY);
-                };
-                return (
-                  <Button key={pct} onClick={handlePct} variant="outline" size="sm" className="h-11 text-[11px] font-black flex-1 min-w-15">
-                    {pct * 100}%
-                  </Button>
-                );
-              })}
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* 杠杆 - 仅市价买入 */}
-        {side === 'BUY' && orderType === 'MARKET' && (
-          <div className="space-y-1.5">
-            <label className="text-xs font-bold text-muted-foreground flex items-center gap-1.5">
-              <Scale className="w-3.5 h-3.5" /> {t('lev.label')}{useBuff ? ` ${t('spot.levDisabledByBuff')}` : ''}
-            </label>
-            <div className={useBuff ? 'opacity-40 pointer-events-none' : ''}>
-              <select
-                value={leverage}
-                onChange={e => setLeverage(Number(e.target.value))}
-                className="w-full h-10 rounded-md bg-input border border-border px-3.5 text-sm font-semibold text-foreground focus:outline-none focus:ring-2 focus:ring-ring appearance-none cursor-pointer"
-                style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2.5'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 12px center' }}
-              >
-                {SPOT_LEVERAGE_OPTIONS.map(lv => (
-                  <option key={lv} value={lv}>{lv}x{lv === 1 ? ` ${t('spot.noLeverage')}` : ''}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-        )}
-
-        {/* 折扣券 - 仅市价买入且有可用券 */}
-        {side === 'BUY' && orderType === 'MARKET' && discountBuff && (
-          <div className="space-y-1.5">
-            <div className="flex items-center justify-between">
-              <label className="text-xs font-bold text-muted-foreground flex items-center gap-1">
-                <Sparkles className="w-3.5 h-3.5 text-warning" />
-                {t('spot.discount')}{leverage > 1 ? ` ${t('spot.discountDisabledByLev')}` : ''}
-              </label>
-              <button
-                type="button"
-                onClick={() => { if (leverage > 1) return; setUseBuff(v => !v); }}
-                disabled={leverage > 1}
-                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${useBuff ? 'bg-warning' : 'bg-muted-foreground/30'} ${leverage > 1 ? 'opacity-40 cursor-not-allowed' : ''}`}
-              >
-                <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-background transition-transform ${useBuff ? 'translate-x-5' : 'translate-x-1'}`} />
+      {/* 委托类型 + 限价 */}
+      <div className="grid grid-cols-2 gap-3.5">
+        <div className="field">
+          <label>{t('orderType.label')}</label>
+          <div className="seg flex">
+            {(['MARKET', 'LIMIT'] as const).map(o => (
+              <button key={o} className={cn('flex-1', orderType === o && 'on')} onClick={() => setOrderType(o)}>
+                {t(o === 'MARKET' ? 'orderType.market' : 'orderType.limit')}
               </button>
-            </div>
-            {useBuff && (
-              <div className="flex items-center gap-2 text-xs bg-warning/10 border border-warning/40 rounded-md px-3 py-2">
-                <Badge variant="warning" className="text-[10px] px-2">{discountBuff.buffName}</Badge>
-                <span className="text-muted-foreground font-bold">{t('spot.discountLine')}</span>
-              </div>
-            )}
+            ))}
+          </div>
+        </div>
+        {orderType === 'LIMIT' && (
+          <div className="field">
+            <label>{t('open.limitLabel')}</label>
+            <NumInput value={limitPrice} onChange={setLimitPrice} placeholder={t('open.limitPlaceholder')} step={PRICE_STEP_TEXT} min="0" unit="USDT" />
           </div>
         )}
+      </div>
 
-        {/* 预估 + 提交（mt-auto 压底） */}
-        <div className="mt-auto pt-4 border-t border-border border-dashed space-y-4">
-          {qtyNum > 0 && priceForCalc > 0 && (
-            <div className="space-y-2">
-              {isUsdtInput && (
-                <div className="flex justify-between text-xs font-bold text-muted-foreground">
-                  <span>{t('spot.estGet')}{unitLv > 1 ? ` ${t('spot.totalPosLev', { lev: unitLv })}` : ''}</span>
-                  <span className="font-mono text-foreground">≈ {fmtNum(floorToStep(leveragedQty, filter.stepSize))} {cfg.name}</span>
-                </div>
-              )}
-              {side === 'BUY' && leverage > 1 && (
-                <div className="flex justify-between text-xs font-bold text-muted-foreground">
-                  <span>{t('spot.totalPos', { lev: leverage })}</span>
-                  <span className="font-mono text-foreground">${fmtNum(estimatedAmount)} USDT</span>
-                </div>
-              )}
-              <div className="flex justify-between text-xs font-bold text-muted-foreground">
-                <span>{side === 'BUY' && leverage > 1 ? t('spot.margin') : t(side === 'BUY' ? 'spot.estCost' : 'spot.estProceeds')}</span>
-                <span className="text-foreground">
-                  {useBuff && discountRate < 1 && side === 'BUY' && (
-                    <span className="line-through text-muted-foreground mr-1.5">${fmtNum(marginAmount)}</span>
-                  )}
-                  ${fmtNum(marginAmount * discountRate)} USDT
-                </span>
-              </div>
-              <div className="flex justify-between text-xs font-bold text-muted-foreground">
-                <span>{t('spot.fee')}</span>
-                <span className="font-mono">${fmtNum(estimatedCommission * discountRate)} USDT</span>
-              </div>
-              {side === 'BUY' && (
-                <div className="flex justify-between text-sm font-black pt-1">
-                  <span className="text-muted-foreground">{t('spot.total')}</span>
-                  <span className="text-foreground">
-                    ${fmtNum((marginAmount + estimatedCommission) * discountRate)} USDT
-                  </span>
-                </div>
-              )}
+      {/* 数量：买入时右侧单位可点，币 ↔ USDT 换算 */}
+      <div className="field">
+        <label>
+          <span>{isUsdtInput ? t('spot.amount') : t('spot.quantity')}</span>
+          <span>{t('open.minOrder', { step: MIN_QTY, unit: cfg.name })}</span>
+        </label>
+        <NumInput
+          value={quantity}
+          onChange={setQuantity}
+          placeholder={isUsdtInput ? t('spot.spendPlaceholder') : String(MIN_QTY)}
+          step={isUsdtInput ? '0.01' : String(MIN_QTY)}
+          min={isUsdtInput ? 0 : MIN_QTY}
+          unit={isUsdtInput ? 'USDT' : cfg.name}
+          unitTitle={side === 'BUY' ? t('open.switchUnit') : undefined}
+          onUnitClick={side === 'BUY' ? () => switchUnit(buyUnit === 'USDT' ? 'COIN' : 'USDT') : undefined}
+        />
+        {currentPrice > 0 && <PctRow active={activePct} onPick={handlePct} />}
+      </div>
+
+      {/* 现货杠杆借款：仅市价买入；用了折扣券就只能 1x */}
+      {isBuyMarket && (
+        <div className="flex flex-col gap-2">
+          <div className="flex justify-between items-baseline text-[12.5px] font-semibold text-muted-foreground">
+            <span>{t('lev.label')}</span>
+            <b className="num text-[20px] font-bold text-foreground">{leverage}x</b>
+          </div>
+          <div className={useBuff ? 'opacity-40 pointer-events-none' : ''}>
+            <LeverageSlider value={leverage} max={SPOT_MAX_LEVERAGE} ticks={SPOT_LEVERAGE_OPTIONS} onChange={setLeverage} />
+          </div>
+          {useBuff && <div className="text-[12px] text-warning">{t('spot.levDisabledByBuff')}</div>}
+        </div>
+      )}
+
+      {/* 折扣券：仅市价买入且有可用券；用了杠杆就不能叠 */}
+      {isBuyMarket && discountBuff && (
+        <div className="field">
+          <label>
+            <span>{t('spot.discount')}</span>
+            <button
+              type="button"
+              disabled={leverage > 1}
+              onClick={() => { if (leverage > 1) return; setUseBuff(v => !v); }}
+              className={cn('chip', useBuff && 'fill orange', leverage > 1 && 'opacity-40 cursor-not-allowed')}
+            >
+              {discountBuff.buffName}
+            </button>
+          </label>
+          <div className="text-[12px] text-muted-foreground">
+            {leverage > 1 ? t('spot.discountDisabledByLev') : t('spot.discountLine')}
+          </div>
+        </div>
+      )}
+
+      {/* 预估 */}
+      {qtyNum > 0 && priceForCalc > 0 && (
+        <div className="num border-t border-foreground pt-1">
+          {isUsdtInput && (
+            <div className="kv py-[7px]">
+              <span className="k">{t('spot.estGet')}{unitLv > 1 ? ` ${t('spot.totalPosLev', { lev: unitLv })}` : ''}</span>
+              <span className="v">≈ {fmtNum(floorToStep(leveragedQty, filter.stepSize))} {cfg.name}</span>
             </div>
           )}
-          <FuturesActionButton
-            className="mt-2"
-            onClick={handleSubmit}
-            disabled={submitting || currentPrice <= 0}
-            loading={submitting}
-            success={actionSuccess}
-            side={side}
-            label={cfg.name}
-          />
+          {side === 'BUY' && leverage > 1 && (
+            <div className="kv py-[7px]">
+              <span className="k">{t('spot.totalPos', { lev: leverage })}</span>
+              <span className="v">{fmtNum(estimatedAmount)}</span>
+            </div>
+          )}
+          {side === 'BUY' && (
+            <div className="kv py-[7px]">
+              <span className="k">{leverage > 1 ? t('spot.margin') : t('spot.estCost')}</span>
+              <span className="v">
+                {useBuff && discountRate < 1 && <span className="line-through text-muted-foreground mr-1.5">{fmtNum(marginAmount)}</span>}
+                {fmtNum(marginAmount * discountRate)}
+              </span>
+            </div>
+          )}
+          <div className="kv py-[7px]">
+            <span className="k">{t('spot.fee')}</span>
+            <span className="v">{fmtNum(estimatedCommission * discountRate)}</span>
+          </div>
+          <div className="kv py-[7px] border-b-0 text-[16px]">
+            <span className="k">{side === 'BUY' ? t('spot.total') : t('spot.estProceeds')}</span>
+            <span className="v text-[20px] font-bold [font-stretch:85%]">
+              {fmtNum(side === 'BUY' ? (marginAmount + estimatedCommission) * discountRate : marginAmount)} USDT
+            </span>
+          </div>
         </div>
-      </CardContent>
+      )}
+
+      <FuturesActionButton
+        onClick={handleSubmit}
+        disabled={submitting || currentPrice <= 0}
+        loading={submitting}
+        success={actionSuccess}
+        side={side}
+        label={cfg.name}
+      />
     </>
   );
 }

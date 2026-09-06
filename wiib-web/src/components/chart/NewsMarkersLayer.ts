@@ -16,8 +16,8 @@ import type { CanvasRenderingTarget2D } from 'fancy-canvas';
 /** 一个标记：一根 K 线时间桶内的快讯聚合（count>1 时画数字角标） */
 export interface NewsMarker { time: number; count: number; }
 
-const FONT = '700 10px ui-monospace, Consolas, monospace';
-/** 药丸高度；globe 独占区宽度也用它（正方形区域内画圆） */
+const FONT = '700 10px system-ui, sans-serif';
+/** 角标高度；globe 独占区宽度也用它（正方形区域内画圆） */
 const CHIP_H = 18;
 /** globe 半径 */
 const R = 4.5;
@@ -25,9 +25,9 @@ const R = 4.5;
 export class NewsMarkersLayer implements ISeriesPrimitive<Time> {
   /** 标记集合，CandleChart 拉完快讯后赋值并调 update() */
   markers: NewsMarker[] = [];
-  /** 主题位：暗色下换底色/描边，由 CandleChart 的主题 effect 维护 */
-  dark = false;
-  /** 每帧实测的药丸矩形（pane 坐标，time → 矩形）：点击命中与弹窗定位都读它 */
+  /** 角标配色：纸底 + 灰描边灰图形，由 CandleChart 从 token 灌进来，切主题改完调 update() */
+  palette = { fg: '#7a7e88', border: 'rgba(122,126,136,.45)', bg: '#fafaf7' };
+  /** 每帧实测的角标矩形（pane 坐标，time → 矩形）：点击命中与弹窗定位都读它 */
   readonly rects = new Map<number, { x: number; y: number; w: number; h: number }>();
 
   chartApi: IChartApi | null = null;
@@ -56,7 +56,7 @@ export class NewsMarkersLayer implements ISeriesPrimitive<Time> {
     this._requestUpdate = undefined;
   }
 
-  /** 改完 markers/dark 调它触发重绘 */
+  /** 改完 markers/palette 调它触发重绘 */
   update() {
     this._requestUpdate?.();
   }
@@ -113,10 +113,7 @@ class PaneRenderer implements IPrimitivePaneRenderer {
       const chart = L.chartApi, series = L.seriesApi;
       if (!chart || !series || !L.markers.length) return;
       const ts = chart.timeScale();
-      // 精密终端配色：底色贴卡片、描边与图形走同一个信号蓝，暗色下把蓝提亮一档保持对比
-      const fg = L.dark ? '#6f9dff' : '#2962ff';
-      const border = L.dark ? 'rgba(111,157,255,.55)' : 'rgba(41,98,255,.45)';
-      const bg = L.dark ? 'rgba(16,20,28,.92)' : 'rgba(255,255,255,.95)';
+      const { fg, border, bg } = L.palette;
 
       c.save();
       c.font = FONT;
@@ -136,7 +133,7 @@ class PaneRenderer implements IPrimitivePaneRenderer {
         // 悬在最高价上方 8px，纵向夹在 pane 内（价格出可视范围时坐标是界外值，不夹会飘出主图）
         const y0 = Math.round(Math.min(Math.max(4, yHigh - CHIP_H - 8), mediaSize.height - CHIP_H - 4));
 
-        // 连接杆：药丸底到蜡烛高点，标记归属哪根一目了然
+        // 连接杆：角标底到蜡烛高点，标记归属哪根一目了然
         const stemTop = y0 + CHIP_H;
         if (yHigh - stemTop > 2) {
           c.strokeStyle = border;
@@ -147,10 +144,9 @@ class PaneRenderer implements IPrimitivePaneRenderer {
           c.stroke();
         }
 
-        // 药丸底（roundRect 是 Safari 16.4+，老 iOS 退化成直角，别让整帧绘制炸掉）
+        // 底：纸底 + 1px 灰边，直角（全站不出圆角）
         c.beginPath();
-        if (c.roundRect) c.roundRect(x0, y0, w, CHIP_H, CHIP_H / 2);
-        else c.rect(x0, y0, w, CHIP_H);
+        c.rect(x0, y0, w, CHIP_H);
         c.fillStyle = bg;
         c.fill();
         c.strokeStyle = border;
