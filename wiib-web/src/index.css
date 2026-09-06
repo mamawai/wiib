@@ -191,12 +191,12 @@ html.pwa nav a {
    接入前需同步调整页内布局。 */
 .page-shell {
   width: 100%;
-  max-width: 90rem; /* 1440px */
+  max-width: 1800px;
   margin-inline: auto;
+  /* 左右和 .wrap 一样（不分层，页面自己的 p-4/p-6 横向会被这里盖掉），两边和顶栏齐 */
+  padding-inline: 20px;
 }
-
-/* 宽版壳：卡片密集的看板页（竞技场详情）用，大屏比标准壳多给 240px */
-.page-shell-wide { max-width: 105rem; } /* 1680px */
+@media (min-width: 768px) { .page-shell { padding-inline: 52px; } }
 
 /* ===== 工具类 ===== */
 /* 卡片基线：底色 + 1px 边框，纯靠线分层 */
