@@ -27,6 +27,10 @@
     "toDark": "切换到暗色模式",
     "login": "登录"
   },
+  "footer": {
+    "brand": "WhatIfIBought 模拟交易",
+    "disclaimer": "所有数据均为虚拟，不构成投资建议"
+  },
   "led": {
     "ok": "正常",
     "warn": "降级",

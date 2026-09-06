@@ -9,7 +9,8 @@ import { NotificationList } from './NotificationList';
 
 /**
  * 顶栏信封：未读角标 + 下拉面板。点开即全部标已读，面板仍列最近 50 条历史。
- * 只在 PC 显示（顶栏操作区整体 hidden lg:flex），手机端的通知入口在「我的」页。
+ * 按钮壳跟着 .tools button / .tools .ic 走（无底色无边框，图标 16px 灰）。
+ * 只在 PC 显示（顶栏工具区整体 hidden lg:flex），手机端的通知入口在「我的」页。
  */
 export function NotificationBell() {
   const navigate = useNavigate();
@@ -30,20 +31,20 @@ export function NotificationBell() {
       <button
         type="button"
         onClick={() => void toggle()}
-        className="relative w-8 h-8 rounded-md flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-surface-hover transition-colors cursor-pointer"
+        className="relative inline-flex cursor-pointer"
         aria-label={t('notif.title')}
       >
-        <Bell className="w-4 h-4" />
+        <Bell className="ic" />
         {unread > 0 && (
-          <span className="absolute -top-0.5 -right-0.5 min-w-4 h-4 px-1 rounded-full bg-destructive text-white text-[9px] font-black tabular-nums flex items-center justify-center">
+          <span className="absolute -top-2 -right-2 min-w-4 h-4 px-1 bg-primary text-white text-[9px] font-black tabular-nums flex items-center justify-center">
             {unread > 99 ? '99+' : unread}
           </span>
         )}
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full mt-2 w-80 rounded-lg pt-card shadow-lg overflow-hidden z-50 animate-in fade-in slide-in-from-top-2">
-          <div className="px-4 py-2.5 microlabel font-semibold border-b border-border/60">{t('notif.title')}</div>
+        <div className="absolute right-0 top-full mt-1.5 w-80 border border-foreground bg-background overflow-hidden z-50 animate-in fade-in slide-in-from-top-2">
+          <div className="px-4 py-2.5 text-[13px] font-semibold text-muted-foreground border-b border-border">{t('notif.title')}</div>
           <NotificationList
             items={items}
             loading={loading}
