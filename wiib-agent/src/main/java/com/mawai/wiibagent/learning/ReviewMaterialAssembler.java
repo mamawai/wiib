@@ -25,16 +25,7 @@ import java.math.RoundingMode;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Comparator;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.IdentityHashMap;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -154,7 +145,7 @@ public class ReviewMaterialAssembler {
             }
             BigDecimal high = bars.stream().map(KlineBar::high).max(BigDecimal::compareTo).orElseThrow();
             BigDecimal low = bars.stream().map(KlineBar::low).min(BigDecimal::compareTo).orElseThrow();
-            BigDecimal open = bars.get(0).open();
+            BigDecimal open = bars.getFirst().open();
             if (open.signum() <= 0 || high.subtract(low).multiply(BigDecimal.valueOf(100))
                     .divide(open, 2, RoundingMode.HALF_UP).compareTo(QUIET_AMPLITUDE_PCT) >= 0) {
                 return false;
@@ -210,7 +201,7 @@ public class ReviewMaterialAssembler {
                 .gt(AiTraderDecision::getWakeTime, fromMs)
                 .le(AiTraderDecision::getWakeTime, toMs)
                 .orderByAsc(AiTraderDecision::getWakeTime));
-        BigDecimal end = series.isEmpty() ? start : series.get(series.size() - 1).getEquity();
+        BigDecimal end = series.isEmpty() ? start : series.getLast().getEquity();
 
         BigDecimal returnPct = start.signum() > 0
                 ? end.subtract(start).multiply(BigDecimal.valueOf(100)).divide(start, 2, RoundingMode.HALF_UP)
@@ -438,7 +429,7 @@ public class ReviewMaterialAssembler {
         int opens = 0;
         // HOLD 段游标（按币各一个）：同币连续同一等待条件压成一段，遇动作行或条件变化就结算。
         // 15m 档一天 96 轮，行情不动时几十轮等的是同一句话，一轮一行只会把动作行的信号稀释掉。
-        // 旧格式整块观望占 WHOLE 伪键，与新格式的币键互不干扰
+        // 错误格式（没分段）整块观望占 WHOLE 伪键，与新格式的币键互不干扰
         Map<String, Hold> holds = new LinkedHashMap<>();
         for (AiTraderDecision d : rows) {
             if (AiTraderDecision.STATUS_ERROR.equals(d.getStatus())) {
@@ -449,7 +440,7 @@ public class ReviewMaterialAssembler {
                 skipped++;
                 continue;
             }
-            // stale 治理：被忽略交易的旧格式轮整行剔（唤醒轮数仍按原始行统计），新格式剔段后继续
+            // stale 治理：新格式剔段后继续；错误格式落在 stale 生命期内整行剔（唤醒轮数仍按原始行统计）
             String reasoning = staleFiltered(d, plans);
             if (reasoning == null) {
                 continue;
@@ -598,7 +589,7 @@ public class ReviewMaterialAssembler {
 
     /**
      * 动作行的结论：结论块整块，截断保头（块内判断在前）。
-     * 没有结论块（旧数据/格式失守）退化为截尾片段——结论在末尾，保头会正好把它切掉。
+     * 没有结论块（错误格式）退化为截尾片段——结论在末尾，保头会正好把它切掉。
      */
     private String conclusion(String reasoning, AgentLang lang) {
         if (reasoning == null || reasoning.isBlank()) {
@@ -661,17 +652,17 @@ public class ReviewMaterialAssembler {
      * 结论块内的币种分段标记：方括号币码独占一行（[BTCUSDT]）。语言无关——两门语言的模板同一形状。
      * 只在结论块正文里匹配，[ROUND CONCLUSION] 带空格够不到，[本轮结论]、[警报] 非拉丁字母也够不到。
      */
-    private static final Pattern SEGMENT_TAG = Pattern.compile("(?m)^\\s*\\[([A-Z0-9]{2,20})\\]\\s*$");
+    private static final Pattern SEGMENT_TAG = Pattern.compile("(?m)^\\s*\\[([A-Z0-9]{2,20})]\\s*$");
 
     /** 结论块里的一个币种分段：段头币码 + 段身（判断/动作/等待） */
     public record ConclusionSegment(String symbol, String body) {
     }
 
-    /** 旧格式整块观望在按币容器里的伪键：没有分段标记时全部条件归它 */
+    /** 错误格式（没分段）整块观望在按币容器里的伪键：没有分段标记时全部条件归它 */
     static final String WHOLE = "";
 
     /**
-     * 结论块正文按 [SYMBOL] 标记切段；无标记（旧格式）返回空列表。
+     * 结论块正文按 [SYMBOL] 标记切段；无标记（错误格式）返回空列表。
      * 首个标记之前的引子（总评）不绑定任何币，不进结果——归属计算只认分段。
      */
     public static List<ConclusionSegment> splitSegments(String conclusionBody) {
@@ -694,7 +685,7 @@ public class ReviewMaterialAssembler {
 
     /**
      * 观望轮的等待条件按币抽取：新格式（总分结构）每个 [SYMBOL] 段各抽各的，键=币码；
-     * 旧格式整块抽一条，键={@link #WHOLE}。没有结论块 → 单条 WHOLE 空值（"这轮没给条件"）。
+     * 错误格式（没分段）整块抽一条，键={@link #WHOLE}。没有结论块 → 单条 WHOLE 空值（"这轮没给条件"）。
      */
     LinkedHashMap<String, String> waitsBySymbol(String reasoning, AgentLang lang) {
         LinkedHashMap<String, String> out = new LinkedHashMap<>();
@@ -719,13 +710,14 @@ public class ReviewMaterialAssembler {
         return out;
     }
 
-    // ==================== stale 教材过滤 ====================
+    // ==================== 被标记不算数的交易，从决策正文里剔掉 ====================
 
     /**
-     * 一行决策在 stale 治理（主人标记忽略）下的教材产出，时间线/唤醒最近决策/chat 共用：
-     * 新格式剔掉属于被忽略交易的 [SYMBOL] 段；旧格式无段可剔，退化为按轮剔——
-     * stale 计划的开仓轮（wake_time 相等）或 actionsJson 里 positionId 命中即整行剔除，返回 null。
-     * 其余返回（可能剔过段的）reasoning，null 正规化为空串。无 stale 计划时零改动。
+     * 主人把某笔交易标记成"这笔不算数"（stale）之后，这行决策还剩多少字能用。
+     * 时间线、唤醒回注、chat 都走这里，免得被否掉的那笔继续教坏模型。
+     * 结论块按 [SYMBOL] 分了段的，只剔那个币的段，别的币照留；
+     * 错误格式（没按币分段或没写结论块）剔不了段，退化成按轮兜底：这轮落在任一 stale 计划生命期内就整行不要返回 null。
+     * 没有 stale 计划就原样返回，一个字不动，错误格式的行也照留。
      */
     public String staleFiltered(AiTraderDecision d, List<AiTraderPlan> plans) {
         String reasoning = d.getReasoning() == null ? "" : d.getReasoning();
@@ -737,7 +729,7 @@ public class ReviewMaterialAssembler {
         if (c != null && SEGMENT_TAG.matcher(c.body(reasoning)).find()) {
             return scrubStaleSegments(reasoning, c, d.getWakeTime(), plans);
         }
-        return staleLegacyRow(d, plans) ? null : reasoning;
+        return inStaleLifetime(d.getWakeTime(), plans) ? null : reasoning;
     }
 
     /** 新格式剔段：结论块里被忽略交易的 [SYMBOL] 段连段头一起剔，引子（总评）与其余段保留 */
@@ -785,32 +777,18 @@ public class ReviewMaterialAssembler {
                 && wakeTime <= (p.getClosedWakeTime() == null ? Long.MAX_VALUE : p.getClosedWakeTime());
     }
 
-    /** 旧格式按轮剔：stale 计划的开仓轮，或动作轨迹里任一动作命中被忽略交易（平仓/调止损止盈轮） */
-    private static boolean staleLegacyRow(AiTraderDecision d, List<AiTraderPlan> plans) {
+    /** 错误格式按轮兜底：这轮 wakeTime 落在任一 stale 计划的生命期内，时间规则与新格式剔段同一条 */
+    private static boolean inStaleLifetime(long wakeTime, List<AiTraderPlan> plans) {
         for (AiTraderPlan p : plans) {
-            if (Boolean.TRUE.equals(p.getStale())
-                    && java.util.Objects.equals(p.getOpenedWakeTime(), d.getWakeTime())) {
+            if (Boolean.TRUE.equals(p.getStale()) && covers(p, wakeTime)) {
                 return true;
             }
-        }
-        if (d.getActionsJson() == null || d.getActionsJson().isBlank()) {
-            return false;
-        }
-        try {
-            JSONArray arr = JSON.parseArray(d.getActionsJson());
-            for (int i = 0; i < arr.size(); i++) {
-                if (staleAction(arr.getJSONObject(i), d.getWakeTime(), plans)) {
-                    return true;
-                }
-            }
-        } catch (Exception e) {
-            // 轨迹坏行当无命中：教材过滤缺一轮不挡组装
         }
         return false;
     }
 
     /**
-     * 单个动作是否属于被忽略交易（时间线摘要/chat 工具名/旧格式剔轮共用同一识别核心）：
+     * 单个动作是否属于被忽略交易（时间线摘要/chat 工具名共用同一识别核心）：
      * positionId 命中 stale 仓位绑定，或该轮是 stale 计划的开仓轮且动作开的正是该币向。
      */
     private static boolean staleAction(JSONObject action, long wakeTime, List<AiTraderPlan> plans) {
@@ -823,7 +801,7 @@ public class ReviewMaterialAssembler {
             if (p.getPositionId() != null && id != null && id.longValue() == p.getPositionId()) {
                 return true;
             }
-            if ("open_position".equals(action.getString("tool"))
+            if ("open_position".equals(Objects.requireNonNull(action).getString("tool"))
                     && java.util.Objects.equals(p.getOpenedWakeTime(), wakeTime)
                     && args != null
                     && p.getSymbol().equals(args.getString("symbol"))
@@ -893,7 +871,7 @@ public class ReviewMaterialAssembler {
     /** 真观望分界（口径7）：段跨度 ≥6h 才升格对账块，短于它的碎观望全部收进一行汇总 */
     static final long LONG_HOLD_MS = 6 * 3_600_000L;
 
-    /** 观望段游标：同币连续同一等待条件的多轮压成一段。symbol={@link #WHOLE} 即旧格式整块 */
+    /** 观望段游标：同币连续同一等待条件的多轮压成一段。symbol={@link #WHOLE} 即错误格式（没分段）整块 */
     private static final class Hold {
         final String key;
         final String kind;
@@ -917,7 +895,7 @@ public class ReviewMaterialAssembler {
     /**
      * 动作行涉及的币（可变集合）：args.symbol 直取，只带 positionId 的动作经计划绑定反查；
      * 任一动作解析不出币 → null，调用方保守结算全部游标（历史无绑定数据的兜底）。
-     * WHOLE（旧格式整块）由调用方自行加入——账户级叙述随任何动作作废。
+     * WHOLE（错误格式整块）由调用方自行加入——账户级叙述随任何动作作废。
      */
     private static Set<String> actedSymbols(String actionsJson, List<AiTraderPlan> plans) {
         try {
@@ -977,7 +955,7 @@ public class ReviewMaterialAssembler {
         // 等待条件全文不截断：它是这段对账的唯一原料
         block.append("  ").append(prompts.get(lang, "reviewer.label.waiting", Map.of(
                 "wait", h.wait.isEmpty() ? prompts.get(lang, "reviewer.label.noWait") : h.wait))).append('\n');
-        // 段起点结构快照：旧格式整块段不知道在等哪个币，各币都给一行
+        // 段起点结构快照：错误格式整块段不知道在等哪个币，各币都给一行
         for (String symbol : WHOLE.equals(h.symbol) ? symbols : List.of(h.symbol)) {
             block.append("  ").append(structureSnapshot(symbol, h.from, lang)).append('\n');
         }
@@ -1035,8 +1013,8 @@ public class ReviewMaterialAssembler {
                         .append(prompts.get(lang, "reviewer.label.pathNoBars")).append('\n');
                 continue;
             }
-            BigDecimal open = hourly.get(0).open();
-            BigDecimal close = hourly.get(hourly.size() - 1).close();
+            BigDecimal open = hourly.getFirst().open();
+            BigDecimal close = hourly.getLast().close();
             BigDecimal high = null;
             BigDecimal low = null;
             long highAt = 0;

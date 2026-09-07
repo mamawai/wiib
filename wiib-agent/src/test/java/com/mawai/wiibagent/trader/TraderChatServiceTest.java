@@ -110,9 +110,9 @@ class TraderChatServiceTest {
         return d;
     }
 
-    /** decisions：新格式剔 stale 分段、旧格式命中轮整行剔——与复盘时间线同一套识别逻辑 */
+    /** decisions：新格式剔 stale 分段、错误格式落在 stale 生命期内整行剔——与复盘时间线同一套识别逻辑 */
     @Test
-    void decisions剔stale分段与旧格式整轮() {
+    void decisions剔stale分段与错误格式整轮() {
         when(traderService.mine(ME)).thenReturn(running());
         AiTraderPlan stale = new AiTraderPlan();
         stale.setSymbol("BTCUSDT");
@@ -128,10 +128,11 @@ class TraderChatServiceTest {
                 // 同轮给 stale 仓位调过止损：工具名也得剔，数据工具照常
                 "[{\"tool\":\"set_stop_loss\",\"args\":{\"positionId\":42,\"stopLossPrice\":99000},\"status\":\"ok\"},"
                         + "{\"tool\":\"klines\"}]");
-        AiTraderDecision legacyClose = decision(9000L, "[本轮结论]\n动作：平仓\n等待：无",
+        // 没分段的平仓轮：落在生命期 [1000, 5000] 内，整行不出
+        AiTraderDecision unsegmentedClose = decision(4000L, "[本轮结论]\n动作：平仓\n等待：无",
                 "[{\"tool\":\"close_position\",\"args\":{\"positionId\":42},\"status\":\"ok\"}]");
         when(traderService.decisions(eq(7L), anyInt(), any(), any(), any(), any()))
-                .thenReturn(List.of(segmented, legacyClose));
+                .thenReturn(List.of(segmented, unsegmentedClose));
 
         JSONArray out = parse(service.decisions(ME, null, AgentLang.ZH)).getJSONArray("decisions");
 

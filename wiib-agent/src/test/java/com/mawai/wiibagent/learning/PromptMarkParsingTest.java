@@ -104,7 +104,7 @@ class PromptMarkParsingTest {
     private static final String EN_CONCLUSION =
             "some market context\n[ROUND CONCLUSION]\nJudgement: breakout confirmed\nAction: HOLD\nWaiting: retest 99000 holds";
 
-    /** 旧格式（无分段标记）整块的等待条件从 waitsBySymbol 的 WHOLE 伪键取 */
+    /** 错误格式（无分段标记）整块的等待条件从 waitsBySymbol 的 WHOLE 伪键取 */
     private String wholeWait(String reasoning, AgentLang lang) {
         return assembler().waitsBySymbol(reasoning, lang).get(ReviewMaterialAssembler.WHOLE);
     }

@@ -443,7 +443,7 @@ UsageTrackingChatModel 每轮新建（工厂里的模型实例是跨唤醒缓存
 另外两组方法是"结论块格式"的下游，读完第 5.4 节的 `closingFormat` 再回来看：
 
 - `splitSegments` / `waitsBySymbol`：结论块按 `[SYMBOL]` 切段，观望轮的等待条件按币抽取做对账。
-- `staleFiltered` / `staleFilteredToolNames`：主人标记忽略某笔交易后，**新格式剔掉对应的 `[SYMBOL]` 段，旧格式无段可剔退化为整行剔除**。时间线 / 唤醒回注 / chat 三处共用这一套。
+- `staleFiltered` / `staleFilteredToolNames`：主人标记忽略某笔交易后，**新格式剔掉对应的 `[SYMBOL]` 段；错误格式（模型没按币分段）无段可剔，落在 stale 计划生命期内的轮整行剔除**。没人标忽略时错误格式的行原样保留。时间线 / 唤醒回注 / chat 三处共用这一套。
 
 ---
 

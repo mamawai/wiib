@@ -374,19 +374,25 @@ class ReviewMaterialAssemblerTest {
         assertThat(timeline).contains("[BTCUSDT] 观望对账段").contains("等待：回踩 63370–63480 企稳再做多");
     }
 
-    /** 旧格式退化为按轮剔：stale 计划的开仓轮 + positionId 命中的调仓轮整行消失，无关轮保留，唤醒轮数不缩水 */
+    /**
+     * 错误格式（没分段）退化为按轮剔：落在 stale 计划生命期内的轮整行消失——开仓轮、调仓轮、中间的持有轮都算；
+     * 生命期之外的轮保留，唤醒轮数不缩水
+     */
     @Test
-    void timelineDropsLegacyStaleRounds() {
+    void timelineDropsUnsegmentedRoundsInsideStaleLifetime() {
         when(decisionMapper.selectOne(any())).thenReturn(null);
+        // 生命期 [FROM+1h, FROM+2h]（planOf 归档时刻=开仓+1h）
         AiTraderPlan stale = planOf("BTCUSDT", "BREAKOUT", FROM + 3600_000, true);
         stale.setPositionId(42L);
         when(planMapper.selectList(any())).thenReturn(List.of(stale));
         String openRound = "[本轮结论]\n判断：突破\n动作：开多\n等待：无";
+        String holdRound = "[本轮结论]\n判断：浮盈\n动作：HOLD\n等待：多单继续拿着";
         String slRound = "[本轮结论]\n判断：走高\n动作：上移止损\n等待：无";
         String openActs = "[{\"tool\":\"open_position\",\"args\":{\"symbol\":\"BTCUSDT\",\"side\":\"LONG\"},\"status\":\"ok\"}]";
         String slActs = "[{\"tool\":\"set_stop_loss\",\"args\":{\"positionId\":42,\"stopLossPrice\":99000},\"status\":\"ok\"}]";
         when(decisionMapper.selectList(any())).thenReturn(List.of(), List.of(
                 okRow(FROM + 3600_000, AiTraderDecision.KIND_TRADE, openRound, openActs),
+                okRow(FROM + 5400_000, AiTraderDecision.KIND_TRADE, holdRound, "[]"),
                 okRow(FROM + 7200_000, AiTraderDecision.KIND_TRADE, slRound, slActs),
                 okRow(FROM + 10800_000, AiTraderDecision.KIND_TRADE,
                         "[本轮结论]\n判断：观望\n动作：HOLD\n等待：站稳 99000", "[]")));
@@ -394,8 +400,10 @@ class ReviewMaterialAssemblerTest {
         String timeline = assembler.assemble(trader(), FROM, TO, AgentLang.ZH).timelineBlock();
 
         assertThat(timeline).doesNotContain("open_position").doesNotContain("set_stop_loss");
+        // 生命期内的持有轮没有动作也照剔，生命期外那轮观望留下
+        assertThat(timeline).doesNotContain("多单继续拿着");
         assertThat(timeline).contains("另有 1 段短观望共 1 轮");
-        assertThat(timeline).contains("本期活动：唤醒 3 轮，动作轮 0");
+        assertThat(timeline).contains("本期活动：唤醒 4 轮，动作轮 0");
     }
 
     /**
@@ -628,9 +636,9 @@ class ReviewMaterialAssemblerTest {
         assertThat(waits.get("ETHUSDT")).contains("1888");
     }
 
-    /** 旧格式（无分段标记）整块归 WHOLE 伪键——历史决策行不回填，双格式兼容 */
+    /** 错误格式（无分段标记）整块归 WHOLE 伪键：没人标 stale 时这行照样进素材 */
     @Test
-    void waitsBySymbolFallsBackToWholeBlockForLegacyRows() {
+    void waitsBySymbolFallsBackToWholeBlockForUnsegmentedRows() {
         var waits = assembler.waitsBySymbol(
                 "[本轮结论]\n判断：观望\n动作：HOLD\n等待：站稳 99000", AgentLang.ZH);
 
@@ -708,9 +716,9 @@ class ReviewMaterialAssemblerTest {
         assertThat(timeline).contains("本期活动：唤醒 3 轮");
     }
 
-    /** 新旧格式混排（中途升级/切语言）：旧行走整块段、新行走币段，互不冲断——段数=WHOLE+BTC+ETH 三段 */
+    /** 错误格式与新格式混排：没分段的行走整块段、分段的行走币段，互不冲断——段数=WHOLE+BTC+ETH 三段 */
     @Test
-    void timelineHandlesMixedLegacyAndSegmentedRows() {
+    void timelineHandlesMixedUnsegmentedAndSegmentedRows() {
         when(decisionMapper.selectOne(any())).thenReturn(null);
         when(decisionMapper.selectList(any())).thenReturn(List.of(), List.of(
                 okRow(FROM + 900_000, AiTraderDecision.KIND_TRADE,

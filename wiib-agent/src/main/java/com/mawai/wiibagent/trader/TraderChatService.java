@@ -138,7 +138,7 @@ public class TraderChatService {
             return noTrader(lang);
         }
         int n = limit == null ? DEFAULT_DECISIONS : Math.clamp(limit, 1, MAX_DECISIONS);
-        // stale 教材过滤（口径3：chat 跟随忽略）：新格式剔段、旧格式整轮剔，与复盘时间线同一套识别
+        // stale 教材过滤（口径3：chat 跟随忽略）：新格式剔段、错误格式落在 stale 生命期内整轮剔，与复盘时间线同一套识别
         List<AiTraderPlan> allPlans = planStore.listAll(t.getId(), t.getRoundNo());
         JSONArray arr = new JSONArray();
         for (AiTraderDecision d : traderService.decisions(t.getId(), n, null, null, null, null)) {
