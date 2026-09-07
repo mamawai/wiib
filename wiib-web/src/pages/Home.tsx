@@ -275,7 +275,7 @@ export function Home() {
       {/* ====== 新手教学 ====== */}
       <section className="sec mt-12"><HomeFaq /></section>
 
-      {/* 网格点某一天的下钻：当日五分类拆解 + 当天已平的合约仓位 */}
+      {/* 网格点某一天的下钻：当日五分类盈亏拆解，数据全来自已有的当月快照，弹窗自己不发请求 */}
       <DayDetailModal
         date={selectedDate}
         snapshot={selectedSnapshot}

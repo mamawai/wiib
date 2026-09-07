@@ -30,8 +30,9 @@ import java.util.Map;
  * K线收盘 Stream 消费者（quant 侧），消费 KlineStreamCache的KLINE_CLOSED_STREAM
  *
  * <p>feed 把收盘写进 Stream，本消费者重建 {@link KlineBar} 并 republish 本地 {@link KlineClosedEvent}，
- * 驱动 quant 域的预测/策略/MacroContext 三个监听者。这是 quant 跨进程获取实时收盘的<b>唯一</b>入口——
- * 拆成独立进程后，本消费者随 quant 服务启动即自动从 Redis 取数，监听者一行不用改。</p>
+ * 驱动三个监听者：策略信号（StrategyRuntime）、交易员唤醒（TraderScheduler）、叙事对账（VerificationTask）。
+ * 这是本进程跨进程获取实时收盘的<b>唯一</b>入口——拆成独立进程后，本消费者随服务启动即自动从 Redis 取数，
+ * 监听者一行不用改。</p>
  */
 @Slf4j
 @Component

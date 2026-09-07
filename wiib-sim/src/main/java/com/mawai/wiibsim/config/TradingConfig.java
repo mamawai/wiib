@@ -47,8 +47,10 @@ public class TradingConfig {
 
     @Data
     public static class Futures {
-        /** 资金费率回退值（0.01%/8h）。正常结算走结算时点懒拉取的真实费率（premiumIndex.lastFundingRate），
-         *  拉取失败才用此值；符号约定同真实机制：正=多头付、空头收。 */
+        /** 资金费率回退值（0.01%/8h）。正常结算读缓存里的真实费率——结算点由 FundingRateService 拉一次
+         *  官方全量（premiumIndex.lastFundingRate）写进去，缓存缺失才回退此值；
+         *  另外持仓卡片的 fundingFeePerCycle 预估恒用此值（FuturesTradingServiceImpl），不看缓存。
+         *  符号约定同真实机制：正=多头付、空头收。 */
         private BigDecimal fundingRate = new BigDecimal("0.0001");
         /**
          * 全局最大杠杆上限（与 Binance 主流币档位 1 对齐，单 symbol 实际生效上限由

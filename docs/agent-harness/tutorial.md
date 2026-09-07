@@ -1,6 +1,6 @@
 # Agent Harness 阅读指南
 
-**这份文档解决一个问题**：`wiib-agent` 下有一万六千多行 Java（另加两门语言的提示词词表约 2400 行、前端对话模块约 2900 行），从哪儿开始读、按什么顺序读、读到哪一段该停下来先补背景。
+**这份文档解决一个问题**：`wiib-agent` 下有一万七千多行 Java（测试另有两万行、92 个测试类；再加两门语言的提示词词表约 2400 行、前端对话模块约 3000 行），从哪儿开始读、按什么顺序读、读到哪一段该停下来先补背景。
 
 它不是 API 文档，也不重复 [architecture.md](./architecture.md) 已经讲过的架构。那份文档回答"这套东西是什么"，这份文档回答"**我该按什么顺序把它读懂**"。
 
@@ -20,7 +20,7 @@
 
 | 装置 | 形态 | 循环 | 触发 | 代码在 |
 |---|---|:---:|---|---|
-| **trader agent** | ReactAgent（15 工具） | ✓ | K 线收盘 / 波动警报 / 手动 | `trader/` |
+| **trader agent** | ReactAgent（15 工具） | ✓ | K 线收盘 / 波动警报 / 手动 | `trader/`（现场流与轨迹见 5.7） |
 | **chat agent** | 平铺编排 + ReactAgent 叶子 | ✓ 带回环 | 用户提问 | `chat/` |
 | **learning agent** | ReactAgent（1 只读工具） | ✓ | 日线交接第三阶段 | `learning/LearningRunner` |
 | **reviewer workflow** | 单次调用，无工具 | ✗ | 日线交接第二阶段 / 点播 | `learning/ReviewRunner` |
@@ -51,7 +51,7 @@ flowchart LR
 
 ## 第 1 章 · 热身：两个小文件（20 分钟）
 
-目的是熟悉这个仓库的代码风格和注释密度，别一上来就啃 760 行的大文件。
+目的是熟悉这个仓库的代码风格和注释密度，别一上来就啃上千行的大文件（最大的三个是 `ReviewMaterialAssembler` 1143 行、`TraderWakeupRunner` 897 行、`ChatTurnRunner` 629 行）。
 
 | 文件 | 行数 | 读它干什么 |
 |---|---|---|
@@ -109,6 +109,10 @@ POST /api/ai/workbench/chat
 ### 站点 2~3 · 配置怎么变成模型
 
 `LlmEndpointService` 里有一处值得单看：`create/update` 和 `testConnection` **共用同一份 `toRow` 组装**。不共用就会出现"测通了但存进去的不是它"。同理，连通性探测走的是 `ByokModelBuilder` 的**生产建模路径**，不是另搭一个形似的探针——测什么就得是接下来真跑什么。
+
+顺着 `ByokModelBuilder.build` 往下就是四条协议的分叉（`AiProtocols`）：`openai` 走 Spring AI 的 `OpenAiChatModel`，`responses` / `anthropic` / `gemini` 各是一个自研 `ChatModel`（`llm/` 下三个同名类）。**"能不能服务端搜索"是协议能力与用户勾选的与**——chat-completions 没有标准的服务端搜索，所以 openai 那条永远是 false。这个布尔既进 `ResponsesChatModel` 的构造参数，也决定 summarizer 的新闻条款拼哪版，所以它必须进指纹（见站点 4）。
+
+另外**思考档位不设白名单**：`none/low/medium/high` 只是前端的快捷选项，各家还有 `xhigh`/`minimal` 之类，`normalizeEffort` 只抹平大小写空白、只挡列宽（VARCHAR(16)）。认不认只有上游知道。
 
 `ChatModelFactory` 两个点：
 
@@ -272,7 +276,7 @@ langgraph4j 有几处行为跟直觉相反，而且**错了不报错**。这几�
 | 类 | 管什么 |
 |---|---|
 | `i18n/PromptCatalog` | **喂给模型**的东西：系统提示词、工具描述，以及 AI 产出后落库、跟 trader 主人语言走的话（决策 error/reasoning、paused_reason）。词表在 `resources/prompts/{zh,en}/*.yml` |
-| `i18n/LocalizedToolCallbacks` | `@Tool(description=...)` 是编译期常量换不掉，所以自己拼 ToolCallback：名字与 inputSchema 照旧由注解推导，只把 description 换成 `tool.<工具名>` 那条 |
+| `i18n/LocalizedToolCallbacks` | `@Tool(description=...)` 是编译期常量换不掉，所以自己拼 ToolCallback：名字与 inputSchema 照旧由注解推导，只把 description 换成 `tool.<工具名>` 那条。它还兼了 `FailureAsResult`：**工具失败包成回执回给模型，不抛出**——langgraph4j 的工具节点不接异常，抛出去整轮就没了。写工具自己都 catch 了，这层兜的是数据工具（K 线首拉失败会原样抛）和参数解析失败 |
 | `i18n/UserLangResolver` | 查用户的 AI 产出语言（lang 列在 sim 的 user 表，走 internal API）。不加缓存——缓存换来的是"刚切完语言还出旧语言" |
 
 三条规矩，读到别的地方会反复撞上：
@@ -307,13 +311,16 @@ langgraph4j 有几处行为跟直觉相反，而且**错了不报错**。这几�
 `startDailyHandover` 是本功能唯一的全局同步点，读的时候盯三样：
 
 ```text
-阶段0 全体例行唤醒照常跑完（join 等交易全部结束）
-  →【停工窗口开】挡住全部四个入口
+阶段0 全体例行唤醒**发出**（不等结果）
+  →【停工窗口开】挡住全部四个入口  ← 发完就开，不是跑完才开
+  → join 等在途交易全部结束（复盘读的才是定格的一天）
 阶段1 全体复盘并行
   → 屏障（等全部复盘落库）  ← 没有它，同一轮学习里各人看到的世界就不一样
 阶段2 全体学习并行（同侪池不足 2 人整体静默跳过）
   →【停工窗口关，在 finally 里】 ← 关不上全体 trader 就永久停摆了
 ```
+
+**窗口为什么要在 join 之前开**：晚开的话，5m 档会在阶段 0 等待期间又撞上一次边界醒来、占住 inFlight，那个 trader 的复盘就被 `phase()` 跳过了。代价是窗口把阶段 0 的交易执行也圈了进去，上界从「复盘 600s + 学习 300s」变成「唤醒 600s + 复盘 600s + 学习 300s」。
 
 `phase()` 里 inFlight 抢不到就跳过该 trader 本阶段：硬等会拖住全体，而复盘/学习明天还有机会；这也是屏障不脏读的第二道闸（窗口挡新唤醒，inFlight 挡残留的旧唤醒）。
 
@@ -325,11 +332,17 @@ langgraph4j 有几处行为跟直觉相反，而且**错了不报错**。这几�
 |---|---|---|
 | `MIN_WAKE_SECONDS` | 30 | 距下一边界不足此数=事件迟到，放弃本轮**不算失败** |
 | `MAX_WAKE_SECONDS` | 600 | 单轮时长硬顶 |
-| `MAX_MODEL_CALLS` | 8 | ReAct 保险丝 |
+| `MAX_MODEL_CALLS` | 12 | ReAct 保险丝 |
 | `MAX_CONSECUTIVE_FAILURES` | 5 | 连败自动 PAUSED |
-| `LIQUIDATION_FLOOR` | 100 | 权益跌破初始 1% 判爆仓终局 |
+| `BUST_OUT_FLOOR` | 100（BigDecimal） | 权益跌破初始 1% 判出局终局 |
 
 **模型无权突破任何一条**——四层都是外生的，写在代码里，不在提示词里。提示词里的约束模型可以无视，代码里的不行。
+
+`MAX_MODEL_CALLS` 的值要连着常量注释一起读：给到 12 是因为**并不并行差得远**——会并行的模型一轮发 4~9 个 tool_call，两三次就取完数据；不并行的一轮一个，多币多周期求证根本走不完。（注释里写的是「5 币」，那是上限改 12 那会儿的旧币种档，币种上限后来才收到 3。）撞上限本身不算失败，但收束时最后一条若是纯 tool_call、正文为空，这轮就没有收尾的结论块，下一轮的检验旧论点和复盘素材都跟着缺。所以 `ModelCallLimiter` 除了拒，还会在**最后一次能执行工具**时往回执末尾贴一句收尾提示（`llm.callLimit.lastCall`），让模型下一次调用直接给结论。
+
+同一笔账还管着币种上限：`TraderService.MAX_SYMBOLS = 3`（一个币扎实求证约 3 次），在**保存配置**时就挡住，不在 `TradeGuard` 里；前端 `MyTrader.MAX_SYMBOLS` 是同一个数，改要一起改。
+
+`BUST_OUT_FLOOR` 只是常量改了名（原 `LIQUIDATION_FLOOR`，类型也换成了 `BigDecimal`），**状态枚举仍是 `AiTrader.STATUS_LIQUIDATED`**、词表里仍写「爆仓」——别顺手一起改。
 
 唤醒预算 `wakeBudgetSeconds` = `min(下一边界 - 5s - now, 600s)`：**唤醒决不占用下一根 K 线**。
 
@@ -347,10 +360,11 @@ langgraph4j 有几处行为跟直觉相反，而且**错了不报错**。这几�
 ```text
 UsageTrackingChatModel 每轮新建（工厂里的模型实例是跨唤醒缓存的，装饰器不新建会跨轮累加）
   → TradeTools 每轮 new（绑 sim 子账户 / 白名单 / 风险规格 / 本轮截止时刻）
-  → 计划懒清理与补绑（cleanupAndRebindPlans）
+  → 计划对账（rebindPlans → TraderPlanStore.rebind，出 Rebind(live/closed/filled) 三段）
   → 组装系统提示词（promptAssembler.assemble）、观察包（observation）与开场白（routine / alert instruction）
   → AgentGraphs.reactAgent + 15 工具 + ModelCallLimiter + ToolCallTraceHook
        首轮 forceFirstToolChoice=required：不看数据不许决策
+       streaming(true)：模型文本逐字推给唤醒现场（见 5.7）
   → FutureTask 限时执行
   → finally：动作轨迹与用量**无论成败都要落**（超时作废那轮，单和 token 都是真发生的）
 ```
@@ -377,9 +391,9 @@ UsageTrackingChatModel 每轮新建（工厂里的模型实例是跨唤醒缓存
 
 | 块 | 来源 | 要点 |
 |---|---|---|
-| 自上次唤醒以来 | `events` | 懒清理归档的计划配 sim 已平仓位说结局（止损/止盈/主动平、成交价、盈亏、当时的失效条件），补绑的说限价单成交；没事件整块缺席 |
+| 自上次唤醒以来 | `events` | 素材就是上一步 `Rebind` 的两段：`closed()` 配 sim 已平仓位说结局（止损/止盈/主动平、成交价、盈亏、当时的失效条件），`filled()` 说限价单成交补上了仓位 id；没事件整块缺席 |
 | 账户状态 | `accountStateJson` | 持仓带杠杆/标记价/强平价、计划与修订历史（时刻可读）、挂单带已挂时长。一次给足，工具预算才能留给行情求证 |
-| 上一轮结论 + 轨迹 | `lastConclusion` / `trajectory` | 上一轮结论完整回注（最近一条写出结论块的 OK 行，整块不截断）+ 轨迹一行一轮（时刻/状态/权益/工具名或失败原因）；只回注交易类（TRADE/ALERT/MANUAL），REVIEW/LEARN 已走笔记注入 |
+| 上一轮结论 + 轨迹 | `lastConclusion` / `trajectory` | 两处共吃 `recentWakes` 一次查齐的那份 `List<RecentWake>`（别各查各的）：结论完整回注（最近一条写出结论块的 OK 行，整块不截断）+ 轨迹一行一轮（时刻/状态/权益/工具名或失败原因）。只回注交易类（TRADE/ALERT/MANUAL），REVIEW/LEARN 已走笔记注入。被主人标记忽略的交易在 `RecentWake` 里就已剔掉内容，行头的时刻/状态/权益原样留着——那是唤醒事实，不是教材 |
 | 论点战绩 | `PlayStatsAssembler` | 纯代码算，模型只许引用不许自算；stale 过滤在**配对之后** |
 | 财经日历 | `EconCalendarAssembler` | 过去 12h + 未来 24h，只给事实不给指令 |
 | 复盘笔记 / 学习笔记 | `ai_trader.memory` / `learning_notes` | **并列注入不合并**：来源分开，模型才分得清"自己的教训"与"从别人学的" |
@@ -400,6 +414,28 @@ UsageTrackingChatModel 每轮新建（工厂里的模型实例是跨唤醒缓存
 ### 5.6 对外面
 
 `TraderActionService` 是三个动作（留言 / 手动唤醒 / 点播复盘）的**唯一实现**，执行入口只有动作面板这一条 REST。`TraderChatService` 是对话轨读 trader 的**唯一入口**，只查不写。两个类的类注释就是"两条 agent 链解耦纪律"的落地说明。
+
+### 5.7 现场与轨迹（后加的一条链，跟着读一遍）
+
+唤醒过程能逐帧看，这条链只有三个文件，但**职责切得很干净，值得照着学**：
+
+| 文件 | 管什么 | 不认识什么 |
+|---|---|---|
+| `trader/WakeTrace` | 一次唤醒的过程状态（纯数据）。每个变更方法**返回要外发的帧**，`replay` 按当前状态合成回放帧，`toJson` 是落库形状 | 不认识 SSE、langgraph、Spring 容器 |
+| `trader/TraderLiveHub` | 订阅者管理、扇出、心跳。按 traderId 订阅，一次唤醒一个 `Run` 句柄，runner 只碰它 | 不认识 langgraph |
+| `controller/TraderController` | 准入：谁能连 | — |
+
+帧序列：`run_start` → `prompt` → 每次模型调用的 `model_start` / `token…` / `model_end` → `tool_result…` → `run_end`。中途连上按当前状态回放，空闲只有心跳。
+
+读的时候盯这几处：
+
+- **两个时间常量的由来**：心跳 20s（nginx 默认 `proxy_read_timeout` 60s 会掐静默连接，留 3 倍余量）、订阅 30 分钟到点让前端重连。与 chat 那边的 `ChatTurnStreamer` 同款理由，可以对照。
+- **准入不在 hub 里，在 controller**：hub 只管"按 traderId 扇出"，谁配连是 controller 判的。
+- **两个接口的拒法故意不一样**：`/{id}/live` 对非主人直接抛（前端 `getSse` 见到 JSON 就按接口报错处理）；`/{id}/decisions/{decisionId}/trace` 对非主人**回 `null`，与"这条老决策没有轨迹"同一个形状**——轨迹入口本就藏在主人才见得到的按钮后面，报错反倒把"有这东西"讲了出去。
+- **工具回执预览截 2000 字**（`WakeTrace.PREVIEW_CHARS`）：轨迹要落库进 `ai_trader_decision.trace_json`，K 线回执几万字原样存进去没有意义。
+- **前端门控必须在父层**：`pages/ArenaDetail.tsx` 里那句注释说得很清楚——`LiveRunCard` 一挂载就建流，卡片内部 `return null` 拦不住。
+
+测试：`TraderLiveHubTest`（扇出与订阅）、`WakeTraceTest`（帧与落库形状）。
 
 ---
 
@@ -436,7 +472,7 @@ UsageTrackingChatModel 每轮新建（工厂里的模型实例是跨唤醒缓存
 
 两者共有的降级安全：**失败不计连败**（没有资金风险，不值得暂停机制）、格式失守时留 ERROR 行但不动笔记、同侪不足整体静默跳过（不写空话也不留 ERROR 行）。
 
-### 顺带：`ReviewMaterialAssembler` 是全包最大的一个类（1156 行）
+### 顺带：`ReviewMaterialAssembler` 是全包最大的一个类（1143 行）
 
 它现在同时服务四个地方（复盘 / 同侪学习 / 竞技场已了结交易 / 论点战绩统计），所以配对算法只能有一套：`pairAll` + `bestMatch` + `closeMannerKey`。各配一套会自相矛盾。
 
@@ -463,19 +499,23 @@ behavior 和 replay coach 是**唯二绕开 `AgentGraphs` 的地方**（借 `Rea
 
 ## 第 8 章 · 前端（1.5 小时）
 
-对话模块约 2900 行，比后端好读得多，但比旧版复杂——让位/补答/排队/中断/重新生成五件事都要在这里落地。
+对话模块约 3000 行，比后端好读得多，但比旧版复杂——让位/补答/排队/中断/重新生成五件事都要在这里落地。
+
+> 行数会漂，下表只给量级，用来排读的先后。
 
 | 顺序 | 文件 | 行数 | 看什么 |
 |---|---|---|---|
-| 1 | `components/workbench/chatStore.ts` | 704 | **手写的外部 store，不是 zustand**（`subscribe`/`getSnapshot` + `useSyncExternalStore`）。状态与 SSE 消费脱离组件生命周期：切页只是面板卸载，流在这里继续收 |
+| 1 | `components/workbench/chatStore.ts` | 747 | **手写的外部 store，不是 zustand**（`subscribe`/`getSnapshot` + `useSyncExternalStore`）。状态与 SSE 消费脱离组件生命周期：切页只是面板卸载，流在这里继续收 |
 | 2 | 同上，`settle()` | — | **补答由前端发起**，后端只排队不偷跑。时机只有一条规则：本地没有轮在跑、排队消息也发完了 |
 | 3 | 同上，`sendQueue` / `queuedId` | — | 后端不让位（正在出答案）时消息先上屏排队，本轮结束自动真发。`queuedId` 是气泡与队列条目共用的身份——靠下标对应的话，流式插条目/回放重建/重生成砍尾任一处都会错位 |
 | 4 | `components/workbench/chatView.ts` | 46 | 过程条目（调度/专家/进度）归并成"工作过程轨"，折叠状态用 `rid` 当键而不是下标（同上，下标会错位） |
-| 5 | `components/workbench/ChatPanel.tsx` | 455 | SSE 消费与渲染主体 |
-| 6 | `ChatMessages.tsx` / `ChatComposer.tsx` | 254 / 397 | 气泡与输入区（排队态、中断按钮、重新生成入口都在这儿） |
+| 5 | `components/workbench/ChatPanel.tsx` | 456 | SSE 消费与渲染主体 |
+| 6 | `ChatMessages.tsx` / `ChatComposer.tsx` | 343 / 397 | 气泡与输入区（排队态、中断按钮、重新生成入口都在这儿） |
 | 7 | `ChatDock.tsx` | 432 | 浮球 + 可拖拽面板。`DRAG_THRESHOLD` / `CLICK_SWALLOW_MS` 两个常量的注释解释了"点了没反应"是怎么来的 |
 | 8 | `TraderFormCards.tsx` | 267 | 三张表单卡——模型只弹卡，按下按钮打 REST 的是用户 |
-| 9 | `LlmEndpointForm.tsx` / `LlmEndpointSelect.tsx` | — | trader / 对话 / 复盘教练**共用**的端点表单 |
+| 9 | `BehaviorReportCard.tsx` | 220 | `analyze_my_behavior` 的渲染出口——行为画像报告在对话里长什么样 |
+| 10 | `SessionHistory.tsx` | 104 | 会话列表与切换 |
+| 11 | `LlmEndpointForm.tsx` / `LlmEndpointSelect.tsx` | — | trader / 对话 / 复盘教练**共用**的端点表单 |
 
 ### 一条值得专门跟一遍的链
 
@@ -488,7 +528,10 @@ behavior 和 replay coach 是**唯二绕开 `AgentGraphs` 的地方**（借 `Rea
 
 **断任何一环，"没配 key 自动跳配置"就退化成一行红字。** 清标记那步不能省：不清的话用户关掉弹窗会被反复顶开。
 
-另外两个页面：`pages/MyTrader.tsx`（684 行，trader 配置 + 动作面板 + 提示词预览，预览用的就是后端那份 `closingFormat`，看到的与真喂的一致）、`pages/ArenaDetail.tsx`（459 行，公开竞技场的决策时间线与净值曲线）。
+trader 那条链的前端另在两处：
+
+- `pages/MyTrader.tsx`（585 行）：trader 配置 + 动作面板 + 提示词预览。预览用的就是后端那份 `closingFormat`，看到的与真喂的一致；`MAX_SYMBOLS` 与后端 `TraderService.MAX_SYMBOLS` 是同一个 3。
+- `pages/ArenaDetail.tsx`（427 行）+ `components/arena/`（9 个件，共 762 行）：记分头 → 六格 `.strip` → 左主栏（净值曲线 / 现场 / 决策时间线）‖ 右侧栏（持仓 / 计划 / 两份笔记）。**现场只给主人的门控在这一层**（见 5.7），`LiveRunCard.tsx` + `WakeTraceView.tsx` + `hooks/useTraderLive.ts` 是 5.7 那条链的前端一侧。
 
 ---
 
@@ -502,8 +545,13 @@ behavior 和 replay coach 是**唯二绕开 `AgentGraphs` 的地方**（借 `Rea
 | `ChatWorkbenchAdmissionTest` | 四道准入的顺序，以及名额泄漏那条钉子（要关掉 executor 制造提交失败） |
 | `ChatWorkbenchDeferredTest` / `ChatCancelTest` / `ChatRegenerateTest` | 让位补答 / 中断 / 重新生成三条链路 |
 | `ChatYieldCoordinatorTest` | 让位握手与队列本身 |
-| `ApprovalGateOrderTest` | hook 顺序对不对、闸门在真叶子上真的拦下了 |
+| `ApprovalGateOrderTest` / `ChatWorkbenchHitlTest` | hook 顺序对不对、闸门在真叶子上真的拦下了；后者跑 HITL 端到端 |
 | `ExpertCallLimitTest` | 专家的调用上限怎么生效（直接调 `expertGraph` 真跑，验的才是生产建图点挂没挂） |
+| `AnthropicChatModelTest` / `GeminiChatModelTest` / `ResponsesChatModelTest` | 三条自研协议各自的请求体、流式解析、工具与 tool_choice |
+| `CancelSignalTest` | 中断信号从 `RunnableConfig` 走到在途模型流：绑定时机、掐断、取消传上游、正常结束不反向取消（用 mock 模型跑，真到 WebClient 那一段只能真跑验，见附录 B） |
+| `TraderLiveHubTest` / `WakeTraceTest` | 现场扇出与轨迹帧、落库形状（见 5.7） |
+| `TraderPlanStoreTest` | 计划对账 `rebind` 的三段划分 |
+| `ReviewMaterialAssemblerTest` | 全包最大那个类的配对算法与 stale 剔段 |
 | `TraderWakeupLoopTest` | mock 模型跑通真 ReactAgent 唤醒回路 |
 | `TraderSchedulerTest` | 三阶段时序、屏障不漏人、停工窗口挡四入口、异常不卡死窗口 |
 | `TraderPromptAssemblerTest` / `WakeInstructionI18nTest` | 注入面成文、收尾标记两处同源 |
