@@ -93,7 +93,7 @@ public class TraderScheduler {
         }
         if (handoverActive) {
             // 窗口内的K线事件直接丢弃不补跑：与"不做兜底补漏"同一条哲学——陈旧信号没有意义。
-            // 代价是 5m 档跳过 1~2 根K线，日线交接每天只有一次，可接受
+            // 代价是 5m 档最多跳过 5 根K线（窗口上界＝唤醒600s＋复盘600s＋学习300s），每天只有一次，可接受
             log.info("[TraderSched] 日线交接中，丢弃K线事件 {} closeTime={}", event.symbol(), event.closeTime());
             return;
         }

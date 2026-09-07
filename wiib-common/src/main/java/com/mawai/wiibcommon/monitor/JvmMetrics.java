@@ -15,7 +15,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * JVM 运行指标采集（共享层）：读**本进程**的 MXBean，采集逻辑与进程无关，sim/feed/quant 三家共用。
+ * JVM 运行指标采集（共享层）：读**本进程**的 MXBean，采集逻辑与进程无关，feed/sim/agent 三家共用。
  * <p>{@link #collectLite()} 供实时推送（堆/堆外/线程/GC/CPU/运行时长）；{@link #collect()} 加内存池+类加载供详情。
  * 全部 static——无状态、无需注入。
  */

@@ -9,8 +9,9 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 /**
- * quant 进程 JVM 监控发布：定时采样本进程 JVM 发 Redis，sim 中继到 /topic/monitor/quant。
- * <p>JVM 指标是连续量、无"事件"，只能定时采样。quant 已开 @EnableScheduling（应用类），此处不再重复。
+ * agent 进程 JVM 监控发布：定时采样本进程 JVM 发 Redis，sim 中继到 /topic/monitor/quant。
+ * <p>频道名 quant 是拆进程前的旧称，前端按它订，别改。
+ * <p>JVM 指标是连续量、无"事件"，只能定时采样。agent 已开 @EnableScheduling（应用类），此处不再重复。
  */
 @Slf4j
 @Component

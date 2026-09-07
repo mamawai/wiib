@@ -155,7 +155,7 @@ public enum ErrorCode {
             Arrays.stream(values()).collect(Collectors.toUnmodifiableMap(ErrorCode::getCode, e -> e));
 
     /**
-     * 按码反查。跨服务调用（quant 打 sim internal API）收到的只有码，要成文得先找回枚举。
+     * 按码反查。跨服务调用（agent 打 sim internal API）收到的只有码，要成文得先找回枚举。
      * 认不出返回 null——对方比自己新时不该炸，由调用方决定怎么退。
      */
     public static ErrorCode of(int code) {

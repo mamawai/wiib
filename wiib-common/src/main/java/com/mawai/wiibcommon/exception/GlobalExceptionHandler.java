@@ -17,7 +17,7 @@ import java.util.Map;
 
 /**
  * 全局异常处理器（三模块共享）
- * 放 wiib-common，quant/feed/sim 均 scanBasePackages 到 com.mawai.wiibcommon，自动生效。
+ * 放 wiib-common，feed/sim/agent 均 scanBasePackages 到 com.mawai.wiibcommon，自动生效。
  * <p>
  * <b>错误文案在这里成文</b>：业务代码一路只传 {@link ErrorCode}，语言按当次请求的 X-Lang 头
  * （见 {@code RequestLangFilter}）现查词表。所以加一个错误码只要加一条枚举 + 两门语言各一条词条，

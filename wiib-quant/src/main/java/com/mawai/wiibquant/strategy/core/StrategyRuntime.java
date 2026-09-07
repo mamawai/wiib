@@ -26,8 +26,8 @@ import java.util.stream.Collectors;
 /**
  * 插拔式策略实盘信号运行时。
  *
- * <p>5m KlineClosedEvent 驱动，策略读取实时流并产出 LIVE 信号。当前层只负责信号落库，
- * 下单执行由后续 StrategyExecutionAdapter 接入，避免把信号记录和交易副作用混在一起。</p>
+ * <p>5m KlineClosedEvent 驱动，策略读实时流产出 LIVE 信号。信号落库之外，同一趟把执行交给
+ * StrategyExecutionPort（testnet/sim 按 ExecutionRoutingConfig 路由）。</p>
  */
 @Slf4j
 @Component

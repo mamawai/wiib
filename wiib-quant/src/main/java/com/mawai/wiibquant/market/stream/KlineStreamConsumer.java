@@ -27,7 +27,7 @@ import java.time.Duration;
 import java.util.Map;
 
 /**
- * K线收盘 Stream 消费者（quant 侧），消费 KlineStreamCache的KLINE_CLOSED_STREAM
+ * K线收盘 Stream 消费者（代码在 quant 库，跑在 agent 进程里），消费 KlineStreamCache的KLINE_CLOSED_STREAM
  *
  * <p>feed 把收盘写进 Stream，本消费者重建 {@link KlineBar} 并 republish 本地 {@link KlineClosedEvent}，
  * 驱动三个监听者：策略信号（StrategyRuntime）、交易员唤醒（TraderScheduler）、叙事对账（VerificationTask）。

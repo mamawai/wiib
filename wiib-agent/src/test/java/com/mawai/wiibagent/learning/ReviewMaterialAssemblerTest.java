@@ -214,7 +214,7 @@ class ReviewMaterialAssemblerTest {
         tp.setTakeProfits(List.of(new FuturesTakeProfit("t1", new BigDecimal("95000"), new BigDecimal("0.01"))));
         assertThat(ReviewMaterialAssembler.closeManner(new PromptCatalog(), tp, AgentLang.ZH)).isEqualTo("止盈带走");
 
-        // 保护单实时监控在先，带内成交只能是主动平仓（模型自平或审批执行）
+        // 保护单实时监控在先，带内成交只能是主动平仓（模型自己调 close_position）
         FuturesPositionDTO manual = closedPos("LONG", "100000", "101000", "10", FROM, FROM + 1);
         manual.setStopLosses(List.of(new FuturesStopLoss("s1", new BigDecimal("95500"), new BigDecimal("0.01"))));
         manual.setTakeProfits(List.of(new FuturesTakeProfit("t1", new BigDecimal("110000"), new BigDecimal("0.01"))));

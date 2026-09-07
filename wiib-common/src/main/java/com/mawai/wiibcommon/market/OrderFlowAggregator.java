@@ -16,9 +16,8 @@ import java.util.Map;
 /**
  * aggTrade 流式聚合：按需输出 order flow 指标。BinanceWsClient 写入，BuildFeaturesNode 读取。
  *
- * <p>存储后端为 Redis Stream（每 symbol 一条），feed 进程 {@link #onAggTrade} 写、quant 进程
- * {@link #getMetrics} 读算，天然跨进程。窗口聚合在读侧（quant）按交易所 ts 现算，符合"feed 只转发、
- * quant 自己重算 orderflow"的拆分约定。</p>
+ * <p>存储后端为 Redis Stream（每 symbol 一条），feed 进程 {@link #onAggTrade} 写、agent 进程
+ * {@link #getMetrics} 读算，天然跨进程。窗口聚合放读侧按交易所 ts 现算——feed 只转发，orderflow 由读侧自己重算。</p>
  */
 @Slf4j
 @Component

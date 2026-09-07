@@ -453,7 +453,7 @@ public class TraderService {
     /**
      * 仓位规格校验：区间本身要成立，边界不能离谱。
      * 杠杆上界只卡到 125——实际可用还受 sim 按名义价值分档限制，超档由 sim 拒并把原因回传给模型，
-     * 这里不重复实现一套分档表（quant 进程读不到 sim 的 bracket registry）。
+     * 这里不重复实现一套分档表（agent 进程读不到 sim 的 bracket registry）。
      */
     private String validateSpec(UpsertReq req) {
         int lmin = req.leverageMin() == null ? TraderRiskConfig.DEF_LEV_MIN : req.leverageMin();

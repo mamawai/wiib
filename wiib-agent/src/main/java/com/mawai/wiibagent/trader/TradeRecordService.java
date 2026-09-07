@@ -114,8 +114,7 @@ public class TradeRecordService {
     }
 
     /**
-     * 平仓决策：actionsJson 里 close_position 命中该 positionId 的那一轮。模型自平与"转请求→主人批准"两条路
-     * 都会在决策里留这条动作（后者 status=pending），一个逻辑覆盖两种。同一仓位多次减仓取最后一轮（了结的那次）。
+     * 平仓决策：actionsJson 里 close_position 命中该 positionId 的那一轮。同一仓位多次减仓取最后一轮（了结的那次）。
      * 候选窗口 [最早开仓−4h, 最晚了结]，SQL 先按 like 粗筛，再在 Java 里精确对 positionId。
      * 被拒（rejected 字段）/出错（status=error）的动作不算数——窗口上界是全部仓位里最晚的了结时刻，
      * 仓位早已平掉后再对它下的一条失败 close_position 也会落进窗口，不筛掉就会顶掉真正的平仓决策。
