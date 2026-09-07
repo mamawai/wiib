@@ -30,7 +30,7 @@ public final class CancelSignal {
 
     @SuppressWarnings("unchecked")
     public static <S extends AgentState> NodeHook.WrapCall<S> hook() {
-        return (nodeId, state, config, action) -> config.metadata(CONFIG_KEY)
+        return (_, state, config, action) -> config.metadata(CONFIG_KEY)
                 .map(signal -> ScopedValue.where(CURRENT, (CompletableFuture<Void>) signal)
                         .call(() -> action.apply(state, config)))
                 .orElseGet(() -> action.apply(state, config));
