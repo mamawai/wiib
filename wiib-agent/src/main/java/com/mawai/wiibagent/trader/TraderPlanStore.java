@@ -61,7 +61,7 @@ public class TraderPlanStore {
     /**
      * 开仓/加仓成交或限价挂出即落计划。isAddOn=true（同币同向已有持仓）走加仓覆盖：新论点上位，
      * 旧论点进修订历史（模型下单前已在提示词里看过旧计划，知情覆盖），持有时长按最初开仓算。
-     * isAddOn=false 但同键旧计划还在＝同轮内平掉后重开（懒清理只在唤醒开头跑）：这是独立新仓
+     * isAddOn=false 但同键旧计划还在＝同轮内平掉后重开（已了结计划要等下次唤醒开头才归档）：这是独立新仓
      * 不是加仓——旧计划归档，仓龄从新仓起算，修订史不继承（仓龄诚实）。
      */
     public void upsert(AiTraderPlan plan, boolean isAddOn, AgentLang lang) {
@@ -115,20 +115,19 @@ public class TraderPlanStore {
                 .eq(AiTraderPlan::getStatus, AiTraderPlan.STATUS_LIVE));
     }
 
-    /** 一趟懒清理的结果：还活着的、这趟归档的、这趟刚补绑仓位 id 的（限价成交） */
-    public record Cleanup(List<AiTraderPlan> live, List<AiTraderPlan> closed, List<AiTraderPlan> filled) {
+    /** 一趟 rebind 的结果：还活着的、这趟归档的、这趟补上仓位 id 的 */
+    public record Rebind(List<AiTraderPlan> live, List<AiTraderPlan> closed, List<AiTraderPlan> filled) {
     }
 
     /**
-     * 懒清理 + 补绑：计划的 (symbol|side) 既无持仓也无挂单 → 止损/止盈/主动平/撤单殊途同归，
-     * 计划完成使命，归档带上了结时刻。三份名单一起返回（清理与查询一次唤醒只跑一趟）：
-     * 存活的回注账户状态，归档/补绑的进开场白的事件块。
-     * <p>
-     * 补绑：LIVE 计划无 positionId（限价挂单成交前响应里没有）且同键有在场仓位 → 盖仓位 id。
-     * liveKeys 含挂单键（挂单保活的计划没有仓位可绑），所以映射单独传；同键至多一仓，无歧义。
+     * 每次唤醒开头，拿 sim 的持仓/挂单对一遍 LIVE 计划：
+     * 计划的 (symbol|side) 还有持仓或开仓挂单 → 留下；
+     * 其中限价单成交后计划还没有仓位 id 的，补上它当初拿不到的 sim 仓位 id；
+     * 既无持仓也无挂单（止损/止盈/平仓/撤单） → 归档，带上了结时刻。
+     * liveKeys 含挂单键，positionIdByKey 只有持仓键，所以分开传。
      */
-    public Cleanup cleanupStale(long traderId, int roundNo, Set<String> liveKeys,
-                                Map<String, Long> positionIdByKey, long boundaryTime) {
+    public Rebind rebind(long traderId, int roundNo, Set<String> liveKeys,
+                         Map<String, Long> positionIdByKey, long boundaryTime) {
         List<AiTraderPlan> live = new ArrayList<>();
         List<AiTraderPlan> closed = new ArrayList<>();
         List<AiTraderPlan> filled = new ArrayList<>();
@@ -139,8 +138,7 @@ public class TraderPlanStore {
                     p.setPositionId(posId);
                     mapper.updateById(p);
                     filled.add(p);
-                    log.info("[TraderPlan] 限价成交补绑仓位id traderId={} {} {} positionId={}",
-                            traderId, p.getSymbol(), p.getSide(), posId);
+                    log.info("[TraderPlan] 限价单成交，计划补上仓位id traderId={} {} {} positionId={}", traderId, p.getSymbol(), p.getSide(), posId);
                 }
                 live.add(p);
                 continue;
@@ -149,7 +147,7 @@ public class TraderPlanStore {
             closed.add(p);
             log.info("[TraderPlan] 归档已了结计划 traderId={} {} {}", traderId, p.getSymbol(), p.getSide());
         }
-        return new Cleanup(live, closed, filled);
+        return new Rebind(live, closed, filled);
     }
 
     /** 按仓位 id 找存活计划：平仓工具手里只有 positionId */
@@ -166,10 +164,7 @@ public class TraderPlanStore {
         return mapper.selectById(planId);
     }
 
-    /**
-     * 主人标记忽略/取消：只动 stale 列，计划本体不碰。
-     * 此 stale 与 {@link #cleanupStale}（清理已了结残留计划）无关——那是生命周期，这是教材治理。
-     */
+    /** 主人标记忽略/取消：只动 stale 列，计划本体不碰。 */
     public void setStale(long planId, boolean stale) {
         // wrapper 更新不走 INSERT_UPDATE 自动填充，updated_at 手动带上——本表所有写路径同一口径
         mapper.update(null, new LambdaUpdateWrapper<AiTraderPlan>()

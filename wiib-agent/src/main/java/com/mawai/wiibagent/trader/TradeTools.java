@@ -229,7 +229,7 @@ public class TradeTools {
             plan.setStopLossPrice(req.stopLossPrice());
             plan.setTakeProfitPrice(req.takeProfitPrice());
             plan.setOpenedWakeTime(ctx.boundaryTime());
-            // 市价单/市价加仓响应即带仓位id；限价挂单为null，成交后唤醒懒清理趟补绑
+            // 市价单/市价加仓响应即带仓位id；限价挂单为null，成交后下次唤醒开头补上（TraderPlanStore.rebind）
             plan.setPositionId(resp.getPositionId());
             planStore.upsert(plan, isAddOn, ctx.lang());
         } catch (Exception e) {

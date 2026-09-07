@@ -22,8 +22,8 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * 计划懒清理趟的补绑语义：限价单在两次唤醒之间成交，计划里的 positionId 还是 null，
- * 下一轮 cleanupStale 拿在场仓位 id 盖上——配对精确 join 的最后一块地基。
+ * rebind：限价单在两次唤醒之间成交，计划里的 positionId 还是 null，
+ * 下一轮唤醒开头拿在场仓位 id 盖上；同键既无持仓也无挂单的归档。
  */
 class TraderPlanStoreTest {
 
@@ -50,12 +50,12 @@ class TraderPlanStoreTest {
         return p;
     }
 
-    /** 限价成交补绑：LIVE 计划无 id 且同键有在场仓位 → 盖 id 落库，计划保留并进 filled 名单 */
+    /** 限价单成交：LIVE 计划无 id 且同键有在场仓位 → 补上仓位 id 落库，计划保留并进 filled 名单 */
     @Test
     void rebindStampsPositionIdOnUnboundLivePlan() {
         when(mapper.selectList(any())).thenReturn(List.of(livePlan("BTCUSDT", "LONG", null)));
 
-        TraderPlanStore.Cleanup c = store.cleanupStale(7L, 1,
+        TraderPlanStore.Rebind c = store.rebind(7L, 1,
                 Set.of(TraderPlanStore.key("BTCUSDT", "LONG")),
                 Map.of(TraderPlanStore.key("BTCUSDT", "LONG"), 42L), BOUNDARY);
 
@@ -69,12 +69,12 @@ class TraderPlanStoreTest {
         assertThat(cap.getValue().getStatus()).isEqualTo(AiTraderPlan.STATUS_LIVE);
     }
 
-    /** 已绑定的计划不重写：补绑只救 null，不做刷新——省一次每轮白写；也不算成交事件 */
+    /** 已有仓位 id 的计划不重写：只补 null，不做刷新，省一次每轮白写；也不算成交事件 */
     @Test
     void boundPlanNotRewritten() {
         when(mapper.selectList(any())).thenReturn(List.of(livePlan("BTCUSDT", "LONG", 42L)));
 
-        TraderPlanStore.Cleanup c = store.cleanupStale(7L, 1,
+        TraderPlanStore.Rebind c = store.rebind(7L, 1,
                 Set.of(TraderPlanStore.key("BTCUSDT", "LONG")),
                 Map.of(TraderPlanStore.key("BTCUSDT", "LONG"), 42L), BOUNDARY);
 
@@ -89,7 +89,7 @@ class TraderPlanStoreTest {
     void pendingOrderPlanStaysAliveUnbound() {
         when(mapper.selectList(any())).thenReturn(List.of(livePlan("ETHUSDT", "SHORT", null)));
 
-        TraderPlanStore.Cleanup c = store.cleanupStale(7L, 1,
+        TraderPlanStore.Rebind c = store.rebind(7L, 1,
                 Set.of(TraderPlanStore.key("ETHUSDT", "SHORT")), Map.of(), BOUNDARY);
 
         assertThat(c.live()).hasSize(1);
@@ -103,7 +103,7 @@ class TraderPlanStoreTest {
     void deadKeyPlanArchivedWithClosedTime() {
         when(mapper.selectList(any())).thenReturn(List.of(livePlan("BTCUSDT", "LONG", 42L)));
 
-        TraderPlanStore.Cleanup c = store.cleanupStale(7L, 1, Set.of(), Map.of(), BOUNDARY);
+        TraderPlanStore.Rebind c = store.rebind(7L, 1, Set.of(), Map.of(), BOUNDARY);
 
         assertThat(c.live()).isEmpty();
         assertThat(c.closed()).hasSize(1);
