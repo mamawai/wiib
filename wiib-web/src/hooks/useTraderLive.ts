@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { ApiError, traderApi } from '../api';
-import type { ArenaLiveEvent, TraderLiveEvent, TraderLiveStatus, WakeCall, WakeTrace } from '../types';
+import type { TraderLiveEvent, WakeCall, WakeTrace } from '../types';
 
 /** 重连退避：2s 起翻倍，封顶 30s */
 const BACKOFF_MIN_MS = 2_000;
@@ -101,37 +101,4 @@ export function useTraderLive(traderId: number): TraderLive {
   }, [traderId]);
 
   return state;
-}
-
-export interface ArenaLive {
-  /** 在跑的 trader → 状态；没在跑的不在表里 */
-  statuses: Map<number, TraderLiveStatus>;
-  endedAt: number;
-}
-
-/** 竞技场列表：谁在跑、跑到哪。snapshot 整体替换，status 逐条覆盖（running=false 就删），有人结束就动 endedAt */
-export function useArenaLive(): ArenaLive {
-  const [statuses, setStatuses] = useState<Map<number, TraderLiveStatus>>(() => new Map());
-  const [endedAt, setEndedAt] = useState(0);
-
-  useEffect(() => {
-    const ctrl = new AbortController();
-    const onFrame = (e: ArenaLiveEvent) => {
-      if (e.type === 'snapshot') {
-        setStatuses(new Map(e.traders.map(s => [s.traderId, s] as const)));
-        return;
-      }
-      setStatuses(prev => {
-        const next = new Map(prev);
-        if (e.running) next.set(e.traderId, e);
-        else next.delete(e.traderId);
-        return next;
-      });
-      if (!e.running) setEndedAt(Date.now());
-    };
-    void reconnectLoop(signal => traderApi.arenaLive(onFrame, signal), ctrl.signal);
-    return () => ctrl.abort();
-  }, []);
-
-  return { statuses, endedAt };
 }

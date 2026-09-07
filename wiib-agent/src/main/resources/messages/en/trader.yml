@@ -5,6 +5,7 @@ trader:
   notCreated: You have not created an AI Trader yet
   alreadyExists: One AI Trader per account
   notFound: No such trader
+  notOwner: You can only watch your own trader
   liquidatedRound: This round ended in liquidation - reset for a new round first
   # {{reason}} is whatever the upstream endpoint returned, passed through untranslated
   connectFailed: "The model connectivity check failed: {{reason}}"

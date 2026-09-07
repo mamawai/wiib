@@ -228,11 +228,9 @@ class TraderWakeupLoopTest {
             inv.<AiTraderDecision>getArgument(0).setId(1234L);
             return 1;
         });
-        // 主人与路人各挂一个现场出口，唤醒前就连上
+        // 现场出口唤醒前就连上
         Frames owner = new Frames();
-        Frames viewer = new Frames();
-        hub.subscribeTrader(7L, true, owner);
-        hub.subscribeTrader(7L, false, viewer);
+        hub.subscribeTrader(7L, owner);
 
         runner.wake(trader(), 1785171600000L);
 
@@ -269,22 +267,12 @@ class TraderWakeupLoopTest {
         assertThat(calls.getJSONObject(1).getString("text")).isEqualTo("突破前高放量，做多并挂好止损，本轮结束。");
         assertThat(trace.getJSONObject("end").getString("status")).isEqualTo(AiTraderDecision.STATUS_OK);
 
-        // 现场帧序：主人全收；非主人少的只有 prompt
+        // 现场帧序
         assertThat(owner.events).containsExactly("run_start", "prompt", "model_start", "model_end", "tool_result",
-                "model_start", "token", "model_end", "run_end");
-        assertThat(viewer.events).containsExactly("run_start", "model_start", "model_end", "tool_result",
                 "model_start", "token", "model_end", "run_end");
         assertThat(owner.last("run_end").getLong("decisionId")).isEqualTo(1234L);
         assertThat(owner.last("tool_result").getString("name")).isEqualTo("open_position");
         assertThat(owner.last("token").getString("text")).contains("本轮结束");
-        // 每帧都带 traderId/runId/seq，seq 本轮内递增
-        String runId = owner.data.getFirst().getString("runId");
-        assertThat(runId).isNotBlank();
-        for (int i = 0; i < owner.data.size(); i++) {
-            assertThat(owner.data.get(i).getLong("traderId")).isEqualTo(7L);
-            assertThat(owner.data.get(i).getString("runId")).isEqualTo(runId);
-            assertThat(owner.data.get(i).getIntValue("seq")).isEqualTo(i + 1);
-        }
     }
 
     /** 唤醒"最近决策"回注同样过 stale：被忽略交易的分段不注入；行本身保留——行头时刻是唤醒事实 */
@@ -682,7 +670,7 @@ class TraderWakeupLoopTest {
     }
 
     /**
-     * 仓位在两次唤醒之间被止损带走：计划懒清理归档，开场白的事件块配上 sim 已平仓位把结局说清
+     * 仓位在两次唤醒之间被止损带走：唤醒开头把计划归档，开场白的事件块配上 sim 已平仓位把结局说清
      * （了结方式/成交价/盈亏/当时的失效条件），模型不必靠"仓位不见了"自己猜。
      */
     @Test

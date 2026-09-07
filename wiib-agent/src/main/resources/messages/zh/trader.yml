@@ -5,6 +5,7 @@ trader:
   notCreated: 尚未创建 AI Trader
   alreadyExists: 每个用户只能创建一个 AI Trader
   notFound: trader 不存在
+  notOwner: 只能看自己 trader 的工作流程
   liquidatedRound: 本局已爆仓终局，请先重置开新一局
   # {{reason}} 是上游端点原样返回的报错，不翻
   connectFailed: "模型连通性测试失败：{{reason}}"

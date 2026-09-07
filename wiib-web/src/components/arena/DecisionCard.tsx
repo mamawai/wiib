@@ -27,8 +27,9 @@ const LOOKED_MAX = 4;
  * 单条决策卡：徽章/时间/权益/遥测 → "看了什么"一句 → 交易动作行（参数/拒因）→ 推理折叠 + 过程。
  * 复盘/学习不交易，左边一道色线，正文直接铺 markdown。
  * highlight=从已了结交易跳过来的那一条，描个边让人找得到。
+ * mine=看的是自己的 trader，只有这时才出"过程"入口——轨迹接口对别人一律回 null。
  */
-export function DecisionCard({ d, highlight }: { d: AiTraderDecisionView; highlight?: boolean }) {
+export function DecisionCard({ d, mine, highlight }: { d: AiTraderDecisionView; mine?: boolean; highlight?: boolean }) {
   const { t } = useTranslation('ai');
   // 过程轨迹：首次点开才拉，之后开合不重拉；拉失败复位标记，再点一次重试
   const [traceOpen, setTraceOpen] = useState(false);
@@ -153,7 +154,7 @@ export function DecisionCard({ d, highlight }: { d: AiTraderDecisionView; highli
         : (
           <ReasoningFold reasoning={d.reasoning}>
             {/* 这轮落了轨迹（hasTrace）才有过程可看 */}
-            {d.hasTrace && (
+            {mine && d.hasTrace && (
               <button type="button" onClick={toggleTrace}
                       className={cn('underline underline-offset-[3px]', traceOpen && 'font-extrabold')}>
                 {t('live.process')}

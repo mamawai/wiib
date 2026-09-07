@@ -18,7 +18,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class WakeTraceTest {
 
     private static WakeTrace trace() {
-        return new WakeTrace(7L, "run-1", "TRADE", 1000L, 595, new BigDecimal("10000"), 1, 2);
+        return new WakeTrace(7L, "TRADE", 1000L, 595, new BigDecimal("10000"), 1, 2);
     }
 
     private static AssistantMessage.ToolCall call(String id, String name, String args) {
@@ -141,8 +141,8 @@ class WakeTraceTest {
         t.token("前");
         t.token("后");
 
-        // 主人：已结束的 call 合成 model_end + tool_result，进行中的合成 model_start + 一帧累计 token
-        List<WakeTrace.Frame> owner = t.replay(true);
+        // 已结束的 call 合成 model_end + tool_result，进行中的合成 model_start + 一帧累计 token
+        List<WakeTrace.Frame> owner = t.replay();
         assertThat(owner).extracting(WakeTrace.Frame::event)
                 .containsExactly("run_start", "prompt", "model_end", "tool_result", "model_start", "token");
         assertThat(owner.get(0).data().getString("kind")).isEqualTo("TRADE");
@@ -154,38 +154,8 @@ class WakeTraceTest {
         assertThat(owner.get(4).data().getIntValue("call")).isEqualTo(2);
         assertThat(owner.get(5).data().getIntValue("call")).isEqualTo(2);
         assertThat(owner.get(5).data().getString("text")).isEqualTo("前后");
-        // 非主人：没有 prompt
-        assertThat(t.replay(false)).extracting(WakeTrace.Frame::event)
-                .containsExactly("run_start", "model_end", "tool_result", "model_start", "token");
         // 提示词还没到：回放里也没有 prompt 帧
-        assertThat(trace().replay(true)).extracting(WakeTrace.Frame::event).containsExactly("run_start");
+        assertThat(trace().replay()).extracting(WakeTrace.Frame::event).containsExactly("run_start");
     }
 
-    @Test
-    void 列表状态对象() {
-        WakeTrace t = trace();
-        JSONObject idle = t.status();
-        assertThat(idle.getLongValue("traderId")).isEqualTo(7L);
-        assertThat(idle.getBooleanValue("running")).isTrue();
-        assertThat(idle.getString("kind")).isEqualTo("TRADE");
-        assertThat(idle.getLong("since")).isPositive();
-        assertThat(idle.getIntValue("call")).isEqualTo(0);
-        assertThat(idle.get("tool")).isNull();
-        assertThat(idle.toJSONString()).doesNotContain("\"tool\"");
-
-        t.callStart();
-        t.callEnd("", List.of(call("c1", "klines", "{\"symbol\":\"ETHUSDT\"}"), call("c2", "indicators", "{}")));
-        JSONObject calling = t.status();
-        assertThat(calling.getIntValue("call")).isEqualTo(1);
-        // 取第一条
-        assertThat(calling.getString("tool")).isEqualTo("klines");
-        assertThat(calling.getString("symbol")).isEqualTo("ETHUSDT");
-
-        t.toolResult("c1", "klines", "d");
-        assertThat(t.status().get("tool")).isNull();
-        assertThat(t.status().get("symbol")).isNull();
-
-        t.end("OK", null, BigDecimal.TEN, 1, 1, null);
-        assertThat(t.status().getBooleanValue("running")).isFalse();
-    }
 }

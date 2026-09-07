@@ -11,7 +11,7 @@ import java.util.List;
 
 /**
  * 一次唤醒的过程轨迹：纯数据。运行线程写、订阅者连上时读，方法全同步。
- * 每个变更方法返回要外发的帧（事件名 + data），traderId/runId/seq 由 hub 补；
+ * 每个变更方法返回要外发的帧（事件名 + data），hub 原样扇出；
  * {@link #replay} 按当前状态合成回放帧；{@link #toJson} 是落库形状。
  * 不认识 SSE、langgraph、Spring 容器。
  */
@@ -79,7 +79,6 @@ public final class WakeTrace {
     }
 
     final long traderId;
-    final String runId;
     private final String kind;
     private final long wakeTime;
     private final long startedAt = System.currentTimeMillis();
@@ -90,16 +89,12 @@ public final class WakeTrace {
     private String promptSystem;
     private String promptInstruction;
     private final List<Call> calls = new ArrayList<>();
-    /** 列表流的"在调什么"：model_end 有 toolCalls 时取第一条，tool_result 清掉 */
-    private String tool;
-    private String symbol;
     /** 收尾块，非空=本轮已结束 */
     private JSONObject end;
 
-    public WakeTrace(long traderId, String runId, String kind, long wakeTime, long budgetSeconds,
+    public WakeTrace(long traderId, String kind, long wakeTime, long budgetSeconds,
                      BigDecimal equity, int positions, int pendingOrders) {
         this.traderId = traderId;
-        this.runId = runId;
         this.kind = kind;
         this.wakeTime = wakeTime;
         this.budgetSeconds = budgetSeconds;
@@ -153,11 +148,6 @@ public final class WakeTrace {
             call.toolCalls.add(new ToolCall(tc.id(), tc.name(), parseArgs(tc.arguments())));
         }
         call.endedAt = System.currentTimeMillis();
-        if (!call.toolCalls.isEmpty()) {
-            ToolCall first = call.toolCalls.getFirst();
-            tool = first.name();
-            symbol = first.args() instanceof JSONObject args ? args.getString("symbol") : null;
-        }
         return modelEnd(call);
     }
 
@@ -169,8 +159,6 @@ public final class WakeTrace {
         String preview = responseData.length() > PREVIEW_CHARS ? responseData.substring(0, PREVIEW_CHARS) : responseData;
         ToolResult result = new ToolResult(id, name, status, preview);
         call.results.add(result);
-        tool = null;
-        symbol = null;
         return toolResultFrame(call, result);
     }
 
@@ -180,8 +168,6 @@ public final class WakeTrace {
         if (!calls.isEmpty() && calls.getLast().empty()) {
             calls.removeLast();
         }
-        tool = null;
-        symbol = null;
         end = new JSONObject()
                 .fluentPut("status", status)
                 .fluentPut("error", error)
@@ -195,13 +181,13 @@ public final class WakeTrace {
     // ========== 读 ==========
 
     /**
-     * 中途连上的回放：run_start → prompt（只给主人）→ 已结束的 call 发 model_end + 它的 tool_result
+     * 中途连上的回放：run_start → prompt → 已结束的 call 发 model_end + 它的 tool_result
      * → 进行中的 call 发 model_start + 一帧累计 token。
      */
-    public synchronized List<Frame> replay(boolean includePrompt) {
+    public synchronized List<Frame> replay() {
         List<Frame> frames = new ArrayList<>();
         frames.add(runStart());
-        if (includePrompt && promptSystem != null) {
+        if (promptSystem != null) {
             frames.add(promptFrame());
         }
         for (Call call : calls) {
@@ -219,18 +205,6 @@ public final class WakeTrace {
             }
         }
         return frames;
-    }
-
-    /** 列表流的状态对象；tool/symbol 没有就缺席（fastjson2 不输出 null） */
-    public synchronized JSONObject status() {
-        return new JSONObject()
-                .fluentPut("traderId", traderId)
-                .fluentPut("running", end == null)
-                .fluentPut("kind", kind)
-                .fluentPut("since", startedAt)
-                .fluentPut("call", calls.size())
-                .fluentPut("tool", tool)
-                .fluentPut("symbol", symbol);
     }
 
     /** 落库形状（含 prompt，读接口按主人与否剥） */

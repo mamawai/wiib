@@ -1,7 +1,7 @@
 /**
  * 本地预览用的假后端（只给 vite.config.mock.ts 用，不进正式构建）。
- * 覆盖 arena/detail/decisions/trace 几个 GET，外加两条 SSE：
- * 竞技场列表流按秒改状态芯片，详情现场流循环播一整轮唤醒（逐字吐字 + 工具回执）。
+ * 覆盖 arena/detail/decisions/trace 几个 GET，外加一条 SSE：
+ * 详情现场流循环播一整轮唤醒（逐字吐字 + 工具回执），只有 1 号（mine）有。
  * 未命中的 /api/* 一律回 code:0 data:null——Layout 那些接口拿不到数据不影响看效果，
  * 但只要漏一个 404，axios 拿到 SPA 的 index.html 会当业务失败弹 toast
  */
@@ -815,16 +815,10 @@ const send = (res: ServerResponse, event: string, data: unknown) => {
 
 const wait = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
 
-/**
- * 详情页现场流：一轮播完歇 8 秒再来一轮，随时打开都能赶上动画。
- * 每帧带 traderId/runId/seq——前端归约不看 seq，但协议里有，缺了跟真后端对不上
- */
-async function playLive(traderId: number, res: ServerResponse, alive: () => boolean) {
+/** 详情页现场流：一轮播完歇 8 秒再来一轮，随时打开都能赶上动画 */
+async function playLive(res: ServerResponse, alive: () => boolean) {
   while (alive()) {
-    const runId = `run_${Date.now().toString(36)}`;
-    let seq = 0;
-    const frame = (event: string, data: Record<string, unknown>) =>
-      send(res, event, { traderId, runId, seq: ++seq, ...data });
+    const frame = (event: string, data: Record<string, unknown>) => send(res, event, data);
 
     for (const f of buildRun()) {
       if (!alive()) return;
@@ -847,40 +841,6 @@ async function playLive(traderId: number, res: ServerResponse, alive: () => bool
       await wait(1000);
       res.write(': keepalive\n\n');
     }
-  }
-}
-
-/** 列表流的状态轮播：让芯片文字动起来（唤醒中 → 第 n 次思考 → 正在调某工具） */
-const ARENA_STEPS: Array<{ call: number; tool?: string | null; symbol?: string | null }> = [
-  { call: 0 },
-  { call: 1 },
-  { call: 1, tool: 'klines', symbol: 'BTCUSDT' },
-  { call: 1, tool: 'indicators', symbol: 'BTCUSDT' },
-  { call: 2 },
-  { call: 2, tool: 'open_position', symbol: 'BTCUSDT' },
-  { call: 3 },
-];
-
-/**
- * 竞技场列表流：连上先 snapshot（只含在跑的），之后逐条 status。
- * 1 号一直在跑，2 号跑跑停停——停的那几秒芯片会消失，正好看得到"结束"是什么样
- */
-async function playArena(res: ServerResponse, alive: () => boolean) {
-  const mk = (traderId: number, i: number, kind: string) => ({
-    traderId, running: true, kind, since: Date.now() - i * 4000, ...ARENA_STEPS[i % ARENA_STEPS.length],
-  });
-
-  send(res, 'snapshot', { traders: [mk(1, 0, 'TRADE'), mk(2, 2, 'ALERT')] });
-
-  let i = 0;
-  while (alive()) {
-    await wait(2500);
-    if (!alive()) return;
-    i++;
-    send(res, 'status', mk(1, i, 'TRADE'));
-    // 2 号每 7 步歇一轮：running=false 那条让前端把它从表里删掉
-    if (i % 7 === 0) send(res, 'status', { traderId: 2, running: false, kind: 'ALERT', since: Date.now(), call: 0 });
-    else send(res, 'status', mk(2, i + 2, 'ALERT'));
   }
 }
 
@@ -919,21 +879,14 @@ else if (location.search.includes('light')) localStorage.setItem('theme', 'light
         const path = url.split('?')[0];
         const q = new URLSearchParams(url.split('?')[1] ?? '');
 
-        // ---- 两条 SSE ----
-        if (path === '/api/ai/trader/live') {
-          sseOpen(res);
-          let closed = false;
-          req.on('close', () => { closed = true; });
-          void playArena(res, () => !closed);
-          return;
-        }
+        // ---- 现场流 SSE ----
         const liveMatch = path.match(/^\/api\/ai\/trader\/(\d+)\/live$/);
         if (liveMatch) {
           sseOpen(res);
           let closed = false;
           req.on('close', () => { closed = true; });
           // 只有 1 号有现场，其余挂着不发（对应"没在唤醒"）
-          if (liveMatch[1] === '1') void playLive(1, res, () => !closed);
+          if (liveMatch[1] === '1') void playLive(res, () => !closed);
           return;
         }
 

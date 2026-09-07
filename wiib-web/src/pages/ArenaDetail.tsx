@@ -327,9 +327,12 @@ export function ArenaDetail() {
               : <div className="h-[280px] flex items-center justify-center text-[14px] mute">{t('detail.notEnoughPoints')}</div>}
           </div>
 
-          {/* 现场卡常挂着（里面的流要一直连着），唤醒中才渲染出来 */}
-          <LiveRunCard traderId={traderId} intervalCode={tr?.intervalCode} onEnded={setEndedAt}
-                       className="order-2 xl:order-none" />
+          {/* 现场只给主人：门控必须在这层，LiveRunCard 一挂载就建流，卡片内部 return null 拦不住 */}
+          {/* 主人这边常挂着（里面的流要一直连着），唤醒中才渲染出来 */}
+          {tr?.mine && (
+            <LiveRunCard traderId={traderId} intervalCode={tr.intervalCode} onEnded={setEndedAt}
+                         className="order-2 xl:order-none" />
+          )}
 
           <div ref={listRef} className="order-6 xl:order-none scroll-mt-16">
             <div className="flex items-end gap-[22px] flex-wrap border-b border-foreground">
@@ -364,7 +367,7 @@ export function ArenaDetail() {
               ) : (
                 <>
                   <div ref={staggerRef}>
-                    {decisions.map(d => <DecisionCard key={d.id} d={d} highlight={d.id === focusId} />)}
+                    {decisions.map(d => <DecisionCard key={d.id} d={d} mine={tr?.mine} highlight={d.id === focusId} />)}
                   </div>
                   {hasMore && (
                     <div className="py-4">

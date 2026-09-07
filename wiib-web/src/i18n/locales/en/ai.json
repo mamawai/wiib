@@ -189,9 +189,7 @@
   },
   "live": {
     "scene": "Live · waking up",
-    "running": "Waking up",
-    "thinking": "Thinking #{{n}}",
-    "prompt": "Prompt · owner only",
+    "prompt": "Prompt",
     "systemPrompt": "System prompt",
     "instruction": "Opening brief",
     "processing": "running",

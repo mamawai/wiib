@@ -3,25 +3,12 @@ import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { RefreshCw } from 'lucide-react';
 import { traderApi } from '../api';
-import { toolName } from '../components/arena/traderTools';
 import { STATUS_META } from '../components/arena/traderStatus';
-import { useArenaLive } from '../hooks/useTraderLive';
 import { useStagger } from '../hooks/useStagger';
 import { cn, fmtNum } from '../lib/utils';
-import type { TraderLiveStatus, TraderPublicView } from '../types';
+import type { TraderPublicView } from '../types';
 
 const REFRESH_MS = 60_000;
-
-/** 实时芯片：脉冲点 + 在调的工具（带币种）；没在调工具就是第几次思考，还没开始思考就是唤醒中 */
-function LiveChip({ st }: { st: TraderLiveStatus }) {
-  const { t } = useTranslation('ai');
-  const text = st.tool
-    ? `${toolName(st.tool)}${st.symbol ? ` ${st.symbol.replace('USDT', '')}` : ''}`
-    : st.call > 0 ? t('live.thinking', { n: st.call }) : t('live.running');
-  return (
-    <span className="chip border-primary text-primary"><i className="dot pulse" />{text}</span>
-  );
-}
 
 /** 币种列表 BTCUSDT,ETHUSDT → BTC / ETH */
 const symbolList = (symbols: string) => symbols.split(',').map(s => s.replace('USDT', '')).join(' / ');
@@ -34,8 +21,6 @@ export function Arena() {
   const { t } = useTranslation(['ai', 'common']);
   const [traders, setTraders] = useState<TraderPublicView[]>([]);
   const [loading, setLoading] = useState(true);
-  // 谁在唤醒中：行内芯片；有人跑完（endedAt 变）排行立刻重拉
-  const { statuses, endedAt } = useArenaLive();
   const boardRef = useStagger<HTMLElement>();
 
   const load = useCallback(() => {
@@ -49,7 +34,7 @@ export function Arena() {
     load();
     const timer = setInterval(load, REFRESH_MS);
     return () => clearInterval(timer);
-  }, [load, endedAt]);
+  }, [load]);
 
   const empty = traders.length === 0 && !loading;
   const hasMine = traders.some(tr => tr.mine);
@@ -92,7 +77,6 @@ export function Arena() {
 
           {traders.map((tr, i) => {
             const st = STATUS_META[tr.status] ?? STATUS_META.PAUSED;
-            const live = statuses.get(tr.id);
             return (
               <Link key={tr.id} to={`/arena/${tr.id}`} className={cn(row, 'hov items-center py-[22px] border-b border-border')}>
                 <span className={cn('num cond text-[56px] font-bold leading-none', i < 3 ? 'text-foreground' : 'mute')}>{i + 1}</span>
@@ -117,10 +101,7 @@ export function Arena() {
                 </span>
                 <span className={cn(hideNarrow, 'num text-right text-[14px] mute')}>R{tr.roundNo}</span>
                 <span className="flex flex-col gap-1.5 items-start">
-                  <span className="flex gap-1.5 flex-wrap">
-                    {live && <LiveChip st={live} />}
-                    <span className={cn('chip', st.chip)}>{t(st.labelKey)}</span>
-                  </span>
+                  <span className={cn('chip', st.chip)}>{t(st.labelKey)}</span>
                   {tr.pausedReason && <span className="text-[12px] mute leading-[1.4]">{tr.pausedReason}</span>}
                 </span>
               </Link>

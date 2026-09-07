@@ -45,13 +45,13 @@ import java.util.Map;
  * AI Trader：我的 trader 管理（创建/配置/启停/重置）+ 公开竞技场（排行/详情/决策时间线/净值曲线）。
  * 竞技场读接口登录即可看（决策日志天生公开——观赏性是产品核心）；写操作只动自己的 trader。
  * <p>
- * 唤醒现场（SSE，事件名即 {@code event:}，data 是 JSON，帧的拼装在 {@code WakeTrace}）：
+ * 唤醒现场（SSE，事件名即 {@code event:}，data 是 JSON，帧的拼装在 {@code WakeTrace}）。
+ * 工作流程只给主人看——下面两个接口都拒绝非主人，公开的只到决策正文为止：
  * <ul>
- *   <li>{@code GET /{id}/live} 详情流，每帧带 traderId/runId/seq：
- *       run_start → prompt（只发主人）→ 每次模型调用 model_start / token… / model_end → tool_result… → run_end；
+ *   <li>{@code GET /{id}/live} 现场流：
+ *       run_start → prompt → 每次模型调用 model_start / token… / model_end → tool_result… → run_end；
  *       中途连上按当前状态回放，空闲只有心跳</li>
- *   <li>{@code GET /live} 列表流：连上发一次 snapshot（只含在跑的），之后逐条 status（running/kind/call/tool/symbol）</li>
- *   <li>{@code GET /{id}/decisions/{decisionId}/trace} 落库轨迹原样返回，非主人剥掉 prompt；老行没有轨迹回 null</li>
+ *   <li>{@code GET /{id}/decisions/{decisionId}/trace} 落库轨迹原样返回；老行没有轨迹回 null</li>
  * </ul>
  */
 @Slf4j
@@ -327,15 +327,8 @@ public class TraderController {
 
     // ========== 唤醒现场 ==========
 
-    @GetMapping(value = "/live", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    @Operation(summary = "竞技场列表现场流（snapshot + status，30 分钟到点前端自动重连）")
-    public SseEmitter arenaLive(HttpServletResponse response) {
-        SseChannel.noProxyBuffering(response);
-        return liveHub.subscribeArena();
-    }
-
     @GetMapping(value = "/{id}/live", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    @Operation(summary = "trader 唤醒现场流（提示词只发主人；中途连上回放当前状态）")
+    @Operation(summary = "trader 唤醒现场流（只有主人能连；中途连上回放当前状态）")
     public SseEmitter live(@PathVariable long id, HttpServletResponse response) {
         SseChannel.noProxyBuffering(response);
         AiTrader t = traderService.byId(id);
@@ -343,22 +336,22 @@ public class TraderController {
             // 抛成 JSON 而不是开流：前端 getSse 见到 JSON 就按接口报错处理
             throw new BizException(messages.get("trader.notFound"));
         }
-        // 主人门控：提示词只给 trader 的主人
-        return liveHub.subscribeTrader(id, t.getUserId() == StpUtil.getLoginIdAsLong());
+        if (t.getUserId() != StpUtil.getLoginIdAsLong()) {
+            throw new BizException(messages.get("trader.notOwner"));
+        }
+        return liveHub.subscribeTrader(id);
     }
 
     @GetMapping("/{id}/decisions/{decisionId}/trace")
-    @Operation(summary = "一条决策的过程轨迹（trace_json 原样；非主人看不到提示词；没有轨迹回 null）")
+    @Operation(summary = "一条决策的过程轨迹（trace_json 原样；只给主人，别人与没有轨迹一样回 null）")
     public Result<JSONObject> decisionTrace(@PathVariable long id, @PathVariable long decisionId) {
         AiTraderDecision d = traderService.trace(decisionId);
-        if (d == null || d.getTraderId() != id) {
+        // 非主人回 null 不报错：轨迹入口本就藏在主人才见得到的按钮后面，报错反倒把"有这东西"讲出去了
+        if (d == null || d.getTraderId() != id
+                || traderService.byId(id).getUserId() != StpUtil.getLoginIdAsLong()) {
             return Result.ok(null);
         }
-        JSONObject trace = JSON.parseObject(d.getTraceJson());
-        if (traderService.byId(id).getUserId() != StpUtil.getLoginIdAsLong()) {
-            trace.remove("prompt");
-        }
-        return Result.ok(trace);
+        return Result.ok(JSON.parseObject(d.getTraceJson()));
     }
 
     @GetMapping("/{id}/token-usage")

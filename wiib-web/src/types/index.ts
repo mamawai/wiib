@@ -1018,7 +1018,7 @@ export interface WakeEnd {
 
 /**
  * 一次唤醒的完整过程。实时流按帧归约出来的和 trace 接口原样返回的是同一形状；
- * prompt 只有主人拿得到（非主人后端剥掉/不发），end 跑完才有
+ * 两条路都只有主人拿得到，end 跑完才有
  */
 export interface WakeTrace {
   v: number;
@@ -1034,17 +1034,9 @@ export interface WakeTrace {
   end?: WakeEnd;
 }
 
-/** 详情流每帧都带的三个字段：runId 一次唤醒一个，seq 本轮内递增 */
-interface LiveFrame {
-  traderId: number;
-  runId: string;
-  seq: number;
-}
-
-/** 详情流 SSE 事件（与后端 TraderLiveHub 帧协议一一对应） */
-export type TraderLiveEvent = LiveFrame & (
+/** 现场流 SSE 事件（与后端 TraderLiveHub 帧协议一一对应） */
+export type TraderLiveEvent =
   | { type: 'run_start'; kind: WakeKind; wakeTime: number; budgetSeconds: number; equity: number; positions: number; pendingOrders: number; startedAt: number }
-  // 只发给主人订阅者
   | { type: 'prompt'; system: string; instruction: string }
   | { type: 'model_start'; call: number }
   | { type: 'token'; call: number; text: string }
@@ -1052,24 +1044,7 @@ export type TraderLiveEvent = LiveFrame & (
   | { type: 'model_end'; call: number; text: string; toolCalls: WakeToolCall[] }
   | { type: 'tool_result'; call: number; id: string; name: string; status: WakeToolStatus; preview: string }
   // 决策行已落库后发
-  | { type: 'run_end'; status: 'OK' | 'ERROR'; error: string | null; equity: number; latencyMs: number; modelCalls: number; totalTokens: number | null; decisionId: number }
-);
-
-/** 列表流里一只 trader 的状态：tool 是正在跑的工具（回执到了就清掉），symbol 取自它的 args，没有就缺席 */
-export interface TraderLiveStatus {
-  traderId: number;
-  running: boolean;
-  kind: WakeKind;
-  since: number;
-  call: number;
-  tool?: string | null;
-  symbol?: string | null;
-}
-
-/** 列表流 SSE 事件：snapshot 连上时发一次只含在跑的，之后逐条 status */
-export type ArenaLiveEvent =
-  | { type: 'snapshot'; traders: TraderLiveStatus[] }
-  | ({ type: 'status' } & TraderLiveStatus);
+  | { type: 'run_end'; status: 'OK' | 'ERROR'; error: string | null; equity: number; latencyMs: number; modelCalls: number; totalTokens: number | null; decisionId: number };
 
 /** 创建/改配置入参（apiKey 改配置时传空=不换） */
 export interface TraderUpsertRequest {

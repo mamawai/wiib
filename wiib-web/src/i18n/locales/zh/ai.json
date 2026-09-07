@@ -185,9 +185,7 @@
   },
   "live": {
     "scene": "现场 · 唤醒中",
-    "running": "唤醒中",
-    "thinking": "思考中 #{{n}}",
-    "prompt": "提示词 · 仅主人可见",
+    "prompt": "提示词",
     "systemPrompt": "系统提示词",
     "instruction": "开场白",
     "processing": "处理中",
