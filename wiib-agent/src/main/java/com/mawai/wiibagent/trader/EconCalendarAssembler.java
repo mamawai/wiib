@@ -61,8 +61,8 @@ public class EconCalendarAssembler {
         return sb.toString();
     }
 
-    /** 讲话类补捞认 Speaks 与 Testifies 两种标题（国会作证与讲话同类，都是无数值的时刻型事件） */
-    static boolean relevant(EconCalendarMapper.Row r) {
+    /** 讲话类补捞认 Speaks 与 Testifies 两种标题（国会作证与讲话同类，都是无数值的时刻型事件）。首页日历卡同用这条 */
+    public static boolean relevant(EconCalendarMapper.Row r) {
         String title = r.getTitle().toLowerCase(Locale.ROOT);
         return "High".equals(r.getImpact()) || "Medium".equals(r.getImpact())
                 || ("USD".equals(r.getCurrency()) && (title.contains("speak") || title.contains("testif")));

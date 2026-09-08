@@ -544,7 +544,29 @@ export interface NewsEventItem {
   tags: string;
 }
 
+/** 财经日历一条（ForexFactory 本周快照行，标题是 feed 英文原文） */
+export interface EconCalendarEvent {
+  /** 公布/开始时刻 epoch 毫秒 */
+  eventTime: number;
+  /** 影响的货币代码，如 USD；All=全局事件 */
+  currency: string;
+  title: string;
+  /** feed 原样：High / Medium / Low / Holiday */
+  impact: string;
+  /** 共识预测值原样文本；null=讲话/会议类无数值 */
+  forecast: string | null;
+  previous: string | null;
+}
+
+/** 首页日历卡：已公布 / 即将公布两栏，都按时间正序 */
+export interface EconCalendarView {
+  past: EconCalendarEvent[];
+  upcoming: EconCalendarEvent[];
+}
+
 export const quantApi = {
+  /** 首页财经日历：本周快照里已公布 / 即将公布各 6 条（筛选口径同 trader 唤醒注入） */
+  econCalendar: () => api.get<unknown, EconCalendarView>('/ai/quant/econ-calendar'),
   /**
    * 快讯（news_event 存档，中英两套一起到）。不带参＝最新 100 条；
    * from/to 都给＝该区间 [from, to) 内按发稿时间倒序最多 300 条（按天翻看用）

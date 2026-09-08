@@ -86,6 +86,16 @@
     "window": "{{count}} in the last hour",
     "viewAll": "View all"
   },
+  "calendar": {
+    "title": "Economic calendar",
+    "note": "This week · high / medium impact",
+    "published": "Released",
+    "upcoming": "Upcoming",
+    "emptyPast": "Nothing released yet this week",
+    "emptyUpcoming": "No more events this week",
+    "forecast": "Fcst",
+    "previous": "Prev"
+  },
   "buff": {
     "title": "Daily buff",
     "drawing": "Drawing...",

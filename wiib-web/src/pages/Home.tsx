@@ -10,6 +10,7 @@ import { LatestTradesCard } from '../components/LatestTradesCard';
 import type { TradeItem } from '../components/LatestTradesCard';
 import { ForceOrdersCard } from '../components/ForceOrdersCard';
 import { NewsFlashCard } from '../components/NewsFlashCard';
+import { EconCalendarCard } from '../components/EconCalendarCard';
 import { HomeFaq } from '../components/HomeFaq';
 import { Sparkline } from '../components/fx/Sparkline';
 import { DayDetailModal } from '../components/DayDetailModal';
@@ -268,6 +269,9 @@ export function Home() {
           <div className="col-span-12 xl:col-span-4"><LatestTradesCard trades={latestTrades} loading={tradesLoading} /></div>
         </div>
       </section>
+
+      {/* ====== 财经日历：本周已公布 / 即将公布 ====== */}
+      <section className="sec mt-12"><EconCalendarCard /></section>
 
       {/* ====== 爆仓动态 ====== */}
       <section className="sec mt-12"><ForceOrdersCard /></section>

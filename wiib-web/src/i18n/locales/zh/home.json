@@ -86,6 +86,16 @@
     "window": "过去 1 小时 {{count}} 笔",
     "viewAll": "查看全部"
   },
+  "calendar": {
+    "title": "财经日历",
+    "note": "本周高 / 中影响事件",
+    "published": "已公布",
+    "upcoming": "即将公布",
+    "emptyPast": "本周还没有已公布的事件",
+    "emptyUpcoming": "本周没有更多事件",
+    "forecast": "预测",
+    "previous": "前值"
+  },
   "buff": {
     "title": "每日福利",
     "drawing": "抽奖中...",
