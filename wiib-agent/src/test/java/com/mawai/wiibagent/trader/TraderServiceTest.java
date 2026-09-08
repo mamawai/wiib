@@ -56,10 +56,12 @@ class TraderServiceTest {
     private final AiTraderDecisionMapper decisionMapper = mock(AiTraderDecisionMapper.class);
 
     private final UserLangResolver langResolver = mock(UserLangResolver.class);
+    private final TraderScheduler scheduler = mock(TraderScheduler.class);
+    private final TraderLiveHub hub = mock(TraderLiveHub.class);
 
     private final TraderService service = new TraderService(
             traderMapper, decisionMapper, modelFactory, endpointService,
-            simTradeClient, binanceProperties, planStore,
+            simTradeClient, binanceProperties, planStore, scheduler, hub,
             new PromptCatalog(), langResolver, new MessageCatalog());
 
     /** 端点库里的一条 */
@@ -302,6 +304,84 @@ class TraderServiceTest {
         assertThat(service.reset(1L, true)).isNull();
 
         verify(planStore).purgeRounds(7L, 1);   // quant 三表照删
+    }
+
+    /** 删 trader 的样板：R3、名字 alpha */
+    private AiTrader deletable() {
+        AiTrader t = new AiTrader();
+        t.setId(7L);
+        t.setUserId(1L);
+        t.setName("alpha");
+        t.setRoundNo(3);
+        when(traderMapper.selectOne(any())).thenReturn(t);
+        return t;
+    }
+
+    /**
+     * 删 trader：两表全轮次清、每一局的 sim 子账户逐个销、TRADER 绑定解开，
+     * 三处进程内记账（模型缓存/调度器/现场 hub）跟着摘干净。
+     */
+    @Test
+    void deleteWipesEveryRoundAndForgetsRuntimeState() {
+        deletable();
+
+        assertThat(service.delete(1L, "alpha")).isNull();
+
+        verify(decisionMapper).delete(any());
+        verify(planStore).purgeAll(7L);
+        verify(traderMapper).deleteById(7L);
+        // 端点本身不删，只解开 TRADER 用途的绑定
+        verify(endpointService).bind(1L, UserLlmBinding.TRADER, null);
+        // 每局一个子账户，R1~R3 一个不落
+        verify(simTradeClient).deleteAccount("ai_trader_1_r1");
+        verify(simTradeClient).deleteAccount("ai_trader_1_r2");
+        verify(simTradeClient).deleteAccount("ai_trader_1_r3");
+        verify(modelFactory).evict(7L);
+        verify(scheduler).forget(7L);
+        verify(hub).forget(7L);
+    }
+
+    /** 名字对不上一个字都不动——这是删除唯一的人工闸 */
+    @Test
+    void deleteRejectsNameMismatch() {
+        deletable();
+
+        assertThat(service.delete(1L, "alpha2")).contains("名字对不上");
+
+        verify(traderMapper, never()).deleteById(org.mockito.ArgumentMatchers.anyLong());
+        verify(planStore, never()).purgeAll(org.mockito.ArgumentMatchers.anyLong());
+        verify(simTradeClient, never()).deleteAccount(any());
+    }
+
+    /**
+     * 在途唤醒时拒删：那一轮跑完要写 decision 行、要调 sim 交易工具，
+     * 中途删了就是留一行永远查不到的孤儿加一串报错。
+     */
+    @Test
+    void deleteRefusedWhileWaking() {
+        deletable();
+        when(scheduler.isBusy(7L)).thenReturn(true);
+
+        assertThat(service.delete(1L, "alpha")).contains("正在唤醒中");
+
+        verify(traderMapper, never()).deleteById(org.mockito.ArgumentMatchers.anyLong());
+        verify(decisionMapper, never()).delete(any());
+        verify(simTradeClient, never()).deleteAccount(any());
+    }
+
+    /** 某局 sim 销户失败不阻断：本地已经删干净了，剩下的孤儿账户无业务引用 */
+    @Test
+    void deleteSurvivesSimFailure() {
+        deletable();
+        org.mockito.Mockito.doThrow(new IllegalStateException("sim down"))
+                .when(simTradeClient).deleteAccount("ai_trader_1_r2");
+
+        assertThat(service.delete(1L, "alpha")).isNull();
+
+        // 中间那局炸了，后面那局照删
+        verify(simTradeClient).deleteAccount("ai_trader_1_r3");
+        verify(traderMapper).deleteById(7L);
+        verify(hub).forget(7L);
     }
 
     /**

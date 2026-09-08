@@ -175,6 +175,12 @@ public class TraderLiveHub {
         return traderSubscribers.computeIfAbsent(traderId, _ -> ConcurrentHashMap.newKeySet());
     }
 
+    /** trader 已删：摘掉这两份登记。已连着的 SSE 不主动掐，收不到新帧、30 分钟超时自己走 */
+    public void forget(long traderId) {
+        runs.remove(traderId);
+        traderSubscribers.remove(traderId);
+    }
+
     /** SseChannel 适配成 Sink：写失败 SseChannel 自己标关，下次就返回 false */
     private static Sink sinkOf(SseChannel channel) {
         return (event, data) -> {

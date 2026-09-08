@@ -57,6 +57,9 @@ public class TraderService {
     private final SimTradeClient simTradeClient;
     private final BinanceProperties binanceProperties;
     private final TraderPlanStore planStore;
+    /** 删除时拦在途唤醒、清进程内那两份按 traderId 的记账 */
+    private final TraderScheduler scheduler;
+    private final TraderLiveHub hub;
     /** 暂停原因落库即公开展示，跟 trader 主人的语言写入——与 TraderWakeupRunner 那几种同一口径 */
     private final PromptCatalog prompts;
     private final UserLangResolver langResolver;
@@ -258,6 +261,47 @@ public class TraderService {
         traderMapper.update(null, upd);
         purgeExpiredRounds(t.getId(), userId, newRound);
         log.info("[Trader] 重置开新局 traderId={} round={}", t.getId(), newRound);
+        return null;
+    }
+
+    /**
+     * 删 trader：决策/计划两表全轮次、每一局的 sim 子账户、TRADER 用途绑定一并物理删除，
+     * 竞技场里这个人彻底消失，删完可以立刻重建。端点本身不动——那是全站 BYOK 配置，不归 trader。
+     * <p>
+     * 两道闸：名字要原样打一遍；在途唤醒时拒——那一轮跑完要写 decision 行、要调 sim 交易工具，
+     * 中途删了就是留一行永远查不到的孤儿加一串报错。
+     */
+    public String delete(long userId, String confirmName) {
+        AiTrader t = mine(userId);
+        if (t == null) {
+            return messages.get("trader.notCreated");
+        }
+        if (!t.getName().equals(confirmName)) {
+            return messages.get("trader.delete.nameMismatch");
+        }
+        if (scheduler.isBusy(t.getId())) {
+            return messages.get("trader.delete.busy");
+        }
+        // 本地先清干净：ai_trader 行没了调度器就找不到它，之后销 sim 账户不会跟在途交易撞上
+        decisionMapper.delete(new LambdaQueryWrapper<AiTraderDecision>()
+                .eq(AiTraderDecision::getTraderId, t.getId()));
+        planStore.purgeAll(t.getId());
+        traderMapper.deleteById(t.getId());
+        endpointService.bind(userId, UserLlmBinding.TRADER, null);
+        modelFactory.evict(t.getId());
+        scheduler.forget(t.getId());
+        hub.forget(t.getId());
+        // 每局一个子账户，从 r1 扫一遍：出保留窗口的那些 purgeExpiredRounds 早清过，
+        // sim 侧销户幂等删不存在的不报错，顺带把历史漏删的孤儿一并收走。
+        // 单局失败不阻断——本地已经删净，剩下的孤儿账户无业务引用，同 purgeExpiredRounds 口径
+        for (int round = 1; round <= t.getRoundNo(); round++) {
+            try {
+                simTradeClient.deleteAccount(accountName(userId, round));
+            } catch (Exception e) {
+                log.warn("[Trader] 删除时 sim 子账户销户失败 traderId={} round={}", t.getId(), round, e);
+            }
+        }
+        log.info("[Trader] 删除 traderId={} userId={} rounds={}", t.getId(), userId, t.getRoundNo());
         return null;
     }
 

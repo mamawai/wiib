@@ -207,6 +207,18 @@ public class TraderController {
         return err == null ? Result.ok(null) : Result.fail(err);
     }
 
+    /**
+     * confirmName 走 query 不走 body：DELETE 带 body 规范允许但一路上的代理不一定转发，
+     * 而这就是一个短名字，没有藏进 body 的必要。
+     */
+    @DeleteMapping
+    @Operation(summary = "删除我的 trader（决策/计划/每局sim子账户/TRADER端点绑定全物理删除，竞技场里彻底消失，删完可重建；需名字确认，唤醒中拒）")
+    public Result<Void> delete(@CurrentUserId long userId,
+                               @RequestParam(required = false) String confirmName) {
+        String err = traderService.delete(userId, confirmName);
+        return err == null ? Result.ok(null) : Result.fail(err);
+    }
+
     /** stale 开关请求体。包装 Boolean：缺字段是格式错误要拒，不能被 Jackson 静默填成 false 当"取消忽略"执行 */
     public record PlanStaleRequest(Boolean stale) {
     }

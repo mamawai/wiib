@@ -367,6 +367,12 @@ public class TraderScheduler {
         inFlight.remove(traderId);
     }
 
+    /** trader 已删：摘掉两份 traderId 记账。inFlight 不用摘——删除前已用 {@link #isBusy} 拦掉在途 */
+    public void forget(long traderId) {
+        firedBoundary.remove(traderId);
+        lastWakeAt.remove(traderId);
+    }
+
     /**
      * 下一次例行唤醒的时刻；档位已下线返回 null。动作面板用它显示"再等多久就自动醒了"。
      * 有唤醒时段的跳到时段内的下一根——面板"下次例行"显示的必须是真会醒的那一刻

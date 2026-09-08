@@ -243,7 +243,11 @@
     "resetConfirm": "Reset opens a new round (R{{round}}): a fresh account with 10000, past rounds archived (latest 10 kept, older ones wiped). Continue?",
     "viewTimeline": "See its decision timeline →",
     "resetCarryNotes": "Carry review & learning notes into the new round",
-    "resetCarryHint": "Unchecking only stops injecting them next round; archived notes remain viewable on the decision timeline and are never deleted."
+    "resetCarryHint": "Unchecking only stops injecting them next round; archived notes remain viewable on the decision timeline and are never deleted.",
+    "delete": "Delete trader",
+    "deleteConfirm": "Deleting is permanent — none of this comes back.",
+    "deleteWarn": "This removes: every round's decisions and wake traces, every trade plan (including archived theses and invalidation conditions), and each round's simulated sub-account (positions, orders, fills, ledger). Its arena ranking, equity curve and decision timeline disappear for everyone else too. Your model endpoints are untouched, and you can create a new trader afterwards.",
+    "deleteConfirmName": "Type its name <0>{{name}}</0> to confirm:"
   },
   "tour": {
     "name": {
@@ -592,6 +596,7 @@
     "actionFailed": "Action failed",
     "started": "Started — it wakes on the next candle",
     "reset": "Reset, new round started",
+    "deleted": "Trader deleted",
     "saved": "Config saved",
     "created": "Created. Go start it.",
     "endpointAdded": "Endpoint added",
