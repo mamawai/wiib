@@ -7,7 +7,6 @@
     "arena": "AI竞技场",
     "ranking": "排行",
     "games": "游戏",
-    "more": "更多",
     "testnet": "模拟盘",
     "strategies": "策略",
     "backtest": "回测",
@@ -25,7 +24,8 @@
     "logoHome": "返回首页",
     "toLight": "切换到亮色模式",
     "toDark": "切换到暗色模式",
-    "login": "登录"
+    "login": "登录",
+    "logout": "退出登录"
   },
   "footer": {
     "brand": "WhatIfIBought 模拟交易",

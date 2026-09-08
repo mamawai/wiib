@@ -248,7 +248,7 @@ html.dark .machined { box-shadow: inset 0 1px 0 rgba(255, 255, 255, .07); }
   .logo{font-weight:900;font-size:24px;letter-spacing:-.04em}
   .logo i{color:var(--color-primary);font-style:normal}
   .nav{position:relative;display:flex;gap:28px;font-size:16px;font-weight:500}
-  .nav a{display:inline-flex;align-items:center;gap:4px;padding:4px 0;color:var(--color-muted-foreground);transition:color .15s}
+  .nav a{display:inline-flex;align-items:center;gap:4px;padding:4px 0;white-space:nowrap;color:var(--color-muted-foreground);transition:color .15s}
   .nav a:hover{color:var(--color-foreground)}
   .nav a.on{color:var(--color-foreground);font-weight:700}
   /* 激活项前那颗橙方块是独立元素：悬停到别的项就滑过去，移开滑回来（位置由 JS 写 left） */
@@ -259,6 +259,27 @@ html.dark .machined { box-shadow: inset 0 1px 0 rgba(255, 255, 255, .07); }
   .leds i{width:7px;height:7px;background:var(--color-gain)}
   .tools .ic{width:16px;height:16px;color:var(--color-muted-foreground)}
   .tools button{background:none;border:0;padding:0;cursor:pointer;display:inline-flex}
+
+  /* 顶栏一行摆 11 项，英文文案更长，1500px 往下就开始挤：分四档收间距和字号，
+     全部限定在 .top 里，手机顶栏那套 .tools/.logo 不跟着动。
+     每档按"英文 0.55×字号/字符 + logo + tools + 两侧 52px"估算，最紧一档保 1024px 不溢出 */
+  @media (max-width:1500px){
+    .top{gap:32px}.top .logo{font-size:22px}
+    .top .nav{gap:20px;font-size:15px}.top .tools{gap:16px;font-size:13px}
+  }
+  @media (max-width:1330px){
+    .top{gap:24px}.top .logo{font-size:21px}
+    .top .nav{gap:14px;font-size:14px}.top .tools{gap:13px;font-size:12.5px}
+  }
+  @media (max-width:1190px){
+    .top{gap:18px}.top .logo{font-size:20px}
+    .top .nav{gap:10px;font-size:13px}.top .tools{gap:10px;font-size:12px}
+  }
+  @media (max-width:1080px){
+    .top{gap:14px}.top .logo{font-size:18px}
+    .top .nav{gap:8px;font-size:12.5px}.top .tools{gap:8px;font-size:11.5px}
+    .top .nav .ic{width:12px;height:12px}
+  }
   .rule{height:2px;background:var(--color-foreground)}
 
   /* 行情副条：两份同样内容首尾相接慢慢左移，走完一份就无缝接上；鼠标停上去暂停 */

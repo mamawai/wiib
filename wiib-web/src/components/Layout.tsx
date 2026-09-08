@@ -1,4 +1,4 @@
-import { NavLink, Link, useLocation } from 'react-router-dom';
+import { NavLink, Link, useLocation, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useClickOutside } from '../hooks/useClickOutside';
 import { useState, useRef, useEffect } from 'react';
@@ -15,27 +15,18 @@ import {
   Home, Briefcase, Sun, Moon,
   BarChart3, User, ChevronDown, List, DollarSign,
   Settings2, Gem, Globe,
-  LineChart, FlaskConical, MessageSquare, Info, ExternalLink,
+  ExternalLink, LogOut,
 } from 'lucide-react';
 
 interface Props { children: React.ReactNode }
 
 const MARKET_PATHS = ['/bstock', '/coin', '/commodity', '/tradfi'];
 
+/** 介绍站是单独部署的静态站，不是本应用的路由，只能走外链 */
+const INTRO_URL = 'https://intro.wtfibought.com';
+
 /** 下拉里的图标一律 15px：外面 .nav .ic 是 13px 的，面板里那个尺寸太小 */
 const MENU_IC = 'size-[15px]';
-
-/** 低频四项，一直收在「更多」下拉里。加入口只改这里。存 key 不存文案，理由同 LED_LABEL_KEY */
-type MoreItem = { to: string; icon: React.ReactNode; labelKey: string; external?: boolean };
-const MORE_ITEMS: MoreItem[] = [
-  { to: '/strategies', icon: <LineChart className={MENU_IC} />, labelKey: 'nav.strategies' },
-  { to: '/backtest', icon: <FlaskConical className={MENU_IC} />, labelKey: 'nav.backtest' },
-  { to: '/comments', icon: <MessageSquare className={MENU_IC} />, labelKey: 'nav.comments' },
-  // 介绍站是单独部署的静态站，不是本应用的路由，只能走外链
-  { to: 'https://intro.wtfibought.com', icon: <Info className={MENU_IC} />, labelKey: 'nav.intro', external: true },
-];
-/** 激活态只认站内路由：外链永远等不上 pathname，放进来白比一遍 */
-const MORE_PATHS = MORE_ITEMS.filter(i => !i.external).map(i => i.to);
 
 /** 当前路由是否落在这组前缀里——下拉自身要跟着亮激活态，不然进了子页顶栏就没了着落 */
 const matchPaths = (pathname: string, paths: string[]) =>
@@ -67,13 +58,18 @@ function SystemLeds() {
 
 export function Layout({ children }: Props) {
   const location = useLocation();
-  const { user, token } = useUserStore();
+  const navigate = useNavigate();
+  const { user, token, logout } = useUserStore();
   const { toggleTheme, isDark } = useTheme();
   const { t, i18n } = useTranslation('layout');
   const { toggle: toggleLang } = useLangToggle();
 
   const isMarketActive = matchPaths(location.pathname, MARKET_PATHS);
-  const isMoreActive = matchPaths(location.pathname, MORE_PATHS);
+
+  const handleLogout = async () => {
+    await logout();
+    navigate('/login');
+  };
 
   const navRef = useRef<HTMLElement>(null);
   const dotRef = useRef<HTMLSpanElement>(null);
@@ -161,11 +157,15 @@ export function Layout({ children }: Props) {
               <HeaderNavItem to="/ai" label={t('nav.config')} />
               <HeaderNavItem to="/ranking" label={t('nav.ranking')} />
               <HeaderNavItem to="/games" label={t('nav.games')} />
-              <NavDropdown
-                label={t('nav.more')}
-                isActive={isMoreActive}
-                items={MORE_ITEMS.map(({ to, icon, labelKey, external }) => ({ to, icon, label: t(labelKey), external }))}
-              />
+              <HeaderNavItem to="/strategies" label={t('nav.strategies')} />
+              <HeaderNavItem to="/backtest" label={t('nav.backtest')} />
+              <HeaderNavItem to="/comments" label={t('nav.comments')} />
+              {/* 外链：样式蹭 .nav a，但永远不带 on；data-nav-item 是给橙方块的抓手 */}
+              <a href={INTRO_URL} target="_blank" rel="noopener noreferrer" data-nav-item>
+                {t('nav.intro')}
+                {/* 尾巴上的小箭头告诉用户这一下会跳出站 */}
+                <ExternalLink className="ic" />
+              </a>
             </nav>
 
             <div className="tools">
@@ -176,8 +176,11 @@ export function Layout({ children }: Props) {
               {user ? (
                 <>
                   <NotificationBell />
-                  {/* 退出登录在「我的」页里，顶栏只留个入口 */}
-                  <Link to="/me">{user.username}</Link>
+                  {/* 用户名只作标识不可点，退出就摆在旁边（「我的」页是手机端入口） */}
+                  <span>{user.username}</span>
+                  <button type="button" onClick={handleLogout} title={t('header.logout')} aria-label={t('header.logout')}>
+                    <LogOut className="ic" />
+                  </button>
                 </>
               ) : !token && (
                 <Link to="/login" className="btn sm">{t('header.login')}</Link>
@@ -237,9 +240,9 @@ function HeaderNavItem({ to, label }: { to: string; label: string }) {
   );
 }
 
-interface NavDropdownItem { to: string; icon: React.ReactNode; label: string; external?: boolean }
+interface NavDropdownItem { to: string; icon: React.ReactNode; label: string }
 
-/** 顶栏下拉壳子：市场与更多共用一份，面板宽度/激活态逐字同款，别再复制一遍 */
+/** 顶栏下拉壳子：目前只有「市场」在用，四个子市场收在面板里 */
 function NavDropdown({ label, isActive, items }:
   { label: string; isActive: boolean; items: NavDropdownItem[] }) {
   const [open, setOpen] = useState(false);
@@ -266,21 +269,7 @@ function NavDropdown({ label, isActive, items }:
       {open && (
         // z-50 不能省：NumberFlow 的 transform 会创建层叠上下文，副条数字会盖到面板上
         <div className="absolute top-full left-0 mt-1.5 min-w-44 border border-foreground bg-background py-2 z-50 animate-in fade-in slide-in-from-top-2">
-          {items.map(({ to, icon, label: itemLabel, external }) => external ? (
-            <a
-              key={to}
-              href={to}
-              target="_blank"
-              rel="noopener noreferrer"
-              onClick={() => setOpen(false)}
-              className="flex items-center gap-2.5 px-3.5 py-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
-            >
-              {icon}
-              {itemLabel}
-              {/* 尾巴上的小箭头告诉用户这一下会跳出站 */}
-              <ExternalLink className="w-3 h-3 ml-auto opacity-60" />
-            </a>
-          ) : (
+          {items.map(({ to, icon, label: itemLabel }) => (
             <NavLink
               key={to}
               to={to}

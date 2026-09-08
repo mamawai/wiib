@@ -7,7 +7,6 @@
     "arena": "AI Arena",
     "ranking": "Ranks",
     "games": "Games",
-    "more": "More",
     "testnet": "Testnet",
     "strategies": "Strategies",
     "backtest": "Backtest",
@@ -25,7 +24,8 @@
     "logoHome": "Back to home",
     "toLight": "Switch to light mode",
     "toDark": "Switch to dark mode",
-    "login": "Log in"
+    "login": "Log in",
+    "logout": "Log out"
   },
   "footer": {
     "brand": "WhatIfIBought paper trading",
