@@ -67,7 +67,11 @@
   },
   "news": {
     "title": "Live news",
-    "empty": "No news yet"
+    "empty": "No news yet",
+    "emptyDay": "No news on this day",
+    "prevDay": "Prev day",
+    "nextDay": "Next day",
+    "allDays": "All days"
   },
   "trades": {
     "title": "Latest trades",

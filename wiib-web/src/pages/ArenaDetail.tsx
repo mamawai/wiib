@@ -15,11 +15,10 @@ import { STATUS_META } from '../components/arena/traderStatus';
 import { TradeCard } from '../components/arena/TradeCard';
 import { useCountUp } from '../hooks/useCountUp';
 import { useStagger } from '../hooks/useStagger';
-import { cn, fmtDate, fmtDateTime, fmtNum, fmtSignedPct, fmtTime, fmtTokens } from '../lib/utils';
+import { cn, dayBounds, fmtDate, fmtDateTime, fmtNum, fmtSignedPct, fmtTime, fmtTokens, DAY_MS } from '../lib/utils';
 import type { AiTraderDecisionView, TradeDecisionRef, TradeRecordView, TraderDetailView, TraderEquityPoint } from '../types';
 
 const REFRESH_MS = 60_000;
-const DAY_MS = 86_400_000;
 const PAGE = 50;
 /** 净值曲线可选区间（天）；0=整局 */
 const RANGES = [3, 7, 14, 30, 0] as const;
@@ -31,12 +30,6 @@ const BLK_H = 'sec-h mb-4';
 
 /** 币种列表 BTCUSDT,ETHUSDT → BTC / ETH */
 const symbolList = (symbols: string) => symbols.split(',').map(s => s.replace('USDT', '')).join(' / ');
-
-/** 新加坡时区 yyyy-MM-dd 那一天的 [起, 止) 毫秒——时间线按天查询与 fmtDate/fmtDateTime 同一时区 */
-function dayBounds(day: string): { from: number; to: number } {
-  const from = Date.parse(`${day}T00:00:00+08:00`);
-  return { from, to: from + DAY_MS };
-}
 
 /**
  * 最大回撤%：净值从峰值回落的最大幅度，口径同后端 ReviewMaterialAssembler——

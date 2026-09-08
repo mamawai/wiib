@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Skeleton } from './ui/skeleton';
+import { FEED_MAX_H } from './NewsFlashCard';
 import { useStagger } from '../hooks/useStagger';
 import { fmtNum, fmtTime } from '../lib/utils';
 import { orderSideView } from '../lib/orderSide';
@@ -35,7 +36,8 @@ export function LatestTradesCard({ trades, loading }: Props) {
 
   return (
     <>
-      <div className="sec-h">
+      {/* min-h-7 对齐快讯卡头部（那边有 28px 高的日期控件），两卡底边才齐 */}
+      <div className="sec-h min-h-7">
         <h2>{t('trades.title')}</h2>
         {/* 这里只给最新 20 条，全量分页在 /trades（交易者匿名） */}
         <Link to="/trades">{t('common:all')}</Link>
@@ -47,7 +49,7 @@ export function LatestTradesCard({ trades, loading }: Props) {
       ) : trades.length === 0 ? (
         <div className="py-10 text-center text-sm text-muted-foreground">{t('trades.empty')}</div>
       ) : (
-        <div ref={listRef}>
+        <div ref={listRef} className={FEED_MAX_H}>
           {trades.map(item => {
             // 方向标签渲染期现算：本组件订阅了 useTranslation，切语言会重渲染，这里就跟着重查一遍词表
             const { label, tone } = orderSideView(item.orderSide);

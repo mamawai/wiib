@@ -73,6 +73,18 @@ public interface NewsEventMapper {
             """)
     List<NewsEventItem> selectLatest(@Param("limit") int limit);
 
+    /** 时间窗内的快讯（首页快讯卡按天翻）：左闭右开，倒序，投影同 selectLatest */
+    @Select("""
+            SELECT id, title, content, title_en AS titleEn, content_en AS contentEn,
+                   url, published_at AS publishedAt, tags
+              FROM news_event
+             WHERE published_at >= #{fromMs} AND published_at < #{toMs}
+             ORDER BY published_at DESC
+             LIMIT #{limit}
+            """)
+    List<NewsEventItem> selectInRange(@Param("fromMs") long fromMs, @Param("toMs") long toMs,
+                                      @Param("limit") int limit);
+
     /**
      * 按标签查时间窗内的快讯（K 线图标数据源）。
      * 标签匹配用逗号包夹：tags 是逗号串，裸 LIKE 会让词表未来加了有包含关系的词

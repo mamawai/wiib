@@ -67,7 +67,11 @@
   },
   "news": {
     "title": "实时快讯",
-    "empty": "暂无快讯"
+    "empty": "暂无快讯",
+    "emptyDay": "这一天没有快讯",
+    "prevDay": "前一天",
+    "nextDay": "后一天",
+    "allDays": "全部日期"
   },
   "trades": {
     "title": "最新成交",

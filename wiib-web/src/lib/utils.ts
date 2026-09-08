@@ -40,6 +40,14 @@ export function fmtDate(ts: number | string | Date = Date.now()): string {
   return new Date(ts).toLocaleDateString('en-CA', { timeZone: 'Asia/Singapore' });
 }
 
+export const DAY_MS = 86_400_000;
+
+/** 新加坡时区 yyyy-MM-dd 那一天的 [起, 止) 毫秒——按天查询与 fmtDate/fmtDateTime 同一时区 */
+export function dayBounds(day: string): { from: number; to: number } {
+  const from = Date.parse(`${day}T00:00:00+08:00`);
+  return { from, to: from + DAY_MS };
+}
+
 /** 新加坡时间 MM/DD HH:mm（withSeconds=true 时带秒），列表/卡片时间戳统一走这里。 */
 export function fmtDateTime(ts: number | string | Date, withSeconds = false): string {
   return new Date(ts).toLocaleString('zh-CN', {

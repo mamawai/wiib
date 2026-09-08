@@ -33,13 +33,22 @@ public class AiAgentController {
     /** 首页快讯卡最多给 100 条，约两三天的量 */
     private static final int NEWS_LIMIT = 100;
 
+    /** 按天翻的上限 300 条，一天的量足够 */
+    private static final int NEWS_RANGE_LIMIT = 300;
+
     /**
      * 首页快讯卡读 news_event 存档，不走模型侧那份 20 条的内存缓存。
      * 中英两套一起给，前端按界面语言现选；译文空=没译成，英文界面不展示那条。
+     * <p>
+     * from/to 都给了就查这个左闭右开的时间窗（首页快讯卡按天翻），缺任一个仍是最新 100 条。
      */
     @GetMapping("/quant/news")
-    @Operation(summary = "最新快讯（news_event 存档，首页快讯卡数据源）")
-    public Result<List<NewsEventItem>> news() {
+    @Operation(summary = "快讯（news_event 存档）：带 from/to 查时间窗，否则最新 100 条")
+    public Result<List<NewsEventItem>> news(@RequestParam(required = false) Long from,
+                                            @RequestParam(required = false) Long to) {
+        if (from != null && to != null) {
+            return Result.ok(newsEventMapper.selectInRange(from, to, NEWS_RANGE_LIMIT));
+        }
         return Result.ok(newsEventMapper.selectLatest(NEWS_LIMIT));
     }
 

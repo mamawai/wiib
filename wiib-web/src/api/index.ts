@@ -542,8 +542,12 @@ export interface NewsEventItem {
 }
 
 export const quantApi = {
-  /** 最新快讯（news_event 存档，最多 100 条，中英两套一起到） */
-  news: () => api.get<unknown, NewsEventItem[]>('/ai/quant/news'),
+  /**
+   * 快讯（news_event 存档，中英两套一起到）。不带参＝最新 100 条；
+   * from/to 都给＝该区间 [from, to) 内按发稿时间倒序最多 300 条（按天翻看用）
+   */
+  news: (from?: number, to?: number) =>
+    api.get<unknown, NewsEventItem[]>('/ai/quant/news', { params: { from, to } }),
   /** 打标快讯：标签+时间窗（服务端上限 500 条，倒序取最近） */
   newsEvents: (tag: string, from: number, to: number) =>
     api.get<unknown, NewsEventItem[]>('/ai/quant/news-events', { params: { tag, from, to } }),
