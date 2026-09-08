@@ -504,6 +504,9 @@ export const workbenchApi = {
   /** 删除历史会话（展示记录 + 后端续聊上下文） */
   deleteSession: (sessionId: string) =>
     api.delete<unknown, void>(`/ai/workbench/sessions/${sessionId}`),
+  /** 清空全部历史会话：skipped=在跑或欠补答的那些，后端保留不删 */
+  deleteAllSessions: () =>
+    api.delete<unknown, { deleted: number; skipped: number }>('/ai/workbench/sessions'),
 };
 
 // ========== 用户 BYOK 端点库（AI 页「模型配置」；对话/交易员/复盘教练从中选） ==========

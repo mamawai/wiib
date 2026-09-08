@@ -39,4 +39,8 @@ public interface WorkbenchChatMessageMapper extends BaseMapper<WorkbenchChatMess
              LIMIT #{limit}
             """)
     List<WorkbenchSessionRow> selectSessions(@Param("userId") long userId, @Param("limit") int limit);
+
+    /** 我的全部会话号（清空全部会话时逐个删要用），不排序不限量 */
+    @Select("SELECT DISTINCT session_id FROM workbench_chat_message WHERE user_id = #{userId}")
+    List<String> selectSessionIds(@Param("userId") long userId);
 }

@@ -95,6 +95,10 @@ public class ChatWorkbenchController {
     public record SessionStatus(boolean running, boolean pending) {
     }
 
+    /** 清空全部会话的结果：deleted=删掉几个，skipped=在跑或欠补答被跳过几个 */
+    public record DeleteAllResult(int deleted, int skipped) {
+    }
+
     @Data
     public static class ApprovalRequest {
         private String sessionId;
@@ -327,6 +331,25 @@ public class ChatWorkbenchController {
         contextStore.purge(sessionId);
         approvalRegistry.purgeSession(sessionId);
         return Result.ok(null);
+    }
+
+    @DeleteMapping("/sessions")
+    @Operation(summary = "清空我的全部历史会话；在跑或欠补答的会话跳过不删")
+    public Result<DeleteAllResult> deleteAllSessions(@CurrentUserId long userId) {
+        int deleted = 0;
+        int skipped = 0;
+        for (String sessionId : chatHistoryService.sessionIds(userId)) {
+            // 跳过规则与单删一致：这轮收尾/补答落库还会往会话里写 assistant 行
+            if (runRegistry.isRunning(sessionId) || yieldCoordinator.hasPending(sessionId)) {
+                skipped++;
+                continue;
+            }
+            chatHistoryService.deleteSession(sessionId);
+            contextStore.purge(sessionId);
+            approvalRegistry.purgeSession(sessionId);
+            deleted++;
+        }
+        return Result.ok(new DeleteAllResult(deleted, skipped));
     }
 
     /** HITL 确认回执：approve 后前端自动补发"请继续执行深度研判"，agent 重调工具时闸门放行。 */

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ArrowDown, Bot, ChevronsDownUp, ChevronsUpDown, History, KeyRound, Loader2, Maximize2, Minimize2, PanelLeftClose, PanelLeftOpen, RotateCcw, Square, X } from 'lucide-react';
+import { ArrowDown, ChevronsDownUp, ChevronsUpDown, History, KeyRound, Loader2, Maximize2, Minimize2, PanelLeftClose, PanelLeftOpen, SquarePen, X } from 'lucide-react';
 import { workbenchApi } from '../../api';
 import { cn } from '../../lib/utils';
 import { useToast } from '../ui/use-toast';
@@ -19,6 +19,9 @@ const TITLE_MAX = 40;
 /** 贴底判定的容差：小于它就算"用户在看最新内容"，新内容照常跟随滚动 */
 const STICK_PX = 80;
 
+/** 顶栏图标键：无边框，悬停才有底色 */
+const HEAD_BTN = 'shrink-0 w-8 h-8 flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-surface-hover transition-colors';
+
 interface ChatPanelProps {
   /** 停靠壳（ChatDock）传入：点头部 X 关面板 */
   onClose?: () => void;
@@ -33,8 +36,9 @@ interface ChatPanelProps {
  * 对话面板：chatStore 的视图层（SSE 消费在 store，关面板/切页不中断）。
  * 自身不带卡片外壳，由 ChatDock 决定浮窗还是全屏。
  * <p>
- * 版式：用户提问是右侧气泡，agent 回答是<b>无框正文</b>（署名行 + 正文 + 脚注读数），
- * 过程条目收进可折叠的工作过程轨。答案是这一屏唯一的主角，所以它不套卡片。
+ * 版式：轻量顶栏（品牌字 + 会话标题 + 图标键）、居中限宽的消息列（用户提问是右侧底色气泡，
+ * agent 回答是<b>无框正文</b>：署名行 + 正文 + 一排小动作），过程条目收进一行摘要可展开的工作过程轨。
+ * 全屏时左边多一条常驻会话栏，浮窗/手机上它是右滑叠层。
  */
 export function ChatPanel({ onClose, onGoConfig, fullscreen, onToggleFullscreen }: ChatPanelProps) {
   const { t } = useTranslation(['ai', 'common']);
@@ -81,7 +85,7 @@ export function ChatPanel({ onClose, onGoConfig, fullscreen, onToggleFullscreen 
 
   const blocks = useMemo(() => groupBlocks(items), [items]);
 
-  /** 面板头显示当前会话标题：首条提问截断，与后端历史列表同口径 */
+  /** 顶栏显示当前会话标题：首条提问截断，与后端历史列表同口径 */
   const title = useMemo(() => {
     const first = items.find(it => it.kind === 'user');
     if (!first || first.kind !== 'user') return null;
@@ -153,9 +157,9 @@ export function ChatPanel({ onClose, onGoConfig, fullscreen, onToggleFullscreen 
   }, [scrollToBottom]);
 
   /** 停止：后端跑到下一个检查点才收尾，所以按钮先进"收尾中"；后端说没轮在跑就恢复原状 */
-  const handleStop = useCallback(async () => {
+  const handleStop = useCallback(() => {
     setStopping(true);
-    if (!await chatStore.cancelRun()) setStopping(false);
+    void chatStore.cancelRun().then(running => { if (!running) setStopping(false); });
   }, []);
 
   /** HITL 决策交给 store；本地只记"哪张卡在提交"用来防连点+出转圈。按 requestId 认卡，条目挪位置也不会打偏。 */
@@ -184,6 +188,24 @@ export function ChatPanel({ onClose, onGoConfig, fullscreen, onToggleFullscreen 
     }
   }, [t, toast]);
 
+  /** 清空全部：后端会跳过在跑/欠补答的会话（skipped），所以删完得按剩下的列表重来一遍 */
+  const clearAllSessions = useCallback(async () => {
+    if (!window.confirm(t('history.clearAllConfirm'))) return;
+    setHistoryLoading(true);
+    try {
+      const { skipped } = await workbenchApi.deleteAllSessions();
+      const list = await workbenchApi.sessions();
+      setSessions(list);
+      // 当前会话被清掉了就回到全新状态：留在一个后端已经没有的会话号上，接着聊会答非所问
+      if (sessionId && !list.some(s => s.sessionId === sessionId)) chatStore.newSession();
+      if (skipped > 0) toast(t('history.clearedSkipped', { count: skipped }), 'info');
+    } catch (err) {
+      toast((err as Error).message || t('common:loadFailed'), 'error');
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, [sessionId, t, toast]);
+
   const handleNewSession = useCallback(() => {
     chatStore.newSession();
     setShowHistory(false);
@@ -195,68 +217,50 @@ export function ChatPanel({ onClose, onGoConfig, fullscreen, onToggleFullscreen 
 
   return (
     <div className="flex flex-col h-full min-h-0">
-      {/* 面板头 */}
-      <div className="flex items-center gap-2 px-4 py-3 border-b border-border shrink-0">
-        <Bot className="w-4.5 h-4.5 text-primary shrink-0" />
-        <span className="text-sm font-black shrink-0">{t('chat.title')}</span>
-        {/* 副标题吃掉剩余空间并允许截断：面板宽度可拖到 320，而 sm: 判的是视口不是面板，
-            不给它 flex-1 + truncate 的话 PC 上窄面板会被这句话把按钮挤出去 */}
-        <span className="hidden sm:block flex-1 min-w-0 truncate text-[10px] text-muted-foreground">
-          {title ?? t('chat.subtitle', { hub: HUB_NAME })}
-        </span>
-        {/* 按钮组自己带 ml-auto 把自己顶到右边：副标题在 <640px 是 hidden、不占 flex 位，
-            指望它撑开的话手机上整排按钮会挤到左端 */}
-        <div className="ml-auto flex items-center gap-2 shrink-0">
+      {/* 顶栏：品牌字 + 会话标题 + 一排图标键 */}
+      <div className="flex items-center gap-2 px-2 py-1.5 border-b border-border shrink-0">
+        <span className="pl-1.5 text-sm font-black shrink-0">{HUB_NAME}</span>
+        {title && <span className="flex-1 min-w-0 truncate text-xs text-muted-foreground">{title}</span>}
+        {/* 按钮组自己带 ml-auto 把自己顶到右边：没有会话标题时它左边没有能撑开的东西 */}
+        <div className="ml-auto flex items-center shrink-0">
           {railKeys.length > 0 && (
             <button
               onClick={toggleAllRails}
-              className="shrink-0 border border-border hover:bg-surface-hover w-7 h-7 rounded-lg flex items-center justify-center text-muted-foreground hover:text-primary"
+              className={HEAD_BTN}
               title={anyRailOpen ? t('chat.collapseAllRails') : t('chat.expandAllRails')}
               aria-label={t('chat.toggleAllRails')}
             >
-              {anyRailOpen ? <ChevronsDownUp className="w-3.5 h-3.5" /> : <ChevronsUpDown className="w-3.5 h-3.5" />}
+              {anyRailOpen ? <ChevronsDownUp className="w-4 h-4" /> : <ChevronsUpDown className="w-4 h-4" />}
             </button>
           )}
           {/* 同一个键在两种形态下管两件事：全屏时开合左栏，浮窗/手机时开合右滑叠层。
               对用户都是"看历史对话"，位置不变最省事 */}
           <button
             onClick={() => fullscreen ? setSideOpen(v => !v) : (showHistory ? setShowHistory(false) : openHistory())}
-            className={cn(
-              'shrink-0 border border-border hover:bg-surface-hover w-7 h-7 rounded-lg flex items-center justify-center hover:text-primary',
-              (fullscreen ? sideOpen : showHistory) ? 'text-primary' : 'text-muted-foreground',
-            )}
+            className={cn(HEAD_BTN, (fullscreen ? sideOpen : showHistory) && 'text-foreground')}
             title={fullscreen ? (sideOpen ? t('chat.hideHistory') : t('chat.showHistory')) : t('history.title')}
           >
             {fullscreen
-              ? (sideOpen ? <PanelLeftClose className="w-3.5 h-3.5" /> : <PanelLeftOpen className="w-3.5 h-3.5" />)
-              : <History className="w-3.5 h-3.5" />}
+              ? (sideOpen ? <PanelLeftClose className="w-4 h-4" /> : <PanelLeftOpen className="w-4 h-4" />)
+              : <History className="w-4 h-4" />}
           </button>
-          <button
-            onClick={handleNewSession}
-            className="shrink-0 border border-border hover:bg-surface-hover w-7 h-7 rounded-lg flex items-center justify-center text-muted-foreground hover:text-primary"
-            title={t('chat.newSession')}
-          >
-            <RotateCcw className="w-3.5 h-3.5" />
+          <button onClick={handleNewSession} className={HEAD_BTN} title={t('chat.newSession')}>
+            <SquarePen className="w-4 h-4" />
           </button>
           {/* 全屏只在 PC 出：移动端面板本来就铺满视口 */}
           {onToggleFullscreen && (
             <button
               onClick={onToggleFullscreen}
-              className="shrink-0 hidden md:flex border border-border hover:bg-surface-hover w-7 h-7 rounded-lg items-center justify-center text-muted-foreground hover:text-primary"
+              className={cn(HEAD_BTN, 'hidden md:flex')}
               title={fullscreen ? t('chat.exitFullscreen') : t('chat.fullscreen')}
               aria-label={fullscreen ? t('chat.exitFullscreenAria') : t('chat.fullscreenAria')}
             >
-              {fullscreen ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
+              {fullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
             </button>
           )}
           {onClose && (
-            <button
-              onClick={onClose}
-              className="shrink-0 border border-border hover:bg-surface-hover w-7 h-7 rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground"
-              title={t('common:close')}
-              aria-label={t('chat.closeAria')}
-            >
-              <X className="w-3.5 h-3.5" />
+            <button onClick={onClose} className={HEAD_BTN} title={t('common:close')} aria-label={t('chat.closeAria')}>
+              <X className="w-4 h-4" />
             </button>
           )}
         </div>
@@ -280,6 +284,7 @@ export function ChatPanel({ onClose, onGoConfig, fullscreen, onToggleFullscreen 
               onOpen={s => void openSession(s)}
               onRemove={s => void removeSession(s)}
               onNew={handleNewSession}
+              onClearAll={() => void clearAllSessions()}
             />
           </div>
         )}
@@ -290,18 +295,17 @@ export function ChatPanel({ onClose, onGoConfig, fullscreen, onToggleFullscreen 
               挂在外层的话 bottom 量的是输入区底边，浮标会压在"Enter 发送"那行上 */}
           <div className="relative flex-1 min-h-0 flex flex-col">
             {/* 全屏后每个条目限宽居中：铺满整屏的正文一行能拉到一千多像素，读长回答很累。
-                限在子元素上而不是套一层容器——空态那块靠 h-full 撑满，中间多一层它就撑不起来了 */}
+                限在子元素上而不是套一层容器——空态那块靠 h-full 撑满，中间多一层它就撑不起来了。
+                上下内边距只在有条目时给，空态 h-full 加内边距会多出一截可滚 */}
             <div ref={scrollRef} onScroll={onScroll} className={cn(
-              'flex-1 overflow-y-auto px-4 py-3 space-y-3',
+              'flex-1 overflow-y-auto px-4',
+              items.length > 0 && 'py-6 space-y-6',
               fullscreen && '[&>*]:mx-auto [&>*]:w-full [&>*]:max-w-3xl',
             )}>
               {items.length === 0 && (
-                <div className="h-full flex flex-col items-center justify-center gap-3 text-center px-6">
-                  <div className="w-12 h-12 rounded-full border border-border bg-background flex items-center justify-center text-muted-foreground/60">
-                    <Bot className="w-6 h-6" />
-                  </div>
-                  <p className="text-sm text-muted-foreground">{t('chat.emptyTitle')}</p>
-                  <p className="text-[10px] text-muted-foreground/70">{t('chat.emptyHint', { hub: HUB_NAME })}</p>
+                <div className="h-full flex flex-col items-center justify-center gap-2 text-center px-6">
+                  <h2 className="text-2xl font-black tracking-tight">{t('chat.emptyTitle')}</h2>
+                  <p className="text-xs text-muted-foreground">{t('chat.emptyHint', { hub: HUB_NAME })}</p>
                 </div>
               )}
               {blocks.map(block => {
@@ -375,26 +379,11 @@ export function ChatPanel({ onClose, onGoConfig, fullscreen, onToggleFullscreen 
                     );
                 }
               })}
-              {loading && (
+              {/* 停止键在输入区，这里只报一句"还在跑"；有 token 流时答案自带光标，不必再说 */}
+              {loading && !streamingNow && (
                 <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                  {!streamingNow && (
-                    <>
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      {background ? t('chat.background', { hub: HUB_NAME }) : t('chat.thinking', { hub: HUB_NAME })}
-                    </>
-                  )}
-                  {/* 后台轮询态没有可中断的本地轮：补答跑在后台，没有面板可点停止 */}
-                  {!background && (
-                    <button
-                      onClick={() => void handleStop()}
-                      disabled={stopping}
-                      className="inline-flex items-center gap-1 border border-border rounded-full px-2.5 py-0.5 text-[11px] font-bold hover:text-loss hover:border-loss/40 disabled:opacity-50 transition-colors"
-                      title={t('chat.stopTitle')}
-                    >
-                      <Square className="w-2.5 h-2.5 fill-current" />
-                      {stopping ? t('chat.stopping') : t('chat.stop')}
-                    </button>
-                  )}
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  {background ? t('chat.background', { hub: HUB_NAME }) : t('chat.thinking', { hub: HUB_NAME })}
                 </div>
               )}
             </div>
@@ -403,7 +392,7 @@ export function ChatPanel({ onClose, onGoConfig, fullscreen, onToggleFullscreen 
             {!stuckToBottom && (
               <button
                 onClick={scrollToBottom}
-                className="absolute left-1/2 -translate-x-1/2 bottom-2 z-[5] flex items-center gap-1 rounded-full pt-card shadow-lg px-2.5 py-1 text-[10px] font-bold text-muted-foreground hover:text-primary animate-in fade-in"
+                className="absolute left-1/2 -translate-x-1/2 bottom-2 z-[5] flex items-center gap-1 pt-card shadow-lg px-2.5 py-1 text-[10px] font-bold text-muted-foreground hover:text-primary animate-in fade-in"
               >
                 <ArrowDown className="w-3 h-3" /> {t('chat.toBottom')}
               </button>
@@ -413,7 +402,7 @@ export function ChatPanel({ onClose, onGoConfig, fullscreen, onToggleFullscreen 
           {/* 配置引导条：后端报 2201/2202 时出现——光一行红字用户不知道去哪儿改（配置在 AI 页模型配置 Tab） */}
           {needsConfig && (
             <div className={cn(
-              'mx-3 mb-2 rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 flex items-center gap-2 shrink-0',
+              'mx-3 mb-2 border border-warning/40 bg-warning/10 px-3 py-2 flex items-center gap-2 shrink-0',
               fullscreen && 'w-full max-w-3xl mx-auto',
             )}>
               <KeyRound className="w-3.5 h-3.5 text-warning shrink-0" />
@@ -434,7 +423,15 @@ export function ChatPanel({ onClose, onGoConfig, fullscreen, onToggleFullscreen 
             </div>
           )}
 
-          <ChatComposer loading={loading} onSend={handleSend} fullscreen={fullscreen} />
+          <ChatComposer
+            loading={loading}
+            onSend={handleSend}
+            fullscreen={fullscreen}
+            empty={items.length === 0}
+            stopping={stopping}
+            // 后台轮询态没有可中断的本地轮（补答跑在后台），这时候不给停止键，发送键照常
+            onStop={background ? undefined : handleStop}
+          />
 
           {/* 浮窗 / 手机：历史还是盖在对话上的右滑叠层。全屏那份在左边常驻，这里不重复挂 */}
           {!fullscreen && (
@@ -447,6 +444,7 @@ export function ChatPanel({ onClose, onGoConfig, fullscreen, onToggleFullscreen 
               onOpen={s => void openSession(s)}
               onRemove={s => void removeSession(s)}
               onNew={handleNewSession}
+              onClearAll={() => void clearAllSessions()}
             />
           )}
         </div>

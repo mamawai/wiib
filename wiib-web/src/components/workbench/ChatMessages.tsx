@@ -90,7 +90,7 @@ function SearchStep({ item }: { item: Extract<ChatItem, { kind: 'search' }> }) {
   );
 }
 
-/** 用户提问：右侧气泡，下面挂时刻 */
+/** 用户提问：右侧气泡（无框底色块），下面挂时刻 */
 export function UserBubble({ item, onCancelQueued }: {
   item: Extract<ChatItem, { kind: 'user' }>;
   /** 只有排队中的能撤：已经发出去的那条正在烧钱，撤不回来 */
@@ -98,10 +98,10 @@ export function UserBubble({ item, onCancelQueued }: {
 }) {
   const { t } = useTranslation('ai');
   return (
-    <div className="flex flex-col items-end gap-0.5">
+    <div className="flex flex-col items-end gap-1">
       <div className={cn(
-        'max-w-[85%] rounded-2xl rounded-br-md bg-primary/10 px-3.5 py-2.5',
-        'text-sm leading-relaxed whitespace-pre-wrap break-words',
+        'max-w-[80%] bg-card-2 px-4 py-2.5',
+        'text-[15px] leading-relaxed whitespace-pre-wrap break-words',
         item.queued && 'opacity-60',
       )}>
         {item.content}
@@ -129,10 +129,10 @@ export function UserBubble({ item, onCancelQueued }: {
 }
 
 /**
- * agent 回答：署名行 + 无框正文 + 脚注读数。
+ * agent 回答：署名行 + 无框正文 + 一排小动作（复制 / 重新生成，读数挤在同一行右端）。
  * <p>
  * 正文不套卡片——同一屏里只有用户提问是气泡，答案铺满可用宽度，读起来才像正文而不是聊天记录。
- * 脚注只在流结束后出现：耗时/token 要等 done 事件才有值，流式期间挂个空壳会让布局在出字过程中跳一下。
+ * 动作行只在流结束后出现：耗时/token 要等 done 事件才有值，流式期间挂个空壳会让布局在出字过程中跳一下。
  */
 export function AssistantAnswer({ item, canRegenerate, onRegenerate }: {
   item: Extract<ChatItem, { kind: 'assistant' }>;
@@ -162,7 +162,7 @@ export function AssistantAnswer({ item, canRegenerate, onRegenerate }: {
   return (
     <div className="min-w-0">
       <div className="flex items-center gap-2 mb-1.5">
-        <span className="w-[2px] h-3 rounded-full bg-primary shrink-0" />
+        <span className="w-[7px] h-[7px] bg-primary shrink-0" />
         {/* 署名要压得住，不用微标签那档灰 */}
         <span className="microlabel text-foreground font-bold uppercase shrink-0">{HUB_NAME}</span>
         {meta?.modelLabel && <span className="microlabel font-mono tabular-nums truncate min-w-0">{meta.modelLabel}</span>}
@@ -174,45 +174,50 @@ export function AssistantAnswer({ item, canRegenerate, onRegenerate }: {
         )}
       </div>
 
-      <div className="text-sm">
+      <div className="text-[15px] leading-relaxed">
         <Markdown content={item.content} />
         {item.streaming && item.content && (
           <span className="inline-block w-1.5 h-3.5 bg-primary/80 rounded-[1px] ml-0.5 align-middle animate-pulse" />
         )}
       </div>
 
-      {/* 来源随 done 到（历史回放从库里带）：流式期间不显示，与脚注同理 */}
+      {/* 来源随 done 到（历史回放从库里带）：流式期间不显示，与动作行同理 */}
       {!item.streaming && item.sources && item.sources.length > 0 && <SourceChips sources={item.sources} />}
 
+      {/* 动作是一排淡灰小图标，悬停才亮；读数挤在同一行右端 */}
       {!item.streaming && (
-        <div className="mt-2 pt-1.5 border-t border-border/60 flex items-center gap-2 text-[10px] text-muted-foreground/70">
-          <span className="num truncate min-w-0">{readout}</span>
-          <div className="ml-auto flex items-center gap-2 shrink-0">
-            {canRegenerate && !deferred && (
-              <button
-                onClick={onRegenerate}
-                className="flex items-center gap-1 hover:text-primary transition-colors"
-                title={t('chat.regenTitle')}
-              >
-                <RefreshCw className="w-3 h-3" /> {t('chat.regen')}
-              </button>
-            )}
+        <div className="mt-2 flex items-center gap-0.5 text-muted-foreground/60">
+          <button
+            onClick={copy}
+            className="w-7 h-7 flex items-center justify-center hover:text-foreground hover:bg-surface-hover transition-colors"
+            title={copied ? t('common:copied') : t('chat.copyAnswer')}
+            aria-label={t('chat.copyAnswer')}
+          >
+            {copied ? <Check className="w-3.5 h-3.5 text-success" /> : <Copy className="w-3.5 h-3.5" />}
+          </button>
+          {canRegenerate && !deferred && (
             <button
-              onClick={copy}
-              className="hover:text-primary transition-colors"
-              title={copied ? t('common:copied') : t('chat.copyAnswer')}
-              aria-label={t('chat.copyAnswer')}
+              onClick={onRegenerate}
+              className="w-7 h-7 flex items-center justify-center hover:text-foreground hover:bg-surface-hover transition-colors"
+              title={t('chat.regenTitle')}
+              aria-label={t('chat.regen')}
             >
-              {copied ? <Check className="w-3 h-3 text-success" /> : <Copy className="w-3 h-3" />}
+              <RefreshCw className="w-3.5 h-3.5" />
             </button>
-          </div>
+          )}
+          <span className="microlabel num ml-auto truncate min-w-0 pl-2">{readout}</span>
         </div>
       )}
     </div>
   );
 }
 
-/** 工作过程轨：竖轨+节点。默认展开——收不收由用户点，别在他正看专家分析时自己收起来 */
+/**
+ * 工作过程轨：一行摘要 + 展开后的竖轨节点。默认展开——收不收由用户点，别在他正看专家分析时自己收起来。
+ * <p>
+ * 摘要按轨里有什么现挑：跑着就说正在做什么，跑完优先报搜了几个站，其次报调度了几位专家，
+ * 都没有才退回"N 步"。
+ */
 export function ProcessRail({ steps, active, open, onToggle }: {
   steps: RailStep[]; active: boolean; open: boolean; onToggle: () => void;
 }) {
@@ -220,14 +225,31 @@ export function ProcessRail({ steps, active, open, onToggle }: {
   // 认得出的 agent 翻成展示名，认不出的（后端加了新 agent）原样显示 id
   const agentName = (id: string) =>
     (id === 'supervisor' ? HUB_NAME : AGENT_LABEL_KEY[id] ? t(AGENT_LABEL_KEY[id]) : null);
+
+  const experts = new Set<string>();
+  const sites = new Set<string>();
+  let searching = false;
+  for (const { item } of steps) {
+    if (item.kind === 'expert') experts.add(item.agent);
+    if (item.kind === 'search') {
+      item.sources.forEach(s => sites.add(s.url));
+      if (item.active) searching = true;
+    }
+  }
+  const summary = active
+    ? (searching ? t('rail.searchingNoQuery') : t('rail.sumWorking'))
+    : sites.size > 0 ? t('rail.searched', { count: sites.size })
+      : experts.size > 0 ? t('rail.sumExperts', { count: experts.size })
+        : t('rail.title', { count: steps.length });
+
   return (
-    <div className="max-w-[95%]">
+    <div>
       <button
         onClick={onToggle}
         className="flex items-center gap-1.5 text-[11px] font-bold text-muted-foreground hover:text-foreground py-0.5"
       >
         <ChevronRight className={cn('w-3 h-3 transition-transform duration-200', open && 'rotate-90')} />
-        {t('rail.title', { count: steps.length })}
+        {summary}
         {active && <Loader2 className="w-3 h-3 animate-spin text-primary" />}
       </button>
       <div className={cn(
@@ -311,7 +333,7 @@ export function HitlCard({ item, onDecide, submitting }: {
       <div className="flex items-center gap-2">
         <ShieldQuestion className="w-4 h-4 text-primary shrink-0" />
         <span className="text-xs font-black">{t('hitl.title')}</span>
-        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-primary/10 text-primary">{item.symbol}</span>
+        <span className="text-[10px] font-bold px-2 py-0.5 bg-primary/10 text-primary">{item.symbol}</span>
       </div>
       <p className="text-xs text-muted-foreground leading-relaxed">{item.reason}</p>
       {item.status === 'pending' ? (

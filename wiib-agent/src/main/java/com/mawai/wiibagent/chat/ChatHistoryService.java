@@ -112,6 +112,11 @@ public class ChatHistoryService {
                 .toList();
     }
 
+    /** 我的全部会话号（清空全部会话时逐个删要用）。 */
+    public List<String> sessionIds(long userId) {
+        return messageMapper.selectSessionIds(userId);
+    }
+
     /** 删除整个会话的展示记录，调用方已做归属校验。 */
     public void deleteSession(String sessionId) {
         messageMapper.delete(new LambdaQueryWrapper<WorkbenchChatMessage>()

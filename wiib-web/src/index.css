@@ -205,13 +205,6 @@ html.pwa nav a {
   border: 1px solid var(--color-border);
 }
 
-/* 横滚行两端的渐隐（对话输入区那排快捷提问）：滚动条是藏起来的，靠这层遮罩告诉用户"这边还有"。
-   --fade-l/--fade-r 由 JS 按滚动位置写，滚到头的那一侧自动收成 0 */
-.hscroll-fade {
-  -webkit-mask-image: linear-gradient(to right, transparent 0, #000 var(--fade-l, 0px), #000 calc(100% - var(--fade-r, 0px)), transparent 100%);
-          mask-image: linear-gradient(to right, transparent 0, #000 var(--fade-l, 0px), #000 calc(100% - var(--fade-r, 0px)), transparent 100%);
-}
-
 /* 微标签：小号宽字距灰字，卡片标题/表头用。
    落在 components 层：调用方叠 text-primary / text-foreground 这类工具类能盖掉这里的 color 和 font-size */
 @layer components {
