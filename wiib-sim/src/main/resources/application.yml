@@ -110,7 +110,7 @@ ldc:
   client-id: ${LDC_CLIENT_ID:}
   client-secret: ${LDC_CLIENT_SECRET:}
   enabled: ${LDC_ENABLED:false}
-  claim-days: ${LDC_CLAIM_DAYS:7}
+  claim-days: ${LDC_CLAIM_DAYS:3650}   # 十年=不设期限；奖是人家挣的，晚来也该给
 
 ---
 # 哨兵模式(线上高可用，配合 redis-compose.yml)：.env 里 SPRING_PROFILES_ACTIVE=sentinel 启用，

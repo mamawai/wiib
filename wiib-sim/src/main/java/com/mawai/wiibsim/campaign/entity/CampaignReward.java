@@ -50,7 +50,7 @@ public class CampaignReward {
      * UPDATE campaign_reward SET status='FAILED', error_msg='人工重置：上次领取中断'
      * WHERE id = ? AND status='CLAIMED';
      * </pre>
-     * 重置前确认活动仍是 SETTLING 且没过 ldc.claim-days，否则用户点下去仍被拒。
+     * 重置前确认活动仍是 SETTLING，否则用户点下去仍被拒（另一道闸 ldc.claim-days 默认十年，撞不上）。
      * 单号不变所以重置不会重复付款；<b>唯一不许做的是另起新单号</b>，见 {@link #outTradeNo}。
      */
     private String status;

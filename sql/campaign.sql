@@ -126,7 +126,7 @@ COMMENT ON COLUMN campaign_reward.status       IS $$PENDING 待领取 / CLAIMED 
 【卡在 CLAIMED 怎么救】发放最坏耗时约 2 分钟，其间进程重启/发版，或收尾的 markSuccess/markFailed 失败，行会永远停在 CLAIMED，用户只看得到"上一次领取正在处理中"且无法自愈。手工重置：
     UPDATE campaign_reward SET status='FAILED', error_msg='人工重置：上次领取中断' WHERE id=? AND status='CLAIMED';
 FAILED 可重领，且 out_trade_no 不变，那次中断若其实已发成功，重领会撞唯一索引被判 SUCCESS，绝不会重复付款。
-【重置完还得过两道闸，否则用户点下去仍是死路】claim() 在看状态之前先判两件事：① 活动必须还是 SETTLING（翻成 DONE 就报"活动尚未结算，暂不可领取"）；② created_at + ldc.claim-days（默认 7 天）不能过（过了报"领取期限已过，请联系管理员"，第 8 天才重置必撞这句，得先把 ldc.claim-days 调大或改 created_at）。重置前先 SELECT 一眼这两个值：
+【重置完还得过两道闸，否则用户点下去仍是死路】claim() 在看状态之前先判两件事：① 活动必须还是 SETTLING（翻成 DONE 就报"活动尚未结算，暂不可领取"）；② created_at + ldc.claim-days 不能过——默认十年，等于不设期限，只有把它调小过才可能撞上"领取期限已过，请联系管理员"，那就调回大值或改 created_at。重置前先 SELECT 一眼这两个值：
     SELECT r.status, r.created_at, c.status FROM campaign_reward r JOIN campaign c ON c.id = r.campaign_id WHERE r.id = ?;
 切记别另起新单号补发，那才是真会双倍付款的操作。$$;
 COMMENT ON COLUMN campaign_reward.out_trade_no IS $$WIIB_{campaignCode}_{userId}，固定可重算，整套幂等的基石。

@@ -25,9 +25,10 @@ public class LdcProperties {
 
     /**
      * 领取期限（天），从 campaign_reward.created_at 起算，过期后 claim() 直接拒。
-     * 过期后要补发得先调大这个值（或改 created_at），光重置状态不够——这道闸还在。
+     * 默认十年 = 不设期限。真要卡期限就调小，那时过期补发得先调回大值（或改 created_at），
+     * 光重置状态不够——这道闸还在。
      */
-    private int claimDays = 7;
+    private int claimDays = 3650;
 
     /** 开关开着且凭证齐全才算真启用 */
     public boolean ready() {
