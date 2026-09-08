@@ -52,6 +52,8 @@ docs/*.md
 !docs/deploy.md
 docs/superpowers/plans/*.md
 docs/superpowers/specs/*.md
+### 海报设计稿只留本地，不入库 ###
+docs/ui-poster/
 ###
 export-md
 
