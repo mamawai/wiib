@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Languages } from 'lucide-react';
 import { cn } from '../lib/utils';
-import { applyLanguage } from '../lib/language';
-import type { Lang } from '../i18n';
+import i18n, { type Lang } from '../i18n';
 
 /**
  * 首次进门的语言选择。挂在 App 的路由外层（不是 Layout）——/login 在 Layout 之外，
@@ -23,13 +22,13 @@ const CHOICES: { lang: Lang; name: string; body: string; footer: string }[] = [
   {
     lang: 'en',
     name: 'English',
-    body: 'The interface and everything the AI writes — decision logs, reviews, chat answers — come back in English.',
+    body: 'Interface in English. The language the AI writes in is a separate setting on the Model config page.',
     footer: 'You can change this any time from the top bar.',
   },
   {
     lang: 'zh',
     name: '中文',
-    body: '界面与 AI 产出都用中文——决策日志、复盘、研判回答，都是中文写的。',
+    body: '界面用中文。AI 用哪门语言写，在「模型配置」页另设。',
     footer: '随时可以在顶栏切换。',
   },
 ];
@@ -57,7 +56,7 @@ export function LanguageGate() {
   if (!open) return null;
 
   const choose = (lang: Lang) => {
-    applyLanguage(lang);
+    void i18n.changeLanguage(lang);
     try {
       localStorage.setItem(CHOSEN_KEY, '1');
     } catch { /* 存不下就下次再问一遍，不影响这次的选择生效 */ }
@@ -67,7 +66,7 @@ export function LanguageGate() {
   return (
     // 没有关闭键、不响应 ESC、点遮罩也不关：两个选项等权且都是一步到位，
     // 不存在"没看懂需要逃生"的情况；也只有这样"选过一次"才真的是选过
-    <div className="fixed inset-0 z-[300] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
+    <div className="fixed inset-0 z-[300] flex items-center justify-center p-4 bg-black/70">
       <div className="pt-card rounded-lg w-full max-w-2xl overflow-hidden">
         <div className="flex items-center gap-2 px-5 py-3 border-b border-border">
           <Languages className="w-3.5 h-3.5 text-primary" />

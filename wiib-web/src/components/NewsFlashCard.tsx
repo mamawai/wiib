@@ -1,84 +1,95 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Newspaper, ExternalLink, Languages } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
+import { X } from 'lucide-react';
 import { Skeleton } from './ui/skeleton';
-import { quantApi } from '../api';
-import type { NewsFlashItem } from '../types';
+import { useStagger } from '../hooks/useStagger';
+import { quantApi, type NewsEventItem } from '../api';
+import { currentLang } from '../i18n';
+import { dayBounds, fmtDate, fmtTime, DAY_MS } from '../lib/utils';
 
-/** "2026-07-09 00:30:12" → "07-09 00:30" */
-function fmtTime(t: string): string {
-  return t?.length >= 16 ? t.slice(5, 16) : t ?? '';
-}
+/** 首页快讯与最新成交并排，两卡列表共用这个高度上限，卡底才齐平（LatestTradesCard 引用同一个） */
+export const FEED_MAX_H = 'max-h-[560px] overflow-y-auto';
 
 /**
- * 实时快讯卡（首页，与最新成交并列）：BlockBeats 重要快讯，
- * 数据走 quant 侧内存缓存（未过期不打上游），前端 60s 轻轮询。
- * <p>源是中文快讯：取原文还是译文由后端按用户语言定，前端只按 translated 打个机器译文标——
- * 与 AI 侧取的是同一份，不会出现"用户看到译文、trader 读到原文"。
+ * 实时快讯（首页，与最新成交并列）：读 news_event 存档（采集轨定时打标+翻译后落库）。
+ * <p>默认最新 100 条 + 60s 轻轮询；也可按天翻看，选了日期就只拉那一天并停掉轮询。
+ * <p>中英两套一起到，切语言不重拉。英文界面只展示标题正文都译好的那些，没译完的不展示，不拿中文凑。
  */
 export function NewsFlashCard() {
   const { t } = useTranslation('home');
-  const [items, setItems] = useState<NewsFlashItem[] | null>(null);
+  const en = currentLang() === 'en';
+  const [items, setItems] = useState<NewsEventItem[] | null>(null);
+  // null=最新（轮询）；yyyy-MM-dd=只看那一天（拉一次）
+  const [day, setDay] = useState<string | null>(null);
+  const listRef = useStagger<HTMLDivElement>();
+  const today = fmtDate();
 
   useEffect(() => {
     let alive = true;
-    const load = () => quantApi.news()
+    const bounds = day ? dayBounds(day) : null;
+    const load = () => quantApi.news(bounds?.from, bounds?.to)
       .then(list => { if (alive) setItems(list); })
       .catch(() => { if (alive) setItems(prev => prev ?? []); });
     load();
-    const t = setInterval(load, 60_000);
-    return () => { alive = false; clearInterval(t); };
-  }, []);
+    if (bounds) return () => { alive = false; };
+    const timer = setInterval(load, 60_000);
+    return () => { alive = false; clearInterval(timer); };
+  }, [day]);
+
+  // 换天先清成骨架，别让上一天的列表挂着
+  const changeDay = (d: string | null) => { setItems(null); setDay(d); };
+  // 没选日期时从今天起步
+  const shiftDay = (delta: number) => changeDay(fmtDate(dayBounds(day ?? today).from + delta * DAY_MS));
+
+  const shown = items == null ? null : en ? items.filter(n => n.titleEn && n.contentEn) : items;
 
   return (
-    <Card className="flex flex-col">
-      <CardHeader className="pb-2">
-        <CardTitle className="flex items-center gap-2">
-          <Newspaper className="w-3.5 h-3.5 text-primary" />
-          {t('news.title')}
-          <span className="led ml-1" />
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="pt-0 flex-1 overflow-hidden">
-        {items == null ? (
-          <div className="space-y-2.5 pt-1">
-            {Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-8" />)}
-          </div>
-        ) : items.length === 0 ? (
-          <div className="py-10 text-center text-sm text-muted-foreground">{t('news.empty')}</div>
-        ) : (
-          // overflow-x-hidden + break-words：正文全文展示后，长链接/无空格长串不能把卡顶出横向滚动条
-          <div className="max-h-96 overflow-y-auto overflow-x-hidden -mx-1 px-1">
-            {items.map(n => (
-              <a
-                key={n.id}
-                href={n.url || undefined}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="group flex gap-2.5 py-2 border-b border-border/60 last:border-0 hover:bg-surface-hover -mx-2 px-2 rounded-md transition-colors"
-              >
-                <span className="num text-[10px] text-muted-foreground shrink-0 pt-0.5 inline-flex items-center gap-1">
-                  {fmtTime(n.createTime)}
-                  {n.translated && <Languages className="w-3 h-3 opacity-50" aria-label={t('news.translated')} />}
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="block text-xs font-semibold leading-snug break-words group-hover:text-primary transition-colors">
-                    {n.title}
-                    {n.url && <ExternalLink className="inline w-2.5 h-2.5 ml-1 opacity-40" />}
-                  </span>
+    <>
+      <div className="sec-h flex-wrap">
+        <h2>{t('news.title')}</h2>
+        {/* 按天翻看：前后一天 + 日期框；清掉回到最新 */}
+        <div className="ml-auto self-center flex items-center gap-1.5">
+          <button type="button" className="btn xs" onClick={() => shiftDay(-1)}>{t('news.prevDay')}</button>
+          <input type="date" value={day ?? ''} max={today}
+                 onChange={e => changeDay(e.target.value || null)}
+                 className="input num h-7 px-2 text-[13px]" />
+          <button type="button" className="btn xs disabled:opacity-40" disabled={!day || day >= today}
+                  onClick={() => shiftDay(1)}>{t('news.nextDay')}</button>
+          {day && (
+            <button type="button" className="btn xs" aria-label={t('news.allDays')} onClick={() => changeDay(null)}>
+              <X className="w-3 h-3" />
+            </button>
+          )}
+        </div>
+      </div>
+      {shown == null ? (
+        <div className="space-y-4">
+          {Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-11" />)}
+        </div>
+      ) : shown.length === 0 ? (
+        <div className="py-10 text-center text-sm text-muted-foreground">{day ? t('news.emptyDay') : t('news.empty')}</div>
+      ) : (
+        <div ref={listRef} className={FEED_MAX_H}>
+          {shown.map(n => {
+            const title = en ? n.titleEn : n.title;
+            const content = en ? n.contentEn : n.content;
+            return (
+              <div key={n.id} className="grid grid-cols-[56px_1fr] gap-4 py-4 border-b border-border">
+                <span className="num text-[13px] text-muted-foreground pt-[3px]">{fmtTime(n.publishedAt)}</span>
+                <div className="min-w-0">
+                  {n.url
+                    ? <a href={n.url} target="_blank" rel="noopener noreferrer" className="block text-[18px] font-bold tracking-[-0.01em] leading-[1.35] break-words">{title}</a>
+                    : <div className="text-[18px] font-bold tracking-[-0.01em] leading-[1.35] break-words">{title}</div>}
                   {/* 全文不截断：2/3 宽度是给全文腾的，截两行就白拿这个宽度了 */}
-                  {n.plain && (
-                    <span className="block text-[11px] text-muted-foreground leading-relaxed mt-0.5 break-words">
-                      {n.plain}
-                    </span>
+                  {content && (
+                    <div className="mt-1 max-w-[72ch] text-sm text-muted-foreground leading-[1.45] break-words">{content}</div>
                   )}
-                </span>
-              </a>
-            ))}
-          </div>
-        )}
-      </CardContent>
-    </Card>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </>
   );
 }

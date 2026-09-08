@@ -88,7 +88,7 @@ public class ScheduledTasks {
         });
     }
 
-    /** futures资金费率扣除（每8小时：00:00、08:00、16:00） */
+    /** futures资金费率（每8小时：00:00、08:00、16:00）：拉官方费率刷缓存 + 扣费。全站只有这里调官方接口 */
     @Scheduled(cron = "0 0 0,8,16 * * *")
     public void chargeFuturesFundingFee() {
         Thread.startVirtualThread(() -> {

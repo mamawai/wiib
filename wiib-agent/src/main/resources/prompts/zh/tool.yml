@@ -1,0 +1,192 @@
+# 工具描述词表（中文）。@Tool 的 description 是编译期常量换不掉，走 LocalizedToolCallbacks
+# 用 tool.<工具名> 这条替换；词表里没有该工具就保留注解里的原描述（允许逐个搬）。
+# 描述只说"能查到什么"，不下"应该多查/少查"的行为指令——那是系统提示词交给模型的开放决策。
+tool:
+  # 快讯工具：语言在建图时烤进实例，这条只管描述——正文取哪门语言不归模型选
+  news_search: |-
+    获取最近的重要快讯列表（标题+正文+来源+时间）。快讯已是完整内容，没有单篇精读这回事。
+
+  peer_insights: |-
+    查看同侪（只读）。两种模式：
+    - 传 traderId：深看这一个人——他的最新复盘全文、他的学习笔记、当前在场计划的论点与失效条件、最近几笔已了结交易的「论点 → 结局」配对。
+    - 不传 traderId：返回本局排行榜快照（每人：名字/状态/本局收益率/已了结笔数/最新复盘一句话）。开场消息里已经给过你一份，需要重新核对时再调。
+    排行榜每行开头 [id=N] 里的 N，就是这里要传的 traderId。
+
+  # 路由工具：只用来让模型结构化地表达"下一步给谁"，方法体永远不会被执行
+  route: 决定下一步。需要真实数据时给出专家名；专家数据已够、可以作答时给 ["FINISH"]。
+
+  # 深研判：一次调用＝3 次深模型调用，描述里要把"贵"和"要用户点头"说死。
+  # 这条中文侧就是英文描述 + 中文触发词，与注解原文逐字相同，不译成中文：
+  # 描述是给模型读的，触发词要匹配用户实际会说的话，两者本就该分开取语言。
+  # 误触发一次烧 3 次深模型调用，"仅在用户明说时才调"这条约束不拿译文去换。
+  run_deep_analysis: |-
+    Run a full deep market analysis (Bull vs Bear adversarial debate + Judge verdict) for a symbol.
+    ONLY call when the user EXPLICITLY asks with words like "深度研判"/"全面分析"; for ordinary
+    trend/outlook questions answer from expert data directly - never call this uninvited.
+    EXPENSIVE: costs 3 deep-model LLM calls. Requires user approval per session.
+    If the result status is PENDING_APPROVAL, tell the user approval is needed and why - the UI
+    will show a confirmation card; after they approve, call this tool again to execute.
+    Returns: narrative, bull/range/bear scenario distribution, invalidation condition, noDirection flag.
+
+  # ---- 行情/指标数据工具（chat 的 market 专家与 trader 唤醒共用）----
+  market_snapshot: |-
+    获取加密永续合约标的的实时行情横截面（短周期视角，不是 K 线）。字段与符号约定：
+    - lastPrice 现价；atr 是 5m 周期的 atr14，止损距离请用 indicators 里你交易周期的 atr14
+    - price_change：{5m,15m,30m,1h,4h,24h} 各窗口涨跌幅（%）
+    - regime：按 15m 指标用固定规则打的标签——TREND_UP/TREND_DOWN（adx>25，方向看 DI 大小）、
+      SQUEEZE（adx<15 且布林带宽<1.5）、SHOCK（5m ATR 近期>2 倍长期均值，刚有冲击）、RANGE（其余）；是规则不是判断
+    - fundingDeviation：(当前费率−0.01%)÷0.03%，正=多头付费偏贵（多头拥挤），负=空头拥挤
+    - oiChangeRate：最近 4 小时持仓量变化率，原始比例（0.03=+3%），正=资金进场，负=离场
+    - lsrExtreme：散户账户多空比在最近 24 小时内的百分位映射到 [-1,1]，接近 +1=多头人数拥挤到极端，−1=空头极端
+    - topTraderBias：最近 2 小时大户持仓多空比后半段相对前半段的变化，正=大户在加多，负=在加空
+    - takerPressure：最近 2 小时主动买卖比的变化，正=主动买入在增强；tradeDelta：最近成交的主动买占比映射到 [-1,1]，
+      正=主动买主导；largeTradeBias：大单方向，正=大单买入为主
+    - liquidationPressure：近期爆仓中多头爆仓占比映射到 [-1,1]，正=多头被爆得多（下跌中的空头力量），负=空头被爆得多；
+      liquidationVolumeUsdt 是爆仓总额
+    - bidAskImbalance / spotBidAskImbalance：合约/现货盘口前 5 档 (买量−卖量)÷总量，正=买盘厚
+    - spotPerpBasisBps：合约相对现货的基差（基点），正=合约升水
+    - fearGreed："数值(标签)"，0=极度恐惧，100=极度贪婪
+    - qualityFlags：列出的 NO_* 表示该项数据缺失，对应分值会是 0——那个 0 是"没数据"，不是"中性"
+    除 price_change/oiChangeRate/spotPerpBasisBps/atr 外，分值都在 [-1,1]，绝对值越大越极端。
+
+  option_iv: |-
+    获取标的在 Deribit 的期权隐含波动率上下文：DVOL 指数与 ATM IV 摘要。
+    用于判断期权市场定价的波动预期是否大于已实现波动率。
+
+  funding_history: |-
+    获取永续合约最近的资金费率历史（最近 30 次结算，每 8 小时一次），外加下次结算时间与
+    当前标记价。用于 carry 判断：资金费持续为正=多头付费给空头（多头拥挤），为负则相反。
+
+  orderbook_depth: |-
+    获取合约盘口前 10 档买卖挂单（价格、数量）。用于观察大额挂单墙相对现价的位置——
+    选限价单挂单位、判断近端支撑/阻力时用。
+
+  klines: |-
+    获取 Binance 合约的原始 OHLCV K 线。固定返回 192 行 [openTime(毫秒), open, high, low, close, volume]，
+    从旧到新；最后一行是尚未走完的当前 K 线（其 close 即最新价，volume 只是部分量），刚收盘的那根是它前一行。
+    末行是否走完按 openTime 判断：openTime 加一个周期晚于现在就还在走。
+    interval：5m/15m/1h/4h/1d——192 根分别覆盖 16小时 / 2天 / 8天 / 32天 / 192天。
+    当你的方法需要逐根读 K 线时才调它：验证 K 线形态、套用你自己的摆动/结构定义、
+    或细看 `kline_structure` 指给你的某一段。这是唯一给全每一根的工具——`kline_structure`
+    也带原始 K 线，但只有最近的和各关键点附近的。
+    同一 symbol+interval 若同时调 `kline_structure`，那边传 includeBars=false，
+    免得它的 focus_bars 与这里的行重复。
+
+  indicators: |-
+    获取标的的全套经典技术指标，按指定周期（5m/15m/1h/4h/1d）用最近 192 根计算，末根是尚未走完的当前 K 线。字段：
+    ma7/ma25/ma99 + ema12/ema20/ema26（均线）；ma_alignment：1=MA7>MA25>MA99 多头排列，-1=空头排列，0=纠缠；
+    rsi14 + rsi14_trend（>70 超买，<30 超卖）；
+    macd_dif/dea/hist + macd_hist_trend（动量）；macd_cross 只在末根刚发生金叉/死叉时出现（golden/death），没发生就没这个字段；
+    boll_upper/mid/lower + boll_pb（%B，0~100：>100 收在上轨之上，<0 收在下轨之下，50 在中轨）
+    + boll_bandwidth（(上轨−下轨)÷中轨×100；收窄=挤压，扩张=趋势中）；
+    atr14（Wilder RMA 波动率；常用的止损距离单位）；
+    kdj_k/d/j；adx + plus_di/minus_di（adx>25 趋势，<15 震荡；方向看 plus_di 与 minus_di 谁大）；
+    obv/obv_ma20/obv_trend + volume_ma20/volume_ratio（量能确认；volume_ratio=末根量÷20 根均量）；
+    close_trend。各 *_trend 字段取值：rising_5=连续 5 根上行、falling_5=连续 5 根下行、mostly_up/mostly_down=多数上行/下行、sideways=涨跌各半。
+
+  kline_structure: |-
+    与 `klines` 同一份 192 根 K 线的结构摘要——路径、分段、量价分布与关键价位，都替你算好。
+    只给中性事实：不下趋势/反转结论，判断是你的事。
+    用数字前先读这几条：
+    - atr14 是 Wilder RMA——与 `indicators` 工具报的完全同值。avg_tr_* 是 True Range 的
+      简单算术平均：记忆更短、更贴当前波动，但它不是 ATR，两者绝不能混用。
+    - swings 是 ±swingWindow 根内的局部极值。最后 swingWindow 根永远不可能入选
+      （右侧尚未确认），刚发生的转折不在里面。
+    - segments_swing 按摆动点切段，相邻段共享边界那一根，各段成交量相加会大于
+      volume.total，不要求和。
+    - 所有 idx 都指向与 `klines` 同一 symbol+interval 的同一行序。
+    给到你的是算好的路径加 focus_bars——最近 N 根与各关键点附近的原始 K 线；
+    要每一根原始 K 线请用 `klines`。
+
+  # ---- trader 专家的只读档案工具（chat 侧，userId 建叶子时烤死）----
+  trader_overview: |-
+    获取当前用户 AI 交易员的概况：状态（RUNNING/PAUSED/LIQUIDATED 及原因）、权益与初始资金、
+    轮次、交易标的、唤醒周期、仓位规格，以及完整的复盘笔记（它至今学到了什么）。
+    用户还没创建交易员时返回 hasTrader=false。
+
+  trader_positions: |-
+    获取当前用户 AI 交易员的在场持仓：标的、方向、数量、开仓价、杠杆、未实现盈亏，
+    以及当前生效的止损/止盈单。用户还没创建交易员时返回 hasTrader=false。
+
+  trader_decisions: |-
+    获取当前用户 AI 交易员最近的决策时间线，新的在前。每条含 kind（TRADE=例行唤醒 /
+    ALERT=波动警报唤醒 / REVIEW=每日复盘）、状态、权益、调过的工具，以及完整的推理全文。
+    回答"它那笔为什么这么做"就用它——推理全文就是答案。
+
+  trader_plans: |-
+    获取当前用户 AI 交易员的交易计划：全部在场计划外加最近归档的几条。每条计划带论点
+    （playType）、引用的数据（signalsUsed）、失效条件、开仓/止损/目标价，以及止损移动的修订史。
+
+  # ---- 对 trader 动手的三个表单工具（chat 汇总者持有；只弹表单，执行权在用户手指上）----
+  wake_trader: |-
+    为用户打开「立即唤醒交易员」表单。重要：这不会唤醒交易员——只是弹一张卡片，
+    上面有它上次/下次唤醒时间和一个由用户自己按的按钮。
+    唤醒真实且昂贵（烧用户的模型额度，可能真开仓/平仓）——正因如此触发权在用户不在你。
+    绝不能说交易员已被唤醒；要说表单已打开、等用户确认。
+
+  review_trader_now: |-
+    为用户打开「立即复盘」表单。重要：这不会执行复盘——只是弹一张卡片，
+    上面有上次复盘时间、有没有新素材和一个由用户自己按的按钮。执行一次要烧一次深模型调用。
+    绝不能说复盘已经跑完，更不能假装知道复盘说了什么；要说表单已打开。
+
+  leave_note_to_trader: |-
+    打开「给交易员留言」表单，把你按用户原话起草的留言预填进去。
+    重要：这不会保存留言——用户要审你的草稿、设定它随几轮唤醒生效，然后自己按保存。
+    留言是随后 N 轮唤醒注入后即抹掉的临时话；长期规则该写进交易员配置页的自定义提示词，不在这。
+    绝不能说留言已保存；要说表单已打开、草稿在里面。
+
+  # ---- 唤醒交易工具（trader 醒来时挂的动作工具；护栏由服务端强制，描述只是说明书）----
+  get_account: |-
+    获取你的完整账户状态：可用余额、在场持仓（含 id、方向、数量、开仓价、杠杆、未实现盈亏、
+    强平价、当前止损/止盈）与未成交限价单。这份状态每轮已注入开场白的【当前账户】，通常不用调它；
+    只在本轮自己动过手后核对账户时用。
+
+  open_position: |-
+    在你的模拟账户开合约仓位（全仓模式）。硬规则（违反即拒，拒因可修正、并附带确切的允许区间）：
+    杠杆必须落在主人配置的区间内——那是区间不是上限，选太低同样被拒；开新仓时保证金
+    （=数量×价格÷杠杆）必须落在配置的权益占比区间内（加仓豁免）；同一标的的杠杆必须与
+    已有持仓或挂单一致；LIMIT 价须在标记价 ±5% 内；stopLossPrice 与 takeProfitPrice 都必填且方向正确。
+    playType 是论点标签：BREAKOUT/PULLBACK/REVERSAL/TREND_FOLLOW/RANGE/NEWS/FUNDING/OTHER。
+    signalsUsed：一句话，引用论点所依据的具体数据字段。
+    invalidationCondition：能证明论点错了的市场条件（不是盈亏数字）——它进入该仓位的计划；
+    它没被触发、价格没到目标位、主人也没发话，就没有主动平仓的理由。
+    止损价、止盈价（即计划目标位）、失效条件一起落进计划，下一轮开场白原样回注给你。
+
+  close_position: |-
+    按 positionId（见开场白【当前账户】的持仓，或 get_account）市价平掉持仓的全部或一部分。
+    quantity：要平的币数；传持仓全量即全平。reason：一句话说明为什么现在平。
+
+  set_stop_loss: |-
+    替换持仓的止损（positionId 见开场白【当前账户】的持仓，或 get_account）。新止损始终覆盖整个仓位——不传数量。
+    只许收紧：LONG 的止损只能上移、SHORT 的只能下移（相对当前止损）——放宽止损说明论点
+    已经动摇，去核对失效条件。不许把止损贴到现价旁边逼它秒触发——那是亏损中的恐慌平仓
+    换了个马甲；论点若已失效，就明说并用 close_position。reason 必填，进入该仓位公开的
+    计划修订史。
+
+  set_take_profit: |-
+    替换持仓的止盈（positionId 见开场白【当前账户】的持仓，或 get_account）。新止盈始终覆盖整个仓位——不传数量。
+    只许远离：LONG 的目标只能上移、SHORT 的只能下移——把 LONG 目标下调到现价附近
+    就是变相的恐慌平仓；想提前离场，就引用失效条件并用 close_position。
+    reason 必填（进入公开的计划修订史）。
+
+  write_plan: |-
+    给一个没有计划记录的在场持仓补立交易计划（positionId 见开场白【当前账户】的持仓，或 get_account）。
+    止损价取仓位当前挂着的止损；targetPrice 不传就取当前挂着的止盈。
+    已有计划的仓位会被拒——计划不可改，改论点的合法途径只有加仓或平掉重开。
+
+  cancel_order: 按 orderId（见开场白【当前账户】的挂单，或 get_account 的 pendingOrders）撤掉一张未成交限价单。
+
+  # 行为分析：一次调用＝10 个内部端点 + 一次大 prompt 的深模型调用。同 run_deep_analysis，
+  # 描述保持英文只换触发词——描述给模型读，触发词要匹配用户真会说的话。
+  # 报告整份走 SSE 渲染成卡片，回模型的是裁剪版，所以描述里要交代"别复述数字，去谈它"
+  analyze_my_behavior: |-
+    Run a full behaviour analysis of THIS user's own account across every dimension of the
+    platform (crypto spot, tokenized US equities, futures, prediction, the three games) plus
+    a risk profile and targeted suggestions.
+    ONLY call when the user EXPLICITLY asks about their own habits/style/risk profile, e.g.
+    "分析我的行为"/"我是什么类型的交易者"/"我的风险偏好" - never call this uninvited.
+    EXPENSIVE: 10 internal data calls plus one large deep-model call. Results are cached for
+    30 minutes, so calling it twice in a row gains nothing.
+    The full report is rendered as a card in the chat UI. Your job afterwards is to talk about
+    it, not to recite every number - unless cardShown is false, in which case the user cannot
+    see the card and you must state the key findings yourself.

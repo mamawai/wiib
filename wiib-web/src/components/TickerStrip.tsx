@@ -1,10 +1,8 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import NumberFlow from '@number-flow/react';
-import { cn } from '../lib/utils';
-import { COIN_MAP } from '../lib/coinConfig';
-import { cryptoApi, futuresApi, bstockApi } from '../api';
-import { useCryptoStream } from '../hooks/useCryptoStream';
+import { bstockApi } from '../api';
+import { useCoinQuote, useStockQuote, type Quote } from '../hooks/useQuote';
 import type { BStock } from '../types';
 
 /** NumberFlow 要的是 Intl 参数而非格式化后的字符串，按价位档给小数位 */
@@ -14,58 +12,7 @@ function fractionDigits(price: number): number {
   return 5;
 }
 
-interface Quote { key: string; name: string; price: number | null; pct: number | null; to: string; live: boolean }
-
-/** 单币报价：实时流价 + 1h×25 根K线首根收盘作 24h 基准（与行情卡同口径） */
-function useCoinQuote(symbol: string): Quote {
-  const cfg = COIN_MAP[symbol];
-  const tick = useCryptoStream(symbol, cfg.futuresOnly ? 'futures' : 'spot');
-  const [base, setBase] = useState<number | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    const load = cfg.futuresOnly ? futuresApi.klines : cryptoApi.klines;
-    load(symbol, '1h', 25)
-      .then(rows => { if (!cancelled && rows?.length) setBase(Number(rows[0][4])); })
-      .catch(() => {});
-    return () => { cancelled = true; };
-  }, [symbol, cfg.futuresOnly]);
-
-  const price = (cfg.futuresOnly ? (tick?.fp ?? tick?.price) : tick?.price) ?? null;
-  const pct = price != null && base ? ((price - base) / base) * 100 : null;
-  return { key: symbol, name: cfg.name, price, pct, to: `/coin/${symbol}`, live: true };
-}
-
-/**
- * 美股报价：bStock 的价并在 Spot 流里（getAllSpotSymbols = crypto ∪ stock），
- * 订阅方式与币种一致；24h 基准同样取 1h×25 首根收盘，与上面的币种口径对齐。
- * stock 为 undefined（列表还没回来）时 useCryptoStream 收 undefined 自动空转。
- */
-function useStockQuote(stock: BStock | undefined): Quote {
-  const symbol = stock?.symbol;
-  const tick = useCryptoStream(symbol, 'spot');
-  const [base, setBase] = useState<number | null>(null);
-
-  useEffect(() => {
-    if (!symbol) return;
-    let cancelled = false;
-    bstockApi.klines(symbol, '1h', 25)
-      .then(rows => { if (!cancelled && rows?.length) setBase(Number(rows[0][4])); })
-      .catch(() => {});
-    return () => { cancelled = true; };
-  }, [symbol]);
-
-  const price = tick?.price ?? stock?.price ?? null;
-  const pct = price != null && base ? ((price - base) / base) * 100 : (stock?.changePct ?? null);
-  return {
-    key: symbol ?? '',
-    name: stock?.ticker ?? stock?.name ?? '',
-    price, pct,
-    to: `/bstock/${symbol}`,
-    live: true,
-  };
-}
-
+/** 一格：代号 + 价 + 涨跌幅，字号/间距全走 .ticker 的 b/em/set */
 function TickerCell({ q, onGo }: { q: Quote; onGo: (to: string) => void }) {
   const up = (q.pct ?? 0) >= 0;
   return (
@@ -73,29 +20,26 @@ function TickerCell({ q, onGo }: { q: Quote; onGo: (to: string) => void }) {
       type="button"
       tabIndex={-1}
       onClick={() => onGo(q.to)}
-      className="flex items-center gap-1.5 px-3 h-full text-[11px] num whitespace-nowrap hover:bg-surface-hover transition-colors cursor-pointer"
+      className="bg-transparent border-0 p-0 [font:inherit] text-inherit cursor-pointer"
     >
-      <span className="font-semibold text-foreground font-sans">{q.name}</span>
+      <b>{q.name}</b>
       {q.price == null
         ? <span className="text-muted-foreground">—</span>
         : q.live
           ? <NumberFlow
               value={q.price}
               format={{ maximumFractionDigits: fractionDigits(q.price), minimumFractionDigits: 2 }}
-              className="text-muted-foreground"
             />
-          : <span className="text-muted-foreground">{q.price.toLocaleString('en-US', { maximumFractionDigits: 2, minimumFractionDigits: 2 })}</span>}
+          : <span>{q.price.toLocaleString('en-US', { maximumFractionDigits: 2, minimumFractionDigits: 2 })}</span>}
       {q.pct != null && (
-        <span className={cn('font-semibold', up ? 'text-gain' : 'text-loss')}>
-          {up ? '+' : ''}{q.pct.toFixed(2)}%
-        </span>
+        <em className={up ? 'up' : 'dn'}>{up ? '+' : ''}{q.pct.toFixed(2)}%</em>
       )}
     </button>
   );
 }
 
 /**
- * 行情副条：顶栏下 26px 报价条，横向缓慢无缝滚动（悬停暂停），点击直达交易页。
+ * 行情副条：顶栏下一行报价，横向缓慢无缝滚动（悬停暂停），点击直达交易页。
  * 盘面 = 主流三币 + 黄金 + 美股市值 Top 4，八格全走实时流。仅桌面显示。
  */
 export function TickerStrip() {
@@ -124,17 +68,15 @@ export function TickerStrip() {
   const quotes: Quote[] = [btc, eth, sol, xau, stock0, stock1, stock2, stock3].filter(q => q.key);
 
   // 两份相同内容首尾相接：数据/订阅只有一份，DOM 渲染两遍
-  const half = (hidden: boolean): ReactNode => (
-    <div className="flex items-stretch h-full shrink-0" aria-hidden={hidden}>
-      {quotes.map(q => <TickerCell key={`${hidden ? 'b' : 'a'}-${q.key}`} q={q} onGo={navigate} />)}
-    </div>
-  );
+  const cells = (prefix: string) => quotes.map(q => <TickerCell key={`${prefix}-${q.key}`} q={q} onGo={navigate} />);
 
   return (
-    <div className="hidden md:block h-[26px] border-b border-border bg-card-2 overflow-hidden group">
-      <div className="flex h-full w-max animate-[wiib-ticker_50s_linear_infinite] group-hover:[animation-play-state:paused] motion-reduce:animate-none">
-        {half(false)}
-        {half(true)}
+    <div className="wrap hidden md:block">
+      <div className="ticker num">
+        <div className="track">
+          <span className="set">{cells('a')}</span>
+          <span className="set" aria-hidden>{cells('b')}</span>
+        </div>
       </div>
     </div>
   );

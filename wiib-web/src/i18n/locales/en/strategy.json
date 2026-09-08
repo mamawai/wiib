@@ -22,12 +22,10 @@
     "name": {
       "fibo": "Fibo Retracement",
       "turtle": "Turtle Breakout",
-      "sqzmom": "Sqz Momentum",
-      "liqfade": "Liq Fade"
+      "sqzmom": "Sqz Momentum"
     },
     "desc": {
       "fibo": "Limit orders at Fibonacci retracements",
-      "liqfade": "Fading liquidation cascades",
       "sqzmom": "Squeeze momentum breakout",
       "turtle": "4H 90/15 channel breakout"
     },
@@ -85,11 +83,7 @@
     "strategy": {
       "fibo": "15m impulse legs, a limit order parked in the 0.66 golden pocket for the pullback; SL at the leg origin, TP at the prior high/low, gated by the 1h SMA200 trend",
       "turtle": "4h channel breakout entered on touch, ATR stop, exit on the opposite channel — classic trend following",
-      "sqzmom": "4h BB/KC squeeze builds up, market entry with the momentum once it releases; signals are sparse",
-      "liqfade": "5m liquidation cascade with three signatures (drop / premium / taker sell pressure) — fade it long on a hit, timed exit after 1h",
-      "note": {
-        "liqfade": "Needs the local taker/premium side data; a window without enough coverage fails outright"
-      }
+      "sqzmom": "4h BB/KC squeeze builds up, market entry with the momentum once it releases; signals are sparse"
     },
     "speed": {
       "slow": "Slow",

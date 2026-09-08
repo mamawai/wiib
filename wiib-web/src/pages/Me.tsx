@@ -13,7 +13,7 @@ import { ProfilePublicToggle } from '../components/ProfilePublicToggle';
 import { LanguageSettingRow } from '../components/LanguageSwitcher';
 import { useNotificationPanel } from '../hooks/useNotificationPanel';
 import { userApi } from '../api';
-import { Trophy, Gamepad2, Sun, Moon, LogOut, ChevronRight, User, LineChart, RotateCcw, MessageSquare, Bell, Receipt, Gift, FlaskConical, Swords } from 'lucide-react';
+import { Trophy, Gamepad2, Sun, Moon, LogOut, ChevronRight, User, LineChart, RotateCcw, MessageSquare, Bell, Receipt, Gift, FlaskConical, Swords, Info, ExternalLink, type LucideIcon } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 export function Me() {
@@ -61,7 +61,8 @@ export function Me() {
     }
   };
 
-  const items = [
+  // external=站外地址，走新标签页而不是路由跳转
+  const items: { icon: LucideIcon; label: string; to: string; color: string; external?: boolean }[] = [
     // 活动同样只有这一个手机端入口（底栏 5 格已满），放第一位——限时的东西藏深了就没人看
     { icon: Gift, label: t('me.nav.campaign'), to: '/campaign', color: 'text-amber-400' },
     // 账单没进顶栏/底栏（导航已经满了），另一个入口在持仓页仓位历史旁边
@@ -74,6 +75,8 @@ export function Me() {
     { icon: Trophy, label: t('me.nav.ranking'), to: '/ranking', color: 'text-amber-400' },
     { icon: Gamepad2, label: t('me.nav.games'), to: '/games', color: 'text-pink-400' },
     { icon: MessageSquare, label: t('me.nav.comments'), to: '/comments', color: 'text-teal-400' },
+    // 介绍站是单独部署的静态站，手机端从这里进
+    { icon: Info, label: t('me.nav.intro'), to: 'https://intro.wtfibought.com', color: 'text-sky-400', external: true },
   ];
 
   // 整页都是本人数据，user 没到之前没什么可显示的（路由已挡住未登录，null 只可能是还在拉）
@@ -134,19 +137,23 @@ export function Me() {
       {/* 功能入口 */}
       <Card>
         <CardContent className="pt-5 divide-y divide-border/50">
-          {items.map(({ icon: Icon, label, to, color }) => (
-            <button
-              key={to}
-              onClick={() => navigate(to)}
-              className="flex items-center gap-3 w-full py-3.5 first:pt-0 last:pb-0 text-left hover:text-primary transition-colors cursor-pointer group"
-            >
-              <div className="w-8 h-8 rounded-lg bg-surface-hover flex items-center justify-center">
-                <Icon className={cn("w-4 h-4", color)} />
-              </div>
-              <span className="flex-1 text-sm font-medium">{label}</span>
-              <ChevronRight className="w-4 h-4 text-muted-foreground group-hover:text-primary transition-colors" />
-            </button>
-          ))}
+          {items.map(({ icon: Icon, label, to, color, external }) => {
+            // 尾巴区分去向：站内是往右进一层，站外是跳出去
+            const Tail = external ? ExternalLink : ChevronRight;
+            return (
+              <button
+                key={to}
+                onClick={() => external ? window.open(to, '_blank', 'noopener,noreferrer') : navigate(to)}
+                className="flex items-center gap-3 w-full py-3.5 first:pt-0 last:pb-0 text-left hover:text-primary transition-colors cursor-pointer group"
+              >
+                <div className="w-8 h-8 rounded-lg bg-surface-hover flex items-center justify-center">
+                  <Icon className={cn("w-4 h-4", color)} />
+                </div>
+                <span className="flex-1 text-sm font-medium">{label}</span>
+                <Tail className="w-4 h-4 text-muted-foreground group-hover:text-primary transition-colors" />
+              </button>
+            );
+          })}
         </CardContent>
       </Card>
 

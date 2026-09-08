@@ -12,15 +12,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 class EtfFlowScraperTest {
 
     @Test
-    void parseLatestReadsTotalFlowFromFarsideTable() throws Exception {
-        EtfFlowScraper scraper = new EtfFlowScraper(null);
-        EtfFlowScraper.EtfFlowPoint point = scraper.parseLatest(sampleHtml());
-
-        assertEquals(java.time.LocalDate.of(2026, 4, 24), point.date());
-        assertEquals(new BigDecimal("111.7"), point.totalFlowUsdMillion());
-    }
-
-    @Test
     void parseAllReturnsEveryDailyRowAscendingSkippingTotalRow() throws Exception {
         EtfFlowScraper scraper = new EtfFlowScraper(null);
         List<EtfFlowScraper.EtfFlowPoint> points = scraper.parseAll(sampleHtml());
@@ -33,17 +24,18 @@ class EtfFlowScraperTest {
         assertEquals(new BigDecimal("111.7"), points.get(1).totalFlowUsdMillion());
     }
 
+    /** 与 collectOnce 同一套组合（finalizedPoints(parseAll)）：占位空行被剔，落库的是上一个已完结日 */
     @Test
-    void parseLatestFinalizedSkipsCurrentNewYorkPlaceholderRow() {
+    void finalizedPointsSkipCurrentNewYorkPlaceholderRow() {
         EtfFlowScraper scraper = new EtfFlowScraper(null);
-        EtfFlowScraper.EtfFlowPoint rawLatest = scraper.parseLatest(currentNewYorkDayPlaceholderHtml());
-        EtfFlowScraper.EtfFlowPoint point = scraper.parseLatestFinalized(
-                currentNewYorkDayPlaceholderHtml(), LocalDate.of(2026, 6, 10));
+        List<EtfFlowScraper.EtfFlowPoint> raw = scraper.parseAll(currentNewYorkDayPlaceholderHtml());
+        List<EtfFlowScraper.EtfFlowPoint> finalized =
+                scraper.finalizedPoints(raw, LocalDate.of(2026, 6, 10));
 
-        assertEquals(LocalDate.of(2026, 6, 9), rawLatest.date());
-        assertEquals(new BigDecimal("0.0"), rawLatest.totalFlowUsdMillion());
-        assertEquals(LocalDate.of(2026, 6, 8), point.date());
-        assertEquals(new BigDecimal("-91.4"), point.totalFlowUsdMillion());
+        assertEquals(LocalDate.of(2026, 6, 9), raw.get(raw.size() - 1).date());
+        assertEquals(new BigDecimal("0.0"), raw.get(raw.size() - 1).totalFlowUsdMillion());
+        assertEquals(LocalDate.of(2026, 6, 8), finalized.get(finalized.size() - 1).date());
+        assertEquals(new BigDecimal("-91.4"), finalized.get(finalized.size() - 1).totalFlowUsdMillion());
     }
 
     private String sampleHtml() throws Exception {

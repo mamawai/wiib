@@ -47,7 +47,7 @@ import java.util.stream.Collectors;
  *    盈亏归因互不污染。</p>
  *
  * <p>已知口径差：sim 无 GTX/post-only，挂单价已被穿越时按 taker 费成交而非拒单。
- * 持仓期钩子 onPositionBarClosed 已接（LiqFade 时间出场）；平仓归因 reason 只落 quant 日志，
+ * 持仓期钩子 onPositionBarClosed 已接（Turtle 通道退出/灾难止损）；平仓归因 reason 只落 quant 日志，
  * sim 侧 FuturesCloseRequest 无此字段不扩。</p>
  */
 @Slf4j

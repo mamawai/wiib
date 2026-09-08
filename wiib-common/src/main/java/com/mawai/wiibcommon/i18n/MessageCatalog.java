@@ -20,12 +20,7 @@ public class MessageCatalog {
     private final LangBundle bundle;
 
     public MessageCatalog() {
-        this("classpath*:messages/*/*.yml");
-    }
-
-    /** 单测用：换个目录装一套词表，不碰生产那份 */
-    public MessageCatalog(String locationPattern) {
-        this.bundle = new LangBundle("界面文案", locationPattern);
+        this.bundle = new LangBundle("界面文案", "classpath*:messages/*/*.yml");
     }
 
     /** 按当次请求的界面语言取一条 */

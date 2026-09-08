@@ -184,6 +184,23 @@ public class CacheService {
         cryptoPriceCache.put("mark:" + symbol, price);
     }
 
+    // ==================== 资金费率（结算点写，扣费与前端查询读） ====================
+
+    public record FundingRate(BigDecimal rate, long fetchedAt) {}
+
+    // 9 小时盖到下一个结算点，多出 1 小时留给结算延迟；连着两个结算点都没拉到就自然过期，前端不显示旧数
+    private static final Duration FUNDING_RATE_TTL = Duration.ofHours(9);
+
+    public void putFundingRate(String symbol, BigDecimal rate, long fetchedAtMs) {
+        stringRedisTemplate.opsForValue().set("market:funding-rate:" + symbol,
+                JSON.toJSONString(new FundingRate(rate, fetchedAtMs)), FUNDING_RATE_TTL);
+    }
+
+    public FundingRate getFundingRate(String symbol) {
+        String v = stringRedisTemplate.opsForValue().get("market:funding-rate:" + symbol);
+        return v != null ? JSON.parseObject(v, FundingRate.class) : null;
+    }
+
     // ==================== 通用缓存 ====================
 
     public void set(String key, String value, Duration duration) {

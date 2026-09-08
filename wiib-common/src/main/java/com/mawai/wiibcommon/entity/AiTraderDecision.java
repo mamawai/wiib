@@ -7,8 +7,15 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 /**
- * AI Trader 每次唤醒一行：推理全文 + 动作（含 play_type 论点标签）+ 权益快照。
- * 竞技场决策时间线与净值曲线的唯一数据源。
+ * 每次唤醒落一行，只增不改：这轮想了什么（reasoning）、调了什么工具做了什么（actionsJson）、
+ * 当时权益多少。wake_time 就是那次唤醒的K线边界。
+ * <p>
+ * kind 两类：TRADE/ALERT/MANUAL 是唤醒（例行K线/波动警报/主人手动叫醒），有权益；
+ * REVIEW/LEARN 是复盘和学习，reasoning 装的是笔记全文，没权益。
+ * status：OK 正常、ERROR 失败、SKIPPED 上轮没跑完或信号迟到——跳过也照写，时间线上不藏。
+ * <p>
+ * 三处在用：竞技场的时间线与净值曲线；下一轮唤醒回注最近几行轨迹和上一轮结论；每日复盘拼素材。
+ * reasoning 末尾的 [本轮结论] 块按 [SYMBOL] 一币一段，下游全靠这个形状切，模型没写就都退化。
  */
 @Data
 @TableName("ai_trader_decision")
@@ -73,6 +80,14 @@ public class AiTraderDecision {
      * ai_trader.memory 是滚动覆盖的"生效版本"，历史版本只活在这一列。
      */
     private String memoryAfter;
+
+    /** 唤醒过程轨迹 JSON（形状见 WakeTrace.toJson）；列表查询不背它，单独接口取。老行为空 */
+    @TableField(select = false)
+    private String traceJson;
+
+    /** 时间线行有没有过程可看（trace_json 非空），decisions() 回填 */
+    @TableField(exist = false)
+    private Boolean hasTrace;
 
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdAt;

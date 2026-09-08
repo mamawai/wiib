@@ -1,7 +1,7 @@
 package com.mawai.wiibcommon.constant;
 
 /**
- * AI 功能位名（ai_model_assignment.function_name 的契约值），现只有 quant 进程使用。
+ * AI 功能位名（ai_model_assignment.function_name 的契约值），现只有 wiib-agent 进程使用。
  * 前端 Admin.tsx 的 FUNCTION_LABEL_KEYS 需与此同步。
  * <p>
  * 只剩打标这一位：面向用户的功能位（对话、交易员、行为分析）全部走用户自带 key，

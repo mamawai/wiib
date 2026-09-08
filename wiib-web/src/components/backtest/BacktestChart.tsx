@@ -1,15 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  createChart, createSeriesMarkers, CrosshairMode, CandlestickSeries, HistogramSeries,
+  createChart, createSeriesMarkers, CandlestickSeries, HistogramSeries,
   type DeepPartial, type HandleScrollOptions, type IChartApi, type ISeriesApi,
   type ISeriesMarkersPluginApi, type SeriesMarker, type Time, type UTCTimestamp,
 } from 'lightweight-charts';
-import { Eye, EyeOff, Magnet, Trash2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useIsDark } from '../../hooks/useIsDark';
 import { useDrawings } from '../chart/useDrawings';
-import { DrawToolPicker } from '../chart/DrawToolPicker';
+import { DrawToolPopover, DrawToolRail } from '../chart/DrawToolPicker';
 import type { ChartCtx, OhlcBar } from '../../lib/chartDrawings';
+import { lwcTheme, rgba } from '../../lib/chartTheme';
 import { fmtDateTime } from '../../lib/utils';
 
 /** 与 CandleChart 同款时区约定：横轴按 UTC+8 显示且 bar 边界对齐 */
@@ -52,17 +52,14 @@ interface Props {
   bucketSec?: number;
 }
 
-/** 量柱配色与 CandleChart 同款：半透明红绿，压在蜡烛下层不抢戏 */
-const VOL_UP = 'rgba(8,153,129,.5)', VOL_DOWN = 'rgba(242,54,69,.5)';
-
 /** 行 → LWC 蜡烛点 */
 function toCandle(row: number[]) {
   return { time: toBarTime(row[0]), open: row[1], high: row[2], low: row[3], close: row[4] };
 }
 
-/** 行 → 量柱点（涨绿跌红看收盘对开盘） */
-function toVol(row: number[]) {
-  return { time: toBarTime(row[0]), value: row[5] ?? 0, color: row[4] >= row[1] ? VOL_UP : VOL_DOWN };
+/** 行 → 量柱点（涨绿跌红看收盘对开盘），颜色与 CandleChart 同款：40% 透明压在蜡烛下层 */
+function toVol(row: number[], up: string, down: string) {
+  return { time: toBarTime(row[0]), value: row[5] ?? 0, color: row[4] >= row[1] ? up : down };
 }
 
 /** 行 → 画线层 OhlcBar（time 为图表口径的秒） */
@@ -122,10 +119,11 @@ export function BacktestChart({ bars, marks, cursor, symbol, decimals = 2, heigh
   const longText = t('side.long');
   const shortText = t('side.short');
 
+  // 标记配色现读 token，换主题这次渲染就拿到新色（getComputedStyle 一次的开销可忽略）
+  const { gain, loss } = lwcTheme();
+
   // markers 预排序：按所在 bar 升序，游标推进时按可见数量切片
   const allMarkers = useMemo(() => {
-    const gain = isDark ? '#0abf95' : '#089981';
-    const loss = isDark ? '#ff5a68' : '#f23645';
     const out: { atBar: number; marker: SeriesMarker<Time> }[] = marks.map(m => {
       const isLong = m.side === 'LONG';
       const marker: SeriesMarker<Time> = m.kind === 'entry'
@@ -142,31 +140,22 @@ export function BacktestChart({ bars, marks, cursor, symbol, decimals = 2, heigh
       return { atBar: m.barIndex, marker };
     });
     return out.sort((a, b) => a.atBar - b.atBar);
-  }, [marks, isDark, longText, shortText]);
+  }, [marks, gain, loss, longText, shortText]);
 
   // 建图（主题/高度/币种变化时重建，颜色 token 才能生效；画线层 attach/detach 同一 effect 成对做）
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
+    const th = lwcTheme();
     const chart = createChart(el, {
+      ...th.options,
       width: el.clientWidth,
       height: h,
-      layout: {
-        background: { color: 'transparent' },
-        textColor: isDark ? '#878b96' : '#71737b',
-        fontSize: 11,
-        attributionLogo: false,
-      },
-      grid: {
-        vertLines: { color: isDark ? 'rgba(135,139,150,.08)' : 'rgba(113,115,123,.10)' },
-        horzLines: { color: isDark ? 'rgba(135,139,150,.08)' : 'rgba(113,115,123,.10)' },
-      },
-      crosshair: { mode: CrosshairMode.Normal },
       handleScroll: SCROLL_OPTS,
       // 底部 22% 让给量柱（量柱自己的 scale 压在 82%~100%），蜡烛不与量柱重叠
-      rightPriceScale: { borderVisible: false, scaleMargins: { top: 0.08, bottom: 0.22 } },
+      rightPriceScale: { ...th.options.rightPriceScale, scaleMargins: { top: 0.08, bottom: 0.22 } },
       timeScale: {
-        borderVisible: false, timeVisible: true, secondsVisible: false,
+        ...th.options.timeScale, timeVisible: true, secondsVisible: false,
         // 盲测时间脱敏在 tick 一层做：真实日期不上轴
         tickMarkFormatter: (time: Time) => {
           const base = blindBaseRef.current;
@@ -178,11 +167,7 @@ export function BacktestChart({ bars, marks, cursor, symbol, decimals = 2, heigh
       },
     });
     const series = chart.addSeries(CandlestickSeries, {
-      upColor: isDark ? '#0abf95' : '#089981',
-      downColor: isDark ? '#ff5a68' : '#f23645',
-      borderVisible: false,
-      wickUpColor: isDark ? '#0abf95' : '#089981',
-      wickDownColor: isDark ? '#ff5a68' : '#f23645',
+      ...th.candle,
       priceFormat: { type: 'price', precision: decimals, minMove: 1 / 10 ** decimals },
     });
     // 成交量：独立隐藏价格轴（priceScaleId ''）叠在主图底部，不占用蜡烛的价格刻度
@@ -236,13 +221,15 @@ export function BacktestChart({ bars, marks, cursor, symbol, decimals = 2, heigh
     const target = Math.min(Math.max(cursor, 0), bars.length);
     const drawn = drawnRef.current;
     const sameBars = lastBarsRef.current === bars;
+    const th = lwcTheme();
+    const vUp = rgba(th.gain, .4), vDn = rgba(th.loss, .4);
 
     if (sameBars && target === drawn && drawn !== 0) {
       // 数据没动
     } else if (sameBars && target > drawn && target - drawn <= 600 && drawn > 0) {
       for (let i = drawn; i < target; i++) {
         series.update(toCandle(bars[i]));
-        vol.update(toVol(bars[i]));
+        vol.update(toVol(bars[i], vUp, vDn));
         const o = toOhlc(bars[i]);
         idxRef.current.set(o.time, ohlcRef.current.length);
         ohlcRef.current.push(o);
@@ -250,7 +237,7 @@ export function BacktestChart({ bars, marks, cursor, symbol, decimals = 2, heigh
     } else {
       const shown = bars.slice(0, target);
       series.setData(shown.map(toCandle));
-      vol.setData(shown.map(toVol));
+      vol.setData(shown.map(r => toVol(r, vUp, vDn)));
       const ohlc: OhlcBar[] = new Array(target);
       const idx = new Map<number, number>();
       for (let i = 0; i < target; i++) {
@@ -277,53 +264,41 @@ export function BacktestChart({ bars, marks, cursor, symbol, decimals = 2, heigh
     }
   }, [bars, cursor, allMarkers]);
 
-  const iconCls = (on: boolean) =>
-    `px-2 py-1.5 flex items-center justify-center transition-colors cursor-pointer ${
-      on ? 'bg-card-2 text-foreground shadow-[inset_0_2px_0_var(--color-primary)]'
-         : 'text-muted-foreground hover:bg-surface-hover hover:text-foreground'}`;
+  // 磁吸/显隐/删除跟画线工具住一起（竖栏底部；手机在顶栏那一行）
+  const toolProps = {
+    tool, onSelect: setTool,
+    magnet, onToggleMagnet: () => setMagnet(!magnet),
+    hiddenAll, onToggleHidden: () => setHiddenAll(!hiddenAll), hideDisabled: !drawCount,
+    onTrash: trash, trashDisabled: !hasSelection && !drawCount,
+    trashTitle: hasSelection ? t('chart.deleteSelected') : t('chart.clearAll'),
+  };
 
   return (
-    <div className="space-y-1.5">
-      {/* 画线工具行 */}
-      <div className="flex items-center gap-2 flex-wrap">
-        <DrawToolPicker tool={tool} onSelect={setTool} />
-        <div className="flex rounded-md border border-border overflow-hidden divide-x divide-border">
-          <button type="button" onClick={() => setMagnet(!magnet)} className={iconCls(magnet)}
-            title={magnet ? t('chart.magnetOn') : t('chart.magnetOff')}>
-            <Magnet className="w-3.5 h-3.5" />
-          </button>
-          <button type="button" onClick={() => setHiddenAll(!hiddenAll)} disabled={!drawCount}
-            title={hiddenAll ? t('chart.showDrawings') : t('chart.hideDrawings')}
-            className={`${iconCls(hiddenAll)} disabled:opacity-30 disabled:cursor-default disabled:hover:bg-transparent disabled:hover:text-muted-foreground`}>
-            {hiddenAll ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-          </button>
-          <button type="button" onClick={trash} disabled={!hasSelection && !drawCount}
-            title={hasSelection ? t('chart.deleteSelected') : t('chart.clearAll')}
-            className={`${iconCls(false)} disabled:opacity-30 disabled:cursor-default disabled:hover:bg-transparent disabled:hover:text-muted-foreground`}>
-            <Trash2 className="w-3.5 h-3.5" />
-          </button>
-        </div>
+    <div>
+      {/* 顶栏：桌面端画线工具在左竖栏，这行只剩手机的工具弹层 */}
+      <div className="flex items-center gap-2.5 mb-2.5 flex-wrap md:hidden">
+        <DrawToolPopover {...toolProps} />
       </div>
 
-      {/* 图表主体（relative：文字标注输入浮层的定位基准） */}
-      <div className="relative w-full" style={{ height: h }}>
-        <div ref={containerRef} className="absolute inset-0" />
-        {textEdit && (
-          <input autoFocus placeholder={t('chart.textPlaceholder')}
-            onKeyDown={e => {
-              if (e.key === 'Enter') commitText(e.currentTarget.value);
-              else if (e.key === 'Escape') cancelText();
-            }}
-            onBlur={e => commitText(e.currentTarget.value)}
-            style={{
-              position: 'absolute', left: textEdit.x, top: textEdit.y - 12, zIndex: 6, width: 200,
-              padding: '2px 0', border: 'none', outline: 'none',
-              background: 'transparent', borderBottom: '1px dashed rgba(41,98,255,.75)',
-              color: isDark ? '#e6e8ee' : '#17181a', caretColor: '#2962ff',
-              textShadow: isDark ? '0 1px 3px rgba(0,0,0,.9)' : '0 1px 3px rgba(255,255,255,.95)',
-              font: '600 12px/1.5 ui-monospace, Consolas, monospace',
-            }} />
-        )}
+      <div className="grid grid-cols-1 md:grid-cols-[34px_1fr] border-t border-foreground">
+        <DrawToolRail className="hidden md:flex" {...toolProps} />
+        {/* 图表主体（relative：文字标注输入浮层的定位基准） */}
+        <div className="relative w-full" style={{ height: h }}>
+          <div ref={containerRef} className="absolute inset-0" />
+          {textEdit && (
+            <input autoFocus placeholder={t('chart.textPlaceholder')}
+              onKeyDown={e => {
+                if (e.key === 'Enter') commitText(e.currentTarget.value);
+                else if (e.key === 'Escape') cancelText();
+              }}
+              onBlur={e => commitText(e.currentTarget.value)}
+              className="absolute z-[6] w-[200px] py-0.5 border-0 outline-none bg-transparent text-foreground text-[12px] font-semibold"
+              style={{
+                left: textEdit.x, top: textEdit.y - 12,
+                borderBottom: '1px dashed var(--color-primary)', caretColor: 'var(--color-primary)',
+              }} />
+          )}
+        </div>
       </div>
     </div>
   );

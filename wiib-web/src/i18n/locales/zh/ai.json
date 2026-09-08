@@ -19,6 +19,11 @@
   "tab": {
     "config": "模型配置"
   },
+  "agentLang": {
+    "title": "Agent 提示词语言",
+    "desc": "只管 AI 的提示词与回答用哪门语言，只在这里配置，不随顶栏的界面语言切换变。",
+    "failed": "保存失败"
+  },
   "behavior": {
     "title": "用户行为分析",
     "detail": "明细",
@@ -61,7 +66,6 @@
   },
   "arena": {
     "title": "AI Trader 竞技场",
-    "subtitle": "每人一个 AI · 各带 10000U · 按 K 线唤醒自主交易",
     "myTrader": "我的 Trader",
     "create": "创建我的 Trader",
     "empty": "竞技场空无一人",
@@ -71,7 +75,18 @@
     "tempo": "节奏",
     "return": "收益率",
     "round": "局",
-    "status": "状态"
+    "status": "状态",
+    "runningShort": "在跑",
+    "pausedShort": "停着",
+    "liqShort": "清零",
+    "initial": "初始 10,000",
+    "noTraderTitle": "还没有你的 Trader？",
+    "step1Title": "1. 配一个模型端点",
+    "step1": "在「配置」里填 API key。Claude、GPT、Gemini 都行，key 只存尾四位回显，每次唤醒直接打你的端点，站里不留副本。",
+    "step2Title": "2. 选币种和节奏",
+    "step2": "BTC、ETH、SOL 里挑一到三个，唤醒周期 5m 到 4h。可以限定唤醒时段，比如只在 08:00 到 23:00 醒。",
+    "step3Title": "3. 启动，进竞技场",
+    "step3": "各带 10,000U 虚拟合约账户。每根 K 线醒一次，每天复盘一次，向同侪学一次。爆仓了下一局重新注资。"
   },
   "status": {
     "running": "运行中",
@@ -92,8 +107,6 @@
     "flat": "空仓观望中",
     "qty": "数量",
     "entry": "开仓",
-    "curSl": "当前止损",
-    "curTp": "当前止盈",
     "limitOrder": "限价挂单",
     "openLong": "开多",
     "openShort": "开空",
@@ -102,7 +115,8 @@
     "limitPrice": "限价",
     "learnNotesTitle": "学习笔记",
     "memoryTitle": "记忆笔记",
-    "plansTitle": "交易计划 · 生效中",
+    "plansTitle": "交易计划",
+    "plansActive": "生效中 {{n}}",
     "lastAt": "最近 {{time}}",
     "noLearnNotes": "还没有学习笔记，等全体复盘跑完后的学习轮",
     "noMemory": "还没有记忆笔记，等第一次每日复盘",
@@ -117,11 +131,21 @@
     "noDecisionsDay": "这天没有决策",
     "loadMore": "加载更早",
     "round": "局次",
-    "equityLabel": "权益 · 初始 10000",
+    "initialLabel": "初始 10,000",
+    "allDayWake": "全天唤醒",
+    "lastWake": "最近一次唤醒 {{time}}",
+    "notesTitle": "笔记",
+    "memoryShort": "记忆笔记",
+    "learnShort": "学习笔记",
     "dayN": "第 {{n}} 天",
     "closedCount": "已了结",
     "tradesN_other": "{{count}} 笔",
     "winRate": "胜率",
+    "maxDd": "最大回撤",
+    "tokensOf": "{{scope}} TOKEN",
+    "colSymbol": "币种",
+    "colSlTp": "止损 / 止盈",
+    "colUpnl": "浮盈",
     "lookedAt": "看了"
   },
   "tool": {
@@ -159,14 +183,28 @@
     "learnFailed": "学习失败",
     "alert": "波动警报"
   },
+  "live": {
+    "scene": "现场 · 唤醒中",
+    "prompt": "提示词",
+    "systemPrompt": "系统提示词",
+    "instruction": "开场白",
+    "processing": "处理中",
+    "budget": "{{used}}s / {{budget}}s",
+    "process": "过程",
+    "endedOk": "本轮结束",
+    "endedError": "本轮失败",
+    "callN": "第 {{n}} 次思考",
+    "routine": "{{iv}} 例行",
+    "bars_other": "{{count}} 根"
+  },
   "plan": {
-    "title": "交易计划",
     "basis": "依据：{{s}}",
-    "invalidation": "失效条件：",
+    "invalidation": "失效条件",
     "entry": "入场",
     "origSl": "原始止损",
     "target": "目标",
-    "setAt": "{{time}} 立"
+    "setAt": "{{time}} 立",
+    "revisions_other": "修订 {{count}} 次"
   },
   "trade": {
     "rejected": "·被拒",
@@ -184,7 +222,11 @@
       "takeProfit": "止盈带走",
       "manual": "主动平仓",
       "UNKNOWN": "了结方式不明"
-    }
+    },
+    "staleMark": "忽略此单",
+    "staleUnmark": "取消忽略",
+    "staleBadge": "已忽略",
+    "staleHint": "忽略后 AI 的论点统计、复盘与叙述中不再引用这笔交易；此前已写入笔记的内容随每日复盘滚动淘汰；资金曲线为真实记录，不受影响。公开战绩、排行榜与同侪学习照常，可随时取消。"
   },
   "trader": {
     "tourBtn": "配置引导",
@@ -193,7 +235,9 @@
     "pause": "暂停",
     "reset": "重置开新局",
     "resetConfirm": "重置将开新一局（R{{round}}）：新账户重新注资10000，历史战绩留档（最多保留最近10局，更早的整局记录会被清除）。确定？",
-    "viewTimeline": "看它的决策时间线 →"
+    "viewTimeline": "看它的决策时间线 →",
+    "resetCarryNotes": "带入复盘笔记与学习笔记",
+    "resetCarryHint": "不带入只是新局不再注入这两份笔记；历届笔记存档仍可在决策时间线查看，不会被删除。"
   },
   "tour": {
     "name": {
@@ -224,17 +268,13 @@
       "title": "能开几个仓 / 能不能对锁",
       "body": "关掉「多仓位」＝全账户同时只能有一个仓，AI 自己挑哪个币。未成交的挂单也占坑，否则它先挂三个单就绕过去了。\n\n「多空双开」是同一个币能不能同时持多单和空单。关掉可以防它自己跟自己对冲、白交两遍手续费。单仓模式下这项自动失效——双开本身就需要两个仓位。"
     },
-    "selfManage": {
-      "title": "加仓减仓要不要问你",
-      "body": "关掉某一项，AI 想做时不会直接成交，而是发一条请求给你，出现在本页顶部。\n\n关键是它不会卡住——请求发完这轮就继续跑，等你有空再点同意或叉掉。卡片上会同时给\"它发起时的价格\"和\"现在的实时价格\"，跑没跑掉你自己判断。\n\n默认加仓放开、减仓要问。止损止盈单不受影响，永远自动执行，所以风险始终有保护。"
-    },
     "byok": {
       "title": "你的模型，你的账单",
       "body": "平台不提供模型。模型端点（协议 / Base URL / key / 模型名）统一在 AI 页「模型配置」里维护，这里只从里面选一条；不选就跟随你的默认端点。\n\n每次唤醒都在花你的 token，唤醒频率越高账单越厚。"
     },
     "prompt": {
       "title": "交易风格指令",
-      "body": "平台系统提示词已经写好了角色、纪律和硬性规则，可以展开看全文——和真正喂给 AI 的一字不差。\n\n你写的自定义指令追加在它后面，用来定风格（\"只做突破不抄底\"这类）。风格与策略上与平台默认冲突时，以你写的为准；仓位规格和硬性规则除外，那由系统强制执行。\n\n存库即生效，下一根 K 线就按新的来，不用重启。"
+      "body": "平台系统提示词已经写好了角色、纪律和硬性规则，可以展开看全文——和真正喂给 AI 的一字不差。\n\n你写的自定义指令追加在它后面，用来定风格（\"只做突破不抄底\"这类）。风格与策略上与平台默认冲突时，以你写的为准；仓位规格、硬性规则和收尾格式除外，那由系统强制执行。\n\n存库即生效，下一根 K 线就按新的来，不用重启。"
     },
     "save": {
       "title": "保存，然后启动",
@@ -257,6 +297,7 @@
     "nextDay": "（次日）",
     "sameTime": "起止不能相同（全天请关闭时段）",
     "symbols": "交易币种",
+    "symbolsHint": "最多 {{max}} 个：工具预算与注意力按币摊",
     "specTitle": "仓位规格（强制执行，AI 不得篡改）",
     "specHint": "区间＝必须从中选，不是上限",
     "leverage": "杠杆区间（1~125 倍）",
@@ -267,10 +308,6 @@
     "hedge": "允许多空双开",
     "hedgeHint": "同一个币可同时持多空",
     "hedgeNeedMulti": "需先开启多仓位（双开要占两个仓位）",
-    "selfAdd": "允许 AI 自主加仓",
-    "selfAddHint": "关＝AI 想加仓时发请求给你，等你点同意",
-    "selfReduce": "允许 AI 自主减仓",
-    "selfReduceHint": "关＝减仓/平仓需你确认；止损止盈仍自动触发，风险有保护",
     "alertTitle": "波动警报（仅 1h/4h 档生效）",
     "alertHint": "5 分钟振幅超阈值且持有该币仓位/挂单时临时唤醒",
     "alertOn": "启用波动警报",
@@ -283,7 +320,7 @@
     "reviewOnHint": "日线边界自动跑一次（烧你的 key，单次调用）；当天无交易自动跳过；关掉只停复盘，已有笔记照常注入",
     "learnHint": "排行榜与同侪复盘都是它的素材",
     "learnOn": "启用同侪学习",
-    "learnOnHint": "全体复盘完成后自动跑一次（烧你的 key，多轮调用）；同意学习的 trader ≥3 人才会执行，不足自动跳过；不勾选则双向退出——自己不学习，你的数据也不会被其他 trader 学习；学习笔记之后每次唤醒自动注入；关掉只停学习，已有笔记照常注入",
+    "learnOnHint": "全体复盘完成后自动跑一次（烧你的 key，多轮调用）；同侪池里除你之外 ≥2 人才会执行，不足自动跳过（池 = 同意学习、未暂停、且在场：手里有仓或 24h 内有了结）；不勾选则双向退出——自己不学习，你的数据也不会被其他 trader 学习；学习笔记之后每次唤醒自动注入；关掉只停学习，已有笔记照常注入",
     "endpoint": "模型端点",
     "manageEndpoints": "管理端点（AI 页 · 模型配置）",
     "endpointHint": "每次唤醒、每日复盘、同侪学习都烧这条端点的 key；保存时会先测一次连通性",
@@ -293,15 +330,13 @@
     "listSep": "、",
     "guardSinglePos": "只许一个仓位",
     "guardNoHedge": "同币不得多空双开",
-    "guardAskAdd": "加仓需你确认",
-    "guardAskReduce": "减仓需你确认",
     "promptOffTail": "、开仓必须带止损/论点/失效条件、止损只许收紧、止盈只许远离入场，违规动作会被拒绝并告知原因。",
     "customPrompt": "自定义提示词（定风格与策略，与平台默认冲突时以你的为准）",
     "customPromptOnly": "自定义提示词（唯一指令来源，必填）",
     "customPromptPh": "例：只做趋势突破，不抄底不摸顶；单笔风险不超过权益2%；连亏两笔后本日只观望。",
     "save": "保存配置",
     "create": "创建 Trader",
-    "rules": "规则：每根 K 线唤醒一次（极端波动可能被临时叫醒，每日还有一次复盘），你的 key 你的 token 钱；仓位规格你说了算（杠杆/保证金区间、仓位数、双开、能否自主加减仓），AI 只能遵守不得评价，越界的调用当场被拒；强制止损+失效条件、止损只许收紧。开仓即立交易计划，每次唤醒原样喂回，退出只认止损/止盈/失效条件三条路。模拟盘不涉真实资金，竞技场决策日志与计划修订历史公开可见。别指望它赚钱——看它怎么想才是重点。"
+    "rules": "规则：每根 K 线唤醒一次（极端波动可能被临时叫醒，每日还有一次复盘），你的 key 你的 token 钱；仓位规格你说了算（杠杆/保证金区间、仓位数、双开、能否自主加减仓），AI 只能遵守不得评价，越界的调用当场被拒；强制止损+失效条件、止损只许收紧。开仓即立交易计划，每次唤醒原样喂回，退出只认止损/止盈/失效条件/你的留言四条路。模拟盘不涉真实资金，竞技场决策日志与计划修订历史公开可见。别指望它赚钱——看它怎么想才是重点。"
   },
   "skills": {
     "title": "相关 skills",
@@ -329,18 +364,8 @@
       "news_search": "最近市场快讯全文。"
     }
   },
-  "req": {
-    "title": "AI 请求确认 · {{n}}",
-    "hint": "同意后按当前市价立即执行",
-    "add": "加仓",
-    "reduce": "减仓",
-    "atRequest": "请求时",
-    "now": "现价",
-    "approve": "同意"
-  },
   "chat": {
     "title": "研判对话",
-    "subtitle": "{{hub}} 调度 · 关窗后台继续",
     "openAria": "打开研判对话",
     "closeAria": "关闭对话面板",
     "resize": "拖拽调整大小",
@@ -359,7 +384,7 @@
     "exitFullscreen": "退出全屏（Esc）",
     "fullscreenAria": "全屏显示对话面板",
     "exitFullscreenAria": "退出全屏",
-    "emptyTitle": "问点什么——下面的快捷提问可以直接点",
+    "emptyTitle": "有什么可以帮你？",
     "emptyHint": "行情 · 新闻 · 你的交易员 · 深度研判，都归 {{hub}} 调度",
     "background": "{{hub}} 在后台继续研判，完成后自动展示答案",
     "thinking": "{{hub}} 分析问题中...",
@@ -375,7 +400,10 @@
     "generating": "生成中",
     "regen": "重新生成",
     "regenTitle": "重新生成这条回答",
-    "copyAnswer": "复制回答"
+    "copyAnswer": "复制回答",
+    "sources": "来源",
+    "moreSources": "+{{count}}",
+    "lessSources": "收起"
   },
   "rail": {
     "title_other": "工作过程 · {{count}} 步",
@@ -384,7 +412,13 @@
     "marketAgent": "市场专家",
     "newsAgent": "新闻专家",
     "deferredNote": "专家仍在取数，这个问题的答案稍后自动补上",
-    "hitlResume": "正在恢复深度研判的执行"
+    "hitlResume": "正在恢复深度研判的执行",
+    "searching": "正在搜索：{{query}}",
+    "searchingNoQuery": "正在搜索…",
+    "searched_other": "搜索了 {{count}} 个网站",
+    "searchedNone": "搜索完成",
+    "sumExperts_other": "已调度 {{count}} 位专家",
+    "sumWorking": "正在研判…"
   },
   "hitl": {
     "title": "深度研判确认",
@@ -397,10 +431,15 @@
     "back": "返回对话",
     "loading": "加载历史会话...",
     "empty": "还没有历史对话",
-    "current": "当前",
     "delete": "删除会话",
-    "msgCount_other": "{{count}} 条",
-    "new": "开新对话",
+    "new": "新对话",
+    "groupToday": "今天",
+    "groupYesterday": "昨天",
+    "groupWeek": "近 7 天",
+    "groupOlder": "更早",
+    "clearAll": "清空全部对话",
+    "clearAllConfirm": "删除全部历史对话？不可恢复。进行中的会话会保留。",
+    "clearedSkipped_other": "{{count}} 个进行中的会话未删除",
     "deleteConfirm_other": "删除会话「{{title}}」？{{count}} 条消息与它的续聊上下文会一并清掉，不可恢复。"
   },
   "composer": {
@@ -408,13 +447,13 @@
     "qNews": "最近有什么值得注意的加密新闻？",
     "qTrader": "我的 AI 交易员最近表现如何？",
     "qDeep": "对 ETH 做一次深度研判",
-    "traderTitle": "我的 trader",
     "behaviorLabel": "行为分析",
     "behaviorTitle": "分析我的交易行为，报告出卡片",
     "behaviorAsk": "帮我做一次用户行为分析",
     "actionNote": "给它留言",
     "noSuggests": "快捷提问删光了，点右边铅笔加回来",
     "editSuggests": "编辑快捷提问",
+    "more": "更多操作",
     "ph": "问行情、查新闻、看你的交易员…",
     "phBusy": "{{hub}} 工作中——可继续发消息插话",
     "send": "发送",
@@ -503,7 +542,7 @@
     "name": "名称",
     "namePh": "例：DeepSeek 主力 / Grok 轻量",
     "protocol": "协议",
-    "baseUrl": "Base URL（不含 /v1 后缀）",
+    "baseUrl": "Base URL（不含版本后缀）",
     "model": "模型名",
     "detect": "检测",
     "detectTitle": "拉取该端点可用的模型清单（需先填 Base URL 和 Key）",
@@ -516,6 +555,9 @@
     "effort": "思考档位",
     "effortPh": "留空=不传；可填 none / low / medium / high / xhigh…",
     "effortHint": "留空＝不传这个参数，用模型自己的默认行为；也可以填模型认的其他档位（如 xhigh、minimal）。不是所有模型都认这个参数——认不认没法提前查出来，填完点「测试连通性」试一下最稳。",
+    "webSearch": "联网搜索",
+    "webSearchHint": "在请求里声明该协议的服务端搜索工具，上游支持才会真搜，不支持会自动退回不搜。只有研判对话的最终回答会用它，交易员与专家取数不受影响。搜索会计入上游用量。",
+    "webSearchOpenAiHint": "openai 协议没有标准的服务端搜索；要联网搜索请选 responses / anthropic / gemini",
     "test": "测试连通性",
     "testTitle": "用当前填的配置真发一次请求，确认端点和模型可用",
     "testOk": "连接正常",
@@ -528,8 +570,6 @@
     "analyzeDone": "分析完成",
     "analyzeFailed": "分析失败",
     "actionFailed": "操作失败",
-    "approved": "已同意，按市价执行",
-    "rejected": "已拒绝",
     "started": "已启动，下一根K线开始唤醒",
     "reset": "已重置开新一局",
     "saved": "配置已保存",

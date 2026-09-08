@@ -38,7 +38,8 @@
       "testnet": "Testnet",
       "ranking": "Leaderboard",
       "games": "Games",
-      "comments": "Comments"
+      "comments": "Comments",
+      "intro": "Project Intro"
     },
     "themeDark": "Dark mode",
     "themeLight": "Light mode",
@@ -165,6 +166,8 @@
       "modelPh": "Model name, e.g. gpt-4o, deepseek-chat",
       "protoChat": "Protocol: OpenAI Chat Completions (/v1/chat/completions, for DeepSeek and most others)",
       "protoResponses": "Protocol: OpenAI Responses (/v1/responses, CPA / OpenAI / xAI)",
+      "protoAnthropic": "Protocol: Anthropic Messages (/v1/messages)",
+      "protoGemini": "Protocol: Gemini generateContent (/v1beta)",
       "effortPh": "Reasoning effort, blank = model default (not sent)",
       "effortDefault": "Default",
       "effortHint": "none turns reasoning off and uses the fewest tokens (only some models support it); you can also enter any other level the model accepts, such as xhigh. No way to check up front — save it and try.",

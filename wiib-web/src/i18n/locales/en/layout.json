@@ -7,12 +7,12 @@
     "arena": "AI Arena",
     "ranking": "Ranks",
     "games": "Games",
-    "more": "More",
     "testnet": "Testnet",
     "strategies": "Strategies",
     "backtest": "Backtest",
     "campaign": "Campaign",
     "comments": "Comments",
+    "intro": "Intro",
     "me": "Me"
   },
   "marketMenu": {
@@ -25,7 +25,12 @@
     "logoHome": "Back to home",
     "toLight": "Switch to light mode",
     "toDark": "Switch to dark mode",
-    "login": "Log in"
+    "login": "Log in",
+    "logout": "Log out"
+  },
+  "footer": {
+    "brand": "WhatIfIBought paper trading",
+    "disclaimer": "All data is simulated and not investment advice"
   },
   "led": {
     "ok": "OK",

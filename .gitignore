@@ -52,9 +52,10 @@ docs/*.md
 !docs/deploy.md
 docs/superpowers/plans/*.md
 docs/superpowers/specs/*.md
+### 海报设计稿只留本地，不入库 ###
+docs/ui-poster/
 ###
 export-md
-wiib-quant/AGENT_REFACTOR_PLAN.md
 
 # 可视化头脑风暴临时会话
 .superpowers/

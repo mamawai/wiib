@@ -22,12 +22,10 @@
     "name": {
       "fibo": "斐波回踩",
       "turtle": "海龟突破",
-      "sqzmom": "挤压动量",
-      "liqfade": "清算逆袭"
+      "sqzmom": "挤压动量"
     },
     "desc": {
       "fibo": "斐波那契回撤挂单",
-      "liqfade": "清算级联反向",
       "sqzmom": "挤压动量突破",
       "turtle": "4H 90/15 通道突破"
     },
@@ -83,11 +81,7 @@
     "strategy": {
       "fibo": "15m 找推动腿，0.66 黄金口袋挂限价等回踩；SL=腿回撤位，TP=前高/前低，1h SMA200 趋势同向过滤",
       "turtle": "4h 通道突破触价追入，ATR 止损，反向通道出场，经典趋势跟随",
-      "sqzmom": "4h BB/KC 压缩蓄能，释放后顺动量方向市价进场，信号稀疏",
-      "liqfade": "5m 清算瀑布三签名（跌幅/premium/taker 卖压）命中即逆势接多，1h 时间出场",
-      "note": {
-        "liqfade": "依赖本地 taker/premium 侧数据；所选窗口覆盖不足会直接失败"
-      }
+      "sqzmom": "4h BB/KC 压缩蓄能，释放后顺动量方向市价进场，信号稀疏"
     },
     "speed": {
       "slow": "慢",

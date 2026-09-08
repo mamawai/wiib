@@ -50,7 +50,7 @@ COMMENT ON COLUMN "user".is_bankrupt IS '是否破产（爆仓后禁用交易）
 COMMENT ON COLUMN "user".bankrupt_count IS '破产次数';
 COMMENT ON COLUMN "user".bankrupt_at IS '爆仓时间';
 COMMENT ON COLUMN "user".bankrupt_reset_date IS '恢复日期（交易日09:00恢复）';
-COMMENT ON COLUMN "user".lang IS 'AI产出语言 zh/en（AgentLang.code），NULL=跟随中文。只管后端AI的提示词与回答；界面语言在前端localStorage(wiib-lang)，不从这里读';
+COMMENT ON COLUMN "user".lang IS 'agent提示词语言 zh/en（AgentLang.code），NULL=跟随中文。建号时取当时的界面语言，之后只在配置页改；界面语言在前端localStorage(wiib-lang)，两边互不影响';
 COMMENT ON COLUMN "user".muted_until IS '禁言到期时间，NULL或已过期=未禁言；永久禁言存2099年。到期自动解禁，无需定时任务。重置账户不清此列，否则被禁言者可靠重置逃避处罚';
 COMMENT ON COLUMN "user".profile_public IS '是否允许别人查看自己的持仓与交易历史。关掉只挡详情页，仍照常上排行榜（榜上只有总资产/收益率）';
 COMMENT ON COLUMN "user".created_at IS '创建时间';
@@ -561,7 +561,7 @@ COMMENT ON COLUMN ai_runtime_config.api_key IS 'API Key';
 COMMENT ON COLUMN ai_runtime_config.base_url IS 'OpenAI Compatible Base URL（不含/v1后缀，quant/sim 均自拼 /v1/chat/completions）';
 COMMENT ON COLUMN ai_runtime_config.model IS '该LLM的模型名（功能位切到此配置即用此模型）';
 COMMENT ON COLUMN ai_runtime_config.reasoning_effort IS '思考档位，任意上游认的值（none/low/medium/high/xhigh…），NULL=不传走模型默认；同模型要深浅两档就建两条配置分给不同功能位';
-COMMENT ON COLUMN ai_runtime_config.api_protocol IS '上游协议：openai=/v1/chat/completions（DeepSeek等通用），responses=/v1/responses（CPA/OpenAI官方/xAI，思考模型优先）';
+COMMENT ON COLUMN ai_runtime_config.api_protocol IS '上游协议：openai=/v1/chat/completions，responses=/v1/responses，anthropic=/v1/messages，gemini=/v1beta/models/{model}:streamGenerateContent';
 COMMENT ON COLUMN ai_runtime_config.enabled IS '是否启用';
 
 -- ============================================
@@ -659,8 +659,12 @@ CREATE TABLE IF NOT EXISTS workbench_chat_message (
     completion_tokens BIGINT,
     total_tokens BIGINT,
     latency_ms  INT,
+    -- 这一轮联网搜索的来源 [{url,title}]，只有搜过的 assistant 行有值
+    sources     JSONB,
     created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+-- 旧库补列（新库的 CREATE 里已有），可反复执行
+ALTER TABLE workbench_chat_message ADD COLUMN IF NOT EXISTS sources JSONB;
 
 CREATE INDEX IF NOT EXISTS idx_wb_chat_session ON workbench_chat_message (session_id, id);
 CREATE INDEX IF NOT EXISTS idx_wb_chat_user ON workbench_chat_message (user_id, id DESC);
@@ -668,6 +672,7 @@ COMMENT ON TABLE workbench_chat_message IS '工作台对话历史(展示用):use
 COMMENT ON COLUMN workbench_chat_message.model_label IS '这一轮用的对话主模型:端点名 · 模型名(与LlmEndpointSelect展示口径一致)';
 COMMENT ON COLUMN workbench_chat_message.total_tokens IS '本轮全部模型调用(路由+专家+汇总+压缩+深研判)的token合计;NULL=上游端点没返回usage或本轮账不可信(有别轮的在途专家仍在记账),不是0';
 COMMENT ON COLUMN workbench_chat_message.latency_ms IS '本轮墙钟耗时:从controller接手这一轮起算,不含准入/建叶子/让位握手;比[TurnMetrics]日志多一帧session与user行落库';
+COMMENT ON COLUMN workbench_chat_message.sources IS '这一轮联网搜索搜到/引用的来源 [{url,title}],按url去重;答案底部展示;没搜过或老数据为NULL';
 
 -- ============ workbench_chat_context：工作台会话模型侧上下文（续聊主链；一会话一行整体替换） ============
 -- 替代 langgraph4j PostgresSaver 的 lg4j* 表：那套图每走一步存一行完整快照（一轮 8 行、同一份历史重复存），
@@ -706,8 +711,28 @@ COMMENT ON COLUMN news_event.source_id IS 'BlockBeats快讯id,增量去重键';
 COMMENT ON COLUMN news_event.published_at IS '发稿时刻epoch毫秒(BlockBeats create_time按北京时间解析),对齐K线open_time用';
 COMMENT ON COLUMN news_event.tags IS '逗号串,封闭词表(OIL/GOLD/BTC/美股白名单,见news.collect.vocabulary);空串=轻模型判定与词表标的无关';
 COMMENT ON COLUMN news_event.tagged_model IS '打标用的模型名,坏标追责用';
-COMMENT ON COLUMN news_event.title_en IS '标题英文译文,打标同一次调用顺带产出;NULL=没译成(模型没给/正文超长/老行),取用侧回落中文原文——不许拿原文冒充译文';
+COMMENT ON COLUMN news_event.title_en IS '标题英文译文,打标同一次调用顺带产出;NULL=没译成(模型没给/正文超长/老行):模型侧回落中文原文,英文界面不展示这条——不许拿原文冒充译文';
 COMMENT ON COLUMN news_event.content_en IS '正文英文译文;NULL 同 title_en。正文超过打标输入上限的那条不留译文:半截译文比原文更糟';
+
+-- ============ econ_calendar_event：财经日历（ForexFactory 周历，唤醒开场白注入） ============
+-- 采集轨 EconCalendarCollector 定时拉本周 JSON 删窗口重插（feed 是全量快照，改期/取消靠整窗覆盖自愈）；
+-- EconCalendarAssembler 注入"过去12h已公布+未来24h即将公布"，防 trader 撞数据公布/讲话时刻
+CREATE TABLE IF NOT EXISTS econ_calendar_event (
+    id         BIGSERIAL    PRIMARY KEY,
+    event_time BIGINT       NOT NULL,
+    currency   VARCHAR(8)   NOT NULL,
+    title      VARCHAR(200) NOT NULL,
+    impact     VARCHAR(16)  NOT NULL,
+    forecast   VARCHAR(32),
+    previous   VARCHAR(32),
+    created_at TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_econ_calendar_time ON econ_calendar_event (event_time);
+COMMENT ON TABLE econ_calendar_event IS '财经日历:ForexFactory周历快照,采集删窗口重插;唤醒注入±窗口内高影响事件';
+COMMENT ON COLUMN econ_calendar_event.event_time IS '公布/开始时刻epoch毫秒(feed的ISO带时区时间换算)';
+COMMENT ON COLUMN econ_calendar_event.currency IS '事件影响的货币代码(USD/EUR/…,德国CPI标EUR;All=全局事件);feed字段名叫country是上游历史命名';
+COMMENT ON COLUMN econ_calendar_event.impact IS 'feed原样:High/Medium/Low/Holiday(外汇视角评级,注入过滤另有USD讲话补捞)';
+COMMENT ON COLUMN econ_calendar_event.forecast IS '共识预测值原样文本(55K/0.3%等);NULL=无数值(讲话/会议类);免费feed无实际值列';
 
 -- ============================================
 -- 27. 留言板评论（全站唯一，无附着实体）
@@ -826,8 +851,6 @@ CREATE TABLE IF NOT EXISTS ai_trader (
     margin_pct_max  NUMERIC(5,2) NOT NULL DEFAULT 20,
     allow_multi_position BOOLEAN NOT NULL DEFAULT TRUE,
     allow_hedge     BOOLEAN NOT NULL DEFAULT FALSE,
-    allow_self_add  BOOLEAN NOT NULL DEFAULT TRUE,
-    allow_self_reduce BOOLEAN NOT NULL DEFAULT FALSE,
     review_enabled  BOOLEAN NOT NULL DEFAULT TRUE,
     learning_enabled BOOLEAN NOT NULL DEFAULT TRUE,
     alert_enabled   BOOLEAN NOT NULL DEFAULT TRUE,
@@ -859,8 +882,8 @@ COMMENT ON COLUMN ai_trader.margin_pct_min IS '单笔保证金占权益%下界�
 COMMENT ON COLUMN ai_trader.margin_pct_max IS '单笔保证金占权益%上界，0.1~100';
 COMMENT ON COLUMN ai_trader.allow_multi_position IS '允许同时持有多个仓位；false=全账户至多一仓（挂单一并计数，否则挂几单就能绕过）';
 COMMENT ON COLUMN ai_trader.allow_hedge IS '允许同币多空双开；仅在allow_multi_position=true时有意义（双开天然占两个仓位）';
-COMMENT ON COLUMN ai_trader.allow_self_add IS '允许模型自主加仓；false=转成待确认请求，不阻塞本轮唤醒';
-COMMENT ON COLUMN ai_trader.allow_self_reduce IS '允许模型自主减仓/平仓；false=转请求。止损止盈自动触发不受此约束';
+-- 自主加/减仓开关 allow_self_add / allow_self_reduce 已删：agentic trading 里调仓不等人点头，模型始终自主。旧库执行：
+--     ALTER TABLE ai_trader DROP COLUMN IF EXISTS allow_self_add, DROP COLUMN IF EXISTS allow_self_reduce;
 
 CREATE TABLE IF NOT EXISTS ai_trader_decision (
     id              BIGSERIAL PRIMARY KEY,
@@ -881,8 +904,10 @@ CREATE TABLE IF NOT EXISTS ai_trader_decision (
     latency_ms      INT,
     error           TEXT,
     memory_after    TEXT,
+    trace_json      TEXT,
     created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+ALTER TABLE ai_trader_decision ADD COLUMN IF NOT EXISTS trace_json TEXT;
 
 CREATE INDEX IF NOT EXISTS idx_atd_trader_time ON ai_trader_decision(trader_id, wake_time DESC);
 COMMENT ON TABLE ai_trader_decision IS 'AI Trader每次唤醒一行：推理全文+动作(含play_type论点标签)+权益快照——竞技场决策时间线与净值曲线数据源';
@@ -892,6 +917,7 @@ COMMENT ON COLUMN ai_trader_decision.memory_after IS '仅REVIEW行：本期学�
 COMMENT ON COLUMN ai_trader_decision.equity IS '本轮动作落地后的账户权益USDT';
 COMMENT ON COLUMN ai_trader_decision.model_calls IS '本轮模型调用次数：ReAct是循环，一次唤醒会调很多次（上限见ModelCallLimiter）';
 COMMENT ON COLUMN ai_trader_decision.total_tokens IS '本轮全部模型调用的token合计；NULL=上游端点没返回usage（BYOK网关各不相同），不是0';
+COMMENT ON COLUMN ai_trader_decision.trace_json IS '唤醒过程轨迹JSON（提示词/每次模型调用的正文与工具调用/回执预览/收尾），形状见WakeTrace.toJson；仅TRADE/ALERT/MANUAL行，NULL=老行或begin之前就失败';
 
 CREATE TABLE IF NOT EXISTS ai_trader_plan (
     id              BIGSERIAL PRIMARY KEY,
@@ -909,9 +935,13 @@ CREATE TABLE IF NOT EXISTS ai_trader_plan (
     revisions_json  TEXT,
     status          VARCHAR(8) NOT NULL DEFAULT 'LIVE',
     closed_wake_time BIGINT,
+    stale           BOOLEAN NOT NULL DEFAULT FALSE,
+    position_id     BIGINT,
     created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+ALTER TABLE ai_trader_plan ADD COLUMN IF NOT EXISTS stale BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE ai_trader_plan ADD COLUMN IF NOT EXISTS position_id BIGINT;
 -- 同键同一时刻至多一份存活计划；归档行不占键——同轮重开/跨轮重开都能再立新计划
 CREATE UNIQUE INDEX IF NOT EXISTS uq_atp_live ON ai_trader_plan (trader_id, round_no, symbol, side)
     WHERE status = 'LIVE';
@@ -922,41 +952,11 @@ COMMENT ON COLUMN ai_trader_plan.opened_wake_time IS '开仓所在唤醒边界(m
 COMMENT ON COLUMN ai_trader_plan.revisions_json IS '修订历史追加式JSON [{time,type,change,reason}]：加仓覆盖/移动止盈/移动止损/补立——修改必须留痕带理由，计划本体价格字段永远是原始快照';
 COMMENT ON COLUMN ai_trader_plan.status IS 'LIVE=仓位/挂单存活 CLOSED=已了结归档。归档不删：论点→结局的配对数据是reviewer每日复盘的原料（结局按symbol/side/时间窗join sim已平仓位）';
 COMMENT ON COLUMN ai_trader_plan.closed_wake_time IS '归档时刻(ms)：懒清理发现仓位已了结的唤醒边界/重置时刻，与opened_wake_time围出计划生命期';
+COMMENT ON COLUMN ai_trader_plan.stale IS '主人标记忽略:true=本笔不进论点战绩统计与复盘教材(配对表/了结统计行);权益/排行榜/同侪学习照常。仅CLOSED可标,可随时取消';
+COMMENT ON COLUMN ai_trader_plan.position_id IS 'sim仓位id:市价开仓/加仓从下单响应落盘,限价单成交后唤醒懒清理趟补绑;计划↔仓位配对的精确键,NULL(历史行/未成交挂单)走bestMatch时间就近兜底';
 
--- ============ ai_trader_request：加仓/减仓待主人确认（allow_self_add/reduce 关闭时才产生） ============
--- 异步不阻塞：模型调工具即落库返回，本轮唤醒照常收尾；主人在"我的trader"页点同意才市价执行。
--- 不设过期——卡片上同时给"请求时价"和实时价，价格跑没跑掉由人自己看。
-CREATE TABLE IF NOT EXISTS ai_trader_request (
-    id              BIGSERIAL PRIMARY KEY,
-    trader_id       BIGINT NOT NULL,
-    round_no        INT NOT NULL,
-    type            VARCHAR(8) NOT NULL,
-    symbol          VARCHAR(20) NOT NULL,
-    side            VARCHAR(8) NOT NULL,
-    position_id     BIGINT NOT NULL,
-    quantity        NUMERIC(20,8) NOT NULL,
-    leverage        INT,
-    request_price   NUMERIC(20,8) NOT NULL,
-    reason          TEXT NOT NULL,
-    status          VARCHAR(10) NOT NULL DEFAULT 'PENDING',
-    executed_result TEXT,
-    notified        BOOLEAN NOT NULL DEFAULT FALSE,
-    wake_time       BIGINT NOT NULL,
-    decided_at      TIMESTAMP,
-    created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
--- 同仓位同类型至多一条待确认：模型每轮看仓位没动会反复提，不去重就堆满卡片
-CREATE UNIQUE INDEX IF NOT EXISTS uq_atr_pending ON ai_trader_request (position_id, type)
-    WHERE status = 'PENDING';
-CREATE INDEX IF NOT EXISTS idx_atr_trader ON ai_trader_request (trader_id, status, created_at DESC);
-COMMENT ON TABLE ai_trader_request IS 'AI Trader加仓/减仓待确认请求：自主开关关闭时模型的调用转为此表一行，主人点同意才市价执行';
-COMMENT ON COLUMN ai_trader_request.type IS 'ADD=加仓 / REDUCE=减仓或平仓';
-COMMENT ON COLUMN ai_trader_request.position_id IS '目标仓位id（sim侧）；批准时重查存在性，已被止损带走则置失败';
-COMMENT ON COLUMN ai_trader_request.request_price IS '模型发起时的mark快照，与实时价并列展示供主人判断价格是否跑掉';
-COMMENT ON COLUMN ai_trader_request.status IS 'PENDING待确认 / APPROVED已同意(执行结果见executed_result) / REJECTED主人拒绝';
-COMMENT ON COLUMN ai_trader_request.executed_result IS '批准后的执行结果或失败原因（余额不足/仓位已不存在等），不吞';
-COMMENT ON COLUMN ai_trader_request.notified IS '处理结果是否已回注给模型：主人批/拒之后的下一次唤醒注入一次并置true——反馈闭环的最后一环，不注模型只能从仓位变化倒猜';
-COMMENT ON COLUMN ai_trader_request.wake_time IS '发起时所在唤醒边界(ms)，用于回注提示词时说明"这是第几轮提的"';
+-- 加仓/减仓待主人确认表 ai_trader_request 已删：agentic trading 里调仓不该等人点头，审批链路整条拆掉。旧库执行：
+--     DROP TABLE IF EXISTS ai_trader_request;
 
 -- 旧库放开这几列的列宽（新库的 CREATE 里已是 TEXT）。装的是模型自由文本与上游异常串，
 -- 长度封顶换不来任何好处：PG 的 varchar(n) 与 text 存储实现相同，超长不截断而是整行拒收——
@@ -965,8 +965,6 @@ ALTER TABLE ai_trader          ALTER COLUMN paused_reason          TYPE TEXT;
 ALTER TABLE ai_trader_decision ALTER COLUMN error                  TYPE TEXT;
 ALTER TABLE ai_trader_plan     ALTER COLUMN signals_used           TYPE TEXT;
 ALTER TABLE ai_trader_plan     ALTER COLUMN invalidation_condition TYPE TEXT;
-ALTER TABLE ai_trader_request  ALTER COLUMN reason                 TYPE TEXT;
-ALTER TABLE ai_trader_request  ALTER COLUMN executed_result        TYPE TEXT;
 
 -- ============ user_llm_endpoint / user_llm_binding：用户 BYOK 端点库（2026-08 重构） ============
 -- 全站 BYOK 总配置：一人多条端点（协议+URL+key+模型+思考档位），对话/交易员/复盘教练只做选择；
@@ -980,6 +978,7 @@ CREATE TABLE IF NOT EXISTS user_llm_endpoint (
     base_url         VARCHAR(255)  NOT NULL,
     model            VARCHAR(128)  NOT NULL,
     reasoning_effort VARCHAR(16),
+    web_search       BOOLEAN       NOT NULL DEFAULT FALSE,
     api_key_enc      VARCHAR(1024) NOT NULL,
     is_default       BOOLEAN       NOT NULL DEFAULT FALSE,
     created_at       TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -990,8 +989,11 @@ CREATE INDEX IF NOT EXISTS idx_user_llm_endpoint_user ON user_llm_endpoint(user_
 UPDATE user_llm_endpoint e SET is_default = FALSE
  WHERE e.is_default AND e.id <> (SELECT min(d.id) FROM user_llm_endpoint d WHERE d.user_id = e.user_id AND d.is_default);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_user_llm_endpoint_default ON user_llm_endpoint(user_id) WHERE is_default;
+-- 旧库补列（新库的 CREATE 里已有），可反复执行
+ALTER TABLE user_llm_endpoint ADD COLUMN IF NOT EXISTS web_search BOOLEAN NOT NULL DEFAULT FALSE;
 COMMENT ON TABLE  user_llm_endpoint IS '用户 BYOK 端点库：一条=协议+URL+key+模型(+思考档位)，一人多条；对话/交易员/复盘教练从中选';
 COMMENT ON COLUMN user_llm_endpoint.reasoning_effort IS '思考档位，任意上游认的值（none/low/medium/high/xhigh…），NULL=不传走模型默认；模型支不支持查不到，由用户自选';
+COMMENT ON COLUMN user_llm_endpoint.web_search IS '服务端联网搜索：请求里声明该协议的服务端搜索工具才搜(opt-in)，上游拒收自动退回不搜；responses/anthropic/gemini协议可勾(openai归一false)，端点支不支持由用户自己勾；当前只有对话summarizer用';
 COMMENT ON COLUMN user_llm_endpoint.api_key_enc IS 'AES-256-GCM 密文，密钥来自 WIIB_TRADER_KEY_SECRET';
 COMMENT ON COLUMN user_llm_endpoint.is_default IS '默认端点：没按用途绑定的地方都用它；一人恰一条（首条自动、删默认时最早的顶上）';
 

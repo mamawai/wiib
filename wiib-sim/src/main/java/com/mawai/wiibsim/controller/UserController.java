@@ -120,12 +120,15 @@ public class UserController {
         private String lang;
     }
 
-    /**
-     * 只写不读：界面语言在前端 localStorage，服务端这份只决定 AI 产出语言，不做反向同步。
-     * 前端切换语言与登录成功各推一次。
-     */
+    /** agent 提示词语言：只在配置页改，与界面语言（前端 localStorage）互不影响 */
+    @GetMapping("/lang")
+    @Operation(summary = "读 agent 提示词语言（zh/en）")
+    public Result<String> getLang(@CurrentUserId Long userId) {
+        return Result.ok(AgentLang.of(userService.getById(userId).getLang()).code());
+    }
+
     @PutMapping("/lang")
-    @Operation(summary = "设置 AI 产出语言（zh/en，只影响后端 AI 的提示词与回答）")
+    @Operation(summary = "设置 agent 提示词语言（zh/en，只影响后端 AI 的提示词与回答）")
     public Result<Void> setLang(@CurrentUserId Long userId, @RequestBody LangRequest request) {
         AgentLang lang = AgentLang.find(request.getLang())
                 .orElseThrow(() -> new BizException(ErrorCode.PARAM_ERROR));

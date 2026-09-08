@@ -22,7 +22,7 @@ class WalkForwardEvaluatorTest {
             // 2) embargo 生效：train↔test 间隔严格 = horizonBars + embargo
             assertThat(w.testStart() - w.trainEnd()).isEqualTo(horizonBars + embargo);
             // 3) train 不少于下限、test 在界内、test 块不重叠且前进
-            assertThat(w.trainSize()).isGreaterThanOrEqualTo(minTrain);
+            assertThat(w.trainEnd() - w.trainStart()).isGreaterThanOrEqualTo(minTrain);
             assertThat(w.testStart()).isGreaterThanOrEqualTo(prevTestEnd); // 半开区间相接=不重叠
             assertThat(w.testEnd()).isLessThanOrEqualTo(total);
             assertThat(w.testSize()).isEqualTo(testSize);

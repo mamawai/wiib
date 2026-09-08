@@ -10,8 +10,8 @@ import java.time.Duration;
 /**
  * 合约 depth20@100ms WS 快照缓存。比 REST 轮询更新鲜（100ms 级），供 CollectDataNode 优先使用。
  *
- * <p>存储后端为 Redis KV：feed 进程 {@link #onDepthUpdate} 写、quant 进程 {@link #getFreshDepth} 读，
- * 天然跨进程——拆服务后 feed 写 quant 读各跑一个实例、共享同一 Redis，无需额外消费者。</p>
+ * <p>存储后端为 Redis KV：feed 进程 {@link #onDepthUpdate} 写、agent 进程 {@link #getFreshDepth} 读，
+ * 天然跨进程——两边各跑一个实例、共享同一 Redis，无需额外消费者。</p>
  */
 @Slf4j
 @Component

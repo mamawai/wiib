@@ -19,7 +19,7 @@ class QuantCoreForecasterTest {
         List<KlineBar> bars = uptrend(40);
         QuantCoreForecaster fc = new QuantCoreForecaster(ForecastHorizon.H6, 0.94, new StubDir(Forecast.flat()));
 
-        MultiOutputForecast f = fc.forecast(ResearchFeatures.ofBars(bars));
+        MultiOutputForecast f = fc.forecast(TestFeatures.ofBars(bars));
 
         assertThat(f.expectedVolatility()).isEqualTo(VolatilityEstimator.ewmaVolatility(bars, 0.94));
     }
@@ -28,7 +28,7 @@ class QuantCoreForecasterTest {
     void directionLegFromUnderlyingForecaster() {
         QuantCoreForecaster fc = new QuantCoreForecaster(ForecastHorizon.H6, 0.94, new StubDir(new Forecast(1, 0.5)));
 
-        MultiOutputForecast f = fc.forecast(ResearchFeatures.ofBars(uptrend(40)));
+        MultiOutputForecast f = fc.forecast(TestFeatures.ofBars(uptrend(40)));
 
         assertThat(f.direction().direction()).isEqualTo(1);
         assertThat(f.direction().confidence()).isEqualTo(0.5);
@@ -39,7 +39,7 @@ class QuantCoreForecasterTest {
         QuantCoreForecaster fc = new QuantCoreForecaster(
                 ForecastHorizon.H6, 0.94, new StubVol(0.123), new StubDir(Forecast.flat()));
 
-        MultiOutputForecast f = fc.forecast(ResearchFeatures.ofBars(uptrend(40)));
+        MultiOutputForecast f = fc.forecast(TestFeatures.ofBars(uptrend(40)));
 
         assertThat(f.expectedVolatility()).isEqualTo(0.123);
     }
@@ -48,14 +48,14 @@ class QuantCoreForecasterTest {
     void horizonPassthrough() {
         QuantCoreForecaster fc = new QuantCoreForecaster(ForecastHorizon.H12, 0.94, new StubDir(Forecast.flat()));
 
-        assertThat(fc.forecast(ResearchFeatures.ofBars(uptrend(40))).horizon()).isEqualTo(ForecastHorizon.H12);
+        assertThat(fc.forecast(TestFeatures.ofBars(uptrend(40))).horizon()).isEqualTo(ForecastHorizon.H12);
     }
 
     @Test
     void strongUptrendIsTrendingUpRegime() {
         QuantCoreForecaster fc = new QuantCoreForecaster(ForecastHorizon.H6, 0.94, new StubDir(Forecast.flat()));
 
-        MultiOutputForecast f = fc.forecast(ResearchFeatures.ofBars(uptrend(40)));
+        MultiOutputForecast f = fc.forecast(TestFeatures.ofBars(uptrend(40)));
 
         assertThat(f.regime()).isEqualTo(MarketRegime.TRENDING_UP);
     }
@@ -64,9 +64,9 @@ class QuantCoreForecasterTest {
     void fitDelegatesToDirectionLeg() {
         QuantCoreForecaster fc = new QuantCoreForecaster(ForecastHorizon.H6, 0.94, new FitTrackingDir());
 
-        assertThat(fc.forecast(ResearchFeatures.ofBars(uptrend(40))).direction().direction()).isZero(); // 训练前 flat
+        assertThat(fc.forecast(TestFeatures.ofBars(uptrend(40))).direction().direction()).isZero(); // 训练前 flat
         MultiOutputForecaster trained = fc.fit(List.of());
-        assertThat(trained.forecast(ResearchFeatures.ofBars(uptrend(40))).direction().direction()).isEqualTo(1); // 训练后 LONG
+        assertThat(trained.forecast(TestFeatures.ofBars(uptrend(40))).direction().direction()).isEqualTo(1); // 训练后 LONG
     }
 
     @Test
@@ -74,9 +74,9 @@ class QuantCoreForecasterTest {
         QuantCoreForecaster fc = new QuantCoreForecaster(
                 ForecastHorizon.H6, 0.94, new FitTrackingVol(), new StubDir(Forecast.flat()));
 
-        assertThat(fc.forecast(ResearchFeatures.ofBars(uptrend(40))).expectedVolatility()).isEqualTo(0.01);
+        assertThat(fc.forecast(TestFeatures.ofBars(uptrend(40))).expectedVolatility()).isEqualTo(0.01);
         MultiOutputForecaster trained = fc.fit(List.of());
-        assertThat(trained.forecast(ResearchFeatures.ofBars(uptrend(40))).expectedVolatility()).isEqualTo(0.02);
+        assertThat(trained.forecast(TestFeatures.ofBars(uptrend(40))).expectedVolatility()).isEqualTo(0.02);
     }
 
     @Test
@@ -84,9 +84,9 @@ class QuantCoreForecasterTest {
         QuantCoreForecaster fc = new QuantCoreForecaster(
                 ForecastHorizon.H6, 0.94, new StubVol(0.01), new FitTrackingRegime(), new StubDir(Forecast.flat()));
 
-        assertThat(fc.forecast(ResearchFeatures.ofBars(uptrend(40))).regime()).isEqualTo(MarketRegime.RANGING);
+        assertThat(fc.forecast(TestFeatures.ofBars(uptrend(40))).regime()).isEqualTo(MarketRegime.RANGING);
         MultiOutputForecaster trained = fc.fit(List.of());
-        assertThat(trained.forecast(ResearchFeatures.ofBars(uptrend(40))).regime()).isEqualTo(MarketRegime.SHOCK);
+        assertThat(trained.forecast(TestFeatures.ofBars(uptrend(40))).regime()).isEqualTo(MarketRegime.SHOCK);
     }
 
     static List<KlineBar> uptrend(int n) {

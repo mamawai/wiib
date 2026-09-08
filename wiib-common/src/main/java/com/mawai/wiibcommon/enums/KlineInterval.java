@@ -22,16 +22,4 @@ public enum KlineInterval {
 
     /** Binance API 字符串 */
     private final String code;
-
-    /**
-     * 从 Binance API 字符串反查枚举。
-     */
-    public static KlineInterval fromCode(String code) {
-        for (KlineInterval iv : values()) {
-            if (iv.code.equals(code)) {
-                return iv;
-            }
-        }
-        throw new IllegalArgumentException("未知周期：" + code);
-    }
 }

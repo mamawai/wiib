@@ -12,6 +12,9 @@ public class NewsEventItem {
     private String title;
     /** 纯文本正文（入库时已脱 HTML） */
     private String content;
+    /** 英文译文；null=没译成，英文界面不展示这条 */
+    private String titleEn;
+    private String contentEn;
     /** 原始消息源链接 */
     private String url;
     /** 发稿时刻 epoch 毫秒，前端按 K 线周期桶定位图标 */

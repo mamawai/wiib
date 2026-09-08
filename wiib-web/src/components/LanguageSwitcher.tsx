@@ -3,8 +3,8 @@ import { Languages } from 'lucide-react';
 import { Button } from './ui/button';
 import { Card, CardContent } from './ui/card';
 import { cn } from '../lib/utils';
-import { currentLang, type Lang } from '../i18n';
-import { applyLanguage } from '../lib/language';
+import { useLangToggle } from '../hooks/useLangToggle';
+import type { Lang } from '../i18n';
 
 /**
  * 语言名一律用本族语写死，不跟着界面语言翻译——中文在英文界面里也该是"中文"，
@@ -12,16 +12,8 @@ import { applyLanguage } from '../lib/language';
  */
 const LANG_LABEL: Record<Lang, string> = { zh: '中文', en: 'English' };
 
-/** 当前语言与"点一下切到哪"。只有两门语言，点按直切，不做下拉 */
-function useLangToggle() {
-  const current = currentLang();
-  const next: Lang = current === 'zh' ? 'en' : 'zh';
-  return { current, next, toggle: () => applyLanguage(next) };
-}
-
 /**
- * 顶栏/登录页用的紧凑图标按钮。类名与交互跟旁边的主题切换按钮逐字对齐，
- * 顶栏那排图标必须长成一家人。
+ * 登录页用的紧凑图标按钮。顶栏那两处换成了「中 / EN」文字钮，见 Layout。
  */
 export function LanguageSwitcher({ className }: { className?: string }) {
   const { t } = useTranslation();

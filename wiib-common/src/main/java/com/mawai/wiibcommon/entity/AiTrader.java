@@ -121,12 +121,6 @@ public class AiTrader {
     /** 允许同币多空双开；仅在 allowMultiPosition=true 时有意义 */
     private Boolean allowHedge;
 
-    /** 允许模型自主加仓；false=转待确认请求，不阻塞本轮唤醒 */
-    private Boolean allowSelfAdd;
-
-    /** 允许模型自主减仓/平仓；false=转请求。止损止盈自动触发不受此约束 */
-    private Boolean allowSelfReduce;
-
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdAt;
 

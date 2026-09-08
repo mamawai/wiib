@@ -59,7 +59,6 @@ public class AiBacktestController {
     @Operation(summary = "提交回测（异步；同参数指纹直接复用既有任务）")
     @PostMapping("/run")
     public Result<Map<String, String>> run(@RequestBody RunReq req) {
-        StpUtil.checkLogin();
         long userId = StpUtil.getLoginIdAsLong();
         try {
             String symbol = QuantConstants.normalizeSymbol(req.symbol());
@@ -95,7 +94,6 @@ public class AiBacktestController {
     @Operation(summary = "任务状态（含排队位次）")
     @GetMapping("/tasks/{id}/status")
     public Result<BacktestTaskService.StatusView> status(@PathVariable String id) {
-        StpUtil.checkLogin();
         try {
             return Result.ok(taskService.status(id));
         } catch (BacktestTaskService.TaskRejectedException e) {
@@ -108,7 +106,6 @@ public class AiBacktestController {
     public Result<BacktestTaskService.EventsPage> events(@PathVariable String id,
                                                          @RequestParam(defaultValue = "-1") long after,
                                                          @RequestParam(defaultValue = "500") int limit) {
-        StpUtil.checkLogin();
         try {
             return Result.ok(taskService.events(id, after, limit));
         } catch (BacktestTaskService.TaskRejectedException e) {
@@ -121,7 +118,6 @@ public class AiBacktestController {
     public Result<BacktestTaskService.KlinesPage> klines(@PathVariable String id,
                                                          @RequestParam(defaultValue = "0") int offset,
                                                          @RequestParam(defaultValue = "20000") int limit) {
-        StpUtil.checkLogin();
         try {
             return Result.ok(taskService.klines(id, offset, limit));
         } catch (BacktestTaskService.TaskRejectedException e) {
@@ -132,7 +128,6 @@ public class AiBacktestController {
     @Operation(summary = "回测结果（DONE 后：summary+trades+降采样权益）")
     @GetMapping("/tasks/{id}/result")
     public Result<BacktestTaskService.ResultPayload> result(@PathVariable String id) {
-        StpUtil.checkLogin();
         try {
             return Result.ok(taskService.result(id));
         } catch (BacktestTaskService.TaskRejectedException e) {
@@ -145,7 +140,6 @@ public class AiBacktestController {
     @Operation(summary = "本地 5m K 线覆盖范围（复盘选随机起点用）")
     @GetMapping("/history/coverage")
     public Result<List<CoverageView>> coverage() {
-        StpUtil.checkLogin();
         List<CoverageView> out = new ArrayList<>();
         for (String symbol : QuantConstants.WATCH_SYMBOLS) {
             Long earliest = klineHistoryStore.earliestOpenTime(symbol, KlineHistoryStore.DEFAULT_INTERVAL);
@@ -162,7 +156,6 @@ public class AiBacktestController {
     public Result<HistoryKlines> historyKlines(@RequestParam String symbol,
                                                @RequestParam long fromMs,
                                                @RequestParam long toMs) {
-        StpUtil.checkLogin();
         String normalized = QuantConstants.normalizeSymbol(symbol);
         if (!QuantConstants.WATCH_SYMBOLS.contains(normalized)) {
             return Result.fail(messages.get("quant.backtest.symbolUnsupported"));

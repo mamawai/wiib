@@ -28,10 +28,11 @@ public class KlineStreamCache {
         String normalizedSymbol = symbol.trim().toUpperCase();
         String normalizedInterval = interval.trim().toLowerCase();
         if (KlineHistoryStore.DEFAULT_INTERVAL.equals(normalizedInterval)) {
-            // 异步落库，不占WS回调线程；下游预测管线经HTTP采集(秒级)后才读historyStore，无竞态
+            // 异步落库，不占WS回调线程；下游隔着秒级的HTTP采集才读historyStore，无竞态
             Thread.startVirtualThread(() -> persistDefaultInterval(normalizedSymbol, normalizedInterval, bar));
         }
-        // 收盘 → Redis Stream（唯一实时通道）：quant 侧 KlineStreamConsumer 消费后 republish 本地事件，触发预测/策略
+        // 收盘 → Redis Stream（唯一实时通道）：agent 侧 KlineStreamConsumer 消费后 republish 本地事件，
+        // 触发策略信号 / 交易员唤醒 / 叙事对账
         publishToStream(normalizedSymbol, normalizedInterval, bar);
         log.info("[KlineWS] closed symbol={} interval={} closeTime={}", normalizedSymbol, normalizedInterval, bar.closeTime());
     }

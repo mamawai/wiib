@@ -7,6 +7,15 @@
     "evening": "Good evening",
     "withName": "{{greeting}}, {{name}}"
   },
+  "hero": {
+    "howToPlay": "How it works",
+    "totalAssets": "Total assets USD",
+    "profitPct": "Total return",
+    "balance": "Available balance",
+    "totalPnl": "Total PnL",
+    "positionValue": "Position value",
+    "startCapital": "Starting capital {{amount}}"
+  },
   "quick": {
     "stocks": "Stocks",
     "crypto": "Crypto",
@@ -14,28 +23,38 @@
     "ai": "Config",
     "arena": "AI Arena",
     "games": "Games",
-    "buff": "Rewards"
+    "buff": "Rewards",
+    "stocksDesc": "Tokenized US stocks",
+    "cryptoDesc": "Spot & perpetuals",
+    "predictionDesc": "BTC 5-min up or down",
+    "aiDesc": "BYOK model endpoints",
+    "arenaDesc": "Watch models trade",
+    "gamesDesc": "Blackjack, poker, mines",
+    "buffDesc": "Not drawn today"
   },
-  "dashboard": {
-    "totalAssets": "Total assets · USD",
-    "availableBalance": "Available balance",
-    "totalPnl": "Total PnL",
-    "todayPnl": "Today's PnL",
-    "monthPnl": "Monthly PnL",
-    "monthPnlHelp": "Cells come from the midnight asset snapshot — unrealized PnL across stocks, crypto, futures, prediction and games.\n\nDays the service was down leave no snapshot. Daily PnL is that day's snapshot minus the previous day's, so one missing day blanks out that day and the next.\n\nReference only, may be incomplete. For today's live figure see Today's PnL above.",
-    "refreshed": "Refreshed"
+  "entries": {
+    "title": "Entries"
   },
-  "guest": {
-    "badge": "Paper trading",
-    "headline": "Paper trading,<0/><1>anytime, anywhere</1>",
-    "tagline": "Find out what if you had bought — stocks, BTC and futures.",
-    "start": "Start trading",
-    "howToPlay": "How it works",
-    "statStocks": "Stocks",
-    "statCoins": "Coins",
-    "statMarket": "BTC market"
+  "trader": {
+    "title": "My trader",
+    "todayPct": "{{pct}} today",
+    "roundDay": "Round R{{round}} · day {{day}}",
+    "equity": "Equity",
+    "roundPnl": "Round return",
+    "positions": "Positions",
+    "positionsValue": "{{n}}",
+    "nextWake": "Next wake",
+    "lastRound": "Last round: {{text}}",
+    "seeThinking": "See how it thinks",
+    "emptyTitle": "No trader yet. Add your API key and let a model watch the market for you.",
+    "step1": "1. Add a model endpoint under Config",
+    "step2": "2. Pick symbols and a wake cadence (5m to 4h)",
+    "step3": "3. Start — each trader takes 10,000U into the arena",
+    "create": "Create my trader",
+    "seeOthers": "See what others run"
   },
   "market": {
+    "title": "Markets",
     "stocks": "Stocks",
     "stocksSub": "Tokenized US equities",
     "crypto": "Crypto",
@@ -49,7 +68,10 @@
   "news": {
     "title": "Live news",
     "empty": "No news yet",
-    "translated": "Machine translation of the Chinese source"
+    "emptyDay": "No news on this day",
+    "prevDay": "Prev day",
+    "nextDay": "Next day",
+    "allDays": "All days"
   },
   "trades": {
     "title": "Latest trades",
@@ -59,10 +81,20 @@
   },
   "force": {
     "title": "Liquidations",
-    "longLiq": "Long liq",
-    "shortLiq": "Short liq",
-    "hint": "Live Binance liquidation feed",
+    "longLiq": "Longs liquidated",
+    "shortLiq": "Shorts liquidated",
+    "window": "{{count}} in the last hour",
     "viewAll": "View all"
+  },
+  "calendar": {
+    "title": "Economic calendar",
+    "note": "This week · high / medium impact",
+    "published": "Released",
+    "upcoming": "Upcoming",
+    "emptyPast": "Nothing released yet this week",
+    "emptyUpcoming": "No more events this week",
+    "forecast": "Fcst",
+    "previous": "Prev"
   },
   "buff": {
     "title": "Daily buff",
@@ -84,6 +116,10 @@
     }
   },
   "grid": {
+    "title": "Monthly PnL",
+    "cellTitle": "Day {{day}} · {{pnl}}",
+    "prevMonth": "Previous month",
+    "nextMonth": "Next month",
     "mon": "Mo",
     "tue": "Tu",
     "wed": "We",
@@ -104,7 +140,7 @@
     "games": "Games"
   },
   "faq": {
-    "title": "Getting started · FAQ",
+    "title": "Getting started",
     "spotVsFutures": {
       "q": "Spot vs futures: what's the difference?",
       "a": "Spot means you own the asset — sell higher to profit, and you can only lose what you paid. Futures is margin trading: you never hold the underlying, you can go long or short, leverage amplifies exposure, and you can be liquidated. Gold and oil here are futures-only (TradFi perpetuals) with no spot to buy; tokenized US equities are spot."

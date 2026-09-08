@@ -296,7 +296,7 @@ function StrategyColumn({ view, signals, canClose, closingId, onClose }: {
 }
 
 /**
- * 四策略账户监控：FIBO / LIQFADE / SQZMOM / TURTLE 各绑独立模拟盘账户（盈亏归因互不污染）。
+ * 多策略账户监控：FIBO / SQZMOM / TURTLE 各绑独立模拟盘账户（盈亏归因互不污染）。
  * PC 2×2 田字格对比，移动端竖排。平仓按钮仅 userId=1 渲染，后端二次校验才是真正的门。
  */
 export function Strategies() {

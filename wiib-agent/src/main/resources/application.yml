@@ -1,0 +1,176 @@
+server:
+  port: 8082
+
+spring:
+  # 本地密钥：根目录跑命中第 1 条，IDEA(工作目录=模块)命中第 2 条；线上无此文件，占位符由 env_file 注入
+  config:
+    import:
+      - optional:file:.env.local[.properties]
+      - optional:file:../.env.local[.properties]
+  ai:
+    # Spring AI 2.0 起弃用 spring-retry，spring.ai.retry.* 已无人读取；重试在
+    # ResponsesChatModel(协议层) 与 ResilientChatService(ReactAgent 层) 两处代码里。
+    # 下面 6 类必须全关：各自独立开关，只关 chat 其余仍会因缺 api-key 拒启动。LLM 配置唯一来源是 DB
+    model:
+      chat: none
+      embedding: none
+      image: none
+      moderation: none
+      audio:
+        speech: none
+        transcription: none
+  application:
+    name: wiib-agent
+  threads:
+    virtual:
+      enabled: true
+  # 与 sim 共享同一 PG；连接参数全来自 .env
+  datasource:
+    driver-class-name: org.postgresql.Driver
+    url: jdbc:postgresql://${PG_HOST:localhost}:${PG_PORT:5432}/${PG_DB:wiib}?reWriteBatchedInserts=true
+    username: ${PG_USER}
+    password: ${PG_PASSWORD}
+    hikari:
+      pool-name: wiib-agent-hikari
+      maximum-pool-size: 8
+      minimum-idle: 2
+      connection-timeout: 30000
+      idle-timeout: 300000
+      # 同 sim：别调短，连接一换 PG 就新建 backend 会重读 pg_catalog
+      max-lifetime: 1800000
+  # 消费 feed 写的 kline/markprice Stream + depth/orderflow KV
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      database: ${REDIS_DB:0}
+      password: ${REDIS_PASSWORD:}
+      timeout: 10000
+
+mybatis-plus:
+  # classpath*: 才会扫依赖 jar——KlineHistoryMapper.xml 在 wiib-common 的 jar 里，不带 * 扫不到
+  mapper-locations: classpath*:/mapper/**/*.xml
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,metrics,prometheus
+  metrics:
+    tags:
+      application: wiib-agent
+
+# 主决策周期 M1/M3/M5/M15/H1：QuantGraphFactory 据此定主 timeframe
+trading:
+  decision-interval: M5
+
+# 叙事对账开关：关掉则 VerificationTask 不再自动对账(bar 收盘、兜底 cron 全静默)。
+# 纯数值计算不烧 LLM——快照/vol 预测轨已下线，深研判现只由工作台对话触发，都不归它管
+agent:
+  analysis:
+    enabled: true
+  # 研判工作台对话轨(ChatAgentFactory)
+  workbench:
+    # 单个 agent 一轮 ReAct 的模型调用上限，达到即收尾，防死转烧钱。注意是"每个 agent 各自"而不是
+    # 整轮总量：summarizer 与每个带工具的专家各跑各的 state、计数互不相通，一轮对话的调用数是各家相加。
+    # 这个值就是迭代账里的 L：summarizer 叶子的硬顶按 3L+8 现算(ChatAgentFactory.summarizerLeaf)，改这里那边自动跟上
+    run-model-call-limit: 8
+    summarize-threshold-tokens: 32000  # 历史估算 token 超此值触发压缩：浅模型把老消息总结成一段替换原文
+    summarize-keep-messages: 6         # 压缩后保留的最近消息数(首条用户消息另外无条件保留原文)
+    # summarizer 在 BlockBeats 之外补的新闻来自服务端 web_search 工具(端点勾选开启)，搜到什么平台随上游走。
+    # 这里配的是来源标签名，只影响补充条目怎么标；换源改这里，提示词不用动。留空标 [Web]
+    news-supplement-source:
+
+# 财经日历采集轨（EconCalendarCollector）：定时拉 ForexFactory 本周日历（免费无key）落 econ_calendar_event，
+# 唤醒开场白注入"过去12h已公布+未来24h即将公布"。feed 为个人用途口径，节奏别调快——日历天然耐过期
+econ:
+  calendar:
+    enabled: true
+    interval-ms: 14400000  # 4h 一次：事件改期一般提前数天，再快也换不来新信息
+
+# 快讯采集打标轨（NewsEventCollector）：定时经 NewsCache 拉重要快讯，新条目轻模型打标后落 news_event
+news:
+  collect:
+    enabled: true
+    # 采集周期。BlockBeats 免费额度一次性不回血：每周期最多真打一次 API（NewsCache 10min 缓存窗内
+    # 与对话/深研判共享同一次拉取）。30min≈每天最多48次，改小前先看额度余量
+    interval-ms: 1800000
+    # 打标封闭词表：OIL=原油 GOLD=黄金 BTC=比特币/加密大盘 + 美股白名单。模型只许从中选，选不出留空
+    vocabulary: OIL,GOLD,BTC,COIN,MSTR,TSLA,NVDA
+
+# 策略实盘信号运行时：读实时流并记录 LIVE 信号
+strategy:
+  runtime:
+    enabled: true
+    enabled-ids: FIBO,SQZMOM,TURTLE   # 三策略全启
+    liquidation-window-minutes: 30
+    liquidation-threshold-usdt: 500000
+  execution:
+    enabled: true            # 真下单总开关，当前=开(代码 @Value 默认 false)
+    target: sim              # sim=本平台模拟盘(每策略独立账户 quant-<ID>) | testnet=Binance Testnet
+    # 三策略部署篮子并集(FIBO:BTC/ETH · SQZMOM:SOL/DOGE/XRP · TURTLE:SOL/ETH/DOGE/BNB)
+    symbols: BTCUSDT,ETHUSDT,DOGEUSDT,SOLUSDT,XRPUSDT,BNBUSDT
+    fixed-margin-usdt: 50    # 每仓固定保证金 USDT(testnet 轨用；sim 轨为风险定量)
+    leverage: 20             # testnet 轨请求杠杆
+    sim:
+      leverage: 20           # sim 轨请求杠杆；实际 = min(此值, 各策略 riskPolicy.maxLeverage)
+    order-timeout-bars: 12   # 挂单超时(5m 根数，对齐 FiboParams)
+
+# 本进程只用 REST 拉历史/testnet，不连 WS(BinanceWsClient 在 feed)
+binance:
+  ws-url: wss://stream.binance.com:9443/ws
+  futures-ws-url: wss://fstream.binance.com/ws
+  rest-base-url: https://api.binance.com
+  futures-rest-base-url: https://fapi.binance.com
+  symbols:
+    - BTCUSDT
+    - ETHUSDT
+    - DOGEUSDT
+    - SOLUSDT
+    - XRPUSDT
+  fallback-poll-interval: 5000
+
+# 策略实盘执行下单走 testnet(行情仍主网)；key 不填则 testnet 轨不可用，sim 轨不受影响
+binance-testnet:
+  rest-base-url: https://demo-fapi.binance.com
+  api-key: ${BINANCE_TESTNET_API_KEY:}
+  secret-key: ${BINANCE_TESTNET_SECRET_KEY:}
+  symbols:
+    - ETHUSDT
+    - BTCUSDT
+
+# BlockBeats(律动)重要快讯，NewsCache 懒加载。免费额度是一次性总量、不回血；不填则新闻功能降级
+blockbeats:
+  api-key: ${BLOCKBEATS_API_KEY:}
+  base-url: https://api-pro.theblockbeats.info
+  lang: cn
+  size: 20
+  expiry-ms: 600000           # 复用窗口 10min：窗口内多币种/多次调用复用同一份，超过才重拉
+
+# SimInternalClient 读用户行为数据(behavior agent)，须与 sim 同 token
+# (三进程读同一 .env，默认值也一致，不填即可互通)
+sim:
+  internal:
+    base-url: ${SIM_INTERNAL_BASE_URL:http://localhost:8080}
+internal:
+  api:
+    token: ${INTERNAL_API_TOKEN}
+
+# 降噪：主 agent 用文本收尾时框架必打"JSON 路由解析失败"WARN+堆栈，
+# 那是 FINISH 判定机制(解析失败=本轮结束)，预期路径非故障，压到 ERROR 零损失
+logging:
+  level:
+    com.alibaba.cloud.ai.graph.agent.flow.node.MainAgentNodeAction: error
+
+---
+# 哨兵模式(线上高可用，配合 redis-compose.yml)：.env 里 SPRING_PROFILES_ACTIVE=sentinel 启用，
+# 经哨兵发现主库、故障自动切换。生效后上面的 REDIS_HOST/PORT 被忽略，REDIS_PASSWORD/DB 照常
+spring:
+  config:
+    activate:
+      on-profile: sentinel
+  data:
+    redis:
+      sentinel:
+        master: ${REDIS_SENTINEL_MASTER:mymaster}
+        nodes: ${REDIS_SENTINEL_NODES:redis-sentinel-1:26379,redis-sentinel-2:26379,redis-sentinel-3:26379}

@@ -1,9 +1,9 @@
-import { Activity, Bot, ChevronRight } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Skeleton } from './ui/skeleton';
-import { fmtDateTime } from '../lib/utils';
+import { FEED_MAX_H } from './NewsFlashCard';
+import { useStagger } from '../hooks/useStagger';
+import { fmtNum, fmtTime } from '../lib/utils';
 import { orderSideView } from '../lib/orderSide';
 
 /**
@@ -30,70 +30,50 @@ interface Props {
 }
 
 export function LatestTradesCard({ trades, loading }: Props) {
-  // 「更多」全站通用，直接复用 common，不在本 ns 再写一份
+  // 「全部」全站通用，直接复用 common，不在本 ns 再写一份
   const { t } = useTranslation(['home', 'common']);
+  const listRef = useStagger<HTMLDivElement>();
 
   return (
-    <Card>
-      <CardHeader className="pb-2">
-        <div className="flex items-center justify-between gap-2">
-          <CardTitle className="flex items-center gap-2 text-sm">
-            <div className="p-1 rounded-md bg-primary/10">
-              <Activity className="w-3.5 h-3.5 text-primary" />
-            </div>
-            {t('trades.title')}
-          </CardTitle>
-          {/* 这里只给最新 20 条，全量分页在 /trades（交易者匿名） */}
-          <Link
-            to="/trades"
-            className="inline-flex items-center gap-0.5 text-xs font-medium text-muted-foreground hover:text-primary transition-colors"
-          >
-            {t('common:more')}
-            <ChevronRight className="w-3.5 h-3.5" />
-          </Link>
+    <>
+      {/* min-h-7 对齐快讯卡头部（那边有 28px 高的日期控件），两卡底边才齐 */}
+      <div className="sec-h min-h-7">
+        <h2>{t('trades.title')}</h2>
+        {/* 这里只给最新 20 条，全量分页在 /trades（交易者匿名） */}
+        <Link to="/trades">{t('common:all')}</Link>
+      </div>
+      {loading ? (
+        <div>
+          {Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-[22px] my-[11px]" />)}
         </div>
-      </CardHeader>
-      <CardContent className="p-0">
-        {loading ? (
-          <div className="space-y-0">
-            {Array.from({ length: 5 }).map((_, i) => (
-              <div key={i} className="flex justify-between items-center p-3 border-b border-border/20 last:border-b-0">
-                <Skeleton className="h-4 w-24" />
-                <Skeleton className="h-4 w-16" />
+      ) : trades.length === 0 ? (
+        <div className="py-10 text-center text-sm text-muted-foreground">{t('trades.empty')}</div>
+      ) : (
+        <div ref={listRef} className={FEED_MAX_H}>
+          {trades.map(item => {
+            // 方向标签渲染期现算：本组件订阅了 useTranslation，切语言会重渲染，这里就跟着重查一遍词表
+            const { label, tone } = orderSideView(item.orderSide);
+            const name = item.isFutures ? t('trades.futuresName', { base: item.base }) : item.base;
+            return (
+              <div key={item.id} className="num grid grid-cols-[40px_1fr_auto] gap-3 items-baseline py-[11px] border-b border-border text-[15px]">
+                <span className={`text-[13px] font-bold ${tone === 'buy' ? 'up' : 'dn'}`}>{label}</span>
+                <span className="min-w-0 truncate">
+                  <span className="font-semibold">{name}</span>
+                  {item.isAi && (
+                    <span title={t('trades.aiTrader')} className="inline-block text-[10px] font-bold border border-foreground px-1 ml-1.5 align-[1px]">AI</span>
+                  )}
+                </span>
+                <span className="whitespace-nowrap">
+                  <span className="text-[16px] font-semibold font-stretch-[85%]">
+                    {item.filledAmount == null ? `${item.quantity}${item.base}` : `$${fmtNum(item.filledAmount, 1)}`}
+                  </span>
+                  <span className="text-[12px] text-muted-foreground ml-3">{fmtTime(item.createdAt)}</span>
+                </span>
               </div>
-            ))}
-          </div>
-        ) : trades.length > 0 ? (
-          // 紧凑列（首页 2:1 布局的 1/3 位）：方向 + 币种 + 数量 + 时间。
-          // 金额这一列是窄卡里最放不下的，砍掉 —— 全量含金额去 /trades
-          <div className="max-h-96 overflow-y-auto">
-            {trades.map((item) => {
-              // 方向标签渲染期现算：本组件订阅了 useTranslation，切语言会重渲染，这里就跟着重查一遍词表
-              const { label: sideLabel, tone } = orderSideView(item.orderSide);
-              const name = item.isFutures ? t('trades.futuresName', { base: item.base }) : item.base;
-              return (
-                <div key={item.id} className="flex items-center justify-between gap-2 px-3 py-2.5 border-b border-border/20 last:border-b-0 text-sm">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span className={`text-xs font-medium px-1.5 py-0.5 rounded shrink-0 ${tone === 'buy' ? 'bg-gain/10 text-gain' : 'bg-loss/10 text-loss'}`}>
-                      {sideLabel}
-                    </span>
-                    {item.isAi && (
-                      <span title={t('trades.aiTrader')} className="inline-flex items-center justify-center w-5 h-5 rounded-md bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 shrink-0">
-                        <Bot className="w-3 h-3" />
-                      </span>
-                    )}
-                    <span className="font-medium truncate">{name}</span>
-                    <span className="text-muted-foreground text-xs truncate">{item.quantity}{item.base}</span>
-                  </div>
-                  <span className="text-muted-foreground text-xs shrink-0">{fmtDateTime(item.createdAt)}</span>
-                </div>
-              );
-            })}
-          </div>
-        ) : (
-          <div className="p-8 text-center text-muted-foreground">{t('trades.empty')}</div>
-        )}
-      </CardContent>
-    </Card>
+            );
+          })}
+        </div>
+      )}
+    </>
   );
 }

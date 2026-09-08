@@ -11,13 +11,14 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.context.request.async.AsyncRequestNotUsableException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 import java.util.Map;
 
 /**
  * 全局异常处理器（三模块共享）
- * 放 wiib-common，quant/feed/sim 均 scanBasePackages 到 com.mawai.wiibcommon，自动生效。
+ * 放 wiib-common，feed/sim/agent 均 scanBasePackages 到 com.mawai.wiibcommon，自动生效。
  * <p>
  * <b>错误文案在这里成文</b>：业务代码一路只传 {@link ErrorCode}，语言按当次请求的 X-Lang 头
  * （见 {@code RequestLangFilter}）现查词表。所以加一个错误码只要加一条枚举 + 两门语言各一条词条，
@@ -83,6 +84,15 @@ public class GlobalExceptionHandler {
         log.warn("参数类型错误: {}={}", e.getName(), e.getValue());
         return Result.fail(ErrorCode.PARAM_ERROR.getCode(),
                 messages.get("error.request.typeMismatch", Map.of("name", e.getName())));
+    }
+
+    /**
+     * SSE 客户端断连：心跳往死 socket 一写就抛这个。属正常事件不是异常，
+     * 返回 void 不写响应体——响应是 text/event-stream，往里塞 Result 只会再炸一次"没有转换器"。
+     */
+    @ExceptionHandler(AsyncRequestNotUsableException.class)
+    public void handleAsyncNotUsable(AsyncRequestNotUsableException e) {
+        log.debug("SSE 客户端已断开: {}", e.getMessage());
     }
 
     @ExceptionHandler(Exception.class)

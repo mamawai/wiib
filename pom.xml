@@ -19,6 +19,7 @@
             <module>wiib-common</module>
             <module>wiib-feed</module>
             <module>wiib-quant</module>
+            <module>wiib-agent</module>
             <module>wiib-sim</module>
     </modules>
 
@@ -44,6 +45,12 @@
             <dependency>
                 <groupId>com.mawai</groupId>
                 <artifactId>wiib-common</artifactId>
+                <version>${wiib.version}</version>
+            </dependency>
+
+            <dependency>
+                <groupId>com.mawai</groupId>
+                <artifactId>wiib-quant</artifactId>
                 <version>${wiib.version}</version>
             </dependency>
 

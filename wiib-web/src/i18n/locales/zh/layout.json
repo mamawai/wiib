@@ -7,12 +7,12 @@
     "arena": "AI竞技场",
     "ranking": "排行",
     "games": "游戏",
-    "more": "更多",
     "testnet": "模拟盘",
     "strategies": "策略",
     "backtest": "回测",
     "campaign": "活动",
     "comments": "留言",
+    "intro": "介绍",
     "me": "我的"
   },
   "marketMenu": {
@@ -25,7 +25,12 @@
     "logoHome": "返回首页",
     "toLight": "切换到亮色模式",
     "toDark": "切换到暗色模式",
-    "login": "登录"
+    "login": "登录",
+    "logout": "退出登录"
+  },
+  "footer": {
+    "brand": "WhatIfIBought 模拟交易",
+    "disclaimer": "所有数据均为虚拟，不构成投资建议"
   },
   "led": {
     "ok": "正常",

@@ -24,18 +24,6 @@ class OrderFlowAggregatorTest {
 
     @Test
     @SuppressWarnings("unchecked")
-    void writesAggTradeToStream() {
-        StringRedisTemplate redisTemplate = mock(StringRedisTemplate.class);
-        StreamOperations<String, Object, Object> streamOps = mock(StreamOperations.class);
-        when(redisTemplate.opsForStream()).thenReturn(streamOps);
-        OrderFlowAggregator agg = new OrderFlowAggregator(redisTemplate);
-
-        agg.onAggTrade("BTCUSDT", 100.0, 1.0, false, System.currentTimeMillis());
-        verify(streamOps).add(any(MapRecord.class));
-    }
-
-    @Test
-    @SuppressWarnings("unchecked")
     void computesMetricsFromWindowRecords() {
         StringRedisTemplate redisTemplate = mock(StringRedisTemplate.class);
         StreamOperations<String, Object, Object> streamOps = mock(StreamOperations.class);

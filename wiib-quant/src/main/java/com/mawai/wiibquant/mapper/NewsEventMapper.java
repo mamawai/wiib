@@ -63,36 +63,45 @@ public interface NewsEventMapper {
             """)
     List<Translation> selectTranslations(@Param("sourceIds") List<Long> sourceIds);
 
+    /** 最新 N 条（首页快讯卡数据源）：中英两套都投出来，前端按界面语言现选 */
+    @Select("""
+            SELECT id, title, content, title_en AS titleEn, content_en AS contentEn,
+                   url, published_at AS publishedAt, tags
+              FROM news_event
+             ORDER BY published_at DESC
+             LIMIT #{limit}
+            """)
+    List<NewsEventItem> selectLatest(@Param("limit") int limit);
+
+    /** 时间窗内的快讯（首页快讯卡按天翻）：左闭右开，倒序，投影同 selectLatest */
+    @Select("""
+            SELECT id, title, content, title_en AS titleEn, content_en AS contentEn,
+                   url, published_at AS publishedAt, tags
+              FROM news_event
+             WHERE published_at >= #{fromMs} AND published_at < #{toMs}
+             ORDER BY published_at DESC
+             LIMIT #{limit}
+            """)
+    List<NewsEventItem> selectInRange(@Param("fromMs") long fromMs, @Param("toMs") long toMs,
+                                      @Param("limit") int limit);
+
     /**
      * 按标签查时间窗内的快讯（K 线图标数据源）。
      * 标签匹配用逗号包夹：tags 是逗号串，裸 LIKE 会让词表未来加了有包含关系的词
      * （如 GOLD 与 GOLDX）时互相误中；包夹后只按完整词命中。
      * 倒序取最近的——窗口超限时牺牲的是最老的图标。
      * <p>
-     * 取哪份文本在 SQL 里定：{@code en=true} 优先译文、缺译文回落原文。前端因此少一层判断，
-     * 也保证界面看到的与模型读到的是同一份。
+     * 中英两套都投出来，前端按界面语言现选，切语言不用重拉。
      */
     @Select("""
-            <script>
-            SELECT id,
-            <choose>
-              <when test="en">
-                   COALESCE(NULLIF(title_en, ''), title) AS title,
-                   COALESCE(NULLIF(content_en, ''), content) AS content,
-              </when>
-              <otherwise>
-                   title, content,
-              </otherwise>
-            </choose>
+            SELECT id, title, content, title_en AS titleEn, content_en AS contentEn,
                    url, published_at AS publishedAt, tags
               FROM news_event
              WHERE ',' || tags || ',' LIKE '%,' || #{tag} || ',%'
                AND published_at BETWEEN #{fromMs} AND #{toMs}
              ORDER BY published_at DESC
              LIMIT #{limit}
-            </script>
             """)
     List<NewsEventItem> selectByTagInRange(@Param("tag") String tag, @Param("fromMs") long fromMs,
-                                           @Param("toMs") long toMs, @Param("limit") int limit,
-                                           @Param("en") boolean en);
+                                           @Param("toMs") long toMs, @Param("limit") int limit);
 }

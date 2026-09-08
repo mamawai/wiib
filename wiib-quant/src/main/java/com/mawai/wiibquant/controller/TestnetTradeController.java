@@ -51,7 +51,7 @@ public class TestnetTradeController {
     /** 手动下单：MARKET 立即成交 / LIMIT 挂单。传 leverage 则先调杠杆再下单。 */
     @PostMapping("/order")
     public Result<OrderResponse> order(@RequestBody ManualOrderRequest req) {
-        if (notAdmin()) return Result.fail(messages.get("quant.admin.adminOnly"));
+        if (notAdmin()) return Result.fail(messages.get("quant.testnet.adminOnly"));
         try {
             if (req.getSymbol() == null || req.getSide() == null || req.getType() == null) {
                 return Result.fail(messages.get("quant.testnet.fieldsRequired"));
@@ -93,7 +93,7 @@ public class TestnetTradeController {
     /** 一键市价平仓：查持仓→反向 MARKET reduceOnly 全平。无持仓则提示。 */
     @PostMapping("/close")
     public Result<OrderResponse> close(@RequestParam String symbol) {
-        if (notAdmin()) return Result.fail(messages.get("quant.admin.adminOnly"));
+        if (notAdmin()) return Result.fail(messages.get("quant.testnet.adminOnly"));
         try {
             List<PositionRisk> risks = client.getPositionRisk(symbol);
             BigDecimal amt = risks == null ? BigDecimal.ZERO : risks.stream()
@@ -125,7 +125,7 @@ public class TestnetTradeController {
     /** 撤销该 symbol 全部挂单(清场，方便重测)。 */
     @PostMapping("/cancel-all")
     public Result<SimpleAck> cancelAll(@RequestParam String symbol) {
-        if (notAdmin()) return Result.fail(messages.get("quant.admin.adminOnly"));
+        if (notAdmin()) return Result.fail(messages.get("quant.testnet.adminOnly"));
         try {
             SimpleAck ack = client.cancelAllOpenOrders(symbol);
             log.info("[TestnetManual] 撤全部挂单 symbol={}", symbol);

@@ -4,24 +4,24 @@
     "detail": "破产次数 {{times}} · 将在 {{date}} 09:00 恢复初始资金",
     "nextTradingDay": "下个交易日"
   },
-  "panel": {
-    "chart": "分布",
-    "profit": "收益",
-    "radar": "能力",
-    "wallet": "钱包"
+  "page": {
+    "title": "持仓",
+    "ledger": "资金账单",
+    "history": "合约持仓历史"
   },
-  "overview": {
-    "paperAccount": "模拟账户",
-    "totalAssets": "总资产",
+  "ov": {
+    "totalAssets": "总资产 USDT",
+    "since": "自 {{amount}} 起",
     "balanceWallet": "余额钱包",
     "gameWallet": "游戏钱包",
-    "totalPnl": "总盈亏",
-    "marginLoan": "杠杆借款",
-    "interestAccrued": "应计利息",
     "futuresMargin": "合约保证金",
     "futuresUnrealized": "合约浮盈",
-    "ledgerEntry": "资金账单",
-    "historyEntry": "合约持仓历史"
+    "marginLoan": "杠杆借款",
+    "interestAccrued": "应计利息",
+    "transfer": "划转",
+    "dist": "分布",
+    "profit": "收益",
+    "ability": "能力"
   },
   "toast": {
     "refreshed": "已刷新",
@@ -32,8 +32,14 @@
     "loadMoreFailed": "加载更多失败"
   },
   "daily": {
-    "title": "今日收益",
-    "crypto": "加密"
+    "title": "今日收益"
+  },
+  "alloc": {
+    "title": "资产分布",
+    "crypto": "币种现货",
+    "bstock": "bStock",
+    "futures": "合约（保证金+浮盈）",
+    "cash": "现金"
   },
   "cat": {
     "totalProfit": "总收益",
@@ -45,34 +51,33 @@
     "game": "游戏"
   },
   "holdings": {
-    "title": "持仓",
-    "crypto": "币种",
-    "futures": "合约",
-    "empty": "暂无持仓",
-    "total": "持仓合计"
+    "empty": "暂无持仓"
   },
   "spot": {
     "cryptoTitle": "币种持仓",
-    "cryptoCount_other": "{{count}}种",
+    "cryptoCount_other": "{{count}} 种",
     "bstockTitle": "股票持仓",
-    "bstockCount_other": "{{count}}只 · bStock"
-  },
-  "row": {
-    "qty": "持有 {{qty}}",
-    "approx": "约合 {{value}} {{unit}}",
-    "unitHint": "1枚=1盎司（{{grams}}g）",
-    "avgCost": "均价 {{price}}",
-    "lastPrice": "现价 {{price}}",
-    "shares": "{{qty}}股"
+    "bstockCount_other": "{{count}} 只 · bStock",
+    "colCoin": "币种",
+    "colStock": "股票",
+    "colQty": "持有",
+    "colShares": "股数",
+    "colAvg": "均价",
+    "colLast": "现价",
+    "colValue": "市值",
+    "colPnl": "盈亏",
+    "approx": "约合 {{value}} {{unit}}"
   },
   "prediction": {
-    "title": "BTC涨跌预测",
-    "bets_other": "{{count}}笔",
-    "winRate": "胜率 {{rate}}%",
-    "active_other": "活跃持仓 ({{count}}笔)",
-    "cost": "成本 {{value}}",
-    "value": "市值 {{value}}",
-    "record": "胜/负"
+    "title": "BTC 涨跌预测",
+    "wallet": "游戏钱包",
+    "realized": "已实现盈亏",
+    "totalBets": "总下注",
+    "winRate": "胜率",
+    "active": "活跃",
+    "bets_other": "{{count}} 笔",
+    "record": "{{won}} 胜 {{lost}} 负",
+    "activeHint": "成本 {{cost}} · 市值 {{value}}"
   },
   "reset": {
     "title": "重置账户",
@@ -87,8 +92,6 @@
     "submit": "确认重置"
   },
   "wallet": {
-    "transfer": "划转",
-    "totalPosition": "总持仓",
     "balance": "余额",
     "frozen": "冻结",
     "game": "游戏",

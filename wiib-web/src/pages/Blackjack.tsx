@@ -255,7 +255,7 @@ export function Blackjack() {
           {/* 结算 */}
           {isSettled && game.results && (
             <div className="mt-4 bj-result-in">
-              <div className="bg-black/40 backdrop-blur-sm rounded-xl p-4 space-y-2 border border-white/10">
+              <div className="bg-black/40 rounded-xl p-4 space-y-2 border border-white/10">
                 {game.results.map((r: HandResult) => {
                   const isWin = r.result === 'WIN' || r.result === 'BLACKJACK';
                   const isLose = r.result === 'LOSE';

@@ -1,22 +1,18 @@
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Wallet, Scale, Flame } from 'lucide-react';
 import { futuresApi } from '../../api';
 import { useUserStore } from '../../stores/userStore';
 import { useToast } from '../ui/use-toast';
-import { CardContent } from '../ui/card';
-import { Button } from '../ui/button';
-import { Input } from '../ui/input';
 import { FuturesActionButton } from '../FuturesActionButton';
 import { LeverageSlider } from '../LeverageSlider';
-import { NeuToggle } from '../NeuToggle';
 import { HelpTip } from '../HelpTip';
-import { fmtNum } from '../../lib/utils';
+import { cn, fmtNum } from '../../lib/utils';
 import { getCoin, getCoinPriceDecimals, getCoinPriceStep, formatCoinPrice } from '../../lib/coinConfig';
 import { useTradeFilter } from '../../lib/tradeFilters';
 import type { FuturesBracket, FuturesCrossAccount, FuturesMarginMode, FuturesPosition, FuturesSLItem, FuturesTPItem } from '../../types';
 import { TradeModeSwitch } from './TradeModeSwitch';
 import { SLTPEditor } from './SLTPEditor';
+import { NumInput, PctRow } from './TradeFields';
 import { useQuantityAnimation } from './useQuantityAnimation';
 import {
   POSITION_PCTS, FUTURES_LEVERAGE_OPTIONS, formatRate, getStepPrecision, floorToStep, qtyByPct,
@@ -62,14 +58,12 @@ export function FuturesOpenPanel({ symbol, currentPrice, brackets, positionsKey,
   const [limitPrice, setLimitPrice] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [actionSuccess, setActionSuccess] = useState(false);
-  const [slEnabled, setSlEnabled] = useState(false);
   const [slRows, setSlRows] = useState<SLTPRow[]>([{ price: '', quantity: '' }]);
-  const [tpEnabled, setTpEnabled] = useState(false);
   const [tpRows, setTpRows] = useState<SLTPRow[]>([{ price: '', quantity: '' }]);
   const [crossAcct, setCrossAcct] = useState<FuturesCrossAccount | null>(null);
   // 开仓/调杠杆成功后 +1 触发全仓账户与持仓快照重拉（可用/净值/杠杆都可能变了）
   const [acctTick, setAcctTick] = useState(0);
-  // 保证金输入单位：币=未乘杠杆数量；USDT=保证金金额（内部再 /price 还原成币数量）
+  // 保证金输入单位：币=未乘杠杆数量；USDT=保证金金额（内部再 /price 还原成币数量）。点输入框右侧单位切换
   const [marginUnit, setMarginUnit] = useState<'COIN' | 'USDT'>('USDT');
   // 该币现有仓位快照（≤2张，模式/杠杆币种级一致）
   const [positions, setPositions] = useState<FuturesPosition[]>([]);
@@ -111,7 +105,7 @@ export function FuturesOpenPanel({ symbol, currentPrice, brackets, positionsKey,
 
   useEffect(() => {
     if (!actionSuccess) return;
-    const timer = window.setTimeout(() => setActionSuccess(false), 1600);
+    const timer = window.setTimeout(() => setActionSuccess(false), 800);
     return () => window.clearTimeout(timer);
   }, [actionSuccess]);
 
@@ -130,7 +124,7 @@ export function FuturesOpenPanel({ symbol, currentPrice, brackets, positionsKey,
   const fullSltpRow = (): SLTPRow => ({ price: '', quantity: orderQty > 0 ? String(orderQty) : '' });
 
   // 开仓量随数量/单位/杠杆变，已设档位按各自百分比跟着重算——用户表达的是"平多少比例"，
-  // 改开仓量不该把比例冲掉。数量还空着的行（含刚打开开关那条）补满 100%
+  // 改开仓量不该把比例冲掉。数量还空着的行补满 100%
   const prevOrderQty = useRef(orderQty);
   useEffect(() => {
     const prev = prevOrderQty.current;
@@ -173,12 +167,13 @@ export function FuturesOpenPanel({ symbol, currentPrice, brackets, positionsKey,
     if (priceForCalc > 0 && orderQty * priceForCalc < filter.minNotional) {
       toast(t('toast.minNotional', { amount: filter.minNotional }), 'error'); return;
     }
-    const slItems: FuturesSLItem[] = slEnabled
-      ? slRows.filter(r => parseFloat(r.price) > 0 && parseFloat(r.quantity) > 0).map(r => ({ price: parseFloat(r.price), quantity: parseFloat(r.quantity) }))
-      : [];
-    const tpItems: FuturesTPItem[] = tpEnabled
-      ? tpRows.filter(r => parseFloat(r.price) > 0 && parseFloat(r.quantity) > 0).map(r => ({ price: parseFloat(r.price), quantity: parseFloat(r.quantity) }))
-      : [];
+    // 价格留空的档位=没设，直接滤掉；一档都不填就是不带止损/止盈开仓
+    const slItems: FuturesSLItem[] = slRows
+      .filter(r => parseFloat(r.price) > 0 && parseFloat(r.quantity) > 0)
+      .map(r => ({ price: parseFloat(r.price), quantity: parseFloat(r.quantity) }));
+    const tpItems: FuturesTPItem[] = tpRows
+      .filter(r => parseFloat(r.price) > 0 && parseFloat(r.quantity) > 0)
+      .map(r => ({ price: parseFloat(r.price), quantity: parseFloat(r.quantity) }));
     const slTotal = slItems.reduce((s, r) => s + r.quantity, 0);
     const tpTotal = tpItems.reduce((s, r) => s + r.quantity, 0);
     if (slTotal > orderQty + 1e-9) { toast(t('toast.slOverQty'), 'error'); return; }
@@ -202,9 +197,7 @@ export function FuturesOpenPanel({ symbol, currentPrice, brackets, positionsKey,
       // USDT 模式别把最小币数当金额填回去
       setQuantity(marginUnit === 'USDT' ? '' : String(MIN_QTY));
       setLimitPrice('');
-      setSlEnabled(false);
       setSlRows([fullSltpRow()]);
-      setTpEnabled(false);
       setTpRows([fullSltpRow()]);
       setAcctTick(t => t + 1);
       onTraded();
@@ -244,6 +237,7 @@ export function FuturesOpenPanel({ symbol, currentPrice, brackets, positionsKey,
     : null;
   // 负强平价=永不强平：显示 — 且不传给止损编辑器
   const openLiqPrice = openLiq && openLiq.price > 0 ? openLiq.price : undefined;
+  const liqText = openLiqPrice ? fmtPrice(openLiqPrice) : '—';
   // 下注预算基数：全仓=账户可用 available（余额扣掉已占用+挂单预留）；
   // 逐仓要真划钱，卡两道取小——available 管"钱是不是被全仓占着"，balance 管"钱包里有没有现金"
   // （全仓浮盈进得了 available 进不了 balance）。快照没回来就退回余额，别把可用显示成 0
@@ -251,244 +245,191 @@ export function FuturesOpenPanel({ symbol, currentPrice, brackets, positionsKey,
     ? (crossAcct?.available ?? 0)
     : Math.min(crossAcct?.available ?? Infinity, user?.balance ?? 0);
 
+  /** 保证金按钮：当前输入正好等于某档预算时高亮那一颗 */
+  const pctTarget = (pct: number) => marginUnit === 'USDT'
+    ? Math.floor(budgetBalance * pct * 100) / 100
+    : calcMaxAffordableMarginQty(budgetBalance, pct, priceForCalc, effLeverage, MIN_QTY);
+  const activePct = inputNum > 0 && priceForCalc > 0
+    ? (POSITION_PCTS.find(p => Math.abs(pctTarget(p) - inputNum) < 1e-9) ?? null)
+    : null;
+  const handlePct = (pct: number) => {
+    const target = pctTarget(pct);
+    if (!(target > 0)) { setQuantity(''); return; }
+    // USDT 模式直接填金额（两位小数），币模式走缓动
+    if (marginUnit === 'USDT') setQuantity(target.toFixed(2));
+    else animateQuantity(target, MIN_QTY);
+  };
+
+  // 逐仓只能调高：滑杆下限=持仓杠杆，档位标签补持仓值作起点
+  const isolatedHeld = heldPos != null && !isCross;
+  const sliderMin = isolatedHeld ? posLeverage! : 1;
+  const levTicks = isolatedHeld
+    ? [...new Set([posLeverage!, ...FUTURES_LEVERAGE_OPTIONS.filter(lv => lv >= posLeverage! && lv <= maxLeverage)])].sort((a, b) => a - b)
+    : leverageOptions;
+
+  const limitWarn = parseFloat(limitPrice) > 0 && currentPrice > 0 && (
+    (side === 'LONG' && parseFloat(limitPrice) >= currentPrice) ||
+    (side === 'SHORT' && parseFloat(limitPrice) <= currentPrice)
+  );
+
   return (
     <>
-      {/* 做多/做空切换 + 现货/合约 */}
-      <div className="px-5 pt-5 flex flex-wrap items-center gap-3">
-        <div className="flex flex-1 min-w-[140px] rounded-md border border-border overflow-hidden divide-x divide-border">
-          <button onClick={() => setSide('LONG')} className={`flex-1 py-2.5 text-sm font-bold transition-colors cursor-pointer ${side === 'LONG' ? 'bg-gain text-white' : 'text-muted-foreground hover:bg-surface-hover hover:text-foreground'}`}>{t('side.long')}</button>
-          <button onClick={() => setSide('SHORT')} className={`flex-1 py-2.5 text-sm font-bold transition-colors cursor-pointer ${side === 'SHORT' ? 'bg-loss text-white' : 'text-muted-foreground hover:bg-surface-hover hover:text-foreground'}`}>{t('side.short')}</button>
-        </div>
+      {/* 合约/现货 + 可用 */}
+      <div className="flex justify-between items-center">
         <TradeModeSwitch mode="futures" futuresOnly={cfg.futuresOnly} onModeChange={onModeChange} />
+        {(isCross ? crossAcct : user) != null && (
+          <span className="text-[12.5px] text-muted-foreground">
+            {t('open.availLabel')} <b className="num text-foreground font-semibold">{fmtNum(budgetBalance)}</b> USDT
+          </span>
+        )}
       </div>
 
-      {/* flex-1 + 按钮 mt-auto：面板随左侧图表卡等高，止损止盈展开时消耗预留空档而不是撑高整卡 */}
-      <CardContent className="p-5 mt-2 flex-1 flex flex-col gap-6">
-        {/* 保证金模式 + 执行方式：模式是币种级设置（对齐Binance），有持仓时锁定不可切 */}
-        <div className="flex items-center gap-2">
-          <NeuToggle
-            label={t('marginMode.label')}
-            value={effMarginMode}
-            onChange={m => {
-              if (heldPos) { toast(t('toast.marginModeLocked'), 'error'); return; }
-              setMarginMode(m);
-            }}
-            options={[{ value: 'CROSS', label: t('marginMode.cross') }, { value: 'ISOLATED', label: t('marginMode.isolated') }]}
-          />
-          <NeuToggle
-            label={t('orderType.label')}
-            value={orderType}
-            onChange={setOrderType}
-            options={[{ value: 'MARKET', label: t('orderType.market') }, { value: 'LIMIT', label: t('orderType.limit') }]}
-          />
-        </div>
+      {/* 做多 / 做空 */}
+      <div className="grid grid-cols-2 border-[1.5px] border-foreground">
+        <button
+          onClick={() => setSide('LONG')}
+          className={cn('h-12 text-[17px] font-extrabold cursor-pointer transition-colors', side === 'LONG' ? 'bg-gain text-white' : 'text-muted-foreground hover:text-foreground')}
+        >{t('side.long')}</button>
+        <button
+          onClick={() => setSide('SHORT')}
+          className={cn('h-12 text-[17px] font-extrabold cursor-pointer transition-colors', side === 'SHORT' ? 'bg-loss text-white' : 'text-muted-foreground hover:text-foreground')}
+        >{t('side.short')}</button>
+      </div>
 
-        {/* 限价输入 */}
-        {orderType === 'LIMIT' && (
-          <div className="space-y-1.5">
-            <label className="text-xs font-bold text-muted-foreground">{t('open.limitLabel')}</label>
-            <Input type="number" placeholder={t('open.limitPlaceholder')} value={limitPrice} onChange={e => setLimitPrice(e.target.value)} step={PRICE_STEP_TEXT} min="0" />
-            {parseFloat(limitPrice) > 0 && currentPrice > 0 && (
-              (side === 'LONG' && parseFloat(limitPrice) >= currentPrice) ||
-              (side === 'SHORT' && parseFloat(limitPrice) <= currentPrice)
-            ) && (
-              <div className="text-[10px] text-yellow-500">{t(side === 'LONG' ? 'open.limitFillsGte' : 'open.limitFillsLte')}</div>
-            )}
+      {/* 保证金模式（币种级设置，有持仓锁定）+ 委托类型 */}
+      <div className="grid grid-cols-2 gap-3.5">
+        <div className="field">
+          <label>{t('marginMode.label')}</label>
+          <div className="seg flex">
+            {(['CROSS', 'ISOLATED'] as const).map(m => (
+              <button
+                key={m}
+                className={cn('flex-1', effMarginMode === m && 'on')}
+                onClick={() => { if (heldPos) { toast(t('toast.marginModeLocked'), 'error'); return; } setMarginMode(m); }}
+              >{t(m === 'CROSS' ? 'marginMode.cross' : 'marginMode.isolated')}</button>
+            ))}
+          </div>
+        </div>
+        <div className="field">
+          <label>{t('orderType.label')}</label>
+          <div className="seg flex">
+            {(['MARKET', 'LIMIT'] as const).map(o => (
+              <button key={o} className={cn('flex-1', orderType === o && 'on')} onClick={() => setOrderType(o)}>
+                {t(o === 'MARKET' ? 'orderType.market' : 'orderType.limit')}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {orderType === 'LIMIT' && (
+        <div className="field">
+          <label>{t('open.limitLabel')}</label>
+          <NumInput value={limitPrice} onChange={setLimitPrice} placeholder={t('open.limitPlaceholder')} step={PRICE_STEP_TEXT} min="0" unit="USDT" />
+          {limitWarn && <div className="text-[12px] text-warning">{t(side === 'LONG' ? 'open.limitFillsGte' : 'open.limitFillsLte')}</div>}
+        </div>
+      )}
+
+      {/* 杠杆：无持仓=本地状态；有持仓=调杠杆入口（拖动出确认，确认即改仓位，多空一起变） */}
+      <div className="flex flex-col gap-2">
+        <div className="flex justify-between items-baseline text-[12.5px] font-semibold text-muted-foreground">
+          <span>{t('lev.label')}</span>
+          <b className={cn('num text-[20px] font-bold', pendingLev ? 'text-warning' : 'text-foreground')}>{leverage}x</b>
+        </div>
+        <LeverageSlider value={leverage} min={sliderMin} max={maxLeverage} ticks={levTicks} onChange={setLeverage} />
+        {pendingLev && (
+          <div className="flex gap-1.5">
+            <button className="btn xs fill" disabled={adjustingLev} onClick={() => handleAdjustLeverage(leverage)}>
+              {adjustingLev ? t('lev.applying') : t('lev.apply', { lev: leverage })}
+            </button>
+            <button className="btn xs" disabled={adjustingLev} onClick={() => setLeverage(posLeverage!)}>{t('lev.revert')}</button>
           </div>
         )}
+      </div>
 
-        {/* 杠杆选择：无持仓=本地状态；有持仓=调杠杆入口（拖动出确认，确认即改仓位，多空一起变） */}
-        {(() => {
-          const isolatedHeld = heldPos != null && !isCross;
-          // 逐仓只能调高：滑杆下限=持仓杠杆，档位标签补持仓值作起点
-          const sliderMin = isolatedHeld ? posLeverage! : 1;
-          const ticks = isolatedHeld
-            ? [...new Set([posLeverage!, ...FUTURES_LEVERAGE_OPTIONS.filter(lv => lv >= posLeverage! && lv <= maxLeverage)])].sort((a, b) => a - b)
-            : leverageOptions;
-          return (
-        <div className="space-y-1.5">
-          <div className="flex items-center justify-between">
-            <label className="text-xs font-bold text-muted-foreground flex items-center gap-1.5">
-              <Scale className="w-3.5 h-3.5" /> {t('lev.label')}
-            </label>
-            <div className={`px-2 py-0.5 rounded text-xs font-bold tabular-nums ${pendingLev ? 'bg-yellow-500/10 text-yellow-500' : 'bg-primary/10 text-primary'}`}>{leverage}x</div>
-          </div>
-          <LeverageSlider
-            value={leverage}
-            min={sliderMin}
-            max={maxLeverage}
-            ticks={ticks}
-            onChange={setLeverage}
-          />
-          {pendingLev ? (
-            <div className="flex items-center gap-1.5">
-              <Button size="sm" className="flex-1 h-9 sm:h-7 text-[11px]" disabled={adjustingLev} onClick={() => handleAdjustLeverage(leverage)}>
-                {adjustingLev ? t('lev.applying') : t('lev.apply', { lev: leverage })}
-              </Button>
-              <Button size="sm" variant="outline" className="h-9 sm:h-7 text-[11px]" disabled={adjustingLev} onClick={() => setLeverage(posLeverage!)}>
-                {t('lev.revert')}
-              </Button>
-            </div>
-          ) : (
-            <div className="text-[10px] text-muted-foreground leading-relaxed">
-              {heldPos
-                ? t(isCross ? 'lev.heldCross' : 'lev.heldIsolated', { lev: posLeverage })
-                : t('lev.maxHint', { max: maxLeverage })}
-            </div>
-          )}
-        </div>
-          );
-        })()}
-
-        {/* 保证金数量：币 | USDT 双单位，内部统一换成币数量再算 */}
-        <div className="space-y-2">
-          <div className="flex items-center justify-between">
-            <label className="text-xs font-bold text-muted-foreground flex items-center gap-1.5">
-              <Wallet className="w-3.5 h-3.5" /> {t('open.marginLabel')}
-            </label>
-            <div className="flex items-center gap-2">
-              {(isCross ? crossAcct : user) != null && (
-                <span className="text-xs text-muted-foreground tabular-nums">
-                  {t('open.available', { amount: fmtNum(budgetBalance) })}
-                </span>
-              )}
-              <div className="flex rounded-md border border-border overflow-hidden divide-x divide-border">
-                <button type="button" onClick={() => switchMarginUnit('COIN')}
-                  className={`px-2 py-0.5 text-[10px] font-bold transition-colors cursor-pointer ${marginUnit === 'COIN' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-surface-hover hover:text-foreground'}`}>
-                  {cfg.name}
-                </button>
-                <button type="button" onClick={() => switchMarginUnit('USDT')}
-                  className={`px-2 py-0.5 text-[10px] font-bold transition-colors cursor-pointer ${marginUnit === 'USDT' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-surface-hover hover:text-foreground'}`}>
-                  USDT
-                </button>
-              </div>
-            </div>
-          </div>
-          <div className="relative">
-            <Input
-              type="number"
-              placeholder={marginUnit === 'USDT' ? '0.00' : String(MIN_QTY)}
-              value={quantity}
-              onChange={e => setQuantity(e.target.value)}
-              step={marginUnit === 'USDT' ? '0.01' : String(MIN_QTY)}
-              min={marginUnit === 'USDT' ? 0 : MIN_QTY}
-              className="pr-16"
-            />
-            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground pointer-events-none">
-              {marginUnit === 'USDT' ? 'USDT' : cfg.name}
-            </span>
-          </div>
-          {/* 币安同款门槛：最小名义额 + 按当前杠杆折算的最小保证金（100x黄金≈0.05、50x≈0.10 的来源） */}
-          <div className="text-[10px] text-muted-foreground">
-            {t('open.minOrder', { notional: filter.minNotional, step: filter.stepSize, unit: cfg.name })}
+      {/* 保证金：右侧单位可点，币 ↔ USDT 换算 */}
+      <div className="field">
+        <label>
+          <span>{t('open.marginLabel')}</span>
+          <span>
+            {t('open.minOrder', { step: filter.stepSize, unit: cfg.name })}
             {effLeverage > 0 && ` · ${t('open.minMargin', { amount: (filter.minNotional / effLeverage).toFixed(2) })}`}
-          </div>
-          {priceForCalc > 0 && (
-            <div className="grid grid-cols-4 gap-1.5">
-              {POSITION_PCTS.map(pct => {
-                const handlePct = () => {
-                  if (marginUnit === 'USDT') {
-                    // USDT 模式：预算×pct 直接填金额（两位小数）
-                    const usdt = Math.floor(budgetBalance * pct * 100) / 100;
-                    if (usdt > 0) setQuantity(usdt.toFixed(2)); else setQuantity('');
-                  } else {
-                    const qty = calcMaxAffordableMarginQty(budgetBalance, pct, priceForCalc, effLeverage, MIN_QTY);
-                    if (qty > 0) animateQuantity(qty, MIN_QTY); else setQuantity('');
-                  }
-                };
-                return (
-                  <Button key={pct} size="sm" variant="outline" className="h-10 sm:h-7 text-[11px]" onClick={handlePct}>
-                    {pct * 100}%
-                  </Button>
-                );
-              })}
-            </div>
-          )}
-        </div>
-
-        {/* 预估信息 */}
-        {openEstimate && (() => {
-          const { positionValue, margin, commission, totalCost } = openEstimate;
-          const liqPriceText = openLiqPrice ? `$${fmtPrice(openLiqPrice)}` : '—';
-          const mmrText = openLiq ? t('open.tier', { tier: openLiq.bracket.tier, rate: formatRate(openLiq.bracket.mmr) }) : '—';
-          return (
-            <div className="p-3.5 rounded-md border border-border bg-card-2 space-y-2.5">
-              {/* 预估四项：手机单列防"标签+数值"挤爆，≥sm 恢复两列 */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1.5 text-xs">
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">{t('open.positionValue')}</span>
-                  <span className="font-mono">${fmtNum(positionValue)}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">{t('open.margin')}</span>
-                  <span className="font-mono">${fmtNum(margin)}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">{t('open.fee')}</span>
-                  <span className="font-mono">${fmtNum(commission)}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">{t('open.mmr')}</span>
-                  <span className="font-mono">{mmrText}</span>
-                </div>
-              </div>
-              <div className="flex justify-between items-center text-xs pt-2 border-t border-border/40">
-                <span className="text-muted-foreground flex items-center gap-1">
-                  <Flame className="w-3 h-3 text-yellow-500" /> {t('open.estLiq')}
-                </span>
-                <span className="font-mono font-bold text-yellow-500">{liqPriceText}</span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-xs text-muted-foreground">{t('open.totalRequired')}</span>
-                <span className="text-sm font-bold tabular-nums">${fmtNum(totalCost)}</span>
-              </div>
-            </div>
-          );
-        })()}
-
-        {/* 开仓止损/止盈：手机单列（双列时价格/数量输入被挤到不可用），≥sm 恢复双列 */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <div className="space-y-1.5">
-            <div className="flex items-center justify-between">
-              <label className="text-xs font-bold text-muted-foreground flex items-center gap-1">{t('sltp.sl')} <HelpTip text={t('sltp.slHelpOpen')} /></label>
-              <button type="button" onClick={() => { setSlEnabled(!slEnabled); setSlRows([fullSltpRow()]); }}
-                className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${slEnabled ? 'bg-primary' : 'bg-muted-foreground/30'}`}>
-                <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-background transition-transform shadow-sm ${slEnabled ? 'translate-x-4.5' : 'translate-x-0.75'}`} />
-              </button>
-            </div>
-            {slEnabled && (
-              <SLTPEditor rows={slRows} onChange={setSlRows} kind="SL" posQty={orderQty} minQty={MIN_QTY}
-                entryPrice={priceForCalc || currentPrice} margin={openEstimate?.margin ?? 0} side={side}
-                minPriceStep={PRICE_STEP} priceFormatter={fmtPrice} />
-            )}
-          </div>
-          <div className="space-y-1.5">
-            <div className="flex items-center justify-between">
-              <label className="text-xs font-bold text-muted-foreground flex items-center gap-1">{t('sltp.tp')} <HelpTip text={t('sltp.tpHelpOpen')} /></label>
-              <button type="button" onClick={() => { setTpEnabled(!tpEnabled); setTpRows([fullSltpRow()]); }}
-                className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${tpEnabled ? 'bg-primary' : 'bg-muted-foreground/30'}`}>
-                <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-background transition-transform shadow-sm ${tpEnabled ? 'translate-x-4.5' : 'translate-x-0.75'}`} />
-              </button>
-            </div>
-            {tpEnabled && (
-              <SLTPEditor rows={tpRows} onChange={setTpRows} kind="TP" posQty={orderQty} minQty={MIN_QTY}
-                entryPrice={priceForCalc || currentPrice} margin={openEstimate?.margin ?? 0} side={side}
-                minPriceStep={PRICE_STEP} priceFormatter={fmtPrice} />
-            )}
-          </div>
-        </div>
-
-        {/* 开仓按钮：杠杆调整待确认时置灰，防止"滑杆显示的杠杆"与"实际下单杠杆"错位 */}
-        <FuturesActionButton
-          className="mt-auto"
-          onClick={handleSubmit}
-          disabled={submitting || currentPrice <= 0 || pendingLev}
-          loading={submitting}
-          success={actionSuccess}
-          side={side}
-          leverage={effLeverage}
+          </span>
+        </label>
+        <NumInput
+          value={quantity}
+          onChange={setQuantity}
+          placeholder={marginUnit === 'USDT' ? '0.00' : String(MIN_QTY)}
+          step={marginUnit === 'USDT' ? '0.01' : String(MIN_QTY)}
+          min={marginUnit === 'USDT' ? 0 : MIN_QTY}
+          unit={marginUnit === 'USDT' ? 'USDT' : cfg.name}
+          unitTitle={t('open.switchUnit')}
+          onUnitClick={() => switchMarginUnit(marginUnit === 'USDT' ? 'COIN' : 'USDT')}
         />
-      </CardContent>
+        {priceForCalc > 0 && <PctRow active={activePct} onPick={handlePct} />}
+      </div>
+
+      {/* 预估 */}
+      {openEstimate && (
+        <div className="num border-t border-foreground pt-1">
+          <div className="kv py-[7px]">
+            <span className="k">{t('open.positionValue')}</span>
+            <span className="v">{fmtNum(openEstimate.positionValue)}</span>
+          </div>
+          <div className="kv py-[7px]">
+            <span className="k">{t('open.fee')}</span>
+            <span className="v">{fmtNum(openEstimate.commission)}</span>
+          </div>
+          <div className="kv py-[7px]">
+            <span className="k">{t('open.mmr')}{openLiq ? ` ${t('open.tierShort', { tier: openLiq.bracket.tier })}` : ''}</span>
+            <span className="v">{openLiq ? formatRate(openLiq.bracket.mmr) : '—'}</span>
+          </div>
+          <div className="kv py-[7px]">
+            <span className="k">{t('open.estLiq')}</span>
+            <span className="v text-warning">{liqText}</span>
+          </div>
+          <div className="kv py-[7px] border-b-0 text-[16px]">
+            <span className="k">{t('open.totalRequired')}</span>
+            <span className="v text-[20px] font-bold [font-stretch:85%]">{fmtNum(openEstimate.totalCost)} USDT</span>
+          </div>
+        </div>
+      )}
+
+      {/* 开仓止损/止盈：常显，价格留空就是不设。手机单列（双列时价格/数量输入被挤到不可用），≥sm 恢复双列 */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+        <div className="field">
+          <label>
+            <span className="flex items-center gap-1">{t('sltp.sl')} <HelpTip text={t('sltp.slHelpOpen')} /></span>
+          </label>
+          <SLTPEditor rows={slRows} onChange={setSlRows} kind="SL" posQty={orderQty} minQty={MIN_QTY}
+            entryPrice={priceForCalc || currentPrice} margin={openEstimate?.margin ?? 0} side={side} unit={cfg.name}
+            minPriceStep={PRICE_STEP} priceFormatter={fmtPrice} />
+        </div>
+        <div className="field">
+          <label>
+            <span className="flex items-center gap-1">{t('sltp.tp')} <HelpTip text={t('sltp.tpHelpOpen')} /></span>
+          </label>
+          <SLTPEditor rows={tpRows} onChange={setTpRows} kind="TP" posQty={orderQty} minQty={MIN_QTY}
+            entryPrice={priceForCalc || currentPrice} margin={openEstimate?.margin ?? 0} side={side} unit={cfg.name}
+            minPriceStep={PRICE_STEP} priceFormatter={fmtPrice} />
+        </div>
+      </div>
+
+      {/* 杠杆调整待确认时置灰，防止"滑杆显示的杠杆"与"实际下单杠杆"错位 */}
+      <FuturesActionButton
+        onClick={handleSubmit}
+        disabled={submitting || currentPrice <= 0 || pendingLev}
+        loading={submitting}
+        success={actionSuccess}
+        side={side}
+        label={symbol}
+        leverage={effLeverage}
+      />
+
+      <p className="text-[12px] text-muted-foreground leading-[1.6]">
+        {t(isCross ? 'open.hintCross' : 'open.hintIsolated')}
+        {openLiqPrice ? t('open.hintLiq', { liq: liqText }) : ''}
+      </p>
     </>
   );
 }

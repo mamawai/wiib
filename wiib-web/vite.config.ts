@@ -23,7 +23,7 @@ export default defineConfig({
         display: 'standalone',
         // 不锁竖屏：K 线横屏看是真实需求，且横屏宽度(如 852px)已过 md 断点，自动切桌面版布局
         orientation: 'any',
-        background_color: '#f6f6f4',  // 启动闪屏底色，对齐亮色主题 --color-background
+        background_color: '#fafaf7',  // 启动闪屏底色，对齐亮色主题 --color-background
         theme_color: '#F97316',
         icons: [
           { src: '/icon-192.png', sizes: '192x192', type: 'image/png' },
@@ -72,7 +72,7 @@ export default defineConfig({
   server: {
     port: 3000,
     proxy: {
-      // quant(8082) 的路径要先于兜底 /api 匹配，其余 /api 走 sim(8080)
+      // agent(8082) 的路径要先于兜底 /api 匹配，其余 /api 走 sim(8080)
       '/api/ai': 'http://localhost:8082',
       '/api/testnet': 'http://localhost:8082',
       '/api/admin/ai-agent': 'http://localhost:8082',

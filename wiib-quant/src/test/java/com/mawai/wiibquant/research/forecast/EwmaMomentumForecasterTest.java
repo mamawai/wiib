@@ -39,6 +39,6 @@ class EwmaMomentumForecasterTest {
             BigDecimal v = BigDecimal.valueOf(c);
             bars.add(new KlineBar(0, 0, v, v, v, v, BigDecimal.ONE));
         }
-        return ResearchFeatures.ofBars(bars);
+        return TestFeatures.ofBars(bars);
     }
 }

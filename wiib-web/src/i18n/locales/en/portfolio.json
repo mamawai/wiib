@@ -4,24 +4,24 @@
     "detail": "Bankruptcies: {{times}} · Starting capital restored {{date}} 09:00",
     "nextTradingDay": "the next trading day"
   },
-  "panel": {
-    "chart": "Allocation",
-    "profit": "PnL",
-    "radar": "Skills",
-    "wallet": "Wallet"
+  "page": {
+    "title": "Portfolio",
+    "ledger": "Ledger",
+    "history": "Position history"
   },
-  "overview": {
-    "paperAccount": "Paper account",
-    "totalAssets": "Total assets",
+  "ov": {
+    "totalAssets": "Total assets USDT",
+    "since": "from {{amount}}",
     "balanceWallet": "Balance wallet",
     "gameWallet": "Game wallet",
-    "totalPnl": "Total PnL",
-    "marginLoan": "Margin loan",
-    "interestAccrued": "Accrued interest",
     "futuresMargin": "Futures margin",
     "futuresUnrealized": "Futures unrealized",
-    "ledgerEntry": "Ledger",
-    "historyEntry": "Position history"
+    "marginLoan": "Margin loan",
+    "interestAccrued": "Accrued interest",
+    "transfer": "Transfer",
+    "dist": "Allocation",
+    "profit": "PnL",
+    "ability": "Skills"
   },
   "toast": {
     "refreshed": "Refreshed",
@@ -32,8 +32,14 @@
     "loadMoreFailed": "Failed to load more"
   },
   "daily": {
-    "title": "Today's PnL",
-    "crypto": "Crypto"
+    "title": "Today's PnL"
+  },
+  "alloc": {
+    "title": "Asset allocation",
+    "crypto": "Crypto spot",
+    "bstock": "bStock",
+    "futures": "Futures (margin + PnL)",
+    "cash": "Cash"
   },
   "cat": {
     "totalProfit": "Total PnL",
@@ -45,38 +51,36 @@
     "game": "Games"
   },
   "holdings": {
-    "title": "Holdings",
-    "crypto": "Crypto",
-    "futures": "Futures",
-    "empty": "No holdings",
-    "total": "Holdings total"
+    "empty": "No holdings"
   },
   "spot": {
     "cryptoTitle": "Crypto holdings",
     "cryptoCount_one": "{{count}} coin",
     "cryptoCount_other": "{{count}} coins",
+    "bstockTitle": "Stock holdings",
     "bstockCount_one": "{{count}} stock · bStock",
     "bstockCount_other": "{{count}} stocks · bStock",
-    "bstockTitle": "Stock holdings"
-  },
-  "row": {
-    "qty": "Holding {{qty}}",
-    "approx": "≈ {{value}} {{unit}}",
-    "unitHint": "1 unit = 1 oz ({{grams}}g)",
-    "avgCost": "Avg {{price}}",
-    "lastPrice": "Last {{price}}",
-    "shares": "{{qty}} shares"
+    "colCoin": "Coin",
+    "colStock": "Stock",
+    "colQty": "Holding",
+    "colShares": "Shares",
+    "colAvg": "Avg cost",
+    "colLast": "Last",
+    "colValue": "Value",
+    "colPnl": "PnL",
+    "approx": "≈ {{value}} {{unit}}"
   },
   "prediction": {
     "title": "BTC price prediction",
+    "wallet": "Game wallet",
+    "realized": "Realized PnL",
+    "totalBets": "Total bets",
+    "winRate": "Win rate",
+    "active": "Active",
     "bets_one": "{{count}} bet",
     "bets_other": "{{count}} bets",
-    "winRate": "Win rate {{rate}}%",
-    "active_one": "Active ({{count}} bet)",
-    "active_other": "Active ({{count}} bets)",
-    "cost": "Cost {{value}}",
-    "value": "Value {{value}}",
-    "record": "Won / Lost"
+    "record": "{{won}} won / {{lost}} lost",
+    "activeHint": "Cost {{cost}} · value {{value}}"
   },
   "reset": {
     "title": "Reset account",
@@ -91,8 +95,6 @@
     "submit": "Confirm reset"
   },
   "wallet": {
-    "transfer": "Transfer",
-    "totalPosition": "Total positions",
     "balance": "Balance",
     "frozen": "Frozen",
     "game": "Game",

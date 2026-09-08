@@ -27,7 +27,7 @@ public interface StrategyExecutionPort {
     /**
      * 持仓期钩子：该策略在此 symbol 有持仓时回调 strategy.onPositionBarClosed（时间出场等）。
      * runtime 每根收盘先于新信号评估调用——镜像回测顺序，旧仓先出场新信号才评估。
-     * 默认无动作（testnet 未接，LiqFade 只跑 sim）。
+     * 默认无动作（testnet 轨未接持仓期钩子）。
      */
     default void onPositionBarClosed(String symbol, TradingStrategySpi strategy, StrategyMarketView view) {
     }

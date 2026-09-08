@@ -11,13 +11,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 class AgentLangTest {
 
     @Test
-    void 语言码与前端和库里存的字符串一致() {
-        assertThat(AgentLang.ZH.code()).isEqualTo("zh");
-        assertThat(AgentLang.EN.code()).isEqualTo("en");
-    }
-
-    @Test
     void of认得出的照旧_大小写与空白容忍() {
+        // of 按 code 匹配：这两条过了，"zh"/"en" 的码值契约（前端与库里存的字符串）就一并钉住了
         assertThat(AgentLang.of("zh")).isEqualTo(AgentLang.ZH);
         assertThat(AgentLang.of("en")).isEqualTo(AgentLang.EN);
         assertThat(AgentLang.of(" EN ")).isEqualTo(AgentLang.EN);

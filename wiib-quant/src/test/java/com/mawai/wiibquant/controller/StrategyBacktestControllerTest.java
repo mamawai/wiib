@@ -25,7 +25,7 @@ class StrategyBacktestControllerTest {
         store.bars = flatBars(80, latestClose - 80 * M5 + 1);
 
         StrategyBacktestController controller = new StrategyBacktestController(
-                store, new com.mawai.wiibquant.strategy.backtest.task.BacktestOrchestrator(store, null),
+                store, new com.mawai.wiibquant.strategy.backtest.task.BacktestOrchestrator(store),
                 new MessageCatalog());
         Result<Map<String, Object>> result = controller.runFibo(
                 "BTCUSDT", 1, new BigDecimal("100000"), 5);
@@ -40,7 +40,7 @@ class StrategyBacktestControllerTest {
     void failsWhenLocalKlineHasNoLatestCloseTime() {
         FakeKlineHistoryStore emptyStore = new FakeKlineHistoryStore();
         StrategyBacktestController controller = new StrategyBacktestController(
-                emptyStore, new com.mawai.wiibquant.strategy.backtest.task.BacktestOrchestrator(emptyStore, null),
+                emptyStore, new com.mawai.wiibquant.strategy.backtest.task.BacktestOrchestrator(emptyStore),
                 new MessageCatalog());
 
         Result<Map<String, Object>> result = controller.runFibo(
@@ -58,7 +58,7 @@ class StrategyBacktestControllerTest {
         store.bars.remove(5);
 
         StrategyBacktestController controller = new StrategyBacktestController(
-                store, new com.mawai.wiibquant.strategy.backtest.task.BacktestOrchestrator(store, null),
+                store, new com.mawai.wiibquant.strategy.backtest.task.BacktestOrchestrator(store),
                 new MessageCatalog());
         Result<Map<String, Object>> result = controller.runFibo(
                 "BTCUSDT", 1, new BigDecimal("100000"), 5);

@@ -16,26 +16,26 @@ class MultiFactorForecasterTest {
     @Test
     void allThreeLegsBullishGivesLong() {
         // 上涨(ma_alignment=+1) + 负资金费(拥挤偏空被反向→偏多) + 极恐(F&G低→偏多)
-        ResearchFeatures feat = ResearchFeatures.of(uptrend(40), -0.001, 10);
+        ResearchFeatures feat = TestFeatures.of(uptrend(40), -0.001, 10);
         assertThat(fc.forecast(feat).direction()).isEqualTo(1);
     }
 
     @Test
     void allThreeLegsBearishGivesShort() {
-        ResearchFeatures feat = ResearchFeatures.of(downtrend(40), 0.001, 90);
+        ResearchFeatures feat = TestFeatures.of(downtrend(40), 0.001, 90);
         assertThat(fc.forecast(feat).direction()).isEqualTo(-1);
     }
 
     @Test
     void offChainCanOverrideTrend() {
         // 趋势看多(ma=+1)，但极端正资金费 + 极贪 两条 off-chain 强烈偏空 → 合成转为偏空（证明 off-chain 真参与合成）
-        ResearchFeatures feat = ResearchFeatures.of(uptrend(40), 0.002, 95);
+        ResearchFeatures feat = TestFeatures.of(uptrend(40), 0.002, 95);
         assertThat(fc.forecast(feat).direction()).isEqualTo(-1);
     }
 
     @Test
     void warmupBelowThirtyBarsGivesFlat() {
-        ResearchFeatures feat = ResearchFeatures.of(uptrend(20), -0.001, 10);
+        ResearchFeatures feat = TestFeatures.of(uptrend(20), -0.001, 10);
         Forecast f = fc.forecast(feat);
         assertThat(f.direction()).isZero();
         assertThat(f.confidence()).isZero();

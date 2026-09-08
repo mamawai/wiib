@@ -5,6 +5,7 @@ import com.mawai.wiibcommon.entity.CryptoPosition;
 import org.apache.ibatis.annotations.*;
 
 import java.math.BigDecimal;
+import java.util.List;
 
 @Mapper
 public interface CryptoPositionMapper extends BaseMapper<CryptoPosition> {
@@ -44,5 +45,5 @@ public interface CryptoPositionMapper extends BaseMapper<CryptoPosition> {
 
     /** 全库实际持有的符号全集：估值取价以持仓为准，防配置符号列表漂移漏价（bStock 曾因此漏估值） */
     @Select("SELECT DISTINCT symbol FROM crypto_position WHERE quantity > 0 OR frozen_quantity > 0")
-    java.util.List<String> listDistinctSymbols();
+    List<String> listDistinctSymbols();
 }

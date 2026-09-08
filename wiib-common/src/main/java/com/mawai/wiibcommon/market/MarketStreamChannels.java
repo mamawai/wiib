@@ -16,13 +16,15 @@ public final class MarketStreamChannels {
      * {"symbol","type":"futures-recover","low","high"}    合约限价单区间补漏
      * {"symbol","type":"liq-recover","markLow","markHigh","futLow","futHigh"}  强平区间补漏
      * </pre>
-     * sim（MatchPriceConsumer）订阅做撮合/强平/结算；quant（SentinelPriceConsumer）只取 markprice 喂哨兵。
+     * sim（MatchPriceConsumer）订阅做撮合/强平/结算；agent 两个订阅者——VolatilitySentinel 取 markprice
+     * 喂波动哨兵，ExecutionPriceConsumer 取 futures tick 驱动策略触价单。
      */
     public static final String PRICE = "feed:price";
 
     /**
-     * K线收盘 Redis Stream key（feed 写 → quant 消费组消费）。
-     * 收盘驱动预测/策略，丢一根少一次触发，必须 at-least-once，故用 Stream+消费组而非会丢的 Pub/Sub。
+     * K线收盘 Redis Stream key（feed 写 → agent 侧 KlineStreamConsumer 用 quant 消费组消费）。
+     * 收盘驱动策略信号 / 交易员唤醒 / 叙事对账，丢一根少一次触发，必须 at-least-once，
+     * 故用 Stream+消费组而非会丢的 Pub/Sub。
      */
     public static final String KLINE_CLOSED_STREAM = "stream:kline:closed";
 }

@@ -1,0 +1,69 @@
+# AI Trader 的界面文案：配置校验、动作面板回执、唤醒/复盘的拦阻原因。
+# 与 prompts/<语言>/trader.yml 是两份词表：那边装喂给模型的提示词（跟 trader 主人的 user.lang），
+# 这边装给用户看的话（跟当次请求的 X-Lang 头）。
+trader:
+  notCreated: 尚未创建 AI Trader
+  alreadyExists: 每个用户只能创建一个 AI Trader
+  notFound: trader 不存在
+  notOwner: 只能看自己 trader 的工作流程
+  liquidatedRound: 本局已爆仓终局，请先重置开新一局
+  # {{reason}} 是上游端点原样返回的报错，不翻
+  connectFailed: "模型连通性测试失败：{{reason}}"
+
+  noEndpoint: 还没有可用的模型端点，请先到 AI 页「模型配置」里添加
+
+  # 已了结交易的忽略标记（stale）：教材层治理，公开记录不动
+  plan:
+    notFound: 找不到这笔交易计划
+    notClosed: 只能忽略已了结的交易
+    staleRequired: 请求缺少 stale 参数
+
+  # 创建 / 改配置的入口校验
+  config:
+    nameRequired: 名字必填且不超过32字符
+    badInterval: K线级别仅支持 5m/15m/1h/4h
+    windowNeverWakes: 唤醒时段内没有任何一根 {{interval}} K线收盘，等于永远不会醒；请放宽时段或换档位
+    symbolRequired: 至少选择一个交易币种
+    tooManySymbols: 交易币种最多 {{max}} 个（一次唤醒的工具预算与注意力都按币摊）
+    symbolNotAllowed: "币种超出可交易范围: {{whitelist}}"
+    promptTooLong: 自定义提示词不超过4000字符
+    customPromptRequired: 已取消平台系统提示词，自定义提示词不能为空
+    leverageRange: 杠杆区间须在 1~{{max}} 倍之内
+    leverageInverted: 杠杆区间下界不能大于上界
+    marginRange: 单笔保证金占比须在 0.1~100% 之内
+    marginInverted: 保证金占比下界不能大于上界
+    hedgeNeedsTwoSlots: 只允许一个仓位时无法开启多空双开（双开本身需要两个仓位）
+    alertMultTooLow: 警报灵敏度系数不能低于 1.0（阈值只能调高不能调低）
+    # 唤醒时段的解析失败。WakeWindow.parse 抛的是这些 key，由 TraderService 渲染
+    window:
+      format: 唤醒时段格式须为 HH:mm-HH:mm，如 21:00-08:30
+      sameEnds: 唤醒时段起止不能相同（全天请直接关闭时段）
+      badTime: 唤醒时段时刻不合法（小时 0-23、分钟 0-59）
+      minuteStep: 唤醒时段的分钟只能是 0/5 的倍数（K线按 5 分钟收盘）
+
+  # 留言：覆盖式，同时只有一条待读。saved 后面那两截按情况追加
+  note:
+    empty: 留言内容不能为空
+    saved: 留言已记下，接下来 {{n}} 次唤醒都会带上
+    savedCovered: ；覆盖了上一条还没被读走的留言
+    savedTruncated: ；超出 {{max}} 字的部分已截掉
+    none: 当前没有待读留言
+    cleared: 留言已撤回，trader 不会再看到它
+
+  # 手动唤醒
+  wake:
+    started: 已触发一次唤醒，trader 正在后台做决策；结果稍后出现在竞技场的决策时间线上
+    paused: trader 当前是暂停状态{{why}}，手动唤醒不绕过暂停：请先去「我的 Trader」页启动它
+    pausedWhy: （{{reason}}）
+    liquidated: 本局已爆仓终局，要先在配置页重置开新一局才能继续交易
+    handover: 全体复盘与学习进行中（日线交接的停工窗口），几分钟后窗口关闭再试
+    intervalRetired: 该 trader 的唤醒档位已下线，无法唤醒
+    budgetTooTight: 距下一根K线收盘不足{{seconds}}秒，这一轮时间预算不够，等这根K线收了再点
+    busy: 上一轮唤醒还在跑，本次手动唤醒跳过（同一 trader 不并行）
+
+  # 点播复盘
+  review:
+    started: 已开始复盘，几分钟后会在竞技场的决策时间线上出现一篇 REVIEW；失败也会留一条 ERROR 记录，不会没有下文
+    noMaterial: 自上次复盘以来没有新的交易活动记录（一次交易唤醒都没有），已跳过（没有消耗模型调用）
+    busy: 这个 trader 手上还有活（唤醒或复盘在跑），等它跑完再点
+    handover: 全体复盘与学习进行中（日线交接），几分钟后窗口关闭再试

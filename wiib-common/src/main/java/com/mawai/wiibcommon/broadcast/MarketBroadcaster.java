@@ -7,8 +7,8 @@ import org.springframework.stereotype.Service;
 
 /**
  * 行情/业务消息广播发布器（共享层）。
- * <p>三域（feed/sim/quant）都用它把消息发到 Redis 频道；订阅 + 推前端在 sim 的 {@code WsBroadcastRelay}。
- * 发布与订阅分离——feed/quant 进程无 WS 网关，只发布不订阅，故不依赖 SimpMessagingTemplate。
+ * <p>三个进程（feed/sim/agent）都用它把消息发到 Redis 频道；订阅 + 推前端在 sim 的 {@code WsBroadcastRelay}。
+ * 发布与订阅分离——feed/agent 无 WS 网关，只发布不订阅，故不依赖 SimpMessagingTemplate。
  */
 @Slf4j
 @Service
@@ -24,7 +24,7 @@ public class MarketBroadcaster {
     public static final String KLINE_CHANNEL = CHANNEL_PREFIX + "kline";
     // feed WS 流健康：连/断/重连状态变化时事件驱动推送（非定时），载荷是全量快照 JSON
     public static final String STREAM_HEALTH_CHANNEL = CHANNEL_PREFIX + "stream-health";
-    // 进程 JVM 监控：feed/quant 定时采样发布，sim 中继到 /topic/monitor/{进程}（sim 自身直推不走此频道）
+    // 进程 JVM 监控：feed/agent 定时采样发布，sim 中继到 /topic/monitor/{code}（sim 自身直推不走此频道）
     public static final String MONITOR_CHANNEL = CHANNEL_PREFIX + "monitor";
 
     public void broadcastCryptoQuote(String symbol, String message) {
@@ -50,7 +50,7 @@ public class MarketBroadcaster {
         publish(STREAM_HEALTH_CHANNEL, "streams", snapshotJson);
     }
 
-    /** 进程 JVM 快照：code=进程名（feed/quant），sim 中继到 /topic/monitor/{进程}。 */
+    /** 进程 JVM 快照：code 是频道名（feed / quant，后者是 agent 拆分前的旧称），sim 中继到 /topic/monitor/{code}。 */
     public void broadcastMonitor(String process, String snapshotJson) {
         publish(MONITOR_CHANNEL, process, snapshotJson);
     }

@@ -24,7 +24,7 @@ public class AiRuntimeConfig {
     @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private String reasoningEffort;
 
-    /** 上游协议：openai=/v1/chat/completions，responses=/v1/responses */
+    /** 上游协议，见 AiProtocols：openai / responses / anthropic / gemini */
     private String apiProtocol;
 
     private Boolean enabled;

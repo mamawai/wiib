@@ -103,21 +103,6 @@ public class EtfFlowScraper {
         }
     }
 
-    /** 测试入口：用固定 HTML 样本验证 Farside 表结构解析没漂移（取最新一行）。 */
-    public EtfFlowPoint parseLatest(String html) {
-        List<EtfFlowPoint> all = parseAll(html);
-        return all.get(all.size() - 1);   // parseAll 升序且非空（空表已抛异常）
-    }
-
-    /** 测试入口：按美东源日期过滤，跳过 Farside 当前交易日占位空行。 */
-    EtfFlowPoint parseLatestFinalized(String html, LocalDate sourceToday) {
-        List<EtfFlowPoint> all = finalizedPoints(parseAll(html), sourceToday);
-        if (all.isEmpty()) {
-            throw new IllegalStateException("Farside ETF finalized rows not found");
-        }
-        return all.get(all.size() - 1);
-    }
-
     /** 解析整张 ETF 全历史表 → 每个日期行一个点，按日期升序（回填用）。 */
     public List<EtfFlowPoint> parseAll(String html) {
         if (html == null || html.isBlank()) {
@@ -139,7 +124,8 @@ public class EtfFlowScraper {
     }
 
     /** Farside 会提前放出美东当天空行；只有 flowDate < 美东今天 才视作已完结。 */
-    private List<EtfFlowPoint> finalizedPoints(List<EtfFlowPoint> points, LocalDate sourceToday) {
+    // 包私有非 private：占位行剔除那条钉子（EtfFlowScraperTest）要直接组合 parseAll+它来验
+    List<EtfFlowPoint> finalizedPoints(List<EtfFlowPoint> points, LocalDate sourceToday) {
         if (points == null || points.isEmpty()) {
             return List.of();
         }

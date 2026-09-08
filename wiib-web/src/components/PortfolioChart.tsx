@@ -3,6 +3,7 @@ import { useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { getCoin } from '../lib/coinConfig';
 import { useIsDark } from '../hooks/useIsDark';
+import { chartUi, cssVar, rgba } from '../lib/chartTheme';
 
 interface CryptoRow {
   symbol: string;
@@ -19,8 +20,8 @@ interface BStockRow {
   marketValue: number;
 }
 
-// bStock 无 coinConfig 配色，用独立蓝青系列循环取色，与币种暖色区分
-const BSTOCK_COLORS = ['#635bff', '#0ea5e9', '#14b8a6', '#6366f1', '#06b6d4', '#3b82f6'];
+// bStock 无 coinConfig 配色，用墨色深浅循环取色，与币种的暖色分开
+const BSTOCK_ALPHA = [0.9, 0.72, 0.56, 0.42, 0.3, 0.2];
 
 interface Props {
   cryptoPositions?: CryptoRow[];
@@ -38,9 +39,13 @@ export function PortfolioChart({ cryptoPositions = [], bstockRows = [], futuresR
   useEffect(() => {
     if (!chartRef.current) return;
     const chart = echarts.init(chartRef.current, isDark ? 'dark' : 'light');
+    const ui = chartUi(isDark);
+    const ink = cssVar('--color-foreground', isDark ? '#f1f1ec' : '#121316');
+    const gain = cssVar('--color-gain', isDark ? '#3ecf8e' : '#0b8a5c');
+    const primary = cssVar('--color-primary', isDark ? '#f97316' : '#f25f0a');
 
     // 扇区名同时是 tooltip 里认游戏钱包的判据，先取出来，别在 formatter 里再查一次
-    const gameWalletName = t('overview.gameWallet');
+    const gameWalletName = t('ov.gameWallet');
 
     const data = [
       ...cryptoPositions
@@ -58,7 +63,7 @@ export function PortfolioChart({ cryptoPositions = [], bstockRows = [], futuresR
         .map((b, i) => ({
           name: b.ticker,
           value: b.marketValue,
-          itemStyle: { color: BSTOCK_COLORS[i % BSTOCK_COLORS.length] },
+          itemStyle: { color: rgba(ink, BSTOCK_ALPHA[i % BSTOCK_ALPHA.length]) },
         })),
       ...futuresRows
         .filter(f => f.marketValue > 0)
@@ -70,20 +75,15 @@ export function PortfolioChart({ cryptoPositions = [], bstockRows = [], futuresR
             itemStyle: { color: coin.chartColor },
           };
         }),
-      { name: t('overview.balanceWallet'), value: balance, itemStyle: { color: '#22c55e' } },
-      ...(gameBalance > 0 ? [{ name: gameWalletName, value: gameBalance, itemStyle: { color: '#d946ef' } }] : [])
+      { name: t('ov.balanceWallet'), value: balance, itemStyle: { color: gain } },
+      ...(gameBalance > 0 ? [{ name: gameWalletName, value: gameBalance, itemStyle: { color: primary } }] : [])
     ];
-
-    const textColor = isDark ? '#878b96' : '#71737b'; // muted-foreground token
-    const borderColor = isDark ? '#13151a' : '#FFFFFF'; // Card background
 
     chart.setOption({
       backgroundColor: 'transparent',
       tooltip: {
         trigger: 'item',
-        backgroundColor: isDark ? '#13151a' : '#FFFFFF',
-        borderColor: isDark ? '#23262e' : '#e4e4df',
-        textStyle: { color: isDark ? '#eceef0' : '#17181a' },
+        ...ui.tooltip,
         formatter: (params: { marker: string; name: string; value: number; percent: number }) => {
            // 游戏钱包计入总资产但不能直接下单交易，tooltip 里说清楚免得误解
            const note = params.name === gameWalletName
@@ -95,11 +95,11 @@ export function PortfolioChart({ cryptoPositions = [], bstockRows = [], futuresR
       legend: {
         bottom: '0%',
         left: 'center',
-        textStyle: { color: textColor, fontSize: 11, fontFamily: "'Plus Jakarta Sans Variable', sans-serif" },
+        textStyle: { color: ui.axisLabel, fontSize: 11, fontFamily: cssVar('--font-sans', 'sans-serif') },
         itemWidth: 10,
         itemHeight: 10,
         itemGap: 12,
-        icon: 'circle'
+        icon: 'rect'
       },
       series: [
         {
@@ -109,8 +109,7 @@ export function PortfolioChart({ cryptoPositions = [], bstockRows = [], futuresR
           center: ['50%', '42%'],
           avoidLabelOverlap: false,
           itemStyle: {
-            borderRadius: 6,
-            borderColor: borderColor,
+            borderColor: ui.card,
             borderWidth: 2
           },
           label: {
@@ -122,13 +121,8 @@ export function PortfolioChart({ cryptoPositions = [], bstockRows = [], futuresR
               show: true,
               fontSize: 14,
               fontWeight: 'bold',
-              color: isDark ? '#eceef0' : '#17181a',
-              fontFamily: "'Plus Jakarta Sans Variable', sans-serif"
-            },
-            itemStyle: {
-              shadowBlur: 10,
-              shadowOffsetX: 0,
-              shadowColor: 'rgba(0, 0, 0, 0.5)'
+              color: ui.fg,
+              fontFamily: cssVar('--font-sans', 'sans-serif')
             }
           },
           labelLine: {
@@ -148,5 +142,5 @@ export function PortfolioChart({ cryptoPositions = [], bstockRows = [], futuresR
     // 依赖里必须带 i18n.language：少了它切语言后 option 不重算，图上还是旧文案
   }, [cryptoPositions, bstockRows, futuresRows, balance, gameBalance, isDark, t, i18n.language]);
 
-  return <div ref={chartRef} className="w-full h-56 sm:h-64 transition-colors duration-300" />;
+  return <div ref={chartRef} className="w-full h-full" />;
 }

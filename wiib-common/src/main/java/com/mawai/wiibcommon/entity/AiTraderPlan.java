@@ -11,9 +11,18 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 /**
- * AI Trader 持仓交易计划：开仓时立的论点/失效条件/止损止盈快照，每次唤醒原样回注提示词
- * （nof1 式 plan reinjection）——退出纪律的记忆载体，治恐慌平仓的根：醒来的模型不再是失忆的新人。
- * 键 (trader, round, symbol, side)：sim 同向开仓自动并入同一仓位，任意时刻至多一仓；加仓=新论点覆盖。
+ * 一个仓位一条：开仓那刻立的论点、依据、失效条件、入场/止损/目标价，外加后来每次改动的留痕。
+ * 键 (trader, round, symbol, side)，活的至多一条；加仓＝新论点覆盖旧的。
+ * <p>
+ * 每次唤醒把活着的计划原样塞回提示词——没记忆的模型才看得见这仓当初为什么开、什么情况算论点错了、
+ * 止损为什么在这个价格。invalidationCondition 是主动平仓的许可证：退出只有止损带走、止盈带走、
+ * 失效条件触发、主人发话四条路，避免llm一看到回撤就主动平仓。
+ * <p>
+ * 价格字段是开仓时的快照永不改，当前生效的止损止盈单在 sim 仓位上；移止损、加仓、平仓、补立
+ * 都往 revisionsJson 追加一条带理由的记录。平了归档不删，论点配结局喂复盘和论点战绩；
+ * stale=主人说这笔不算数，退出统计。
+ * <p>
+ * 只有持仓和没成交的开仓挂单才有计划，空仓的币没有。漏立的用 write_plan 补，已有的改不了。
  */
 @Data
 @TableName("ai_trader_plan")
@@ -66,8 +75,17 @@ public class AiTraderPlan {
      */
     private String status;
 
-    /** 归档时刻(ms)：懒清理发现仓位已了结的唤醒边界/重置时刻 */
+    /** 归档时刻(ms)：唤醒开头发现仓位已了结的那根边界，或重置时刻 */
     private Long closedWakeTime;
+
+    /** 主人标记忽略：true=不进论点战绩统计与复盘教材；权益/排行榜/同侪视角照常。仅 CLOSED 可标，可逆 */
+    private Boolean stale;
+
+    /**
+     * sim 仓位 id：市价开仓/加仓从下单响应落盘，限价单成交后由下次唤醒开头补上。
+     * 计划↔仓位配对的精确键；NULL（历史行/未成交挂单）配对走 bestMatch 时间就近兜底。
+     */
+    private Long positionId;
 
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdAt;

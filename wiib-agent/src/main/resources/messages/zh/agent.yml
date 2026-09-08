@@ -1,0 +1,46 @@
+# agent 侧界面文案：工作台会话归属、BYOK 端点库、管理员面板。
+# admin 段只有管理员看得见，但一样跟界面语言——管理员也会切英文。
+agent:
+  chat:
+    sessionNotFound: 会话不存在或无权限
+    sessionRunning: 这个会话还在运行或有补答未落地，等它结束再删
+    approvalExpired: 该确认请求已失效，请重新发起
+    untitled: （无标题）
+
+  # BYOK 端点库（/ai 模型配置页）：校验与探测的返回文案。{{reason}} 是上游端点原样返回的报错，不翻
+  endpoint:
+    limitReached: "端点数量已达上限 {{max}}"
+    notFound: 端点不存在
+    unknownPurpose: 未知用途
+    nameInvalid: 名称必填且不超过 32 字
+    baseUrlRequired: baseUrl不能为空
+    modelRequired: model不能为空
+    protocolRequired: apiProtocol不能为空
+    protocolInvalid: 协议仅支持 openai / responses / anthropic / gemini
+    effortTooLong: "思考档位最长 {{max}} 字符，留空=不传"
+    apiKeyRequired: apiKey不能为空
+    connectFailed: "模型连通性测试失败：{{reason}}"
+    # SSRF 防线（BaseUrlGuard）的拒因
+    baseUrl:
+      malformed: baseUrl 不是合法 URL
+      schemeUnsupported: baseUrl 仅支持 http/https
+      hostMissing: baseUrl 缺少主机名
+      hostUnresolvable: baseUrl 主机名无法解析
+      privateBlocked: baseUrl 不允许指向内网/本机地址
+
+  # 管理员：LLM 配置与功能位分配
+  admin:
+    apiKeyRequired: apiKey不能为空
+    baseUrlRequired: baseUrl不能为空
+    nameRequired: 名称不能为空
+    modelRequired: model不能为空
+    effortTooLong: 思考档位最长 {{max}} 字符，留空=不传
+    protocolUnsupported: 协议仅支持 openai / responses / anthropic / gemini
+    configNotFound: 配置不存在
+    configInUse: 该LLM配置正被功能位引用，无法删除
+    savedButRefreshFailed: 配置已保存，但AI运行时刷新失败（详见服务日志），当前沿用变更前模型运行
+    deletedButRefreshFailed: 已删除，但AI运行时刷新失败（详见服务日志），当前沿用变更前模型运行
+    assignedButRefreshFailed: 分配已保存，但AI运行时刷新失败（详见服务日志），当前沿用变更前模型运行
+    paramsIncomplete: "参数不完整: {{what}}"
+    llmConfigNotFound: "LLM配置不存在(id={{id}})"
+    llmConfigNoModel: "LLM配置'{{name}}'缺模型名，请先在「配置LLM」里补全"

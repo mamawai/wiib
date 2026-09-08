@@ -17,7 +17,7 @@ class HarRvVolForecasterTest {
     @Test
     void gkModeSurvivesFlatClosesWhereCloseReturnsAreZero() {
         // close 恒 100，但高低价有真实波动区间；这是删除 close-return HAR 后必须保住的场景。
-        ResearchFeatures features = ResearchFeatures.ofBars(flatCloseBars(500));
+        ResearchFeatures features = TestFeatures.ofBars(flatCloseBars(500));
 
         double sigma = HarRvVolForecaster.gkDefaults(0.94, 300_000L).forecastSigma(features);
 
@@ -28,7 +28,7 @@ class HarRvVolForecasterTest {
 
     @Test
     void gkModeReturnsFinitePositiveSigmaOnRegularBars() {
-        ResearchFeatures features = ResearchFeatures.ofBars(randomWalkBars(500));
+        ResearchFeatures features = TestFeatures.ofBars(randomWalkBars(500));
 
         double sigma = HarRvVolForecaster.gkDefaults(0.94, 300_000L).forecastSigma(features);
 

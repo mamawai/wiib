@@ -7,6 +7,7 @@ import { useClickOutside } from '../../hooks/useClickOutside';
 import { cn } from '../../lib/utils';
 import { chatStore } from './chatStore';
 import { ChatPanel } from './ChatPanel';
+import { HUB_NAME } from './chatView';
 
 const SIZE_KEY = 'wiib-chatdock-size';
 const BALL_KEY = 'wiib-chatdock-ball';
@@ -409,21 +410,20 @@ export function ChatDock() {
   );
 }
 
-/** 加载中/引导态的简壳：ChatPanel 自带头部，这两个状态没有，得补一个能关的头 */
+/** 加载中/引导态的简壳：ChatPanel 自带顶栏，这两个状态没有，得补一个能关的头（样式与面板顶栏同款） */
 function PanelShell({ onClose, children }: { onClose: () => void; children: React.ReactNode }) {
   const { t } = useTranslation(['ai', 'common']);
   return (
     <>
-      <div className="flex items-center gap-2 px-4 py-3 border-b border-border">
-        <Bot className="w-4.5 h-4.5 text-primary" />
-        <span className="text-sm font-black">{t('chat.title')}</span>
+      <div className="flex items-center gap-2 px-2 py-1.5 border-b border-border">
+        <span className="pl-1.5 text-sm font-black">{HUB_NAME}</span>
         <button
           onClick={onClose}
-          className="ml-auto border border-border hover:bg-surface-hover w-7 h-7 rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground"
+          className="ml-auto w-8 h-8 flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-surface-hover transition-colors"
           title={t('common:close')}
           aria-label={t('chat.closeAria')}
         >
-          <X className="w-3.5 h-3.5" />
+          <X className="w-4 h-4" />
         </button>
       </div>
       {children}

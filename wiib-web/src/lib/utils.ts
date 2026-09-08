@@ -22,12 +22,30 @@ export function fmtNum(n: number | string | null | undefined, decimals = 2): str
   return v.toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
 }
 
+/** 带正负号的美元金额：+$1,284.30 / -$460.00。别拿 '$'+fmtNum 拼，负号会跑到 $ 后面。 */
+export function fmtSignedUsd(n: number, decimals = 2): string {
+  return `${n < 0 ? '-$' : '+$'}${fmtNum(Math.abs(n), decimals)}`;
+}
+
+/** 带正负号的百分比：+28.41% / -1.02%。 */
+export function fmtSignedPct(n: number, decimals = 2): string {
+  return `${n >= 0 ? '+' : ''}${n.toFixed(decimals)}%`;
+}
+
 /**
  * 新加坡时间 yyyy-MM-dd（不传参就是"今天"）。日历/网格切日、按日查接口走这里。
  * en-CA 的短日期格式就是 yyyy-MM-dd；不能用 toISOString().slice(0,10)——那是 UTC，东八区早 8 点前退到前一天。
  */
 export function fmtDate(ts: number | string | Date = Date.now()): string {
   return new Date(ts).toLocaleDateString('en-CA', { timeZone: 'Asia/Singapore' });
+}
+
+export const DAY_MS = 86_400_000;
+
+/** 新加坡时区 yyyy-MM-dd 那一天的 [起, 止) 毫秒——按天查询与 fmtDate/fmtDateTime 同一时区 */
+export function dayBounds(day: string): { from: number; to: number } {
+  const from = Date.parse(`${day}T00:00:00+08:00`);
+  return { from, to: from + DAY_MS };
 }
 
 /** 新加坡时间 MM/DD HH:mm（withSeconds=true 时带秒），列表/卡片时间戳统一走这里。 */
@@ -88,8 +106,12 @@ export function fmtDuration(from: number | string | Date, to: number | string | 
   return i18n.t('duration.s', { s: sec });
 }
 
-/** token 数缩写：12480 → 12.5k。一行小字里放得下，不带尾随空格，拼接由调用方管。 */
+/**
+ * token 数缩写：12480 → 12.5k，2345678 → 2.35M。一行小字里放得下，不带尾随空格，拼接由调用方管。
+ * 单轮决策基本停在 k，整局/整天合计才会上 M（k/M 大小写按 SI 来）。
+ */
 export function fmtTokens(n: number): string {
+  if (n >= 1e6) return `${(n / 1e6).toFixed(2)}M`;
   return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
 }
 

@@ -36,7 +36,7 @@ class BacktestTaskServiceTest {
         volatile boolean fail;
 
         FakeOrchestrator() {
-            super(null, null);
+            super(null);
         }
 
         @Override

@@ -16,8 +16,8 @@ import java.util.Map;
  * 这里按 source_id 把译文换进来；<b>缺译文回落中文原文</b>（存量老快讯、刚拉到还没进采集轨的、
  * 模型没译成的都走这条）。
  * <p>
- * 三个取用侧共用它——首页快讯卡、对话 news 专家的预取、深研判素材——这样界面看到的与模型
- * 读到的永远是同一份，不会出现"用户看到译文、trader 读到原文"。
+ * 只给模型侧用（对话 news 专家的预取、深研判素材），按 agent 语言取；首页快讯卡直接读
+ * news_event 存档，不经这里。
  * <p>
  * 中文用户一次库都不查：直接原样返回。
  */
@@ -31,7 +31,7 @@ public class NewsFlashLocalizer {
     /**
      * 取过语言的一条快讯。
      *
-     * @param translated true=标题或正文用的是机器译文，false=中文原文（前端据此打译文标）
+     * @param translated true=标题或正文用的是机器译文，false=中文原文
      */
     public record LocalizedFlash(long id, String title, String plain, String url,
                                  String createTime, boolean translated) {
@@ -55,7 +55,7 @@ public class NewsFlashLocalizer {
             NewsEventMapper.Translation t = byId.get(f.id());
             String titleEn = t == null ? null : t.getTitleEn();
             String contentEn = t == null ? null : t.getContentEn();
-            // 标题/正文各自回落：只译成一半的那种也算译文，前端照样打标
+            // 标题/正文各自回落：只译成一半的那种也算译文
             return new LocalizedFlash(f.id(), pick(titleEn, f.title()),
                     pick(contentEn, f.plainContent()), f.url(), f.createTime(),
                     has(titleEn) || has(contentEn));

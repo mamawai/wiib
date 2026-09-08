@@ -276,6 +276,16 @@ export interface FuturesBracket {
   maintAmount: number;
 }
 
+/** 资金费率（GET /futures/funding-rate）：后端只读结算点缓存，无合约的标的返回 null。rate 是小数，0.0001=0.01% */
+export interface FundingRateView {
+  symbol: string;
+  rate: number;
+  /** 结算点拉取时刻 */
+  fetchedAt: number;
+  /** 下一个 0/8/16 点 */
+  nextTime: number;
+}
+
 // 币种级调杠杆（对齐Binance）：多空共用杠杆，一次调整作用于该币全部仓位
 export interface FuturesAdjustLeverageRequest {
   symbol: string;
@@ -626,12 +636,16 @@ export type WorkbenchEvent =
   // 行为分析报告：整份结构化数据只走这条通道给前端渲染成卡片，模型手里是裁剪版
   //（少了 overview.trend 那 30 天逐日快照——对模型是噪音，对卡片是那条资产曲线）
   | { type: 'behavior_report'; report: BehaviorAnalysisReport }
+  // 汇总者的服务端搜索过程：searching=开搜（query 可能还没有）、searched=搜完（sources 是命中站点）、
+  // cited=正文引用了某来源（只并入后端攒的来源随 done 回来，过程轨不画）
+  | { type: 'search'; phase: 'searching' | 'searched' | 'cited'; query?: string | null; sources: SearchSource[] }
   // deferred=true：让位收尾（专家还在取数就来了新消息），answer 只是过渡话术；
   // 真答案由后端补答轮落历史，前端靠 status 轮询等它落库后整体回放补显
   // meta 是本轮读数，让位收尾那条 done 不带（答案还没出，无账可报）。
   // cancelled=用户中断，answer 是"半截 + （已中断）"的定稿，前端要整段用它覆盖屏上那半截
   // deferred=让位收尾（answer 只是过渡话术，question=被让位的原问题）；pending=此刻会话还欠着补答，前端空闲时发起补答轮
-  | { type: 'done'; sessionId: string; answer: string; deferred?: boolean; question?: string; cancelled?: boolean; pending?: boolean; meta?: TurnMeta }
+  // sources=这一轮搜到/引用的来源（按 url 去重），答案底部展示；没搜过为空数组
+  | { type: 'done'; sessionId: string; answer: string; deferred?: boolean; question?: string; cancelled?: boolean; pending?: boolean; meta?: TurnMeta; sources?: SearchSource[] }
   | { type: 'error'; message: string };
 
 /**
@@ -715,6 +729,12 @@ export interface WorkbenchSessionSummary {
  * 两条来路的空值形状还不一样：SSE 走 fastjson2，默认不输出 null，字段直接<b>缺席</b>；
  * 历史接口走 Jackson，会老老实实输出 null。所以一律按 `!= null` 判，别判 0、也别只判 undefined。
  */
+/** 联网搜索命中/引用的一个来源 */
+export interface SearchSource {
+  url: string;
+  title?: string | null;
+}
+
 export interface TurnMeta {
   /** 端点名 · 模型名 */
   modelLabel?: string | null;
@@ -733,6 +753,8 @@ export interface WorkbenchChatMessage {
   createdAt: number;
   /** 只有 assistant 行有；user 行与加列之前的老数据是 null */
   meta?: TurnMeta | null;
+  /** 这一轮联网搜索的来源；没搜过或老数据是 null */
+  sources?: SearchSource[] | null;
   /**
    * 后端自己写进历史的特殊行的码（服务端 ChatRowKind），普通行为 null：
    * deferred=补答行（不给重新生成）、hitlResume=批准后自动补发的续跑指令（还原成过程轨）。
@@ -754,6 +776,8 @@ export interface LlmEndpointView {
   model: string;
   /** 任意上游认的档位值（none/low/medium/high/xhigh…），null=不传给上游走模型默认 */
   reasoningEffort: string | null;
+  /** 服务端联网搜索（responses / anthropic / gemini 协议端点可开；只有对话汇总者用它） */
+  webSearch: boolean;
   apiKeyTail: string;
   /** 默认端点：没按用途绑定的地方都用它 */
   isDefault: boolean;
@@ -767,6 +791,7 @@ export interface LlmEndpointSaveRequest {
   model: string;
   reasoningEffort: string;
   apiKey: string;
+  webSearch: boolean;
 }
 
 /** 用途 → 端点 id；缺的用途 = 跟随默认端点 */
@@ -837,25 +862,6 @@ export interface TraderSpec {
   allowMultiPosition: boolean;
   /** 允许同币多空双开；仅在 allowMultiPosition 开启时有意义 */
   allowHedge: boolean;
-  /** 允许模型自主加仓；关=转待确认请求 */
-  allowSelfAdd: boolean;
-  /** 允许模型自主减仓/平仓；关=转请求。止损止盈自动触发不受影响 */
-  allowSelfReduce: boolean;
-}
-
-/** 待确认的加仓/减仓请求：卡片给"请求时价"，前端另配实时价对照 */
-export interface TraderRequestView {
-  id: number;
-  /** ADD=加仓 / REDUCE=减仓 */
-  type: 'ADD' | 'REDUCE';
-  symbol: string;
-  side: string;
-  positionId: number;
-  quantity: number;
-  leverage: number | null;
-  requestPrice: number;
-  reason: string;
-  createdAt: number;
 }
 
 /** 计划修订记录（revisionsJson 解析后）：修改必须留痕带理由 */
@@ -882,6 +888,8 @@ export interface AiTraderPlanView {
   openedWakeTime: number;
   /** [{time,type,change,reason}] */
   revisionsJson: string | null;
+  /** 主人标记忽略：true=AI 统计与复盘不再参考；公开战绩/同侪视角照常 */
+  stale: boolean | null;
 }
 
 /** 交易记录里引用的那一轮决策：id 对应时间线卡；reason 只有平仓有（close_position 的一句话理由） */
@@ -957,12 +965,86 @@ export interface AiTraderDecisionView {
   latencyMs: number | null;
   error: string | null;
   createdAt: string;
+  /** 这轮有没有落库的过程轨迹（trace_json 非空）；老决策行没有，不出"过程"按钮 */
+  hasTrace: boolean;
 }
 
 export interface TraderEquityPoint {
   wakeTime: number;
   equity: number;
 }
+
+// ---- 唤醒过程：实时流（/ai/trader/{id}/live、/ai/trader/live）与落库轨迹（trace_json）----
+
+/** 会走实时流的唤醒类型（复盘/学习不进这条通道） */
+export type WakeKind = 'TRADE' | 'ALERT' | 'MANUAL';
+/** 工具回执状态：按回执前缀 REJECTED: / ERROR: 判，其余 ok */
+export type WakeToolStatus = 'ok' | 'rejected' | 'error';
+
+/** 模型发起的一次工具调用；args 是解析后的对象，解析不了就是原字符串 */
+export interface WakeToolCall {
+  id: string;
+  name: string;
+  args: Record<string, unknown> | string;
+}
+
+/** 一条工具回执；preview 后端已截 2000 字 */
+export interface WakeToolResult {
+  id: string;
+  name: string;
+  status: WakeToolStatus;
+  preview: string;
+}
+
+/** 一次模型调用：文本 + 它发起的工具调用 + 对应回执；startedAt/endedAt 只有落库轨迹带，实时归约的没有 */
+export interface WakeCall {
+  n: number;
+  text: string;
+  toolCalls: WakeToolCall[];
+  results: WakeToolResult[];
+  startedAt?: number;
+  endedAt?: number;
+}
+
+/** 收尾：totalTokens null=上游没回 usage */
+export interface WakeEnd {
+  status: 'OK' | 'ERROR';
+  error: string | null;
+  equity: number;
+  latencyMs: number;
+  modelCalls: number;
+  totalTokens: number | null;
+}
+
+/**
+ * 一次唤醒的完整过程。实时流按帧归约出来的和 trace 接口原样返回的是同一形状；
+ * 两条路都只有主人拿得到，end 跑完才有
+ */
+export interface WakeTrace {
+  v: number;
+  kind: WakeKind;
+  wakeTime: number;
+  startedAt: number;
+  budgetSeconds: number;
+  equity: number;
+  positions: number;
+  pendingOrders: number;
+  prompt?: { system: string; instruction: string };
+  calls: WakeCall[];
+  end?: WakeEnd;
+}
+
+/** 现场流 SSE 事件（与后端 TraderLiveHub 帧协议一一对应） */
+export type TraderLiveEvent =
+  | { type: 'run_start'; kind: WakeKind; wakeTime: number; budgetSeconds: number; equity: number; positions: number; pendingOrders: number; startedAt: number }
+  | { type: 'prompt'; system: string; instruction: string }
+  | { type: 'model_start'; call: number }
+  | { type: 'token'; call: number; text: string }
+  // text 是这次调用的整段文本
+  | { type: 'model_end'; call: number; text: string; toolCalls: WakeToolCall[] }
+  | { type: 'tool_result'; call: number; id: string; name: string; status: WakeToolStatus; preview: string }
+  // 决策行已落库后发
+  | { type: 'run_end'; status: 'OK' | 'ERROR'; error: string | null; equity: number; latencyMs: number; modelCalls: number; totalTokens: number | null; decisionId: number };
 
 /** 创建/改配置入参（apiKey 改配置时传空=不换） */
 export interface TraderUpsertRequest {
@@ -983,17 +1065,6 @@ export interface TraderUpsertRequest {
 }
 
 /** 重要快讯（BlockBeats 缓存透传，plain 为脱 HTML 纯文本） */
-export interface NewsFlashItem {
-  id: number;
-  title: string;
-  plain: string;
-  url: string;
-  /** 形如 "2026-07-09 00:30:12" */
-  createTime: string;
-  /** true=标题/正文是机器译文（源是中文快讯）；取哪份由后端按用户语言定，前端只负责打标 */
-  translated: boolean;
-}
-
 // ========== 留言板与通知 ==========
 
 /** 留言板评论。只有两层：rootId 为空是根评论，非空是该根评论下的子评论。 */

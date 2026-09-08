@@ -319,11 +319,11 @@ class FiboStrategyDbRun {
         FiboParams d = FiboParams.defaults();
         List<ParamCase> cases = List.of(
                 new ParamCase("ext1.0(base)", d),
-                new ParamCase("R1.0", d.withTpRMultiple(1.0)),
-                new ParamCase("R1.5", d.withTpRMultiple(1.5)),
-                new ParamCase("R2.0", d.withTpRMultiple(2.0)),
-                new ParamCase("R2.5", d.withTpRMultiple(2.5)),
-                new ParamCase("R3.0", d.withTpRMultiple(3.0)),
+                new ParamCase("R1.0", withTpR(d, 1.0)),
+                new ParamCase("R1.5", withTpR(d, 1.5)),
+                new ParamCase("R2.0", withTpR(d, 2.0)),
+                new ParamCase("R2.5", withTpR(d, 2.5)),
+                new ParamCase("R3.0", withTpR(d, 3.0)),
                 new ParamCase("ext1.272", withExtRatio(d, 1.272)),
                 new ParamCase("ext1.618", withExtRatio(d, 1.618)));
 
@@ -421,6 +421,14 @@ class FiboStrategyDbRun {
                 d.entryFib(), d.invalidationRatio(), d.slFibRatio(), d.slBufferAtrMult(), e,
                 d.orderTimeoutBars(), d.swingLookbackBars(),
                 d.tpRMultiple(), d.trendFilterOn(), d.trendAlignOn());
+    }
+
+    /** 消融：止盈从斐波延伸位切到 R 倍(entry±r×risk)；r=0 回退延伸位 */
+    private static FiboParams withTpR(FiboParams d, double r) {
+        return new FiboParams(d.swingTfMillis(), d.atrPeriod(), d.reversalAtrMult(), d.minLegAtrMult(),
+                d.entryFib(), d.invalidationRatio(), d.slFibRatio(), d.slBufferAtrMult(), d.tpExtensionRatio(),
+                d.orderTimeoutBars(), d.swingLookbackBars(),
+                r, d.trendFilterOn(), d.trendAlignOn());
     }
 
     /**

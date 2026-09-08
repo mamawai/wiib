@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>WhatIfIBought · 让你的模型替你试一遍</title>
+<meta name="description" content="Agentic trading · 让你的模型替你试一遍 每一步决策都可见 · 真实行情 真实资金费率 真实杠杆档位 · 所有数据均为模拟资金 不构成投资建议">
+<link rel="canonical" href="https://intro.wtfibought.com/">
+<meta name="robots" content="index, follow">
+<meta name="theme-color" content="#f6f6f4" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0b0c0f" media="(prefers-color-scheme: dark)">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="WhatIfIBought">
+<meta property="og:url" content="https://intro.wtfibought.com/">
+<meta property="og:locale" content="zh_CN">
+<meta property="og:locale:alternate" content="en_US">
+<meta property="og:title" content="WhatIfIBought · 让你的模型替你试一遍">
+<meta property="og:description" content="Agentic trading · 让你的模型替你试一遍 每一步决策都可见">
+<meta property="og:image" content="https://intro.wtfibought.com/logo.png">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="favicon.ico" sizes="any">
+<link rel="apple-touch-icon" href="apple-touch-icon-180.png">
+<link rel="stylesheet" href="intro.css">
+<script>
+  // 主题必须赶在首帧之前定，否则暗色用户每次冷启动都要闪一下白
+  (function () {
+    var t = null; try { t = localStorage.getItem('wiib-intro-theme'); } catch (e) { }
+    var dark = t ? t === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+    if (dark) document.documentElement.classList.add('dark');
+  })();
+</script>
+</head>
+<body>
+
+<!-- 全页背景：抖色烟雾 + 点阵，fixed 铺满视口，内容浮在上面 -->
+<div class="page-bg" aria-hidden="true">
+  <canvas id="smoke"></canvas>
+  <div class="dots"></div>
+</div>
+
+<header class="site-head">
+  <div class="wrap bar">
+    <a class="brand" href="https://wtfibought.com"><img src="logo.png" alt="">WhatIfIBought</a>
+    <nav class="head-nav">
+      <a href="#s-dash" data-t="navDash"></a>
+      <a href="#s-wake" data-t="navWake"></a>
+      <a href="#s-eod" data-t="navEod"></a>
+      <a href="#s-chat" data-t="navChat"></a>
+      <a href="#s-base" data-t="navBase"></a>
+    </nav>
+    <div class="head-controls">
+      <button class="ctl-btn" id="btn-lang" aria-label="Language"><svg data-icon="languages"></svg></button>
+      <button class="ctl-btn" id="btn-theme" aria-label="Theme"><svg data-icon="sun"></svg></button>
+      <a class="ctl-btn" href="https://github.com/mamawai/wtfibought" aria-label="GitHub"><svg data-icon="github"></svg></a>
+      <a class="head-cta" href="https://wtfibought.com"><span data-t="navCta"></span><svg data-icon="arrow-right"></svg></a>
+    </div>
+  </div>
+</header>
+
+<main>
+
+<!-- ===== 首屏 ===== -->
+<section class="hero" id="hero">
+  <div class="wrap">
+    <div class="hero-copy">
+      <div class="microlabel hero-kicker reveal" data-t="heroKicker"></div>
+      <h1 class="reveal" data-delay="1" aria-label="What if I bought"><span class="l1">WHAT IF</span><span class="l2">I BOUGHT</span></h1>
+      <p class="sub reveal" data-delay="2" data-t="heroSub"></p>
+      <div class="cta-row reveal" data-delay="3">
+        <a class="btn primary" href="https://wtfibought.com"><span data-t="ctaMain"></span><svg data-icon="arrow-right"></svg></a>
+        <a class="btn" href="https://github.com/mamawai/wtfibought"><svg data-icon="github"></svg><span data-t="ctaGh"></span></a>
+      </div>
+      <div class="strip reveal" data-delay="4" id="strip"></div>
+    </div>
+    <div class="hero-loop reveal" data-delay="3" id="loop"></div>
+    <div class="hero-market reveal" data-delay="5" id="mount-market"></div>
+  </div>
+  <a class="scroll-cue" href="#s-dash" aria-label="scroll"><svg data-icon="mouse"></svg></a>
+</section>
+
+<!-- ===== 01 看板 ===== -->
+<section class="sec" id="s-dash">
+  <div class="wrap">
+    <div class="sec-head">
+      <div>
+        <div class="kick reveal"><span class="no" data-t="s1kick"></span><span class="rule"></span></div>
+        <h2 class="reveal" data-delay="1" data-t="s1h"></h2>
+      </div>
+      <div class="reveal" data-delay="2">
+        <p class="lead" data-t="s1lead"></p>
+        <div class="sec-note" data-t="s1note"></div>
+      </div>
+    </div>
+    <div id="mount-dash" class="reveal" data-delay="2"></div>
+    <p class="mobile-note reveal" data-delay="3" data-t="mobileNoteDash"></p>
+  </div>
+</section>
+
+<!-- ===== 02 流程 ===== -->
+<section class="sec" id="s-wake">
+  <div class="wrap">
+    <div class="sec-head">
+      <div>
+        <div class="kick reveal"><span class="no" data-t="s2kick"></span><span class="rule"></span></div>
+        <h2 class="reveal" data-delay="1" data-t="s2h"></h2>
+      </div>
+      <p class="lead reveal" data-delay="2"><span data-t="s2lead"></span><span class="pc-only"><br><span data-t="s2hint"></span></span></p>
+    </div>
+    <div id="mount-trader" class="reveal" data-delay="2"></div>
+    <p class="mobile-note reveal" data-delay="3" data-t="mobileNoteFlow"></p>
+  </div>
+</section>
+
+<!-- ===== 03 日终 ===== -->
+<section class="sec" id="s-eod">
+  <div class="wrap">
+    <div class="sec-head">
+      <div>
+        <div class="kick reveal"><span class="no" data-t="s3kick"></span><span class="rule"></span></div>
+        <h2 class="reveal" data-delay="1" data-t="s3h"></h2>
+      </div>
+      <p class="lead reveal" data-delay="2" data-t="s3lead"></p>
+    </div>
+    <div class="grid three">
+      <div class="card reveal"><div class="chead"><svg data-icon="notebook-pen"></svg><span class="microlabel">01 · REVIEW</span></div><h3 data-t="e1t"></h3><p data-t="e1p"></p><div class="kv" data-t="e1k"></div></div>
+      <div class="card reveal" data-delay="1"><div class="chead"><svg data-icon="git-branch"></svg><span class="microlabel">02 · WAIT</span></div><h3 data-t="e2t"></h3><p data-t="e2p"></p><div class="kv" data-t="e2k"></div></div>
+      <div class="card reveal" data-delay="2"><div class="chead"><svg data-icon="graduation-cap"></svg><span class="microlabel">03 · LEARN</span></div><h3 data-t="e3t"></h3><p data-t="e3p"></p><div class="kv" data-t="e3k"></div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== 04 工作台 ===== -->
+<section class="sec" id="s-chat">
+  <div class="wrap">
+    <div class="sec-head">
+      <div>
+        <div class="kick reveal"><span class="no" data-t="s4kick"></span><span class="rule"></span></div>
+        <h2 class="reveal" data-delay="1" data-t="s4h"></h2>
+      </div>
+      <p class="lead reveal" data-delay="2" data-t="s4lead"></p>
+    </div>
+    <div id="mount-chat" class="reveal" data-delay="2"></div>
+    <p class="mobile-note reveal" data-delay="3" data-t="mobileNoteFlow"></p>
+  </div>
+</section>
+
+<!-- ===== 05 底座 ===== -->
+<section class="sec" id="s-base">
+  <div class="wrap">
+    <div class="sec-head">
+      <div>
+        <div class="kick reveal"><span class="no" data-t="s5kick"></span><span class="rule"></span></div>
+        <h2 class="reveal" data-delay="1" data-t="s5h"></h2>
+      </div>
+      <p class="lead reveal" data-delay="2" data-t="s5lead"></p>
+    </div>
+    <div class="grid">
+      <div class="card reveal"><div class="chead"><svg data-icon="candlestick-chart"></svg><span class="microlabel">MARKET</span></div><h3 data-t="b1t"></h3><p data-t="b1p"></p><div class="kv" data-t="b1k"></div></div>
+      <div class="card reveal" data-delay="1"><div class="chead"><svg data-icon="scale"></svg><span class="microlabel">RULES</span></div><h3 data-t="b2t"></h3><p data-t="b2p"></p><div class="kv" data-t="b2k"></div></div>
+      <div class="card reveal" data-delay="2"><div class="chead"><svg data-icon="layers"></svg><span class="microlabel">LEDGER</span></div><h3 data-t="b3t"></h3><p data-t="b3p"></p><div class="kv" data-t="b3k"></div></div>
+      <div class="card reveal" data-delay="3"><div class="chead"><svg data-icon="server"></svg><span class="microlabel">TOPOLOGY</span></div><h3 data-t="b4t"></h3><p data-t="b4p"></p><div class="kv" data-t="b4k"></div></div>
+    </div>
+    <div class="pull reveal"><p data-t="pullQ"></p></div>
+  </div>
+</section>
+
+<!-- ===== 06 不止 AI ===== -->
+<section class="sec" id="s-more">
+  <div class="wrap">
+    <div class="sec-head">
+      <div>
+        <div class="kick reveal"><span class="no" data-t="s6kick"></span><span class="rule"></span></div>
+        <h2 class="reveal" data-delay="1" data-t="s6h"></h2>
+      </div>
+    </div>
+    <div class="tiles">
+      <div class="tile reveal"><svg data-icon="candlestick-chart"></svg><div><h3 data-t="m1t"></h3><p data-t="m1p"></p></div></div>
+      <div class="tile reveal" data-delay="1"><svg data-icon="flask-conical"></svg><div><h3 data-t="m2t"></h3><p data-t="m2p"></p></div></div>
+      <div class="tile reveal" data-delay="2"><svg data-icon="line-chart"></svg><div><h3 data-t="m3t"></h3><p data-t="m3p"></p></div></div>
+      <div class="tile reveal"><svg data-icon="message-square"></svg><div><h3 data-t="m4t"></h3><p data-t="m4p"></p></div></div>
+      <div class="tile reveal" data-delay="1"><svg data-icon="trending-up"></svg><div><h3 data-t="m5t"></h3><p data-t="m5p"></p></div></div>
+      <div class="tile reveal" data-delay="2"><svg data-icon="smartphone"></svg><div><h3 data-t="m6t"></h3><p data-t="m6p"></p></div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== 收尾 ===== -->
+<section class="close">
+  <div class="wrap">
+    <h2 class="reveal" data-t="closeH"></h2>
+    <p class="lead reveal" data-delay="1" data-t="closeLead"></p>
+    <div class="cta-row reveal" data-delay="2">
+      <a class="btn primary" href="https://wtfibought.com"><span data-t="ctaMain"></span><svg data-icon="arrow-right"></svg></a>
+      <a class="btn" href="https://github.com/mamawai/wtfibought"><svg data-icon="github"></svg><span data-t="ctaGh"></span></a>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer class="site-foot">
+  <div class="wrap">
+    <div class="foot-top">
+      <div class="foot-brand">
+        <a class="brand" href="https://wtfibought.com"><img src="logo.png" alt="">WhatIfIBought</a>
+        <p data-t="footTag"></p>
+        <div class="foot-spec">PAPER TRADING <span>·</span> NO REAL FUNDS <span>·</span> BYOK</div>
+      </div>
+      <div class="foot-col">
+        <div class="microlabel" data-t="footProduct"></div>
+        <a href="https://wtfibought.com">wtfibought.com</a>
+        <a href="https://wtfibought.com/arena" data-t="footArena"></a>
+        <a href="https://wtfibought.com/ai" data-t="footChat"></a>
+      </div>
+      <div class="foot-col">
+        <div class="microlabel" data-t="footCode"></div>
+        <a href="https://github.com/mamawai/wtfibought">GitHub</a>
+        <a href="https://github.com/mamawai/wtfibought/blob/master/LICENSE">MIT License</a>
+        <a href="https://github.com/mamawai/wtfibought/blob/master/docs/agent-harness/architecture.md" data-t="footDocs"></a>
+      </div>
+      <div class="foot-col">
+        <div class="microlabel" data-t="footContact"></div>
+        <a href="https://linux.do">linux.do</a>
+        <a href="mailto:mawai@linux.do">mawai@linux.do</a>
+      </div>
+    </div>
+    <div class="foot-bottom">
+      <span class="disclaim" data-t="disclaimer"></span>
+      <span class="foot-mark">WIIB<b>.</b></span>
+    </div>
+  </div>
+</footer>
+<noscript><p style="padding:20px;font-size:13px;font-family:var(--font-mono)">This page needs JavaScript for the animated diagrams and the sample board. 流程图与示例看板需要 JavaScript。</p></noscript>
+
+<script src="flow.js"></script>
+<script src="mock-data.js"></script>
+<script src="intro.js"></script>
+</body>
+</html>

@@ -1,6 +1,6 @@
-import { BookOpen } from 'lucide-react';
+import { ChevronRight } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
+import { useStagger } from '../hooks/useStagger';
 
 /**
  * 教学条目：概念名 + 白话解释（结合本站玩法），按 交易基础 → 合约风险 → 玩法 → 账户 排布。
@@ -29,31 +29,27 @@ const FAQ_ITEMS: { id: string; qKey: string; aKey: string }[] = [
   { id: 'resetAccount', qKey: 'faq.resetAccount.q', aKey: 'faq.resetAccount.a' },
 ];
 
-/** 首页 FAQ：新手教学手风琴（原生 details，无 JS 状态） */
+/** 首页新手教学：三列手风琴（原生 details，无 JS 状态） */
 export function HomeFaq() {
   const { t } = useTranslation('home');
+  const gridRef = useStagger<HTMLDivElement>();
 
   return (
-    <Card>
-      <CardHeader className="pb-2">
-        <CardTitle className="flex items-center gap-2">
-          <BookOpen className="w-3.5 h-3.5 text-primary" />
-          {t('faq.title')}
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="pt-0">
-        <div className="divide-y divide-border/60">
-          {FAQ_ITEMS.map(item => (
-            <details key={item.id} className="group py-1">
-              <summary className="flex items-center gap-2 py-2 text-sm font-semibold cursor-pointer list-none select-none hover:text-primary transition-colors [&::-webkit-details-marker]:hidden">
-                <span className="text-primary text-xs transition-transform group-open:rotate-90">▸</span>
-                {t(item.qKey)}
-              </summary>
-              <p className="pb-3 pl-5 text-[13px] leading-relaxed text-muted-foreground">{t(item.aKey)}</p>
-            </details>
-          ))}
-        </div>
-      </CardContent>
-    </Card>
+    <>
+      <div className="sec-h">
+        <h2>{t('faq.title')}</h2>
+      </div>
+      <div ref={gridRef} className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-x-11 gap-y-0">
+        {FAQ_ITEMS.map(item => (
+          <details key={item.id} className="group">
+            <summary className="hov flex justify-between items-center gap-3 py-3.5 border-b border-border text-[15px] font-medium cursor-pointer list-none select-none [&::-webkit-details-marker]:hidden">
+              {t(item.qKey)}
+              <ChevronRight className="ic mute shrink-0 transition-transform group-open:rotate-90" />
+            </summary>
+            <p className="pb-3 text-sm text-muted-foreground leading-[1.6]">{t(item.aKey)}</p>
+          </details>
+        ))}
+      </div>
+    </>
   );
 }

@@ -17,7 +17,7 @@ import java.nio.charset.StandardCharsets;
 /**
  * Redis 广播 → 本地 WebSocket 中继（sim 侧，仅有 WS 网关的进程需要）。
  * <p>订阅 {@link MarketBroadcaster} 发布的频道，收到后按 channel 推到对应 STOMP /topic。
- * 与发布器分离：feed/quant 进程只发布不订阅，无需本类。
+ * 与发布器分离：feed/agent 只发布不订阅，无需本类。
  */
 @Slf4j
 @Service

@@ -1,6 +1,5 @@
 package com.mawai.wiibsim.service.impl;
 
-import com.alibaba.fastjson2.JSON;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.mawai.wiibcommon.entity.FuturesOrder;
 import com.mawai.wiibcommon.entity.FuturesPosition;
@@ -9,7 +8,6 @@ import com.mawai.wiibcommon.entity.FuturesTakeProfit;
 import com.mawai.wiibcommon.entity.User;
 import com.mawai.wiibcommon.enums.ErrorCode;
 import com.mawai.wiibcommon.exception.BizException;
-import com.mawai.wiibcommon.market.BinanceRestClient;
 import com.mawai.wiibcommon.util.SpringUtils;
 import com.mawai.wiibsim.config.FuturesLeverageBracketRegistry;
 import com.mawai.wiibsim.config.TradingConfig;
@@ -21,6 +19,7 @@ import com.mawai.wiibsim.mapper.UserMapper;
 import com.mawai.wiibcommon.cache.CacheService;
 import com.mawai.wiibsim.service.CrossLiquidationService;
 import com.mawai.wiibsim.service.CrossMarginService;
+import com.mawai.wiibsim.service.FundingRateService;
 import com.mawai.wiibsim.service.FuturesPositionIndexService;
 import com.mawai.wiibsim.service.FuturesRiskService;
 import com.mawai.wiibsim.service.FuturesSettlementService;
@@ -59,7 +58,7 @@ public class FuturesSettlementServiceImpl implements FuturesSettlementService {
     private final CrossMarginService crossMarginService;
     private final CrossLiquidationService crossLiquidationService;
     private final RedisLockUtil redisLockUtil;
-    private final BinanceRestClient restClient;
+    private final FundingRateService fundingRateService;
 
     protected record FundingFeeChargeResult(boolean success, boolean checkLiquidation) {}
 
@@ -514,18 +513,20 @@ public class FuturesSettlementServiceImpl implements FuturesSettlementService {
 
     @Override
     public void chargeFundingFeeAll() {
+        // 全站唯一一次调官方资金费率接口：先刷缓存，扣费和前端查询都从缓存取
+        fundingRateService.refresh();
+
         List<FuturesPosition> positions = positionMapper.selectList(new LambdaQueryWrapper<FuturesPosition>()
                 .eq(FuturesPosition::getStatus, "OPEN"));
         if (positions.isEmpty()) return;
 
-        // 结算时点懒拉取各 symbol 真实资金费率（每轮每 symbol 只拉一次），拉不到回退固定费率
         Map<String, BigDecimal> rateBySymbol = new HashMap<>();
         int successCount = 0;
         int failCount = 0;
 
         for (FuturesPosition pos : positions) {
             try {
-                BigDecimal rate = rateBySymbol.computeIfAbsent(pos.getSymbol(), this::fetchFundingRate);
+                BigDecimal rate = rateBySymbol.computeIfAbsent(pos.getSymbol(), fundingRateService::rateForSettlement);
                 boolean success = SpringUtils.getAopProxy(this).chargeFundingFeeOne(pos, rate);
                 if (success) {
                     successCount++;
@@ -539,24 +540,6 @@ public class FuturesSettlementServiceImpl implements FuturesSettlementService {
         }
 
         log.info("futures资金费率结算完成 成功{} 失败{} 费率={}", successCount, failCount, rateBySymbol);
-    }
-
-    /**
-     * 结算时点拉取 symbol 当期资金费率（premiumIndex.lastFundingRate，带符号）。
-     * 拉取/解析失败回退配置固定费率（+0.01%，符号约定同真实：正=多付空收）——
-     * 降级后等价旧固定口径的"方向修正版"，结算任务永不因外部接口卡死。
-     */
-    private BigDecimal fetchFundingRate(String symbol) {
-        try {
-            String json = restClient.getPremiumIndex(symbol);
-            if (json != null) {
-                BigDecimal rate = JSON.parseObject(json).getBigDecimal("lastFundingRate");
-                if (rate != null) return rate;
-            }
-        } catch (Exception e) {
-            log.warn("拉取资金费率失败 symbol={} 回退固定费率: {}", symbol, e.toString());
-        }
-        return tradingConfig.getFutures().getFundingRate();
     }
 
     protected boolean chargeFundingFeeOne(FuturesPosition pos, BigDecimal rate) {

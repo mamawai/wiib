@@ -17,6 +17,8 @@ import com.alibaba.fastjson2.JSONArray;
 import java.math.BigDecimal;
 import java.net.URI;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.LongSupplier;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -32,14 +34,13 @@ public class BinanceRestClient extends BaseRestTemplateConfig {
     public static final long COOLDOWN_MS = 120_000L;
 
     /** 墙钟注入点：熔断的冷却判断要可测 */
-    java.util.function.LongSupplier nowMs = System::currentTimeMillis;
+    LongSupplier nowMs = System::currentTimeMillis;
 
     /**
-     * 熔断截止时刻（0=未熔断）。多线程共享用 volatile；写入取 Math.max 只往后推——
+     * 熔断截止时刻（0=未熔断），多线程共享。写入用 accumulateAndGet 取 max 只往后推——
      * 多个线程可能同时撞 429，先算出来的小值别把后算出来的大值盖掉、把冷却期缩短。
-     * （读改写非原子，极端交错下仍可能丢一次更新；熔断是尽力而为，够用。）
      */
-    private volatile long blockedUntil = 0L;
+    private final AtomicLong blockedUntil = new AtomicLong();
 
     public BinanceRestClient(BinanceProperties props) {
         this.props = props;
@@ -64,9 +65,10 @@ public class BinanceRestClient extends BaseRestTemplateConfig {
      */
     private String getGuarded(String uri) {
         long now = nowMs.getAsLong();
-        if (now < blockedUntil) {
+        long until = blockedUntil.get();
+        if (now < until) {
             // WS 回退轮询会按 symbol 循环调用，冷却期内 warn 会刷屏；熔断触发那一刻已经 error 记过一次了
-            log.debug("Binance 限流冷却中，跳过请求（剩余 {}ms）: {}", blockedUntil - now, uri);
+            log.debug("Binance 限流冷却中，跳过请求（剩余 {}ms）: {}", until - now, uri);
             return null;
         }
         try {
@@ -75,7 +77,7 @@ public class BinanceRestClient extends BaseRestTemplateConfig {
             int code = e.getStatusCode().value();
             if (code == 429 || code == 418) {
                 // now 是入口处读的，这里必须现读：请求本身可能耗了 10s，用旧时间戳会把冷却期截短
-                blockedUntil = Math.max(blockedUntil, nowMs.getAsLong() + COOLDOWN_MS);
+                blockedUntil.accumulateAndGet(nowMs.getAsLong() + COOLDOWN_MS, Math::max);
                 log.error("Binance 限流 {}，熔断 {}ms —— 继续打会升级成 IP ban 并连累策略轨", code, COOLDOWN_MS);
             } else {
                 log.warn("Binance 请求失败 {}: {}", code, uri);
@@ -240,6 +242,15 @@ public class BinanceRestClient extends BaseRestTemplateConfig {
                 .fromUriString(baseUrl + "/fapi/v1/premiumIndex")
                 .queryParam("symbol", symbol)
                 .build().toUri();
+        return getGuarded(uri);
+    }
+
+    /** premiumIndex 不带 symbol：一次返回全部合约的数组，资金费率结算点全量拉取用。 */
+    public String getPremiumIndexAll() {
+        String baseUrl = props.getFuturesRestBaseUrl();
+        if (baseUrl == null || baseUrl.isBlank()) return null;
+        URI uri = UriComponentsBuilder.fromUriString(baseUrl + "/fapi/v1/premiumIndex").build().toUri();
+        log.info("Binance REST premiumIndex 全量");
         return getGuarded(uri);
     }
 

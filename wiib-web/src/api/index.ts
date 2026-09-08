@@ -5,7 +5,7 @@ import type { BacktestTaskStatus, BacktestEventsPage, BacktestKlinesPage, Backte
 import type { LedgerEntry, LedgerBizTypeOption, PublicTrade, UserProfile, PositionHistoryItem, RankingSort } from '../types';
 import type { CampaignInfo, CampaignReward, CampaignScore, MyCampaignView } from '../types';
 import type { LlmEndpointView, LlmEndpointSaveRequest, LlmBindings, LlmPurpose } from '../types';
-import type { User, PageResult, RankingItem, CommentItem, NotificationItem, BuffStatus, UserBuff, BlackjackStatus, GameState, ConvertResult, MinesStatus, MinesGameState, VideoPokerStatus, VideoPokerGameState, CryptoPrice, CryptoOrderRequest, CryptoOrder, CryptoPosition, BStock, FuturesOpenRequest, FuturesCloseRequest, FuturesAddMarginRequest, FuturesReduceMarginRequest, FuturesStopLossRequest, FuturesTakeProfitRequest, FuturesAdjustLeverageRequest, FuturesCrossAccount, WalletTransferPreview, FuturesPosition, FuturesOrder, FuturesReverseResult, FuturesBracket, TradeFilterMap, PredictionRound, PredictionBet, PredictionBuyRequest, PredictionBetLive, PredictionPnl, AssetSnapshot, CategoryAverages, ForceOrder, AiKeyConfig, AiModelAssignment, InviteCode, ChatIntent, WorkbenchEvent, StrategyAccountView, TraderPublicView, TraderOwnerView, TraderDetailView, AiTraderDecisionView, TraderEquityPoint, TraderUpsertRequest, TraderSpec, TraderRequestView, StrategySignalState, FeedStreamHealth, WorkbenchSessionSummary, WorkbenchSessionStatus, WorkbenchChatMessage, NewsFlashItem, TraderActionPanel, TraderActionResult, TradeRecordView } from '../types';
+import type { User, PageResult, RankingItem, CommentItem, NotificationItem, BuffStatus, UserBuff, BlackjackStatus, GameState, ConvertResult, MinesStatus, MinesGameState, VideoPokerStatus, VideoPokerGameState, CryptoPrice, CryptoOrderRequest, CryptoOrder, CryptoPosition, BStock, FuturesOpenRequest, FuturesCloseRequest, FuturesAddMarginRequest, FuturesReduceMarginRequest, FuturesStopLossRequest, FuturesTakeProfitRequest, FuturesAdjustLeverageRequest, FuturesCrossAccount, WalletTransferPreview, FuturesPosition, FuturesOrder, FuturesReverseResult, FuturesBracket, FundingRateView, TradeFilterMap, PredictionRound, PredictionBet, PredictionBuyRequest, PredictionBetLive, PredictionPnl, AssetSnapshot, CategoryAverages, ForceOrder, AiKeyConfig, AiModelAssignment, InviteCode, ChatIntent, WorkbenchEvent, StrategyAccountView, TraderPublicView, TraderOwnerView, TraderDetailView, AiTraderDecisionView, TraderEquityPoint, TraderUpsertRequest, TraderSpec, StrategySignalState, FeedStreamHealth, WorkbenchSessionSummary, WorkbenchSessionStatus, WorkbenchChatMessage, TraderActionPanel, TraderActionResult, TradeRecordView, TraderLiveEvent, WakeTrace } from '../types';
 
 const api = axios.create({
   baseURL: '/api',
@@ -105,7 +105,8 @@ export const userApi = {
   getProfilePublic: () => api.get<unknown, boolean>('/user/profile-public'),
   setProfilePublic: (profilePublic: boolean) =>
     api.post<unknown, void>('/user/profile-public', { profilePublic }),
-  /** 只写不读：界面语言以本地 localStorage 为准，服务端这份只决定 AI 产出（提示词/回答）的语言 */
+  /** agent 提示词语言（zh/en）：只在配置页改，与界面语言（localStorage）互不影响 */
+  getLang: () => api.get<unknown, Lang>('/user/lang'),
   setLang: (lang: Lang) => api.put<unknown, void>('/user/lang', { lang }),
 };
 
@@ -355,6 +356,8 @@ export const futuresApi = {
   // 全仓账户概览：净值/可用/占用/维持保证金
   crossAccount: () => api.get<unknown, FuturesCrossAccount>('/futures/cross-account'),
   brackets: () => api.get<unknown, Record<string, FuturesBracket[]>>('/futures/brackets'),
+  // 资金费率：后端只读结算点(0/8/16)写下的缓存，不回源交易所；无合约的标的返回 null
+  fundingRate: (symbol: string) => api.get<unknown, FundingRateView | null>('/futures/funding-rate', { params: { symbol } }),
   // 交易过滤器（步长/最小数量/最小名义额，合约+现货两套，后端已按官方exchangeInfo刷新）
   tradeFilters: () => api.get<unknown, TradeFilterMap>('/futures/trade-filters'),
   setStopLoss: (data: FuturesStopLossRequest) => api.post<unknown, void>('/futures/stop-loss', data),
@@ -371,8 +374,6 @@ export const futuresApi = {
   live: () => api.get<unknown, FuturesOrder[]>('/futures/live'),
   forceOrders: (symbol?: string, pageNum = 1, pageSize = 20) =>
     api.get<unknown, PageResult<ForceOrder>>('/futures/force-orders', { params: { symbol, pageNum, pageSize } }),
-  /** 首页卡片专用：只要最新一条，后端不发 COUNT(*)，别用 forceOrders(undefined,1,1) 代替 */
-  forceOrderLatest: () => api.get<unknown, ForceOrder | null>('/futures/force-orders/latest'),
 };
 
 // ========== BTC 5min 涨跌预测接口 ==========
@@ -429,23 +430,17 @@ const streamSseEvents = async <E,>(
   }
 };
 
+/** fetch 走 SSE 时的鉴权与语言头（satoken 只认 header 不认 cookie） */
+const sseHeaders = (): Record<string, string> => {
+  const token = getToken();
+  return { [LANG_HEADER]: currentLang(), ...(token ? { satoken: token } : {}) };
+};
+
 /**
- * POST 一个 JSON 请求、以 SSE 收流。准入失败时后端返回的是普通 JSON（Result），
+ * fetch 回来的响应交给 SSE 解析。准入失败时后端返回的是普通 JSON（Result），
  * 抛 ApiError 带 code 让调用方分流（2201/2202 引导去配置）；正常返回 event-stream 就逐事件回调。
  */
-const postSse = async <E,>(url: string, body: unknown, onEvent: (e: E) => void, signal?: AbortSignal) => {
-  const token = getToken();
-  const response = await fetch(url, {
-    method: 'POST',
-    credentials: 'include',
-    headers: {
-      'Content-Type': 'application/json',
-      [LANG_HEADER]: currentLang(),
-      ...(token ? { satoken: token } : {}),
-    },
-    body: JSON.stringify(body),
-    signal,
-  });
+const consumeSse = async <E,>(response: Response, onEvent: (e: E) => void) => {
   const contentType = response.headers.get('content-type') || '';
   if (contentType.includes('application/json')) {
     const payload = await response.json() as { code?: number; msg?: string };
@@ -453,6 +448,24 @@ const postSse = async <E,>(url: string, body: unknown, onEvent: (e: E) => void, 
   }
   if (!response.ok) throw new Error(i18n.t('errors:requestFailedStatus', { status: response.status }));
   await streamSseEvents<E>(response, onEvent);
+};
+
+/** POST 一个 JSON 请求、以 SSE 收流 */
+const postSse = async <E,>(url: string, body: unknown, onEvent: (e: E) => void, signal?: AbortSignal) => {
+  const response = await fetch(url, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json', ...sseHeaders() },
+    body: JSON.stringify(body),
+    signal,
+  });
+  await consumeSse<E>(response, onEvent);
+};
+
+/** GET 一条 SSE 流（订阅型：trader 现场/竞技场列表），断流由调用方重连 */
+const getSse = async <E,>(url: string, onEvent: (e: E) => void, signal?: AbortSignal) => {
+  const response = await fetch(url, { credentials: 'include', headers: sseHeaders(), signal });
+  await consumeSse<E>(response, onEvent);
 };
 
 export const workbenchApi = {
@@ -495,6 +508,9 @@ export const workbenchApi = {
   /** 删除历史会话（展示记录 + 后端续聊上下文） */
   deleteSession: (sessionId: string) =>
     api.delete<unknown, void>(`/ai/workbench/sessions/${sessionId}`),
+  /** 清空全部历史会话：skipped=在跑或欠补答的那些，后端保留不删 */
+  deleteAllSessions: () =>
+    api.delete<unknown, { deleted: number; skipped: number }>('/ai/workbench/sessions'),
 };
 
 // ========== 用户 BYOK 端点库（AI 页「模型配置」；对话/交易员/复盘教练从中选） ==========
@@ -522,6 +538,9 @@ export interface NewsEventItem {
   id: number;
   title: string;
   content: string;
+  /** 英文译文；空=没译成，英文界面不展示这条，不拿中文凑 */
+  titleEn: string | null;
+  contentEn: string | null;
   url: string;
   /** 发稿时刻 epoch 毫秒，按 K 线周期桶定位图标 */
   publishedAt: number;
@@ -529,9 +548,35 @@ export interface NewsEventItem {
   tags: string;
 }
 
+/** 财经日历一条（ForexFactory 本周快照行，标题是 feed 英文原文） */
+export interface EconCalendarEvent {
+  /** 公布/开始时刻 epoch 毫秒 */
+  eventTime: number;
+  /** 影响的货币代码，如 USD；All=全局事件 */
+  currency: string;
+  title: string;
+  /** feed 原样：High / Medium / Low / Holiday */
+  impact: string;
+  /** 共识预测值原样文本；null=讲话/会议类无数值 */
+  forecast: string | null;
+  previous: string | null;
+}
+
+/** 首页日历卡：已公布 / 即将公布两栏，都按时间正序 */
+export interface EconCalendarView {
+  past: EconCalendarEvent[];
+  upcoming: EconCalendarEvent[];
+}
+
 export const quantApi = {
-  /** 重要快讯（quant 侧内存缓存，未过期不打上游） */
-  news: () => api.get<unknown, NewsFlashItem[]>('/ai/quant/news'),
+  /** 首页财经日历：本周快照里已公布 / 即将公布各 6 条（筛选口径同 trader 唤醒注入） */
+  econCalendar: () => api.get<unknown, EconCalendarView>('/ai/quant/econ-calendar'),
+  /**
+   * 快讯（news_event 存档，中英两套一起到）。不带参＝最新 100 条；
+   * from/to 都给＝该区间 [from, to) 内按发稿时间倒序最多 300 条（按天翻看用）
+   */
+  news: (from?: number, to?: number) =>
+    api.get<unknown, NewsEventItem[]>('/ai/quant/news', { params: { from, to } }),
   /** 打标快讯：标签+时间窗（服务端上限 500 条，倒序取最近） */
   newsEvents: (tag: string, from: number, to: number) =>
     api.get<unknown, NewsEventItem[]>('/ai/quant/news-events', { params: { tag, from, to } }),
@@ -543,15 +588,12 @@ export const traderApi = {
   /** 平台系统提示词预览（与唤醒组装同一份文本）：规格项多，走 POST 带 body */
   promptTemplate: (intervalCode: string, symbols: string, spec: TraderSpec, wakeWindow: string | null) =>
     api.post<unknown, string>('/ai/trader/prompt-template', { intervalCode, symbols, spec, wakeWindow }),
-  /** 待确认的加仓/减仓请求（自主开关关掉时才会有） */
-  requests: () => api.get<unknown, TraderRequestView[]>('/ai/trader/requests'),
-  approveRequest: (id: number) => api.post<unknown, void>(`/ai/trader/requests/${id}/approve`),
-  rejectRequest: (id: number) => api.post<unknown, void>(`/ai/trader/requests/${id}/reject`),
   create: (req: TraderUpsertRequest) => api.post<unknown, void>('/ai/trader', req),
   updateConfig: (req: TraderUpsertRequest) => api.put<unknown, void>('/ai/trader/config', req),
   start: () => api.post<unknown, void>('/ai/trader/start'),
   pause: () => api.post<unknown, void>('/ai/trader/pause'),
-  reset: () => api.post<unknown, void>('/ai/trader/reset'),
+  /** carryNotes=false 不带入复盘/学习笔记（只清生效版本，历届存档保留） */
+  reset: (carryNotes: boolean) => api.post<unknown, void>('/ai/trader/reset', { carryNotes }),
   arena: () => api.get<unknown, TraderPublicView[]>('/ai/trader/arena'),
   detail: (id: number) => api.get<unknown, TraderDetailView>(`/ai/trader/${id}`),
   /**
@@ -560,10 +602,26 @@ export const traderApi = {
    */
   decisions: (id: number, limit = 50, before?: number, round?: number, from?: number, to?: number) =>
     api.get<unknown, AiTraderDecisionView[]>(`/ai/trader/${id}/decisions`, { params: { limit, before, round, from, to } }),
+  /** 决策 token 合计；三参数与 decisions 同义（round 空=当前局），整段都没 usage 时返回 null */
+  tokenUsage: (id: number, round?: number, from?: number, to?: number) =>
+    api.get<unknown, number | null>(`/ai/trader/${id}/token-usage`, { params: { round, from, to } }),
   equityCurve: (id: number, round?: number) =>
     api.get<unknown, TraderEquityPoint[]>(`/ai/trader/${id}/equity-curve`, { params: { round } }),
   /** 已了结交易（只有当前局：每局独立子账户，历史局的子账户查不回来） */
   trades: (id: number) => api.get<unknown, TradeRecordView[]>(`/ai/trader/${id}/trades`),
+  /** 标记/取消忽略一笔已了结交易（仅本人、仅CLOSED）：AI 统计与复盘不再参考，公开记录不变 */
+  setPlanStale: (planId: number, stale: boolean) => api.post<unknown, void>(`/ai/trader/plan/${planId}/stale`, { stale }),
+
+  // ---- 唤醒过程实时流：只有主人连得进来，非主人后端直接拒 ----
+  /**
+   * 一只 trader 的现场 SSE：run_start/prompt/model_start/token/model_end/tool_result/run_end。
+   * 中途连上后端按当前状态回放，空闲时只有心跳
+   */
+  live: (id: number, onEvent: (e: TraderLiveEvent) => void, signal?: AbortSignal) =>
+    getSse<TraderLiveEvent>(`/api/ai/trader/${id}/live`, onEvent, signal),
+  /** 某条决策落库的过程轨迹；没有、或不是自己的 trader 都回 null */
+  decisionTrace: (id: number, decisionId: number) =>
+    api.get<unknown, WakeTrace | null>(`/ai/trader/${id}/decisions/${decisionId}/trace`),
 
   // ---- 动作面板：三个动作的唯一执行入口，对话轨只负责把表单卡弹出来 ----
   /** 三张卡的状态一次取齐；每张卡挂载且未落地时拉一次 */

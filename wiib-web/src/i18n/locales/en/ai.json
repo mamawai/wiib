@@ -19,6 +19,11 @@
   "tab": {
     "config": "Model config"
   },
+  "agentLang": {
+    "title": "Agent prompts language",
+    "desc": "Only the language of AI prompts and answers. Set it here; the top-bar interface language switch does not change it.",
+    "failed": "Save failed"
+  },
   "behavior": {
     "title": "Behavior analysis",
     "detail": "Breakdown",
@@ -62,7 +67,6 @@
   },
   "arena": {
     "title": "AI Trader Arena",
-    "subtitle": "One AI each · 10000U each · wakes on every candle, trades on its own",
     "myTrader": "My Trader",
     "create": "Create my Trader",
     "empty": "The arena is empty",
@@ -72,7 +76,18 @@
     "tempo": "Cadence",
     "return": "Return",
     "round": "Round",
-    "status": "Status"
+    "status": "Status",
+    "runningShort": "live",
+    "pausedShort": "idle",
+    "liqShort": "wiped out",
+    "initial": "starts at 10,000",
+    "noTraderTitle": "No Trader of your own yet?",
+    "step1Title": "1. Add a model endpoint",
+    "step1": "Put your API key in Settings. Claude, GPT, Gemini all work. Only the last four digits are stored for display; every wake-up calls your endpoint directly and no copy is kept here.",
+    "step2Title": "2. Pick symbols and cadence",
+    "step2": "One to three of BTC, ETH, SOL, waking anywhere from 5m to 4h. You can limit the wake window too, say only between 08:00 and 23:00.",
+    "step3Title": "3. Start it and enter the arena",
+    "step3": "Each gets a 10,000U virtual futures account. Wakes on every candle, reviews once a day, learns from its peers once a day. Blow up and the next round funds it again."
   },
   "status": {
     "running": "Running",
@@ -95,8 +110,6 @@
     "flat": "Flat, watching",
     "qty": "Qty",
     "entry": "Entry",
-    "curSl": "Stop loss",
-    "curTp": "Take profit",
     "limitOrder": "Limit order",
     "openLong": "Open long",
     "openShort": "Open short",
@@ -105,7 +118,8 @@
     "limitPrice": "Limit",
     "learnNotesTitle": "Learning notes",
     "memoryTitle": "Memory notes",
-    "plansTitle": "Trade plans · live",
+    "plansTitle": "Trade plans",
+    "plansActive": "{{n}} live",
     "lastAt": "Last {{time}}",
     "noLearnNotes": "No learning notes yet — comes after the learning round that follows everyone's daily review",
     "noMemory": "No memory notes yet — comes after the first daily review",
@@ -120,12 +134,22 @@
     "noDecisionsDay": "No decisions on this day",
     "loadMore": "Load earlier",
     "round": "Round",
-    "equityLabel": "Equity · starts at 10000",
+    "initialLabel": "starts at 10,000",
+    "allDayWake": "wakes all day",
+    "lastWake": "last wake-up {{time}}",
+    "notesTitle": "Notes",
+    "memoryShort": "Memory",
+    "learnShort": "Learning",
     "dayN": "Day {{n}}",
     "closedCount": "Closed",
     "tradesN_one": "{{count}} trade",
     "tradesN_other": "{{count}} trades",
     "winRate": "Win rate",
+    "maxDd": "Max drawdown",
+    "tokensOf": "{{scope}} tokens",
+    "colSymbol": "Symbol",
+    "colSlTp": "SL / TP",
+    "colUpnl": "uPnL",
     "lookedAt": "Read"
   },
   "tool": {
@@ -163,14 +187,30 @@
     "learnFailed": "Learning failed",
     "alert": "Volatility alert"
   },
+  "live": {
+    "scene": "Live · waking up",
+    "prompt": "Prompt",
+    "systemPrompt": "System prompt",
+    "instruction": "Opening brief",
+    "processing": "running",
+    "budget": "{{used}}s / {{budget}}s",
+    "process": "Process",
+    "endedOk": "Run finished",
+    "endedError": "Run failed",
+    "callN": "Thought #{{n}}",
+    "routine": "{{iv}} routine",
+    "bars_one": "{{count}} bar",
+    "bars_other": "{{count}} bars"
+  },
   "plan": {
-    "title": "Trade plan",
     "basis": "Basis: {{s}}",
-    "invalidation": "Invalidation: ",
+    "invalidation": "Invalidation",
     "entry": "Entry",
     "origSl": "Initial SL",
     "target": "Target",
-    "setAt": "set {{time}}"
+    "setAt": "set {{time}}",
+    "revisions_one": "revised once",
+    "revisions_other": "revised {{count}}×"
   },
   "trade": {
     "rejected": "· rejected",
@@ -188,7 +228,11 @@
       "takeProfit": "taken by target",
       "manual": "closed by hand",
       "UNKNOWN": "exit unclear"
-    }
+    },
+    "staleMark": "Ignore this trade",
+    "staleUnmark": "Unignore",
+    "staleBadge": "Ignored",
+    "staleHint": "Once ignored, your AI no longer references this trade in thesis stats, reviews or its narrative; lessons already written into its notes fade out through the rolling daily review. The equity curve is the real record and stays untouched. Public record, leaderboard and peer learning carry on as usual. Reversible anytime."
   },
   "trader": {
     "tourBtn": "Setup guide",
@@ -197,7 +241,9 @@
     "pause": "Pause",
     "reset": "Reset to a new round",
     "resetConfirm": "Reset opens a new round (R{{round}}): a fresh account with 10000, past rounds archived (latest 10 kept, older ones wiped). Continue?",
-    "viewTimeline": "See its decision timeline →"
+    "viewTimeline": "See its decision timeline →",
+    "resetCarryNotes": "Carry review & learning notes into the new round",
+    "resetCarryHint": "Unchecking only stops injecting them next round; archived notes remain viewable on the decision timeline and are never deleted."
   },
   "tour": {
     "name": {
@@ -228,17 +274,13 @@
       "title": "How many positions / hedging allowed",
       "body": "Turning off \"multiple positions\" means at most one position across the whole account, and the AI picks which coin. Unfilled orders take the slot too, otherwise it would just place three orders and walk around the rule.\n\n\"Hedging\" is whether the same coin may hold a long and a short at once. Turning it off stops it from hedging against itself and paying fees twice. In single-position mode this is moot — hedging needs two slots."
     },
-    "selfManage": {
-      "title": "Do adds and reduces need your approval",
-      "body": "Turn either off and the AI no longer executes directly; it sends you a request that shows up at the top of this page.\n\nThe point is that it never blocks — once the request is out it finishes the round and moves on, and you approve or dismiss whenever you like. The card shows both the price when it asked and the live price, so you judge whether the move has run away.\n\nBy default adds are free and reduces need approval. Stop-loss and take-profit orders are unaffected and always execute, so risk stays covered."
-    },
     "byok": {
       "title": "Your model, your bill",
       "body": "The platform provides no model. Endpoints (protocol / base URL / key / model name) are all kept under Model config on the AI page; here you only pick one of them. Pick none and it follows your default endpoint.\n\nEvery wake-up spends your tokens — the more often it wakes, the bigger the bill."
     },
     "prompt": {
       "title": "Trading style instructions",
-      "body": "The platform system prompt already covers role, discipline and hard rules — expand it to read the full text, word for word what the AI is fed.\n\nYour custom instructions are appended after it and set the style (\"breakouts only, never catch a falling knife\"). Where style or strategy conflicts with the platform default, yours wins; position spec and hard rules are the exception, those are enforced by the system.\n\nSaved is live: the next candle already runs on the new text, no restart needed."
+      "body": "The platform system prompt already covers role, discipline and hard rules — expand it to read the full text, word for word what the AI is fed.\n\nYour custom instructions are appended after it and set the style (\"breakouts only, never catch a falling knife\"). Where style or strategy conflicts with the platform default, yours wins; position spec, hard rules and the closing format are the exception, those are enforced by the system.\n\nSaved is live: the next candle already runs on the new text, no restart needed."
     },
     "save": {
       "title": "Save, then start",
@@ -261,6 +303,7 @@
     "nextDay": "(next day)",
     "sameTime": "Start and end cannot match (turn the window off for round-the-clock)",
     "symbols": "Symbols",
+    "symbolsHint": "Up to {{max}}: tool budget and attention are split per symbol",
     "specTitle": "Position spec (enforced, the AI cannot bend it)",
     "specHint": "A range means it must pick from inside, not a cap",
     "leverage": "Leverage range (1~125x)",
@@ -271,10 +314,6 @@
     "hedge": "Allow hedging",
     "hedgeHint": "The same coin may hold a long and a short at once",
     "hedgeNeedMulti": "Turn on multiple positions first (hedging needs two slots)",
-    "selfAdd": "Let the AI add on its own",
-    "selfAddHint": "Off = it sends you a request to add and waits for your approval",
-    "selfReduce": "Let the AI reduce on its own",
-    "selfReduceHint": "Off = reducing and closing need your approval; stop loss and take profit still fire, so risk stays covered",
     "alertTitle": "Volatility alert (1h/4h intervals only)",
     "alertHint": "Wakes it early when the 5-minute range breaks the threshold on a coin it holds or has an order on",
     "alertOn": "Enable volatility alerts",
@@ -287,7 +326,7 @@
     "reviewOnHint": "Runs once at the daily boundary (burns your key, one call); skipped on days with no trades; turning it off only stops new reviews, existing notes still inject",
     "learnHint": "The leaderboard and peer reviews are its material",
     "learnOn": "Enable peer learning",
-    "learnOnHint": "Runs once after all reviews finish (burns your key, several calls); needs 3+ opted-in traders, skipped otherwise; opting out is mutual — you do not learn from others and your data is not learned from either; learning notes inject into every later wake-up; turning it off only stops new learning, existing notes still inject",
+    "learnOnHint": "Runs once after all reviews finish (burns your key, several calls); needs 2+ peers in the pool besides you, skipped otherwise (pool = opted in, not paused, and in play: holding a position or closed one within 24h); opting out is mutual — you do not learn from others and your data is not learned from either; learning notes inject into every later wake-up; turning it off only stops new learning, existing notes still inject",
     "endpoint": "Model endpoint",
     "manageEndpoints": "Manage endpoints (AI page · Model config)",
     "endpointHint": "Wake-ups, daily reviews and peer learning all burn this endpoint's key; saving checks connectivity first",
@@ -297,15 +336,13 @@
     "listSep": ", ",
     "guardSinglePos": "one position only",
     "guardNoHedge": "no hedging on the same coin",
-    "guardAskAdd": "adds need your approval",
-    "guardAskReduce": "reduces need your approval",
     "promptOffTail": ". Every entry must carry a stop loss, a thesis and an invalidation condition; stops may only tighten; take profits may only move away from entry. Violating calls are rejected with the reason.",
     "customPrompt": "Custom prompt (sets style and strategy; yours wins over the platform default)",
     "customPromptOnly": "Custom prompt (the only instruction source, required)",
     "customPromptPh": "e.g. Trend breakouts only, never catch a falling knife; risk at most 2% of equity per trade; after two losses in a row, watch only for the rest of the day.",
     "save": "Save config",
     "create": "Create Trader",
-    "rules": "Rules: it wakes once per candle (extreme moves may wake it early, plus one review a day) on your key and your tokens. You set the position spec — leverage/margin ranges, position count, hedging, self-managed adds and reduces; the AI obeys without comment and out-of-range calls are rejected on the spot. Stop loss and invalidation are mandatory; stops may only tighten. Every entry files a trade plan, fed back verbatim on each wake-up, and there are only three ways out: stop loss, take profit, invalidation. Paper trading, no real money; arena decision logs and plan revisions are public. Do not expect it to make money — watching how it thinks is the point."
+    "rules": "Rules: it wakes once per candle (extreme moves may wake it early, plus one review a day) on your key and your tokens. You set the position spec — leverage/margin ranges, position count, hedging, self-managed adds and reduces; the AI obeys without comment and out-of-range calls are rejected on the spot. Stop loss and invalidation are mandatory; stops may only tighten. Every entry files a trade plan, fed back verbatim on each wake-up, and there are only four ways out: stop loss, take profit, invalidation, or a message from you. Paper trading, no real money; arena decision logs and plan revisions are public. Do not expect it to make money — watching how it thinks is the point."
   },
   "skills": {
     "title": "Related skills",
@@ -333,18 +370,8 @@
       "news_search": "Recent market news flashes, full text."
     }
   },
-  "req": {
-    "title": "AI approval requests · {{n}}",
-    "hint": "Approved requests execute at market",
-    "add": "Add",
-    "reduce": "Reduce",
-    "atRequest": "At request",
-    "now": "Now",
-    "approve": "Approve"
-  },
   "chat": {
     "title": "Analysis chat",
-    "subtitle": "{{hub}} orchestrates · keeps running after you close it",
     "openAria": "Open analysis chat",
     "closeAria": "Close chat panel",
     "resize": "Drag to resize",
@@ -363,7 +390,7 @@
     "exitFullscreen": "Exit fullscreen (Esc)",
     "fullscreenAria": "Show chat panel fullscreen",
     "exitFullscreenAria": "Exit fullscreen",
-    "emptyTitle": "Ask something — the quick prompts below are one click away",
+    "emptyTitle": "What can I help with?",
     "emptyHint": "Market data · news · your trader · deep analysis, all orchestrated by {{hub}}",
     "background": "{{hub}} keeps working in the background; the answer shows up when it is done",
     "thinking": "{{hub}} is working on it",
@@ -379,7 +406,10 @@
     "generating": "Generating",
     "regen": "Regenerate",
     "regenTitle": "Regenerate this answer",
-    "copyAnswer": "Copy answer"
+    "copyAnswer": "Copy answer",
+    "sources": "Sources",
+    "moreSources": "+{{count}} more",
+    "lessSources": "Show fewer"
   },
   "rail": {
     "title_one": "Process · {{count}} step",
@@ -389,7 +419,15 @@
     "marketAgent": "Market expert",
     "newsAgent": "News expert",
     "deferredNote": "The expert is still gathering data; this answer follows automatically",
-    "hitlResume": "Resuming the deep analysis"
+    "hitlResume": "Resuming the deep analysis",
+    "searching": "Searching: {{query}}",
+    "searchingNoQuery": "Searching…",
+    "searched_one": "Searched {{count}} site",
+    "searched_other": "Searched {{count}} sites",
+    "searchedNone": "Search finished",
+    "sumExperts_one": "Called {{count}} expert",
+    "sumExperts_other": "Called {{count}} experts",
+    "sumWorking": "Working…"
   },
   "hitl": {
     "title": "Deep analysis approval",
@@ -402,11 +440,16 @@
     "back": "Back to chat",
     "loading": "Loading chat history",
     "empty": "No chat history yet",
-    "current": "Current",
     "delete": "Delete chat",
-    "msgCount_one": "{{count}} message",
-    "msgCount_other": "{{count}} messages",
     "new": "New chat",
+    "groupToday": "Today",
+    "groupYesterday": "Yesterday",
+    "groupWeek": "Previous 7 days",
+    "groupOlder": "Older",
+    "clearAll": "Clear all chats",
+    "clearAllConfirm": "Delete every chat in your history? This cannot be undone. Chats still running are kept.",
+    "clearedSkipped_one": "{{count}} running chat was kept",
+    "clearedSkipped_other": "{{count}} running chats were kept",
     "deleteConfirm_one": "Delete the chat “{{title}}”? Its {{count}} message and follow-up context are wiped for good.",
     "deleteConfirm_other": "Delete the chat “{{title}}”? Its {{count}} messages and follow-up context are wiped for good."
   },
@@ -415,13 +458,13 @@
     "qNews": "Any crypto news worth noting lately?",
     "qTrader": "How has my AI trader been doing?",
     "qDeep": "Run a deep analysis on ETH",
-    "traderTitle": "My trader",
     "behaviorLabel": "Behavior",
     "behaviorTitle": "Analyze my trading behavior — the report comes back as a card",
     "behaviorAsk": "Run a behavior analysis on me",
     "actionNote": "Leave a note",
     "noSuggests": "All quick prompts deleted — the pencil on the right adds them back",
     "editSuggests": "Edit quick prompts",
+    "more": "More actions",
     "ph": "Ask about the market, the news, your trader…",
     "phBusy": "{{hub}} is working — you can still send a message",
     "send": "Send",
@@ -518,7 +561,7 @@
     "name": "Name",
     "namePh": "e.g. DeepSeek main / Grok light",
     "protocol": "Protocol",
-    "baseUrl": "Base URL (without the /v1 suffix)",
+    "baseUrl": "Base URL (without the version suffix)",
     "model": "Model name",
     "detect": "Detect",
     "detectTitle": "Pull the model list this endpoint offers (fill in base URL and key first)",
@@ -532,6 +575,9 @@
     "effort": "Reasoning effort",
     "effortPh": "Blank = not sent; try none / low / medium / high / xhigh…",
     "effortHint": "Blank = the parameter is not sent and the model uses its own default; you can also enter any other level it accepts (xhigh, minimal…). Not every model accepts this, and there is no way to check up front — fill it in and hit Test connection.",
+    "webSearch": "Web search",
+    "webSearchHint": "Declares this protocol's server-side search tool in requests; it only searches when the upstream supports it and falls back to no search automatically when it doesn't. Only the workbench chat's final answer uses it — the trader and the data experts are unaffected. Searches count toward upstream usage.",
+    "webSearchOpenAiHint": "The openai protocol has no standard server-side search; pick responses / anthropic / gemini for web search",
     "test": "Test connection",
     "testTitle": "Send a real request with the current settings to confirm the endpoint and model work",
     "testOk": "Connection OK",
@@ -544,8 +590,6 @@
     "analyzeDone": "Analysis done",
     "analyzeFailed": "Analysis failed",
     "actionFailed": "Action failed",
-    "approved": "Approved, executing at market",
-    "rejected": "Rejected",
     "started": "Started — it wakes on the next candle",
     "reset": "Reset, new round started",
     "saved": "Config saved",

@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { BookOpenCheck, CornerDownLeft, Cpu, MessageSquarePlus, Pencil, Plus, Trash2, UserSearch, Zap } from 'lucide-react';
+import { ArrowUp, BookOpenCheck, MessageSquarePlus, Pencil, Plus, Square, Trash2, UserSearch, Zap } from 'lucide-react';
 import { useClickOutside } from '../../hooks/useClickOutside';
 import { cn } from '../../lib/utils';
 import { chatStore } from './chatStore';
@@ -13,7 +13,7 @@ import type { ChatIntent, TraderFormKind } from '../../types';
  */
 const DEFAULT_SUGGEST_KEYS = ['composer.qMarket', 'composer.qNews', 'composer.qTrader', 'composer.qDeep'];
 const SUGGEST_KEY = 'wiib-chat-suggests';
-/** 最多四条：这一行还要跟 trader 按钮分地方，再多就只能靠滚才看得全，不叫快捷了 */
+/** 最多四条：空态那一组只占输入框上方一两行，再多就把问候语挤没了 */
 const SUGGEST_MAX = 4;
 
 /** trader 动作入口的三项：点了只是把表单卡放进对话，执行要在卡上再按一次（存 key，渲染时翻） */
@@ -23,13 +23,16 @@ const TRADER_ACTIONS: { form: TraderFormKind; labelKey: string; icon: typeof Zap
   { form: 'review', labelKey: 'term.reviewNow', icon: BookOpenCheck },
 ];
 
-/** 拖动阈值与吞 click 的时限，跟悬浮球（ChatDock）同一把尺子：8px 照触屏的 tap slop 定的 */
-const DRAG_THRESHOLD = 8;
-const CLICK_SWALLOW_MS = 300;
-/** 横滚两端的渐隐宽度，配 index.css 的 .hscroll-fade */
-const FADE_W = '1.25rem';
 /** 单条消息字符上限，与后端 ChatWorkbenchController.MAX_MESSAGE_CHARS 同值 */
 const MAX_MESSAGE_CHARS = 10_000;
+
+/** 输入框自动长高的上限 */
+const INPUT_MAX_H = 200;
+
+/** Plus 菜单里的一项 */
+const MENU_ITEM = 'w-full flex items-center gap-2 px-3 py-2 text-xs text-left hover:bg-surface-hover transition-colors';
+/** 发送键与停止键同一个壳，轮流占同一个位置 */
+const SEND_BTN = 'ml-auto w-8 h-8 bg-foreground text-background flex items-center justify-center shrink-0 active:scale-95 transition-all disabled:opacity-40 disabled:active:scale-100';
 
 /** 用户自己配过的那份；null=没配过，交给出厂四条（它们要随语言走，不能在这儿定死） */
 function loadSuggests(): string[] | null {
@@ -42,22 +45,28 @@ function loadSuggests(): string[] | null {
 }
 
 /**
- * 输入区：trader 入口 + 快捷提问 + 多行自适应输入 + 状态行。
+ * 输入区：一整块输入框（多行自适应）+ 框内底部工具行（左 Plus 菜单、右发送/停止）+ 状态行。
  * <p>
  * 敲字只动这一小块的本地 state，不带着上面整条消息列表重画；
  * 同时同步一份到 store —— 关面板会把整个面板卸载，只留本地 state 的话草稿就没了。
  * <p>
- * 快捷提问可改可删（最多四条，存 localStorage）；trader 那三个动作从按钮右侧滑出、
- * 顶掉提示词的位置——两边都是"点一下就走"的入口，轮流用同一段横向空间比各占一行省。
+ * 快捷提问只在空态露面（有对话之后它就是噪音），可改可删（最多四条，存 localStorage）；
+ * trader 三个动作、行为分析、编辑提示词都收进 Plus 菜单。
  * <p>
- * 行为分析是这一行里唯一一个"点了就真发消息"的按钮：它发的那句话带 BEHAVIOR 意图，
+ * 行为分析是菜单里唯一一个"点了就真发消息"的项：它发的那句话带 BEHAVIOR 意图，
  * 后端据此跳过专家派发直奔 analyze_my_behavior——不带意图的同一句话会被路由猜成 trader 问题。
  */
-export function ChatComposer({ loading, onSend, fullscreen }: {
+export function ChatComposer({ loading, onSend, fullscreen, empty, stopping, onStop }: {
   loading: boolean;
   onSend: (text: string, intent?: ChatIntent) => void;
   /** 全屏时输入区跟正文共用一条限宽线，不然输入框会横跨整个屏幕 */
   fullscreen?: boolean;
+  /** 对话还一条都没有：这时候才出快捷提问那一组 */
+  empty?: boolean;
+  /** 点了停止还没等到收尾：停止键这期间不可再点 */
+  stopping?: boolean;
+  /** 不传=这一轮没有可中断的本地流（后台轮在跑），发送键照常可用，用户能直接插话 */
+  onStop?: () => void;
 }) {
   const { t } = useTranslation(['ai', 'common']);
   const [input, setInput] = useState(chatStore.getDraft);
@@ -67,16 +76,18 @@ export function ChatComposer({ loading, onSend, fullscreen }: {
   const defaults = useMemo(() => DEFAULT_SUGGEST_KEYS.map(k => t(k)), [t]);
   const suggests = stored ?? defaults;
   const [editing, setEditing] = useState(false);
-  const [traderOpen, setTraderOpen] = useState(false);
-  // 编辑面板浮在这一行上方，点这一行以外的地方就收起来。
-  // ref 要连铅笔按钮一起圈住，否则点铅笔会同时触发 onOutside 与 onClick，面板一闪就没
-  const quickRef = useRef<HTMLDivElement>(null);
-  useClickOutside(quickRef, () => setEditing(false), editing);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const boxRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const closeEditing = useCallback(() => setEditing(false), []);
+  const closeMenu = useCallback(() => setMenuOpen(false), []);
+  useClickOutside(boxRef, closeEditing, editing);
+  useClickOutside(menuRef, closeMenu, menuOpen);
 
-  /** 内容撑到哪就多高，最多 96px（rows=1 是起始高度，靠这个函数往上长） */
+  /** 内容撑到哪就多高，最多 200px（rows=1 是起始高度，靠这个函数往上长） */
   const fitHeight = (el: HTMLTextAreaElement) => {
     el.style.height = 'auto';
-    el.style.height = `${Math.min(el.scrollHeight, 96)}px`;
+    el.style.height = `${Math.min(el.scrollHeight, INPUT_MAX_H)}px`;
   };
 
   // 挂载时把恢复回来的草稿撑开：只灌 value 不调高度的话，多行草稿回来只剩一行
@@ -113,52 +124,22 @@ export function ChatComposer({ loading, onSend, fullscreen }: {
     // pt 那侧的安全区），10px 顶不住 34px 手势条。用 max() 而不是相加——手势条那块本身就是留白。
     // md 起固定回 10px：env() 是视口级的，iPad 上不贴底的浮窗也会拿到 34px，那是多余的
     <div className="border-t border-border px-3 pt-2 pb-[max(0.625rem,env(safe-area-inset-bottom))] md:pb-2.5 shrink-0">
-      <div className={cn('space-y-2', fullscreen && 'mx-auto w-full max-w-3xl')}>
-        <div ref={quickRef} className="relative flex items-center gap-1.5">
-          {editing && (
-            <SuggestEditor initial={suggests} defaults={defaults} onSave={saveSuggests} onCancel={() => setEditing(false)} />
-          )}
-          <button
-            onClick={() => { setTraderOpen(v => !v); setEditing(false); }}
-            className={cn(
-              'shrink-0 inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-bold transition-colors',
-              traderOpen
-                ? 'border-primary/45 bg-primary/6 text-primary'
-                : 'border-border text-muted-foreground hover:text-foreground hover:bg-surface-hover',
-            )}
-            title={t('composer.traderTitle')}
-            aria-expanded={traderOpen}
-          >
-            <Cpu className="w-3 h-3 shrink-0" /> trader
-          </button>
+      {/* 编辑面板浮在这一块上方，圈住的范围要连触发它的铅笔一起——只圈输入框的话，
+          点铅笔会同时触发 onOutside 与 onClick，面板一闪就没 */}
+      <div ref={boxRef} className={cn('relative w-full', fullscreen && 'mx-auto max-w-3xl')}>
+        {editing && (
+          <SuggestEditor initial={suggests} defaults={defaults} onSave={saveSuggests} onCancel={closeEditing} />
+        )}
 
-          <button
-            onClick={() => { setTraderOpen(false); setEditing(false); onSend(t('composer.behaviorAsk'), 'BEHAVIOR'); }}
-            className="shrink-0 inline-flex items-center gap-1 rounded-full border border-border px-2.5 py-1 text-[11px] font-bold text-muted-foreground hover:text-foreground hover:bg-surface-hover transition-colors"
-            title={t('composer.behaviorTitle')}
-          >
-            <UserSearch className="w-3 h-3 shrink-0" /> {t('composer.behaviorLabel')}
-          </button>
-
-          <ScrollRow contentKey={traderOpen ? 'trader' : suggests.join('|')}>
-            {traderOpen ? (
-              TRADER_ACTIONS.map((a, i) => (
-                <button
-                  key={a.form}
-                  onClick={() => { chatStore.openForm(a.form); setTraderOpen(false); }}
-                  // 三项从左往右依次登场，让人看清是"从 trader 里长出来的"，不是凭空换了一排
-                  style={{ animationDelay: `${i * 50}ms` }}
-                  className="shrink-0 inline-flex items-center gap-1 rounded-full border border-primary/45 px-2.5 py-1 text-[11px] font-bold text-primary hover:bg-primary/8 transition-colors animate-in slide-in-from-left-2"
-                >
-                  <a.icon className="w-3 h-3 shrink-0" /> {t(a.labelKey)}
-                </button>
-              ))
-            ) : suggests.length > 0 ? (
+        {/* 快捷提问只在空态出现，点一下直接发；末尾那支铅笔是编辑入口（Plus 菜单里还有一个） */}
+        {empty && (
+          <div className="flex flex-wrap items-center gap-1.5 pb-2">
+            {suggests.length > 0 ? (
               suggests.map(q => (
                 <button
                   key={q}
                   onClick={() => submit(q)}
-                  className="shrink-0 border border-border rounded-full px-2.5 py-1 text-[11px] font-medium text-muted-foreground hover:text-foreground hover:bg-surface-hover transition-colors"
+                  className="border border-border px-2.5 py-1 text-[11px] font-medium text-muted-foreground hover:text-foreground hover:bg-surface-hover transition-colors"
                 >
                   {q}
                 </button>
@@ -166,25 +147,21 @@ export function ChatComposer({ loading, onSend, fullscreen }: {
             ) : (
               <span className="text-[11px] text-muted-foreground/70">{t('composer.noSuggests')}</span>
             )}
-          </ScrollRow>
-
-          {/* trader 展开时把铅笔收起来：那会儿这一行里没有提示词可改，留着只会误点 */}
-          {!traderOpen && (
             <button
               onClick={() => setEditing(v => !v)}
               className={cn(
-                'shrink-0 w-6 h-6 rounded-md flex items-center justify-center border transition-colors',
-                editing ? 'border-border text-primary' : 'border-transparent text-muted-foreground hover:text-primary hover:border-border',
+                'w-6 h-6 flex items-center justify-center transition-colors',
+                editing ? 'text-primary bg-surface-hover' : 'text-muted-foreground hover:text-primary hover:bg-surface-hover',
               )}
               title={t('composer.editSuggests')}
               aria-label={t('composer.editSuggests')}
             >
               <Pencil className="w-3.5 h-3.5" />
             </button>
-          )}
-        </div>
+          </div>
+        )}
 
-        <div className="flex items-end gap-2 rounded-xl border border-border bg-card-2 px-3 py-2 transition-colors focus-within:border-primary/50">
+        <div className="border border-border bg-card-2 transition-colors focus-within:border-foreground">
           <textarea
             ref={inputRef}
             rows={1}
@@ -198,124 +175,83 @@ export function ChatComposer({ loading, onSend, fullscreen }: {
               }
             }}
             placeholder={loading ? t('composer.phBusy', { hub: HUB_NAME }) : t('composer.ph')}
-            className="flex-1 bg-transparent text-sm leading-relaxed resize-none max-h-24 focus:outline-none placeholder:text-muted-foreground/60"
+            className="block w-full bg-transparent px-3 pt-2.5 text-[15px] leading-relaxed resize-none max-h-[200px] focus:outline-none placeholder:text-muted-foreground/60"
           />
-          {/* 高度按输入框一行文字定（text-sm × leading-relaxed ≈ 1.4rem），跟末行齐平而不是杵个大方块。
-              视觉压小了但热区没缩：after 那层往外撑到 44px 那一档，手机上照按不误 */}
-          <button
-            onClick={() => submit()}
-            disabled={!input.trim()}
-            className="relative w-7 h-[1.4rem] rounded-md bg-primary text-primary-foreground flex items-center justify-center shrink-0 hover:brightness-105 active:scale-95 transition-all disabled:opacity-40 disabled:active:scale-100 after:content-[''] after:absolute after:-inset-2.5"
-            title={t('composer.sendTitle')}
-            aria-label={t('composer.send')}
-          >
-            <CornerDownLeft className="w-3.5 h-3.5" />
-          </button>
+          <div className="flex items-center gap-1 px-1.5 pb-1.5 pt-1">
+            <div ref={menuRef} className="relative">
+              {menuOpen && (
+                <div className="absolute left-0 bottom-full mb-2 z-20 w-52 pt-card shadow-lg py-1 animate-in fade-in slide-in-from-bottom-2">
+                  {TRADER_ACTIONS.map(a => (
+                    <button
+                      key={a.form}
+                      onClick={() => { chatStore.openForm(a.form); setMenuOpen(false); }}
+                      className={MENU_ITEM}
+                    >
+                      <a.icon className="w-3.5 h-3.5 text-primary shrink-0" /> {t(a.labelKey)}
+                    </button>
+                  ))}
+                  <div className="my-1 border-t border-border" />
+                  <button
+                    onClick={() => { setMenuOpen(false); onSend(t('composer.behaviorAsk'), 'BEHAVIOR'); }}
+                    className={MENU_ITEM}
+                    title={t('composer.behaviorTitle')}
+                  >
+                    <UserSearch className="w-3.5 h-3.5 shrink-0" /> {t('composer.behaviorLabel')}
+                  </button>
+                  <button onClick={() => { setMenuOpen(false); setEditing(true); }} className={MENU_ITEM}>
+                    <Pencil className="w-3.5 h-3.5 shrink-0" /> {t('composer.editSuggests')}
+                  </button>
+                </div>
+              )}
+              <button
+                onClick={() => setMenuOpen(v => !v)}
+                className={cn(
+                  'w-8 h-8 flex items-center justify-center transition-colors',
+                  menuOpen ? 'text-primary bg-surface-hover' : 'text-muted-foreground hover:text-foreground hover:bg-surface-hover',
+                )}
+                title={t('composer.more')}
+                aria-label={t('composer.more')}
+                aria-expanded={menuOpen}
+              >
+                <Plus className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* 跑着且这一轮可中断时，发送键换成停止键；一旦敲了字就换回发送键，插话/排队照常能发 */}
+            {loading && onStop && !input.trim() ? (
+              <button
+                onClick={onStop}
+                disabled={stopping}
+                className={SEND_BTN}
+                title={t('chat.stopTitle')}
+                aria-label={stopping ? t('chat.stopping') : t('chat.stop')}
+              >
+                <Square className="w-3 h-3 fill-current" />
+              </button>
+            ) : (
+              <button
+                onClick={() => submit()}
+                disabled={!input.trim()}
+                className={SEND_BTN}
+                title={t('composer.sendTitle')}
+                aria-label={t('composer.send')}
+              >
+                <ArrowUp className="w-4 h-4" />
+              </button>
+            )}
+          </div>
         </div>
 
-        <div className="flex justify-between px-0.5 text-[10px] text-muted-foreground/60">
-          <span>{t('composer.hint')}</span>
-          <span className="num">{loading ? t('composer.busy', { hub: HUB_NAME }) : t('composer.ready', { hub: HUB_NAME })}</span>
+        <div className="flex justify-between gap-2 px-0.5 pt-1 text-[10px] text-muted-foreground/60">
+          <span className="truncate">{t('composer.hint')}</span>
+          <span className="num shrink-0">{loading ? t('composer.busy', { hub: HUB_NAME }) : t('composer.ready', { hub: HUB_NAME })}</span>
         </div>
       </div>
     </div>
   );
 }
 
-/**
- * 横滚行（快捷提问 / trader 三项）：滚动条藏起来，靠三条路让人知道能滚——
- * 纵向滚轮直接推、鼠标按住拖、两端按滚动位置渐隐。触屏一概不接管，交给原生惯性滑动。
- * <p>
- * 全程只改 scrollLeft 和两个 CSS 变量，一次 state 都不起：拖动中不重画，也就不会拖出卡顿。
- */
-function ScrollRow({ contentKey, children }: {
-  /** 内容的身份。它一变就说明这一行宽度变了，渐隐得重算 */
-  contentKey: string;
-  children: React.ReactNode;
-}) {
-  const ref = useRef<HTMLDivElement>(null);
-  const dragRef = useRef<{ id: number; x: number; left: number; moved: boolean } | null>(null);
-  const swallowRef = useRef(0);
-
-  /** 渐隐跟着滚动位置走：滚到头的那侧收成 0，停在中间时两侧都露一截虚化 */
-  const sync = useCallback(() => {
-    const el = ref.current;
-    if (!el) return;
-    const max = el.scrollWidth - el.clientWidth;
-    el.style.setProperty('--fade-l', el.scrollLeft > 1 ? FADE_W : '0px');
-    el.style.setProperty('--fade-r', el.scrollLeft < max - 1 ? FADE_W : '0px');
-  }, []);
-
-  // 内容换了（改过提示词、trader 开合）要重算；面板拖拽 resize、进出全屏这类宽度变化交给 ResizeObserver
-  useEffect(() => { sync(); }, [contentKey, sync]);
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const ro = new ResizeObserver(sync);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [sync]);
-
-  // PC 上没有横向滚轮，纵向的直接拿来推——不接这条等于"能滚但滚不动"。
-  // 必须手接原生监听：React 的 onWheel 挂的是 passive，里面 preventDefault 不生效
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const onWheel = (e: WheelEvent) => {
-      if (!e.deltaY || el.scrollWidth <= el.clientWidth) return;
-      e.preventDefault();
-      el.scrollLeft += e.deltaY;
-    };
-    el.addEventListener('wheel', onWheel, { passive: false });
-    return () => el.removeEventListener('wheel', onWheel);
-  }, []);
-
-  const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    const el = ref.current;
-    // 只接鼠标：触屏本来就能划，抢过来反而把惯性弄没了
-    if (!el || e.pointerType !== 'mouse' || el.scrollWidth <= el.clientWidth) return;
-    dragRef.current = { id: e.pointerId, x: e.clientX, left: el.scrollLeft, moved: false };
-  };
-  const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
-    const d = dragRef.current, el = ref.current;
-    if (!d || !el || d.id !== e.pointerId) return;
-    const dx = e.clientX - d.x;
-    if (!d.moved && Math.abs(dx) > DRAG_THRESHOLD) {
-      d.moved = true;
-      el.setPointerCapture(e.pointerId);
-    }
-    if (d.moved) el.scrollLeft = d.left - dx;
-  };
-  const onPointerEnd = (e: React.PointerEvent<HTMLDivElement>) => {
-    const d = dragRef.current;
-    if (!d || d.id !== e.pointerId) return;
-    if (d.moved) swallowRef.current = performance.now();   // 松手后浏览器还会补一个 click
-    dragRef.current = null;
-  };
-
-  return (
-    <div
-      ref={ref}
-      onScroll={sync}
-      onPointerDown={onPointerDown}
-      onPointerMove={onPointerMove}
-      onPointerUp={onPointerEnd}
-      onPointerCancel={onPointerEnd}
-      // 捕获阶段吞掉拖完补出来的那个 click，否则松手那一下会顺手把某条提问发出去
-      onClickCapture={e => {
-        if (performance.now() - swallowRef.current >= CLICK_SWALLOW_MS) return;
-        swallowRef.current = 0;
-        e.stopPropagation();
-        e.preventDefault();
-      }}
-      className="hscroll-fade flex-1 min-w-0 flex items-center gap-1.5 overflow-x-auto overscroll-x-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-    >
-      {children}
-    </div>
-  );
-}
-
-/** 快捷提问编辑面板：浮在那一行上方。改 / 删 / 加，最多四条，按保存才落 localStorage */
+/** 快捷提问编辑面板：浮在输入区上方。改 / 删 / 加，最多四条，按保存才落 localStorage */
 function SuggestEditor({ initial, defaults, onSave, onCancel }: {
   initial: string[];
   /** 「恢复默认」填回去的出厂四条（已按当前语言翻好） */
@@ -332,7 +268,7 @@ function SuggestEditor({ initial, defaults, onSave, onCancel }: {
   const seq = useRef(rows.length);
 
   return (
-    <div className="absolute left-0 right-0 bottom-full mb-2 z-20 rounded-xl pt-card shadow-lg p-3 animate-in fade-in slide-in-from-bottom-2">
+    <div className="absolute left-0 right-0 bottom-full mb-2 z-20 pt-card shadow-lg p-3 animate-in fade-in slide-in-from-bottom-2">
       <div className="flex items-center gap-2 mb-2">
         <Pencil className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
         <span className="text-xs font-black shrink-0">{t('composer.editorTitle')}</span>
@@ -347,11 +283,11 @@ function SuggestEditor({ initial, defaults, onSave, onCancel }: {
               value={r.text}
               onChange={e => setRows(prev => prev.map(x => (x.id === r.id ? { ...x, text: e.target.value } : x)))}
               placeholder={t('composer.editorPh')}
-              className="flex-1 min-w-0 rounded-lg border border-border bg-card-2 px-2 py-1.5 text-xs focus:outline-none focus:border-primary/50"
+              className="flex-1 min-w-0 border border-border bg-card-2 px-2 py-1.5 text-xs focus:outline-none focus:border-foreground"
             />
             <button
               onClick={() => setRows(prev => prev.filter(x => x.id !== r.id))}
-              className="shrink-0 w-6 h-6 rounded-md flex items-center justify-center text-muted-foreground/60 hover:text-loss hover:bg-loss/10 transition-colors"
+              className="shrink-0 w-6 h-6 flex items-center justify-center text-muted-foreground/60 hover:text-loss hover:bg-loss/10 transition-colors"
               title={t('composer.removeRow')}
               aria-label={t('composer.removeRowAria')}
             >
@@ -364,7 +300,7 @@ function SuggestEditor({ initial, defaults, onSave, onCancel }: {
       {rows.length < SUGGEST_MAX && (
         <button
           onClick={() => setRows(prev => [...prev, { id: seq.current++, text: '' }])}
-          className="mt-1.5 w-full border border-dashed border-border rounded-lg py-1.5 text-[11px] font-bold text-primary hover:bg-primary/6 flex items-center justify-center gap-1 transition-colors"
+          className="mt-1.5 w-full border border-dashed border-border py-1.5 text-[11px] font-bold text-primary hover:bg-primary/6 flex items-center justify-center gap-1 transition-colors"
         >
           <Plus className="w-3 h-3" /> {t('composer.addRow')}
         </button>
@@ -380,13 +316,13 @@ function SuggestEditor({ initial, defaults, onSave, onCancel }: {
         <div className="ml-auto flex items-center gap-2">
           <button
             onClick={onCancel}
-            className="border border-border rounded-lg px-3 h-7 text-[11px] font-bold text-muted-foreground hover:bg-surface-hover transition-colors"
+            className="border border-border px-3 h-7 text-[11px] font-bold text-muted-foreground hover:bg-surface-hover transition-colors"
           >
             {t('common:cancel')}
           </button>
           <button
             onClick={() => onSave(rows.map(r => r.text.trim()).filter(Boolean).slice(0, SUGGEST_MAX))}
-            className="rounded-lg px-3 h-7 text-[11px] font-bold bg-primary text-primary-foreground hover:brightness-105 transition-all"
+            className="px-3 h-7 text-[11px] font-bold bg-primary text-primary-foreground hover:brightness-105 transition-all"
           >
             {t('common:save')}
           </button>

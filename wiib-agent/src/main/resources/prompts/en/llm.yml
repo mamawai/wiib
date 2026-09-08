@@ -1,0 +1,28 @@
+# llm domain catalog (English). Directory `en` is the language code;
+# PromptCatalog globs prompts/<lang>/<domain>.yml.
+#
+# Holds the one-liner an upstream exception is classified into (LlmErrorMessages), shared by chat and
+# coach: it is shown to the user AND stitched into an AssistantMessage fed back to the model and
+# persisted with the conversation context.
+# Hard rule: none of these may echo the upstream text — it often carries the full request URL
+# (?api_key=…) and custom headers.
+llm:
+
+  error:
+    # Unrecognised causes are not diagnosed for the user: both callers' catch blocks cover far more
+    # than the LLM call, a database outage lands here too
+    fallback: Something went wrong, please try again later
+    unauthorized: The API key is invalid or lacks permission - check it in the settings
+    quota: Your API quota is used up or you have hit a rate limit, please try again later
+    modelNotFound: This endpoint does not support that model, pick another one
+    unreachable: The endpoint is not responding - check that the Base URL is correct
+    # type is the class name of the deepest cause, language-independent; it is how unclassified shapes get spotted
+    unknown: Something went wrong ({{type}}), please try again later
+
+  callLimit:
+    # The placeholder receipt for tool_calls the fuse skipped (ModelCallLimiter): says plainly "not
+    # executed" rather than faking a success - the model and the retrospective both read it, and it is
+    # persisted with the conversation context
+    notExecuted: "Not executed: the model-call limit for this run was reached and the tool was skipped."
+    # Appended to the last tool receipt the fuse still lets through (shared by chat leaves / trader wake-ups / learning; names no one's closing format)
+    lastCall: "(System notice: this round's tool-call budget is used up - give your final answer in the next reply and call no more tools.)"

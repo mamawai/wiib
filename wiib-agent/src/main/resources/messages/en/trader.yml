@@ -1,0 +1,69 @@
+# AI Trader interface wording: config validation, action-panel receipts, wake/review blocking reasons.
+# This is a different catalog from prompts/<lang>/trader.yml: that one holds the prompts fed to the
+# model (following the owner's user.lang), this one holds what the user reads (following X-Lang).
+trader:
+  notCreated: You have not created an AI Trader yet
+  alreadyExists: One AI Trader per account
+  notFound: No such trader
+  notOwner: You can only watch your own trader
+  liquidatedRound: This round ended in liquidation - reset for a new round first
+  # {{reason}} is whatever the upstream endpoint returned, passed through untranslated
+  connectFailed: "The model connectivity check failed: {{reason}}"
+
+  noEndpoint: No model endpoint available yet - add one under Model config on the AI page first
+
+  # Ignore mark (stale) on settled trades: curates the AI's own material, public record untouched
+  plan:
+    notFound: Trade plan not found
+    notClosed: Only settled trades can be ignored
+    staleRequired: Missing required field 'stale'
+
+  # Entry validation for create / update config
+  config:
+    nameRequired: A name is required, up to 32 characters
+    badInterval: The candle interval must be 5m, 15m, 1h or 4h
+    windowNeverWakes: No {{interval}} candle closes inside that wake window, so it would never wake up. Widen the window or change the interval
+    symbolRequired: Pick at least one coin to trade
+    tooManySymbols: "At most {{max}} symbols (each wake-up's tool budget and attention are split per symbol)"
+    symbolNotAllowed: "Coin outside the tradable set: {{whitelist}}"
+    promptTooLong: A custom prompt is at most 4000 characters
+    customPromptRequired: With the platform prompt off, a custom prompt is required
+    leverageRange: The leverage range must sit within 1~{{max}}x
+    leverageInverted: The lower bound of the leverage range cannot exceed the upper bound
+    marginRange: Margin per position must be between 0.1% and 100%
+    marginInverted: The lower bound of the margin range cannot exceed the upper bound
+    hedgeNeedsTwoSlots: Hedging needs two position slots, so it cannot be on while only one position is allowed
+    alertMultTooLow: The sensitivity multiplier cannot go below 1.0 (thresholds may only be raised)
+    # Wake-window parse failures. WakeWindow.parse throws these keys; TraderService renders them
+    window:
+      format: The wake window must look like HH:mm-HH:mm, e.g. 21:00-08:30
+      sameEnds: The wake window cannot start and end at the same time (to run all day, just turn the window off)
+      badTime: That is not a valid time of day (hours 0-23, minutes 0-59)
+      minuteStep: Wake-window minutes must be a multiple of 5 (candles close every 5 minutes)
+
+  # Owner note: one unread note at a time, overwriting. The two tails below are appended when they apply
+  note:
+    empty: The note cannot be empty
+    saved: Noted - the next {{n}} wake-ups will carry it
+    savedCovered: "; it replaced your previous unread note"
+    savedTruncated: "; anything past {{max}} characters was trimmed"
+    none: There is no unread note right now
+    cleared: Note withdrawn - the trader will not see it
+
+  # Manual wake-up
+  wake:
+    started: Wake-up triggered; the trader is deciding in the background and the result will show up on the arena decision timeline shortly
+    paused: The trader is paused{{why}}, and a manual wake-up does not bypass that - start it on the My Trader page first
+    pausedWhy: " ({{reason}})"
+    liquidated: This round ended in liquidation - reset for a new round on the config page before trading again
+    handover: The daily review-and-learning handover is running (a short stop-the-world window); try again once it closes in a few minutes
+    intervalRetired: This trader's wake interval has been retired, so it cannot be woken
+    budgetTooTight: Less than {{seconds}}s to the next candle close - there is not enough time budget for this round. Wait for the candle to close
+    busy: The previous wake-up is still running, so this manual one is skipped (no trader runs twice at once)
+
+  # On-demand review
+  review:
+    started: Review started; a REVIEW entry will appear on the arena decision timeline in a few minutes. A failure leaves an ERROR entry, so it never just goes quiet
+    noMaterial: No trading activity has been recorded since the last review (not a single trading wake-up), so it was skipped (no model call spent)
+    busy: This trader is still busy (a wake-up or review is running) - try again once it finishes
+    handover: The daily review-and-learning handover is running; try again once the window closes in a few minutes

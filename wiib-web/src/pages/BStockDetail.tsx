@@ -9,7 +9,8 @@ import { Card, CardContent } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Skeleton } from '../components/ui/skeleton';
-import { CandleChart, newsTagForSymbol } from '../components/CandleChart';
+import { CandleChart } from '../components/CandleChart';
+import { newsTagForSymbol } from '../components/chart/newsTag';
 import { FuturesActionButton } from '../components/FuturesActionButton';
 import { useQuantityAnimation } from '../components/coin/useQuantityAnimation';
 import { floorToStep } from '../components/coin/futuresMath';
@@ -18,11 +19,6 @@ import { ChevronLeft, Wallet, Globe, Landmark } from 'lucide-react';
 import type { BStock, CryptoPosition } from '../types';
 
 const COMMISSION_RATE = 0.001;
-const CHART_TABS = [
-  { label: '5m', interval: '5m' as const }, { label: '15m', interval: '15m' as const },
-  { label: '1h', interval: '1h' as const }, { label: '4h', interval: '4h' as const },
-  { label: '1d', interval: '1d' as const },
-];
 const PCTS = [0.25, 0.5, 0.75, 1];
 const LEVERAGES = [1, 2, 3, 5, 10];
 const QTY_STEP = 0.0001;   // 数量精度：与 toFixed(4) 同口径，缓动动画的步长
@@ -49,7 +45,8 @@ function BStockDetail({ symbol }: { symbol: string }) {
 
   const [info, setInfo] = useState<BStock | null>(null);
   const [position, setPosition] = useState<CryptoPosition | null>(null);
-  const [chartTab, setChartTab] = useState(0);
+  // 周期：图表顶栏自己切，页面只存当前档
+  const [chartIv, setChartIv] = useState<'5m' | '15m' | '1h' | '4h' | '1d'>('5m');
   const [side, setSide] = useState<'BUY' | 'SELL'>('BUY');
   const [qty, setQty] = useState('');
   // 买入输入单位：股数 / USDT 预算。USDT 指"含手续费的现金占用"（用杠杆时即保证金+手续费）
@@ -171,26 +168,19 @@ function BStockDetail({ symbol }: { symbol: string }) {
         {/* 左：图 + 公司信息 */}
         <div className="lg:col-span-2 space-y-4">
           <Card className="overflow-hidden">
-            {/* 5 个档位保持一行（手机端收窄 padding/字号）；右侧高低价挤不下时整体换行到第二行 */}
-            <div className="px-4 pt-3 flex flex-wrap items-center gap-x-1 gap-y-1 sm:gap-x-1.5">
-              {CHART_TABS.map((t, i) => (
-                <Button key={t.label} variant={chartTab === i ? 'secondary' : 'ghost'} size="sm" className="h-7 px-2 text-[11px] sm:px-3 sm:text-xs" onClick={() => setChartTab(i)}>
-                  {t.label}
-                </Button>
-              ))}
-              <span className="ml-auto text-xs text-muted-foreground tabular-nums">
-                {info?.high != null && info?.low != null && t('bstockDetail.highLow', { high: fmtNum(info.high), low: fmtNum(info.low) })}
-              </span>
+            <div className="px-4 pt-3 text-right text-xs text-muted-foreground tabular-nums">
+              {info?.high != null && info?.low != null && t('bstockDetail.highLow', { high: fmtNum(info.high), low: fmtNum(info.low) })}
             </div>
-            <div className="h-[360px] sm:h-[430px] p-2">
+            <div className="h-[430px] sm:h-[520px] p-2">
               {/* bstock 无后端K线广播：现货价格流驱动最后一根实时跳动 */}
               <CandleChart
                 symbol={symbol}
-                interval={CHART_TABS[chartTab].interval}
+                interval={chartIv}
+                marketLabel={`BINANCE ${t('coin.spot')}`}
                 newsTag={newsTagForSymbol(symbol)}
                 klinesFn={bstockApi.klines}
                 streamLive={false}
-                onIntervalChange={iv => setChartTab(CHART_TABS.findIndex(t => t.interval === iv))}
+                onIntervalChange={setChartIv}
                 tick={tick?.price != null && tick?.ts != null ? { price: tick.price, ts: tick.ts } : null}
               />
             </div>
