@@ -1,13 +1,18 @@
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { smoothPath } from '../../lib/smoothPath';
 import { cn, fmtNum } from '../../lib/utils';
 import type { TraderEquityPoint } from '../../types';
 
 const H = 280;
 const PAD = 8;
+/** 末值标签高：20px 粗体 leading-none 一行 + 12px 小字一行（body 行高 1.45 ≈ 17.4），取 38 */
+const TAG_H = 38;
+/** 末值标签跟末点的间隙 */
+const TAG_GAP = 24;
 
 /**
- * 本局净值曲线：直线段折线 + 面积 + 初始资金虚线基准。
+ * 本局净值曲线：单调保形平滑曲线 + 面积 + 初始资金虚线基准。
  * 基准值一起参与 min/max，那条线一定落在图内；末值和首末日期挂在图外，等线画完再浮现。
  */
 export function EquityCurve({ points, base = 10000, lastLabel, className }: {
@@ -38,12 +43,18 @@ export function EquityCurve({ points, base = 10000, lastLabel, className }: {
   const min = Math.min(...vals, base);
   const max = Math.max(...vals, base);
   const y = (v: number) => PAD + (H - 2 * PAD) * (1 - (v - min) / (max - min || 1));
-  const x = (i: number) => PAD + (w - 2 * PAD) * i / (points.length - 1);
-  const pts = vals.map((v, i) => [x(i), y(v)] as const);
-  const line = pts.map((p, i) => `${i ? 'L' : 'M'}${p[0].toFixed(1)} ${p[1].toFixed(1)}`).join(' ');
-  const area = `${line} L${pts[pts.length - 1]?.[0].toFixed(1)} ${H} L${pts[0]?.[0].toFixed(1)} ${H} Z`;
+  const step = (w - 2 * PAD) / (points.length - 1);
+  const ys = vals.map(y);
+  const line = smoothPath(ys, PAD, step);
+  const xEnd = PAD + step * (points.length - 1);
+  const area = `${line} L${xEnd.toFixed(2)} ${H} L${PAD} ${H} Z`;
   const yBase = y(base);
+  const yLast = ys[ys.length - 1];
   const last = points[points.length - 1];
+  // 末点贴图底时标签会掉出容器压到下面那块，翻到点上方去
+  const tagTop = yLast + TAG_GAP + TAG_H > H ? yLast - TAG_GAP - TAG_H : yLast + TAG_GAP;
+  // 基准线贴顶时标签放线上方会出界，改挂线下方
+  const baseTop = yBase - 18 >= 0 ? yBase - 18 : yBase + 6;
 
   return (
     <div ref={box} className={cn('relative h-[280px]', className)}>
@@ -54,10 +65,10 @@ export function EquityCurve({ points, base = 10000, lastLabel, className }: {
             <line x1={0} x2={w} y1={yBase} y2={yBase} stroke="var(--color-muted-foreground)" strokeDasharray="2 5" />
             <path d={line} fill="none" stroke="var(--color-foreground)" strokeWidth="2" />
           </svg>
-          <span className="reveal-late absolute left-0 text-[12px] mute" style={{ top: yBase - 18 }}>
+          <span className="reveal-late absolute left-0 text-[12px] mute" style={{ top: baseTop }}>
             {t('detail.initialLabel')}
           </span>
-          <div className="reveal-late num absolute right-0 text-right" style={{ top: pts[pts.length - 1][1] + 24 }}>
+          <div className="reveal-late num absolute right-0 text-right" style={{ top: tagTop }}>
             <b className="block text-[20px] font-bold [font-stretch:75%] leading-none">{fmtNum(last.equity)}</b>
             {lastLabel && <span className="text-[12px] mute">{lastLabel}</span>}
           </div>
