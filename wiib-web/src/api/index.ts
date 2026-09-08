@@ -594,6 +594,9 @@ export const traderApi = {
   pause: () => api.post<unknown, void>('/ai/trader/pause'),
   /** carryNotes=false 不带入复盘/学习笔记（只清生效版本，历届存档保留） */
   reset: (carryNotes: boolean) => api.post<unknown, void>('/ai/trader/reset', { carryNotes }),
+  /** 删 trader：决策/计划/每局 sim 子账户全物理删除，不可逆；confirmName 要与 trader 名字一字不差 */
+  remove: (confirmName: string) =>
+    api.delete<unknown, void>('/ai/trader', { params: { confirmName } }),
   arena: () => api.get<unknown, TraderPublicView[]>('/ai/trader/arena'),
   detail: (id: number) => api.get<unknown, TraderDetailView>(`/ai/trader/${id}`),
   /**

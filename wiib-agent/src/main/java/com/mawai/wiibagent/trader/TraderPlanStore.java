@@ -197,6 +197,12 @@ public class TraderPlanStore {
                 .le(AiTraderPlan::getRoundNo, maxRoundNo));
     }
 
+    /** 删 trader：不分轮次全清。 */
+    public void purgeAll(long traderId) {
+        mapper.delete(new LambdaQueryWrapper<AiTraderPlan>()
+                .eq(AiTraderPlan::getTraderId, traderId));
+    }
+
     private void archive(AiTraderPlan plan, long closedAt) {
         plan.setStatus(AiTraderPlan.STATUS_CLOSED);
         plan.setClosedWakeTime(closedAt);

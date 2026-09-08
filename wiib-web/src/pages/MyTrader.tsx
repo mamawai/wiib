@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Trans, useTranslation } from 'react-i18next';
-import { BookOpen, Bot, ChevronDown, ChevronLeft, Database, GraduationCap, Loader2, Pause, Play, RotateCcw, Save, Wrench } from 'lucide-react';
+import { BookOpen, Bot, ChevronDown, ChevronLeft, Database, GraduationCap, Loader2, Pause, Play, RotateCcw, Save, Trash2, Wrench } from 'lucide-react';
 import { llmEndpointApi, traderApi } from '../api';
 import { DATA_TOOLS, TRADE_TOOLS, toolName } from '../components/arena/traderTools';
 import { GuidedTour, type TourStep } from '../components/GuidedTour';
@@ -71,6 +71,9 @@ export function MyTrader() {
   // 重置确认面板：打开时笔记默认带入，每次重新打开都回到默认
   const [resetAsk, setResetAsk] = useState(false);
   const [carryNotes, setCarryNotes] = useState(true);
+  // 删除确认面板：名字打对了才放行，每次重新打开都清空重打
+  const [deleteAsk, setDeleteAsk] = useState(false);
+  const [confirmName, setConfirmName] = useState('');
   /** 端点库（下拉选项）；进页面拉一次，改动在 AI 页做 */
   const [endpoints, setEndpoints] = useState<LlmEndpointView[]>([]);
   useEffect(() => { llmEndpointApi.list().then(setEndpoints).catch(() => setEndpoints([])); }, []);
@@ -197,10 +200,17 @@ export function MyTrader() {
             </button>
           )}
           <button
-            onClick={() => { setCarryNotes(true); setResetAsk(true); }}
+            onClick={() => { setCarryNotes(true); setDeleteAsk(false); setResetAsk(true); }}
             disabled={busy != null}
             className="border border-border hover:bg-surface-hover rounded-lg px-3 py-1.5 text-xs font-bold text-muted-foreground flex items-center gap-1.5 disabled:opacity-50">
             {busy === 'reset' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />} {t('trader.reset')}
+          </button>
+          {/* 删除与重置摆一起但描红：重置是换一局接着跑，这个是把这只 trader 整个抹掉 */}
+          <button
+            onClick={() => { setConfirmName(''); setResetAsk(false); setDeleteAsk(true); }}
+            disabled={busy != null}
+            className="border border-loss/40 hover:bg-loss/10 rounded-lg px-3 py-1.5 text-xs font-bold text-loss flex items-center gap-1.5 disabled:opacity-50">
+            {busy === 'delete' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />} {t('trader.delete')}
           </button>
           {mine && (
             <Link to={`/arena/${mine.pub.id}`} className="ml-auto text-xs font-bold text-primary hover:underline">
@@ -226,6 +236,41 @@ export function MyTrader() {
                   {t('trader.reset')}
                 </button>
                 <button onClick={() => setResetAsk(false)}
+                        className="border border-border hover:bg-surface-hover rounded-lg px-3 py-1.5 font-bold text-muted-foreground">
+                  {t('common:cancel')}
+                </button>
+              </div>
+            </div>
+          )}
+          {deleteAsk && (
+            <div className="w-full rounded-lg border border-loss/40 bg-loss/5 p-3 space-y-2.5 text-xs">
+              <p className="font-bold text-loss">{t('trader.deleteConfirm')}</p>
+              <p className="text-[11px] text-muted-foreground leading-relaxed">{t('trader.deleteWarn')}</p>
+              <label className="block space-y-1.5">
+                <span className="block">
+                  <Trans t={t} i18nKey="trader.deleteConfirmName" values={{ name: mine?.pub.name ?? '' }}>
+                    <span className="font-bold text-foreground" />
+                  </Trans>
+                </span>
+                <input value={confirmName} onChange={e => setConfirmName(e.target.value)}
+                       maxLength={32} placeholder={mine?.pub.name}
+                       className="w-full h-9 rounded-lg border border-border bg-card-2 px-3 text-xs" />
+              </label>
+              <div className="flex gap-2">
+                {/* 名字一字不差才点得动；后端也拦一道 */}
+                <button
+                  onClick={() => {
+                    setDeleteAsk(false);
+                    void run('delete', async () => {
+                      await traderApi.remove(confirmName.trim());
+                      setForm(EMPTY_FORM);   // 删干净了，配置表单跟着回到空白
+                    }, t('toast.deleted'));
+                  }}
+                  disabled={busy != null || confirmName.trim() !== mine?.pub.name}
+                  className="border border-loss/40 hover:bg-loss/10 rounded-lg px-3 py-1.5 font-bold text-loss disabled:opacity-50">
+                  {t('trader.delete')}
+                </button>
+                <button onClick={() => setDeleteAsk(false)}
                         className="border border-border hover:bg-surface-hover rounded-lg px-3 py-1.5 font-bold text-muted-foreground">
                   {t('common:cancel')}
                 </button>

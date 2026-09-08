@@ -12,6 +12,11 @@ trader:
 
   noEndpoint: No model endpoint available yet - add one under Model config on the AI page first
 
+  # Deleting a trader: irreversible, name must match, refused mid-wake
+  delete:
+    nameMismatch: The name does not match - type this trader's name exactly
+    busy: It is waking up right now - delete once this round finishes (up to about 10 minutes)
+
   # Ignore mark (stale) on settled trades: curates the AI's own material, public record untouched
   plan:
     notFound: Trade plan not found
