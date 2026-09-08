@@ -30,9 +30,24 @@ tool:
 
   # ---- 行情/指标数据工具（chat 的 market 专家与 trader 唤醒共用）----
   market_snapshot: |-
-    获取加密永续合约标的的实时行情快照：价格、涨跌幅、资金费偏离、持仓量变化、多空比、
-    大户偏向、taker 压力、清算压力、盘口失衡、恐惧贪婪指数、市场状态。
-    除特别说明外，信号字段都是归一化到 [-1,1] 的分值。
+    获取加密永续合约标的的实时行情横截面（短周期视角，不是 K 线）。字段与符号约定：
+    - lastPrice 现价；atr 是 5m 周期的 atr14，止损距离请用 indicators 里你交易周期的 atr14
+    - price_change：{5m,15m,30m,1h,4h,24h} 各窗口涨跌幅（%）
+    - regime：按 15m 指标用固定规则打的标签——TREND_UP/TREND_DOWN（adx>25，方向看 DI 大小）、
+      SQUEEZE（adx<15 且布林带宽<1.5）、SHOCK（5m ATR 近期>2 倍长期均值，刚有冲击）、RANGE（其余）；是规则不是判断
+    - fundingDeviation：(当前费率−0.01%)÷0.03%，正=多头付费偏贵（多头拥挤），负=空头拥挤
+    - oiChangeRate：最近 4 小时持仓量变化率，原始比例（0.03=+3%），正=资金进场，负=离场
+    - lsrExtreme：散户账户多空比在最近 24 小时内的百分位映射到 [-1,1]，接近 +1=多头人数拥挤到极端，−1=空头极端
+    - topTraderBias：最近 2 小时大户持仓多空比后半段相对前半段的变化，正=大户在加多，负=在加空
+    - takerPressure：最近 2 小时主动买卖比的变化，正=主动买入在增强；tradeDelta：最近成交的主动买占比映射到 [-1,1]，
+      正=主动买主导；largeTradeBias：大单方向，正=大单买入为主
+    - liquidationPressure：近期爆仓中多头爆仓占比映射到 [-1,1]，正=多头被爆得多（下跌中的空头力量），负=空头被爆得多；
+      liquidationVolumeUsdt 是爆仓总额
+    - bidAskImbalance / spotBidAskImbalance：合约/现货盘口前 5 档 (买量−卖量)÷总量，正=买盘厚
+    - spotPerpBasisBps：合约相对现货的基差（基点），正=合约升水
+    - fearGreed："数值(标签)"，0=极度恐惧，100=极度贪婪
+    - qualityFlags：列出的 NO_* 表示该项数据缺失，对应分值会是 0——那个 0 是"没数据"，不是"中性"
+    除 price_change/oiChangeRate/spotPerpBasisBps/atr 外，分值都在 [-1,1]，绝对值越大越极端。
 
   option_iv: |-
     获取标的在 Deribit 的期权隐含波动率上下文：DVOL 指数与 ATM IV 摘要。
@@ -48,7 +63,8 @@ tool:
 
   klines: |-
     获取 Binance 合约的原始 OHLCV K 线。固定返回 192 行 [openTime(毫秒), open, high, low, close, volume]，
-    从旧到新；最后一行是尚未走完的当前 K 线（其 close 即最新价，volume 只是部分量）。
+    从旧到新；最后一行是尚未走完的当前 K 线（其 close 即最新价，volume 只是部分量），刚收盘的那根是它前一行。
+    末行是否走完按 openTime 判断：openTime 加一个周期晚于现在就还在走。
     interval：5m/15m/1h/4h/1d——192 根分别覆盖 16小时 / 2天 / 8天 / 32天 / 192天。
     当你的方法需要逐根读 K 线时才调它：验证 K 线形态、套用你自己的摆动/结构定义、
     或细看 `kline_structure` 指给你的某一段。这是唯一给全每一根的工具——`kline_structure`
@@ -57,15 +73,16 @@ tool:
     免得它的 focus_bars 与这里的行重复。
 
   indicators: |-
-    获取标的的全套经典技术指标，按指定周期（5m/15m/1h/4h/1d）用最近 192 根计算。字段：
-    ma7/ma25/ma99 + ema12/ema20/ema26（均线；ma_alignment=bullish/bearish 排列），
-    rsi14 + rsi14_trend（>70 超买，<30 超卖），
-    macd_dif/dea/hist + macd_cross(golden/death) + macd_hist_trend（动量），
-    boll_upper/mid/lower + boll_pb + boll_bandwidth（带宽收窄=挤压，扩张=趋势中），
-    atr14（波动率；常用的止损距离单位），
-    kdj_k/d/j，adx + plus_di/minus_di（adx>25 趋势，<15 震荡），
-    obv/obv_ma20/obv_trend + volume_ma20/volume_ratio（量能确认），
-    close_trend（rising_5=连续 5 根收涨）。最后一根尚未走完。
+    获取标的的全套经典技术指标，按指定周期（5m/15m/1h/4h/1d）用最近 192 根计算，末根是尚未走完的当前 K 线。字段：
+    ma7/ma25/ma99 + ema12/ema20/ema26（均线）；ma_alignment：1=MA7>MA25>MA99 多头排列，-1=空头排列，0=纠缠；
+    rsi14 + rsi14_trend（>70 超买，<30 超卖）；
+    macd_dif/dea/hist + macd_hist_trend（动量）；macd_cross 只在末根刚发生金叉/死叉时出现（golden/death），没发生就没这个字段；
+    boll_upper/mid/lower + boll_pb（%B，0~100：>100 收在上轨之上，<0 收在下轨之下，50 在中轨）
+    + boll_bandwidth（(上轨−下轨)÷中轨×100；收窄=挤压，扩张=趋势中）；
+    atr14（Wilder RMA 波动率；常用的止损距离单位）；
+    kdj_k/d/j；adx + plus_di/minus_di（adx>25 趋势，<15 震荡；方向看 plus_di 与 minus_di 谁大）；
+    obv/obv_ma20/obv_trend + volume_ma20/volume_ratio（量能确认；volume_ratio=末根量÷20 根均量）；
+    close_trend。各 *_trend 字段取值：rising_5=连续 5 根上行、falling_5=连续 5 根下行、mostly_up/mostly_down=多数上行/下行、sideways=涨跌各半。
 
   kline_structure: |-
     与 `klines` 同一份 192 根 K 线的结构摘要——路径、分段、量价分布与关键价位，都替你算好。
@@ -125,14 +142,15 @@ tool:
     只在本轮自己动过手后核对账户时用。
 
   open_position: |-
-    在你的模拟账户开合约仓位。硬规则（违反即拒，拒因可修正、并附带确切的允许区间）：
+    在你的模拟账户开合约仓位（全仓模式）。硬规则（违反即拒，拒因可修正、并附带确切的允许区间）：
     杠杆必须落在主人配置的区间内——那是区间不是上限，选太低同样被拒；开新仓时保证金
-    （=数量×价格/杠杆）必须落在配置的权益占比区间内（加仓豁免）；同一标的的杠杆必须与
-    已有持仓或挂单一致；LIMIT 价须在标记价 ±5% 内；stopLossPrice 必填且方向正确。
+    （=数量×价格÷杠杆）必须落在配置的权益占比区间内（加仓豁免）；同一标的的杠杆必须与
+    已有持仓或挂单一致；LIMIT 价须在标记价 ±5% 内；stopLossPrice 与 takeProfitPrice 都必填且方向正确。
     playType 是论点标签：BREAKOUT/PULLBACK/REVERSAL/TREND_FOLLOW/RANGE/NEWS/FUNDING/OTHER。
     signalsUsed：一句话，引用论点所依据的具体数据字段。
-    invalidationCondition：能证明论点错了的市场条件（不是盈亏数字）——它进入该仓位的计划，
-    是你主动平仓的唯一依据。
+    invalidationCondition：能证明论点错了的市场条件（不是盈亏数字）——它进入该仓位的计划；
+    它没被触发、价格没到目标位、主人也没发话，就没有主动平仓的理由。
+    止损价、止盈价（即计划目标位）、失效条件一起落进计划，下一轮开场白原样回注给你。
 
   close_position: |-
     按 positionId（见开场白【当前账户】的持仓，或 get_account）市价平掉持仓的全部或一部分。
@@ -153,6 +171,7 @@ tool:
 
   write_plan: |-
     给一个没有计划记录的在场持仓补立交易计划（positionId 见开场白【当前账户】的持仓，或 get_account）。
+    止损价取仓位当前挂着的止损；targetPrice 不传就取当前挂着的止盈。
     已有计划的仓位会被拒——计划不可改，改论点的合法途径只有加仓或平掉重开。
 
   cancel_order: 按 orderId（见开场白【当前账户】的挂单，或 get_account 的 pendingOrders）撤掉一张未成交限价单。

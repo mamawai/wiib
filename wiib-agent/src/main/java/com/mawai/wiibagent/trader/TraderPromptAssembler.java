@@ -173,17 +173,20 @@ public class TraderPromptAssembler {
      */
     public String platformTemplate(AgentLang lang, String intervalCode, String symbols,
                                    TraderRiskConfig risk, String wakeWindowText) {
-        return prompts.get(lang, "trader.template", Map.of(
-                "rhythm", rhythmText(lang, intervalCode, wakeWindowText),
-                "symbols", symbols,
+        // 超过 10 对，Map.of 装不下
+        return prompts.get(lang, "trader.template", Map.ofEntries(
+                Map.entry("rhythm", rhythmText(lang, intervalCode, wakeWindowText)),
+                Map.entry("symbols", symbols),
                 // 纪律 4 只留一行指针指向文末收尾块，标记同源
-                "mark", prompts.get(lang, "trader.mark.conclusion"),
-                "leverageMin", risk.leverageMin(),
-                "leverageMax", risk.leverageMax(),
-                "marginPctMin", plain(risk.marginPctMin()),
-                "marginPctMax", plain(risk.marginPctMax()),
-                "positionRule", positionRule(lang, risk),
-                "hedgeRule", hedgeRule(lang, risk)));
+                Map.entry("mark", prompts.get(lang, "trader.mark.conclusion")),
+                // 单轮模型调用上限：模型知道预算才会主动并行取数
+                Map.entry("maxCalls", TraderWakeupRunner.MAX_MODEL_CALLS),
+                Map.entry("leverageMin", risk.leverageMin()),
+                Map.entry("leverageMax", risk.leverageMax()),
+                Map.entry("marginPctMin", plain(risk.marginPctMin())),
+                Map.entry("marginPctMax", plain(risk.marginPctMax())),
+                Map.entry("positionRule", positionRule(lang, risk)),
+                Map.entry("hedgeRule", hedgeRule(lang, risk))));
     }
 
     /** 节奏行按时段说真话：全天=每根K线醒一次；有时段就把"只在时段内醒、时段外例行与警报都停、手动例外"写进同一句 */

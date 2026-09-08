@@ -333,7 +333,7 @@ class TradeToolsTest {
     /** 常规开仓参数（护栏全过），下单链路的用例都用它 */
     private String openOnce(TradeTools t) {
         return t.openPosition("BTCUSDT", "LONG", "MARKET", 0.01, 10,
-                null, 95000.0, null, "BREAKOUT", "突破前高", "1h收盘跌回箱体内");
+                null, 95000.0, 110000.0, "BREAKOUT", "突破前高", "1h收盘跌回箱体内");
     }
 
     /**
@@ -470,7 +470,7 @@ class TradeToolsTest {
         when(planMapper.selectOne(any())).thenReturn(existingPlan());
 
         String r = tools.openPosition("BTCUSDT", "LONG", "MARKET", 0.01, 10,
-                null, 95000.0, null, "PULLBACK", "回踩确认支撑", "1h收盘跌破97000");
+                null, 95000.0, 110000.0, "PULLBACK", "回踩确认支撑", "1h收盘跌破97000");
 
         assertThat(r).doesNotStartWith("REJECTED").contains("777");
         assertThat(tools.actions().get(0).getString("status")).isEqualTo("ok");

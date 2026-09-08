@@ -17,6 +17,7 @@ import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
+import java.util.Arrays;
 
 /**
  * 资金记账切面。主战场是 UserMapper 的原子资金方法——那是 user 表五个钱包列唯一的出口
@@ -124,8 +125,7 @@ public class LedgerAspect {
             // 只有 markPositionFee 能提供 userId 和扣款额，缺了就记不成一条完整流水。
             // 这里跳过不抛：POSITION_MARGIN 不参与不变量对账，漏一条只影响账单完整性，
             // 不会让账实不符——与"ledger INSERT 失败必须抛"那条约束不冲突。
-            log.warn("[Ledger] 资金费扣保证金缺少 markPositionFee 标注，跳过记账 args={}",
-                    java.util.Arrays.toString(point.getArgs()));
+            log.warn("[Ledger] 资金费扣保证金缺少 markPositionFee 标注，跳过记账 args={}", Arrays.toString(point.getArgs()));
             return;
         }
 

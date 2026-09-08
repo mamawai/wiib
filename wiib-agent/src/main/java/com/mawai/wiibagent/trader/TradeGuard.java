@@ -165,9 +165,17 @@ public final class TradeGuard {
                     "rule", prompts.get(lang, isLong ? "trader.guard.stopLossRuleLong" : "trader.guard.stopLossRuleShort"),
                     "entry", entryRef.stripTrailingZeros().toPlainString()));
         }
-        if (req.takeProfitPrice() != null
-                && (isLong ? req.takeProfitPrice().compareTo(entryRef) <= 0
-                : req.takeProfitPrice().compareTo(entryRef) >= 0)) {
+        // 止盈必填：它就是计划的目标位，盈亏比与"到目标位落袋"都按它算；想让利润奔跑开仓后往远移即可
+        if (req.takeProfitPrice() == null) {
+            return prompts.get(lang, "trader.guard.takeProfitRequired");
+        }
+        // 同止损：SHORT 的「0 <= 入场价」为真会放行一张止盈价为 0 的单
+        if (req.takeProfitPrice().signum() <= 0) {
+            return prompts.get(lang, "trader.guard.takeProfitPositive", Map.of(
+                    "given", req.takeProfitPrice().stripTrailingZeros().toPlainString()));
+        }
+        if (isLong ? req.takeProfitPrice().compareTo(entryRef) <= 0
+                : req.takeProfitPrice().compareTo(entryRef) >= 0) {
             return prompts.get(lang, "trader.guard.takeProfitDirection", Map.of("rule",
                     prompts.get(lang, isLong ? "trader.guard.takeProfitRuleLong" : "trader.guard.takeProfitRuleShort")));
         }

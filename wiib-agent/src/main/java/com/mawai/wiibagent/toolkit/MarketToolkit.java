@@ -29,10 +29,28 @@ public class MarketToolkit {
     private final MarketDataService dataService;
 
     @Tool(name = "market_snapshot", description = """
-            Get real-time market snapshot for a crypto perpetual symbol: price, price changes,
-            funding deviation, open-interest change, long/short ratios, top-trader bias, taker pressure,
-            liquidation pressure, orderbook imbalance, fear&greed index, regime.
-            All signal fields are normalized scores in [-1,1] unless stated otherwise.""")
+            Get a real-time cross-section of a crypto perpetual symbol (short-timeframe view, not candles).
+            Fields and sign conventions:
+            - lastPrice; atr is the 5m atr14 — for stop distances use the atr14 of your own timeframe from `indicators`
+            - price_change: {5m,15m,30m,1h,4h,24h} percent change per window
+            - regime: a rule-based label on 15m indicators — TREND_UP/TREND_DOWN (adx>25, direction by DI),
+              SQUEEZE (adx<15 and Bollinger bandwidth<1.5), SHOCK (recent 5m ATR > 2x its longer average),
+              RANGE (everything else); a rule, not a judgement
+            - fundingDeviation: (current rate - 0.01%) / 0.03%; positive = longs paying up (crowded long), negative = crowded short
+            - oiChangeRate: open-interest change over the last 4h as a raw ratio (0.03 = +3%); positive = money entering, negative = leaving
+            - lsrExtreme: percentile of the retail long/short account ratio within the last 24h mapped to [-1,1];
+              near +1 = long accounts crowded to an extreme, -1 = short extreme
+            - topTraderBias: change in the top traders' position long/short ratio, second half of the last 2h vs the first; positive = adding longs
+            - takerPressure: change in the taker buy/sell ratio over the last 2h, positive = buying strengthening;
+              tradeDelta: taker-buy share of recent trades mapped to [-1,1], positive = buyers dominate;
+              largeTradeBias: direction of large trades, positive = mostly buys
+            - liquidationPressure: share of long liquidations among recent liquidations mapped to [-1,1];
+              positive = longs being liquidated (selling force), negative = shorts; liquidationVolumeUsdt is the total
+            - bidAskImbalance / spotBidAskImbalance: top-5 levels (bid qty - ask qty) / total for futures / spot; positive = thicker bids
+            - spotPerpBasisBps: perp premium over spot in basis points; positive = perp trading rich
+            - fearGreed: "value(label)", 0 = extreme fear, 100 = extreme greed
+            - qualityFlags: each NO_* means that input is missing and its score is 0 — that 0 is "no data", not "neutral"
+            Apart from price_change / oiChangeRate / spotPerpBasisBps / atr, scores live in [-1,1]; larger magnitude = more extreme.""")
     public String marketSnapshot(@ToolParam(description = "Symbol, e.g. BTCUSDT") String symbol) {
         MarketAssembly a = dataService.assemble(symbol);
         if (!a.available()) {

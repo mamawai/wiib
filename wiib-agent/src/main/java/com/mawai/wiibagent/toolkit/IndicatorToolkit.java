@@ -61,7 +61,9 @@ public class IndicatorToolkit {
             Get raw OHLCV candlesticks for a crypto perpetual symbol from Binance futures.
             Returns a fixed 192 rows [openTime(ms), open, high, low, close, volume], oldest first;
             the last row is the current still-forming candle (its close is the live price,
-            its volume is only partial).
+            its volume is only partial) and the bar that just closed is the row before it. Tell
+            whether the last row is still forming by its openTime: openTime plus one interval later
+            than now means it is still running.
             interval: 5m/15m/1h/4h/1d — 192 bars span 16h / 2d / 8d / 32d / 192d respectively.
             Call it when your method requires reading the candles bar by bar: verifying candle
             patterns, applying your own swing or structure definition, or inspecting a stretch
@@ -83,15 +85,22 @@ public class IndicatorToolkit {
 
     @Tool(name = "indicators", description = """
             Get the full classic technical indicator set for a crypto perpetual symbol, computed
-            on the requested interval (5m/15m/1h/4h/1d) over the last 192 candles. Fields:
-            ma7/ma25/ma99 + ema12/ema20/ema26 (moving averages; ma_alignment=bullish/bearish stacking),
-            rsi14 + rsi14_trend (>70 overbought, <30 oversold),
-            macd_dif/dea/hist + macd_cross(golden/death) + macd_hist_trend (momentum),
-            boll_upper/mid/lower + boll_pb + boll_bandwidth (bandwidth shrinking = squeeze, expanding = trending),
-            atr14 (volatility; common stop-distance unit),
-            kdj_k/d/j, adx + plus_di/minus_di (adx>25 trending, <15 ranging),
-            obv/obv_ma20/obv_trend + volume_ma20/volume_ratio (volume confirmation),
-            close_trend (rising_5 = 5 consecutive up closes). The last candle is still forming.""")
+            on the requested interval (5m/15m/1h/4h/1d) over the last 192 candles; the last candle is
+            still forming. Fields:
+            ma7/ma25/ma99 + ema12/ema20/ema26 (moving averages); ma_alignment: 1 = MA7>MA25>MA99 bullish
+            stacking, -1 = bearish stacking, 0 = tangled;
+            rsi14 + rsi14_trend (>70 overbought, <30 oversold);
+            macd_dif/dea/hist + macd_hist_trend (momentum); macd_cross appears only when a golden/death
+            cross happened on the last bar, otherwise the field is absent;
+            boll_upper/mid/lower + boll_pb (%B on a 0-100 scale: >100 closed above the upper band, <0 below
+            the lower band, 50 at the middle) + boll_bandwidth ((upper-lower)/mid*100; shrinking = squeeze,
+            expanding = trending);
+            atr14 (Wilder RMA volatility; common stop-distance unit);
+            kdj_k/d/j; adx + plus_di/minus_di (adx>25 trending, <15 ranging; direction = which DI is larger);
+            obv/obv_ma20/obv_trend + volume_ma20/volume_ratio (volume confirmation; volume_ratio = last bar
+            volume / 20-bar average);
+            close_trend. Every *_trend field is one of rising_5 (5 consecutive rises), falling_5, mostly_up,
+            mostly_down, sideways.""")
     public String indicators(@ToolParam(description = "Symbol, e.g. BTCUSDT") String symbol,
                              @ToolParam(description = "Interval: 5m/15m/1h/4h/1d") String interval) {
         String err = validateInterval(interval);

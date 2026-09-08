@@ -500,7 +500,7 @@ class TraderWakeupLoopTest {
         when(planMapper.selectList(any())).thenReturn(List.of());
         ChatModel model = modelOpeningThenSummary("""
                 {"symbol":"BTCUSDT","side":"LONG","orderType":"MARKET","quantity":0.01,"leverage":10,
-                 "limitPrice":null,"stopLossPrice":95000,"takeProfitPrice":null,
+                 "limitPrice":null,"stopLossPrice":95000,"takeProfitPrice":110000,
                  "playType":"BREAKOUT","signalsUsed":"突破前高",
                  "invalidationCondition":"1h收盘跌回98000下方"}""");
         when(modelFactory.modelFor(any())).thenReturn(model);

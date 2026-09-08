@@ -37,16 +37,16 @@ class TradeGuardTest {
                 multi, hedge);
     }
 
-    /** 基准单：0.1×100000/10 = 保证金1000 = 权益10%，落在 5~20% 区间内 */
+    /** 基准单：0.1×100000/10 = 保证金1000 = 权益10%，落在 5~20% 区间内；止损止盈都带（两者都是硬规则） */
     private TradeGuard.OpenReq base() {
         return new TradeGuard.OpenReq("BTCUSDT", "LONG", "MARKET", new BigDecimal("0.1"), 10,
-                null, new BigDecimal("95000"), null, "BREAKOUT", "突破前高", "1h收盘跌回98000下方");
+                null, new BigDecimal("95000"), new BigDecimal("110000"), "BREAKOUT", "突破前高", "1h收盘跌回98000下方");
     }
 
-    /** 空单基准：止损在入场价上方 */
+    /** 空单基准：止损在入场价上方、止盈在下方 */
     private TradeGuard.OpenReq baseShort() {
         return new TradeGuard.OpenReq("BTCUSDT", "SHORT", "MARKET", new BigDecimal("0.1"), 10,
-                null, new BigDecimal("105000"), null, "BREAKOUT", "跌破前低", "1h收盘站回102000上方");
+                null, new BigDecimal("105000"), new BigDecimal("90000"), "BREAKOUT", "跌破前低", "1h收盘站回102000上方");
     }
 
     // ---------- 造数变体：生产 OpenReq 不带 wither（无生产调用），变体构造属于测试侧 ----------
@@ -81,9 +81,39 @@ class TradeGuardTest {
                 r.limitPrice(), r.stopLossPrice(), r.takeProfitPrice(), r.playType(), r.signalsUsed(), v);
     }
 
+    private static TradeGuard.OpenReq withTakeProfitPrice(TradeGuard.OpenReq r, BigDecimal v) {
+        return new TradeGuard.OpenReq(r.symbol(), r.side(), r.orderType(), r.quantity(), r.leverage(),
+                r.limitPrice(), r.stopLossPrice(), v, r.playType(), r.signalsUsed(), r.invalidationCondition());
+    }
+
     @Test
     void validOpenPasses() {
         assertThat(validateOpen(base(), EQUITY, MARK, WL, cfg(), List.of())).isNull();
+        assertThat(validateOpen(baseShort(), EQUITY, MARK, WL, cfg(), List.of())).isNull();
+    }
+
+    // ---------- 止盈：计划的目标位，与止损同为硬规则 ----------
+
+    /** 没有目标位就没有盈亏比、也没有"到目标位落袋"可检验——缺了拒，拒因告诉它往远移不受限 */
+    @Test
+    void takeProfitRequired() {
+        assertThat(validateOpen(withTakeProfitPrice(base(), null), EQUITY, MARK, WL, cfg(), List.of()))
+                .contains("止盈价").contains("目标位").contains("set_take_profit");
+    }
+
+    /** SHORT 的方向校验「0 <= 入场价」为真会放行止盈价 0：正数校验要挡在方向校验之前 */
+    @Test
+    void takeProfitZeroRejectedBeforeDirectionCheck() {
+        assertThat(validateOpen(withTakeProfitPrice(baseShort(), BigDecimal.ZERO), EQUITY, MARK, WL, cfg(), List.of()))
+                .contains("正数").contains("你给了0");
+    }
+
+    @Test
+    void takeProfitWrongSideRejected() {
+        assertThat(validateOpen(withTakeProfitPrice(base(), new BigDecimal("99000")), EQUITY, MARK, WL, cfg(), List.of()))
+                .contains("LONG止盈须高于入场价");
+        assertThat(validateOpen(withTakeProfitPrice(baseShort(), new BigDecimal("101000")), EQUITY, MARK, WL, cfg(), List.of()))
+                .contains("SHORT止盈须低于入场价");
     }
 
     // ---------- 杠杆区间：允许集合，不是上限 ----------

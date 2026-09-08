@@ -125,17 +125,20 @@ public class TradeTools {
     }
 
     @Tool(name = "open_position", description = """
-            Open a futures position on your sim account. Hard rules (violations are rejected with a
-            reason you can fix, and the rejection tells you the exact allowed range): leverage must land
+            Open a futures position on your sim account (cross margin). Hard rules (violations are rejected
+            with a reason you can fix, and the rejection tells you the exact allowed range): leverage must land
             INSIDE the range your owner configured — it is a range, not a ceiling, so picking too low is
             rejected too; when opening a NEW position the margin (=quantity*price/leverage) must land
             inside the configured percent-of-equity band (adds are exempt); same-symbol leverage must
             match any position or pending order already on that symbol;
-            LIMIT price within 5% of mark, stopLossPrice REQUIRED and on the correct side.
+            LIMIT price within 5% of mark; stopLossPrice and takeProfitPrice are both REQUIRED and on the correct side.
             playType is your thesis label: BREAKOUT/PULLBACK/REVERSAL/TREND_FOLLOW/RANGE/NEWS/FUNDING/OTHER.
             signalsUsed: one sentence citing the concrete data fields your thesis rests on.
             invalidationCondition: the market condition that would prove your thesis wrong (NOT a PnL
-            number) — it becomes part of your position's plan and is your only ground for manual exit.""")
+            number) — it becomes part of your position's plan; while it has not fired, price has not reached
+            the target and your owner has not spoken, there is no ground for a manual exit.
+            Stop, take-profit (= the plan's target) and invalidation condition are all filed into the plan and
+            injected back into your next opening message.""")
     public String openPosition(@ToolParam(description = "Symbol, e.g. BTCUSDT") String symbol,
                                @ToolParam(description = "LONG or SHORT") String side,
                                @ToolParam(description = "MARKET or LIMIT") String orderType,
@@ -145,7 +148,7 @@ public class TradeTools {
                                // 必须是包装类型：primitive 漏传会被绑成 0.0，护栏的 null 检查就成了摆设，
                                // LONG 的方向校验「0 >= 入场价」为假直接放行——裸多单就是这么开出去的
                                @ToolParam(description = "Stop-loss price, REQUIRED") Double stopLossPrice,
-                               @ToolParam(description = "Take-profit price, optional", required = false) Double takeProfitPrice,
+                               @ToolParam(description = "Take-profit price, REQUIRED; it is recorded as the plan's target") Double takeProfitPrice,
                                @ToolParam(description = "Thesis label: BREAKOUT/PULLBACK/REVERSAL/TREND_FOLLOW/RANGE/NEWS/FUNDING/OTHER") String playType,
                                @ToolParam(description = "One sentence citing concrete data behind this trade") String signalsUsed,
                                @ToolParam(description = "Market condition that proves this thesis wrong, e.g. '1h close back below 64200 box top'") String invalidationCondition) {
@@ -397,7 +400,9 @@ public class TradeTools {
 
     @Tool(name = "write_plan", description = """
             Backfill a trading plan for an open position that has NO plan record (positionId from the
-            [Account] block in your opening message, or get_account). Rejected if the position already has a plan — plans are immutable; the only
+            [Account] block in your opening message, or get_account). The stop is copied from the position's
+            current stop-loss order; targetPrice falls back to its current take-profit order when omitted.
+            Rejected if the position already has a plan — plans are immutable; the only
             legal ways to change a thesis are adding to the position or closing and reopening.""")
     public String writePlan(@ToolParam(description = "Position id from the [Account] block in your opening message (or get_account)") long positionId,
                             @ToolParam(description = "Thesis label: BREAKOUT/PULLBACK/REVERSAL/TREND_FOLLOW/RANGE/NEWS/FUNDING/OTHER") String playType,
@@ -439,7 +444,10 @@ public class TradeTools {
             plan.setEntryPrice(pos.getEntryPrice());
             plan.setStopLossPrice(TradeGuard.extremePrice(pos.getStopLosses() == null ? List.of()
                     : pos.getStopLosses().stream().map(FuturesStopLoss::getPrice).toList(), isLong));
-            plan.setTakeProfitPrice(targetPrice == null ? null : BigDecimal.valueOf(targetPrice));
+            // 目标位没传就抄仓位现挂的止盈：计划的 target 是"到目标位落袋"和复盘配对的依据，不能空着
+            plan.setTakeProfitPrice(targetPrice != null ? BigDecimal.valueOf(targetPrice)
+                    : TradeGuard.extremePrice(pos.getTakeProfits() == null ? List.of()
+                            : pos.getTakeProfits().stream().map(FuturesTakeProfit::getPrice).toList(), isLong));
             // 补立也盖仓位id：入参已经 findPosition 对 sim 校验过，不是模型凭空抄的
             plan.setPositionId(pos.getId());
             // 持有时长按仓位真实开仓时间算，不是补立时刻——补立不能"清零仓龄"

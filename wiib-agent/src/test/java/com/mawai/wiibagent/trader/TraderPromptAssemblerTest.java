@@ -164,7 +164,7 @@ class TraderPromptAssemblerTest {
                 .contains("不引数字的反对视为没有反对")
                 .contains("主人留言：已执行")
                 .as("收尾标记与系统提示词同源").contains("[本轮结论]")
-                .as("开仓类留言：硬性字段自己补齐，不是拒绝理由").contains("止损、失效条件、论点标签由你自己补齐")
+                .as("开仓类留言：硬性字段自己补齐，不是拒绝理由").contains("止损、止盈、失效条件、论点标签由你自己补齐")
                 .as("反重放跟正文同位置").contains("一次性动作做过不要再做")
                 .doesNotContain("尽量考虑履行").doesNotContain("观点不成立").doesNotContain("不是常驻规则");
 
