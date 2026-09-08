@@ -18,6 +18,19 @@
         <spring-ai.version>2.0.1</spring-ai.version>
     </properties>
 
+    <dependencyManagement>
+        <dependencies>
+            <!-- 钉死 spring-ai 全家版本：langgraph4j 传递的 core 是 2.0.0，会和 starter 的 2.0.1 autoconfigure 打架 -->
+            <dependency>
+                <groupId>org.springframework.ai</groupId>
+                <artifactId>spring-ai-bom</artifactId>
+                <version>${spring-ai.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
     <dependencies>
         <!-- 量化能力库：策略/回测/研究/行情/交易所客户端，传递 wiib-common(web/redis/aop/sa-token/mybatis-plus/fastjson2/caffeine) -->
         <dependency>
