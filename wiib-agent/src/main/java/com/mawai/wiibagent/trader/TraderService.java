@@ -361,8 +361,10 @@ public class TraderService {
             q.lt("wake_time", to);
         }
         List<Map<String, Object>> rows = decisionMapper.selectMaps(q);
+        // SUM 无行可加时回一行、列值 NULL，MyBatis 把整行全 null 的行映射成 null 元素，首行得先判空
+        Map<String, Object> first = rows.isEmpty() ? null : rows.getFirst();
         // PG 的 SUM(bigint) 回 numeric，JDBC 给的是 BigDecimal，按 Number 收
-        Object v = rows.isEmpty() ? null : rows.getFirst().get("total");
+        Object v = first == null ? null : first.get("total");
         return v instanceof Number n ? n.longValue() : null;
     }
 

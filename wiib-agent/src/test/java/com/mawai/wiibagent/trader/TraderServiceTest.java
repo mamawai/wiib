@@ -23,6 +23,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.math.BigDecimal;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -497,6 +498,15 @@ class TraderServiceTest {
         Map<String, Object> row = new HashMap<>();
         row.put("total", null);
         when(decisionMapper.selectMaps(any())).thenReturn(List.of(row));
+
+        assertThat(service.sumTokens(7L, null, null, null)).isNull();
+    }
+
+    /** 真实形态：整行只有 total 一列且为 NULL，MyBatis 把这行映射成 null 元素，取首行得先判空 */
+    @Test
+    void sumTokensNullWhenRowMappedToNull() {
+        when(traderMapper.selectById(7L)).thenReturn(traderOnRound(1));
+        when(decisionMapper.selectMaps(any())).thenReturn(Arrays.asList((Map<String, Object>) null));
 
         assertThat(service.sumTokens(7L, null, null, null)).isNull();
     }

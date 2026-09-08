@@ -11,6 +11,7 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.context.request.async.AsyncRequestNotUsableException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 import java.util.Map;
@@ -83,6 +84,15 @@ public class GlobalExceptionHandler {
         log.warn("参数类型错误: {}={}", e.getName(), e.getValue());
         return Result.fail(ErrorCode.PARAM_ERROR.getCode(),
                 messages.get("error.request.typeMismatch", Map.of("name", e.getName())));
+    }
+
+    /**
+     * SSE 客户端断连：心跳往死 socket 一写就抛这个。属正常事件不是异常，
+     * 返回 void 不写响应体——响应是 text/event-stream，往里塞 Result 只会再炸一次"没有转换器"。
+     */
+    @ExceptionHandler(AsyncRequestNotUsableException.class)
+    public void handleAsyncNotUsable(AsyncRequestNotUsableException e) {
+        log.debug("SSE 客户端已断开: {}", e.getMessage());
     }
 
     @ExceptionHandler(Exception.class)
