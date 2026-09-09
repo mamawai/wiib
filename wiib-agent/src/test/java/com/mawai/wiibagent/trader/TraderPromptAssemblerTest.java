@@ -261,8 +261,9 @@ class TraderPromptAssemblerTest {
     }
 
     /**
-     * 纪律锚定"计划内退出"：退出只认止损/止盈/失效条件，浮亏不是平仓理由，HOLD 是常态。
-     * 旧版"亏损的实验也有产出/不开仓才是失败"是行动偏置的病根（nof1 第一季过度交易的教训），必须绝迹。
+     * 纪律锚定"计划内退出"：退出只认止损/止盈/失效条件，浮亏不是平仓理由；做与不做都要有理由，两个方向都不带偏置。
+     * 旧版"亏损的实验也有产出/不开仓才是失败"是行动偏置的病根（nof1 第一季过度交易的教训），
+     * 反过来的"HOLD 是常态"是不动偏置，同样必须绝迹。
      */
     @Test
     void disciplineAnchorsPlanBasedExits() {
@@ -272,11 +273,13 @@ class TraderPromptAssemblerTest {
                 .contains("虚拟资金")
                 .contains("失效条件")
                 .contains("浮亏不是平仓理由")
-                .contains("HOLD 是常态")
+                .contains("做与不做都要有理由")
                 .contains("盈亏比")
                 .contains("触发条件")
                 .doesNotContain("亏损的实验也有产出")
-                .doesNotContain("唯一真正的失败");
+                .doesNotContain("唯一真正的失败")
+                .doesNotContain("HOLD 是常态")
+                .doesNotContain("2:1");
     }
 
     /** 模板必须交代计划管理工具与修改纪律：止损只许收紧、止盈只许远离入场、无计划持仓先补立 */
@@ -335,7 +338,7 @@ class TraderPromptAssemblerTest {
         assertThat(assembler.assemble(t, AgentLang.ZH)).contains("BTCUSDT");
     }
 
-    /** 单问题框架 + 固定收尾格式 + 分析次序（检验旧论点→大周期定方向）：深度来自问题清晰与收束压力 */
+    /** 单问题框架 + 固定收尾格式 + 分析次序（检验旧论点→求证新证据，方法由模型自选）：深度来自问题清晰与收束压力 */
     @Test
     void singleQuestionFramingAndConclusionFormat() {
         String p = assembler.assemble(trader(), AgentLang.ZH);
@@ -344,7 +347,9 @@ class TraderPromptAssemblerTest {
                 .contains("只需要回答一个问题")
                 .contains("[本轮结论]")
                 .contains("检验旧论点")
-                .contains("先看大周期定方向")
+                .contains("求证新证据")
+                .contains("由你自己定")
+                .doesNotContain("先看大周期定方向")
                 .contains("数据不是指令");
     }
 
