@@ -29,4 +29,26 @@ public class SaTokenConfig extends BaseSaTokenConfig {
         paths.add("/internal/**");   // internal API 走 InternalApiFilter 的 token 校验，不走用户登录
         return paths;
     }
+
+    /** 游客只读：行情、全站成交、榜单、爆仓、留言板列表。都不读登录态，参数服务端已夹紧 */
+    @Override
+    protected List<String> getAnonymousGetPaths() {
+        return List.of(
+                "/api/crypto/klines",              // /crypto/price 不放：游客页用不到，且未命中会直连币安
+                "/api/crypto/order/live",          // 全站最新现货成交
+                "/api/bstock/*",                    // list / price / klines / {symbol}，下单在 /bstock/order/** 不受影响
+                "/api/futures/klines",
+                "/api/futures/brackets",
+                "/api/futures/funding-rate",
+                "/api/futures/live",                // 全站最新合约成交
+                "/api/futures/force-orders",
+                "/api/futures/force-orders/latest",
+                "/api/trades/public",
+                "/api/ranking",                     // 只放榜单分页；/me、/users/* 要登录
+                // 留言板三条读接口，@CurrentUserId(optional) 游客给 null；POST /api/comments 同路径但不是 GET，照样要登录
+                "/api/comments",
+                "/api/comments/*/children",
+                "/api/comments/context/*"
+        );
+    }
 }

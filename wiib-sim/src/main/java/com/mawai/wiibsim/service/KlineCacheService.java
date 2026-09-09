@@ -1,12 +1,16 @@
 package com.mawai.wiibsim.service;
 
+import com.mawai.wiibcommon.enums.ErrorCode;
+import com.mawai.wiibcommon.exception.BizException;
 import com.mawai.wiibcommon.market.BinanceRestClient;
+import com.mawai.wiibsim.config.TradeFilterRegistry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
+import java.util.Set;
 import java.util.function.Supplier;
 
 /**
@@ -30,23 +34,38 @@ public class KlineCacheService {
      * 币安上限现货 1000、合约 1500，前端最多要 500 —— 统一收到 1000。
      */
     private static final int MAX_LIMIT = 1000;
+    /** 币安认的周期。乱传的 symbol/interval 币安回错误，错误不进缓存，每次都会回源，所以先挡在这 */
+    private static final Set<String> INTERVALS = Set.of(
+            "1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "8h", "12h", "1d", "3d", "1w", "1M");
 
     private final BinanceRestClient binanceRestClient;
     private final StringRedisTemplate redisTemplate;
+    private final TradeFilterRegistry tradeFilterRegistry;
+    private final BStockService bStockService;
 
-    /** 现货K线（crypto 现货 / bStock 共用） */
+    /** 现货K线（crypto 现货 / bStock 共用）：只认上架的现货币种和 bStock */
     public String spotKlines(String symbol, String interval, int limit, Long endTime) {
+        String s = symbol.toUpperCase();
+        check(interval, tradeFilterRegistry.allSpot().containsKey(s) || bStockService.isBStockSymbol(s));
         // 先夹再建闭包：loader 捕获的是这个变量，夹在 cached() 里面对回源无效
         int n = clamp(limit);
-        return cached("spot", symbol, interval, n, endTime,
-                () -> binanceRestClient.getKlinesLight(symbol, interval, n, endTime));
+        return cached("spot", s, interval, n, endTime,
+                () -> binanceRestClient.getKlinesLight(s, interval, n, endTime));
     }
 
-    /** 合约K线 */
+    /** 合约K线：只认上架的合约币种 */
     public String futuresKlines(String symbol, String interval, int limit, Long endTime) {
+        String s = symbol.toUpperCase();
+        check(interval, tradeFilterRegistry.allFutures().containsKey(s));
         int n = clamp(limit);
-        return cached("fut", symbol, interval, n, endTime,
-                () -> binanceRestClient.getFuturesKlinesLight(symbol, interval, n, endTime));
+        return cached("fut", s, interval, n, endTime,
+                () -> binanceRestClient.getFuturesKlinesLight(s, interval, n, endTime));
+    }
+
+    private static void check(String interval, boolean symbolKnown) {
+        if (!symbolKnown || !INTERVALS.contains(interval)) {
+            throw new BizException(ErrorCode.PARAM_ERROR);
+        }
     }
 
     private static int clamp(int limit) {
@@ -54,8 +73,7 @@ public class KlineCacheService {
     }
 
     private String cached(String market, String symbol, String interval, int limit, Long endTime, Supplier<String> loader) {
-        // symbol 大写归一防 key 分裂；请求参数保持原样透传（与无缓存时行为一致）
-        String key = "kline:" + market + ":" + symbol.toUpperCase() + ":" + interval + ":" + limit
+        String key = "kline:" + market + ":" + symbol + ":" + interval + ":" + limit
                 + ":" + (endTime == null ? "latest" : endTime);
         try {
             String hit = redisTemplate.opsForValue().get(key);

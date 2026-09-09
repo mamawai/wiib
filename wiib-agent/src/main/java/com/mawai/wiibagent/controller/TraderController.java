@@ -279,7 +279,7 @@ public class TraderController {
     @GetMapping("/arena")
     @Operation(summary = "竞技场列表（全部trader按收益率排序）")
     public Result<List<TraderPublicView>> arena() {
-        long viewer = StpUtil.getLoginIdAsLong();
+        long viewer = viewerId();
         List<AiTrader> all = traderService.all();
         // 模型名按人批量解析（两条查询），不在循环里逐个查
         Map<Long, UserLlmEndpoint> endpoints = endpointService.resolveForUsers(
@@ -307,7 +307,7 @@ public class TraderController {
     @GetMapping("/{id}")
     @Operation(summary = "trader详情（当前持仓/挂单实时现查 + 各持仓的交易计划 + 复盘/学习笔记）")
     public Result<TraderDetailView> detail(@PathVariable long id) {
-        long viewer = StpUtil.getLoginIdAsLong();
+        long viewer = viewerId();
         AiTrader t = traderService.byId(id);
         if (t == null) {
             return Result.fail(ErrorCode.SYSTEM_ERROR.getCode(), messages.get("trader.notFound"));
@@ -405,6 +405,11 @@ public class TraderController {
         return Result.ok(traderService.equityCurve(t, round).stream()
                 .map(d -> new EquityPoint(d.getWakeTime(), d.getEquity()))
                 .toList());
+    }
+
+    /** 竞技场看客是谁：游客给 -1，publicView 里 mine 永远对不上 */
+    private static long viewerId() {
+        return StpUtil.isLogin() ? StpUtil.getLoginIdAsLong() : -1L;
     }
 
     /** 单个 trader 当前端点的模型名；用户把端点删光了给 null（前端显示"未配置"） */

@@ -4,6 +4,7 @@ import com.mawai.wiibcommon.dto.BStockDTO;
 import com.mawai.wiibcommon.util.Result;
 import com.mawai.wiibsim.service.BStockService;
 import com.mawai.wiibsim.service.KlineCacheService;
+import cn.dev33.satoken.stp.StpUtil;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
@@ -43,6 +44,8 @@ public class BStockController {
             @RequestParam(defaultValue = "5m") String interval,
             @RequestParam(defaultValue = "500") int limit,
             @RequestParam(required = false) Long endTime) {
+        // 翻历史要登录，同 CryptoMarketController.klines
+        if (endTime != null) StpUtil.checkLogin();
         return klineCacheService.spotKlines(symbol, interval, limit, endTime);
     }
 

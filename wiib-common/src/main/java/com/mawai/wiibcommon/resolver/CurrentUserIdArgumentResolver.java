@@ -12,7 +12,7 @@ import org.springframework.web.method.support.ModelAndViewContainer;
 
 /**
  * @CurrentUserId 参数解析：从 Sa-Token 取当前登录用户 ID，按参数类型返回对应形态。
- * 未登录时 StpUtil 会抛 NotLoginException，交由全局处理器转 401。
+ * 未登录时 StpUtil 会抛 NotLoginException，交由全局处理器转 401；optional=true 的形参未登录给 null。
  */
 public class CurrentUserIdArgumentResolver implements HandlerMethodArgumentResolver {
 
@@ -24,6 +24,10 @@ public class CurrentUserIdArgumentResolver implements HandlerMethodArgumentResol
     @Override
     public Object resolveArgument(MethodParameter parameter, ModelAndViewContainer mavContainer,
                                   @NonNull NativeWebRequest webRequest, WebDataBinderFactory binderFactory) {
+        CurrentUserId ann = parameter.getParameterAnnotation(CurrentUserId.class);
+        if (ann != null && ann.optional() && !StpUtil.isLogin()) {
+            return null;
+        }
         Class<?> type = parameter.getParameterType();
         if (type == String.class) {
             return StpUtil.getLoginIdAsString();

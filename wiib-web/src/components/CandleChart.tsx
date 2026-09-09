@@ -310,6 +310,8 @@ export interface CandleChartProps {
   limit?: number;
   visibleBars?: number;
   klinesFn?: (symbol: string, interval: string, limit: number, endTime?: number) => Promise<number[][]>;
+  /** 往左翻历史。游客传 false：后端带 endTime 的请求要登录，拖到最左只提示不发请求 */
+  loadHistory?: boolean;
   streamLive?: boolean;
   tick?: { price: number; ts: number } | null;
   indicators?: boolean;
@@ -325,7 +327,7 @@ export interface CandleChartProps {
 }
 
 export function CandleChart({
-  symbol, interval, limit = 300, visibleBars = 110, klinesFn = futuresApi.klines, streamLive = true,
+  symbol, interval, limit = 300, visibleBars = 110, klinesFn = futuresApi.klines, loadHistory = true, streamLive = true,
   tick = null, indicators = false, onIntervalChange, positionOverlays, tradeMarks, newsTag,
   advanced, marketLabel = 'BINANCE',
 }: CandleChartProps) {
@@ -718,6 +720,7 @@ export function CandleChart({
 
     const loadMore = () => {
       if (loadingRef.current || exhaustedRef.current || !readyRef.current || !barsRef.current.length) return;
+      if (!loadHistory) { exhaustedRef.current = true; showHint(i18n.t('market:chart.loginForHistory')); return; }
       if (barsRef.current.length >= MAX_BARS) { exhaustedRef.current = true; showHint(i18n.t('market:chart.limitReached')); return; }
 
       loadingRef.current = true;
@@ -790,7 +793,7 @@ export function CandleChart({
       readyRef.current = false; barsRef.current = []; idxRef.current = new Map();
       loadingRef.current = false; exhaustedRef.current = false;
     };
-  }, [symbol, interval, limit, visibleBars, decimals, klinesFn, indicators, subs, marketLabel, base, attachDrawings]);
+  }, [symbol, interval, limit, visibleBars, decimals, klinesFn, loadHistory, indicators, subs, marketLabel, base, attachDrawings]);
 
   // 图型切换：只切 visible，两条 series 的数据一直同步喂着。
   // 蜡烛藏起来后挂在它身上的画线照画（primitive 不吃 series.visible），画线层原地不动

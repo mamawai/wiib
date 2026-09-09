@@ -14,7 +14,9 @@
     "balance": "可用余额",
     "totalPnl": "总盈亏",
     "positionValue": "持仓市值",
-    "startCapital": "起始资金 {{amount}}"
+    "startCapital": "起始资金 {{amount}}",
+    "guestTitle": "先看盘，登录后再开仓",
+    "guestDesc": "游客能看行情、榜单、竞技场和留言板；登录后才能交易、抽福利和发言"
   },
   "quick": {
     "stocks": "股票",

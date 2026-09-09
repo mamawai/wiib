@@ -12,6 +12,7 @@ import { ForceOrdersCard } from '../components/ForceOrdersCard';
 import { NewsFlashCard } from '../components/NewsFlashCard';
 import { EconCalendarCard } from '../components/EconCalendarCard';
 import { HomeFaq } from '../components/HomeFaq';
+import { LoginPrompt } from '../components/LoginPrompt';
 import { Sparkline } from '../components/fx/Sparkline';
 import { DayDetailModal } from '../components/DayDetailModal';
 import { useCountUp } from '../hooks/useCountUp';
@@ -138,9 +139,10 @@ function HeroMain({ user, history, realtime }: { user: User; history: AssetSnaps
 export function Home() {
   const navigate = useNavigate();
   const { t, i18n } = useTranslation('home');
-  const { user } = useUserStore();
-  // 路由已挡住未登录，user 为 null 只可能是 fetchUser 还没回来。
+  const { user, token } = useUserStore();
+  // 游客没 token；有 token 但 user 为 null 是 fetchUser 还没回来。
   // 行情/成交那几块不依赖 user，先渲染出来，开屏等 user 到了再补
+  const guest = !token;
   const ready = !!user;
   const [refreshNonce, setRefreshNonce] = useState(0);
 
@@ -160,7 +162,8 @@ export function Home() {
 
   const entriesRef = useStagger<HTMLDivElement>();
 
-  useEffect(() => { if (shouldShowNotice()) navigate('/intro', { replace: true }); }, [navigate]);
+  // 首访自动跳玩法说明只给登录用户；游客打开根路径就是首页，说明页从顶部那条链接自己点
+  useEffect(() => { if (!guest && shouldShowNotice()) navigate('/intro', { replace: true }); }, [guest, navigate]);
 
   useEffect(() => {
     if (ready) buffApi.status().then(setBuffStatus).catch(() => {});
@@ -231,6 +234,17 @@ export function Home() {
         </section>
       )}
 
+      {/* 游客顶栏：开屏那块整个不出，换一句说明 + 去登录 */}
+      {guest && (
+        <section className="pt-[26px] flex flex-wrap items-end justify-between gap-x-6 gap-y-3">
+          <div>
+            <b className="text-[20px] font-bold text-foreground">{t('hero.guestTitle')}</b>
+            <LoginPrompt text={t('hero.guestDesc')} className="mt-2" />
+          </div>
+          <Link to="/intro" className="text-[14px] text-muted-foreground hover:text-foreground transition-colors">{t('hero.howToPlay')}</Link>
+        </section>
+      )}
+
       {/* ====== 入口一排七格 ====== */}
       <section className="sec tight mt-8 pt-3.5 [&_.sec-h]:mb-3">
         <div className="sec-h">
@@ -243,7 +257,8 @@ export function Home() {
               <span className={ENTRY_DESC}>{t(`quick.${k}Desc`)}</span>
             </Link>
           ))}
-          <button className={entryCls(6)} onClick={() => setBuffOpen(true)}>
+          {/* 游客点福利直接去登录，抽奖弹窗只在登录后挂 */}
+          <button className={entryCls(6)} onClick={() => guest ? navigate('/login') : setBuffOpen(true)}>
             <span className={ENTRY_NAME}>
               <Gift className={ENTRY_IC} />
               {t('quick.buff')}
@@ -251,7 +266,7 @@ export function Home() {
               {buffStatus?.canDraw && <i className="w-[7px] h-[7px] bg-primary ml-1.5" />}
             </span>
             <span className={ENTRY_DESC}>
-              {buffStatus?.canDraw === false ? t('buff.drawnToday') : t('quick.buffDesc')}
+              {guest ? t('buff.loginFirst') : buffStatus?.canDraw === false ? t('buff.drawnToday') : t('quick.buffDesc')}
             </span>
           </button>
         </div>

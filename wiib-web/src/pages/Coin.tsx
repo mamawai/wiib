@@ -16,6 +16,7 @@ import { FuturesOpenPanel } from '../components/coin/FuturesOpenPanel';
 import { FuturesPositionsCard } from '../components/coin/FuturesPositionsCard';
 import { CoinOrdersCard } from '../components/coin/CoinOrdersCard';
 import { MarketSessionBadge } from '../components/coin/MarketSessionBadge';
+import { LoginPrompt } from '../components/LoginPrompt';
 import { fmtNum } from '../lib/utils';
 import { COIN_MAP, getCoin, DEFAULT_SYMBOL, formatCoinPrice } from '../lib/coinConfig';
 import type { CryptoPosition, FuturesBracket, FuturesPosition } from '../types';
@@ -43,6 +44,8 @@ export function Coin({ symbol = DEFAULT_SYMBOL }: { symbol?: string }) {
   const navigate = useNavigate();
   const { toast } = useToast();
   const fetchUser = useUserStore(s => s.fetchUser);
+  // 游客只看图和行情：持仓/委托/下单面板这些要登录的都不发请求、不渲染
+  const loggedIn = useUserStore(s => !!s.token);
 
   // 现货/合约模式（纯合约标的只有合约）
   const [mode, setMode] = useState<'spot' | 'futures'>('futures');
@@ -86,7 +89,7 @@ export function Coin({ symbol = DEFAULT_SYMBOL }: { symbol?: string }) {
   const fetchPosition = useCallback(() => {
     cryptoOrderApi.position(symbol).then(setPosition).catch(() => setPosition(null));
   }, [symbol]);
-  useEffect(() => { fetchPosition(); }, [fetchPosition, mode]);
+  useEffect(() => { if (loggedIn) fetchPosition(); }, [fetchPosition, mode, loggedIn]);
 
   // 跨卡刷新：成交后 bump 对应 key，订单表/仓位卡据此重拉
   const [spotOrdersKey, setSpotOrdersKey] = useState(0);
@@ -118,7 +121,7 @@ export function Coin({ symbol = DEFAULT_SYMBOL }: { symbol?: string }) {
   // 限价单是挂单时刻（成交时刻接口没给），偏差最多一根 K 线，接受
   const [tradeMarks, setTradeMarks] = useState<TradeMark[]>([]);
   useEffect(() => {
-    if (!isFuturesMode) return;
+    if (!isFuturesMode || !loggedIn) return;
     let cancelled = false;
     const TERMINAL = new Set(['FILLED', 'STOP_LOSS', 'TAKE_PROFIT', 'LIQUIDATED']);
     futuresApi.orders(undefined, 1, 200, symbol).then(page => {
@@ -133,7 +136,7 @@ export function Coin({ symbol = DEFAULT_SYMBOL }: { symbol?: string }) {
         })));
     }).catch(() => {});
     return () => { cancelled = true; };
-  }, [symbol, isFuturesMode, futuresOrdersKey]);
+  }, [symbol, isFuturesMode, futuresOrdersKey, loggedIn]);
 
   // 本 symbol 的合约仓位（仓位卡每次拉到都上抛一份），映射成 K 线的仓位参考线。
   // 双向持仓同 symbol 至多一多一空，标签"多 10x / 空 25x"天然不重名
@@ -299,6 +302,7 @@ export function Coin({ symbol = DEFAULT_SYMBOL }: { symbol?: string }) {
               tradeMarks={isFuturesMode ? tradeMarks : undefined}
               newsTag={newsTagForSymbol(symbol)}
               klinesFn={isFuturesMode ? futuresApi.klines : cryptoApi.klines}
+              loadHistory={loggedIn}
               streamLive={klineLive}
               tick={klineLive ? null : chartTick}
               indicators
@@ -358,7 +362,9 @@ export function Coin({ symbol = DEFAULT_SYMBOL }: { symbol?: string }) {
             );
           })()}
 
-          {isFuturesMode ? (
+          {!loggedIn ? (
+            <LoginPrompt text={t('coin.loginToTrade')} className="border-t-2 border-foreground pt-3.5" />
+          ) : isFuturesMode ? (
             <FuturesOpenPanel
               symbol={symbol}
               currentPrice={currentPrice}
@@ -380,7 +386,7 @@ export function Coin({ symbol = DEFAULT_SYMBOL }: { symbol?: string }) {
       </div>
 
       {/* 合约持仓（空仓时自隐藏；卡内自订 WS 流与档位表） */}
-      {isFuturesMode && (
+      {loggedIn && isFuturesMode && (
         <FuturesPositionsCard
           symbol={symbol}
           showCloseAll
@@ -391,12 +397,14 @@ export function Coin({ symbol = DEFAULT_SYMBOL }: { symbol?: string }) {
         />
       )}
 
-      <CoinOrdersCard
-        symbol={symbol}
-        mode={mode}
-        spotRefreshKey={spotOrdersKey}
-        futuresRefreshKey={futuresOrdersKey}
-      />
+      {loggedIn && (
+        <CoinOrdersCard
+          symbol={symbol}
+          mode={mode}
+          spotRefreshKey={spotOrdersKey}
+          futuresRefreshKey={futuresOrdersKey}
+        />
+      )}
     </div>
   );
 }

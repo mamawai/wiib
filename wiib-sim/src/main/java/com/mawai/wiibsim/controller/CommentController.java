@@ -59,9 +59,11 @@ public class CommentController {
         private Integer days;
     }
 
+    // 三条读接口游客也能看（SaTokenConfig 放行了 GET），userId 为 null 只是"本人表态"不标
+
     @GetMapping
     @Operation(summary = "根评论分页（时间倒序，带子评论预览与本人表态）")
-    public Result<List<CommentDTO>> list(@CurrentUserId Long userId,
+    public Result<List<CommentDTO>> list(@CurrentUserId(optional = true) Long userId,
                                          @RequestParam(defaultValue = "1") int page,
                                          @RequestParam(defaultValue = "20") int size) {
         return Result.ok(commentService.listRoots(userId, page, size));
@@ -69,7 +71,7 @@ public class CommentController {
 
     @GetMapping("/{rootId}/children")
     @Operation(summary = "子评论分页")
-    public Result<List<CommentDTO>> children(@CurrentUserId Long userId,
+    public Result<List<CommentDTO>> children(@CurrentUserId(optional = true) Long userId,
                                              @PathVariable long rootId,
                                              @RequestParam(defaultValue = "1") int page,
                                              @RequestParam(defaultValue = "10") int size) {
@@ -78,7 +80,7 @@ public class CommentController {
 
     @GetMapping("/context/{commentId}")
     @Operation(summary = "聚焦视图：该评论所属根评论+其全部子评论（通知跳转用）")
-    public Result<CommentDTO> context(@CurrentUserId Long userId, @PathVariable long commentId) {
+    public Result<CommentDTO> context(@CurrentUserId(optional = true) Long userId, @PathVariable long commentId) {
         return Result.ok(commentService.context(userId, commentId));
     }
 

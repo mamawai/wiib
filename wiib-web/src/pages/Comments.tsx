@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { commentApi } from '../api';
 import { useUserStore } from '../stores/userStore';
+import { LoginPrompt } from '../components/LoginPrompt';
 import { useToast } from '../components/ui/use-toast';
 import { Button } from '../components/ui/button';
 import { Dialog, DialogHeader, DialogContent, DialogFooter } from '../components/ui/dialog';
@@ -270,10 +271,11 @@ export function Comments() {
   const { toast } = useToast();
   const [params, setParams] = useSearchParams();
   const user = useUserStore(s => s.user);
+  const guest = useUserStore(s => !s.token);
 
   const currentUserId = user?.id ?? null;
   const isAdmin = currentUserId === ADMIN_USER_ID;
-  // 路由已挡住未登录，这里为 null 只可能是 fetchUser 还没回来
+  // 游客恒为 null，只能看；登录了还是 null 是 fetchUser 还没回来
   const ready = currentUserId != null;
   const focusId = params.get('focus');
 
@@ -532,16 +534,20 @@ export function Comments() {
         </div>
       </details>
 
-      {/* 发帖框 */}
+      {/* 发帖框；游客换成去登录 */}
       <div className="rounded-lg pt-card p-4">
-        <ComposeBox
-          value={text}
-          onChange={setText}
-          onSubmit={() => void submitRoot()}
-          submitting={postingRoot}
-          ready={ready}
-          placeholder={t('comments.composePlaceholder')}
-        />
+        {guest ? (
+          <LoginPrompt text={t('comments.loginToPost')} />
+        ) : (
+          <ComposeBox
+            value={text}
+            onChange={setText}
+            onSubmit={() => void submitRoot()}
+            submitting={postingRoot}
+            ready={ready}
+            placeholder={t('comments.composePlaceholder')}
+          />
+        )}
       </div>
 
       {/* 聚焦视图提示条 */}
