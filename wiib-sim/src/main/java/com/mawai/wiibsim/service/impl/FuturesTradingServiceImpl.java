@@ -1034,7 +1034,12 @@ public class FuturesTradingServiceImpl implements FuturesTradingService {
                 .orderByDesc(FuturesOrder::getCreatedAt)
                 .last("LIMIT 20");
         return orderMapper.selectList(wrapper).stream()
-                .map(FuturesHelper::buildOrderResponse)
+                .map(o -> {
+                    // 全站流不带人，和 /trades/public 一个口径
+                    FuturesOrderResponse r = FuturesHelper.buildOrderResponse(o);
+                    r.setUserId(null);
+                    return r;
+                })
                 .toList();
     }
 

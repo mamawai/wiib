@@ -63,18 +63,16 @@ public class BStockServiceImpl extends ServiceImpl<BStockMapper, BStock> impleme
     public BStockDTO detail(String symbol) {
         BStock s = lambdaQuery().eq(BStock::getSymbol, symbol).one();
         if (s == null) throw new BizException(ErrorCode.STOCK_NOT_FOUND);
-        JSONObject t = null;
-        try {
-            String json = binanceRestClient.get24hTicker(symbol);
-            if (json != null) t = JSON.parseObject(json);
-        } catch (Exception e) {
-            log.warn("获取{}24h行情失败: {}", symbol, e.getMessage());
-        }
-        return toDTO(s, t);
+        // 24h 行情和 /list 共用那份 15s 批量缓存，详情页刷多少次都不逐只打币安
+        List<String> symbols = lambdaQuery().eq(BStock::getEnabled, true).select(BStock::getSymbol).list()
+                .stream().map(BStock::getSymbol).toList();
+        return toDTO(s, loadTicker24h(symbols).get(s.getSymbol()));
     }
 
     @Override
     public BigDecimal price(String symbol) {
+        // 不是 bStock 的符号直接报不存在，不拿它去回退币安
+        if (!isBStockSymbol(symbol)) throw new BizException(ErrorCode.STOCK_NOT_FOUND);
         BigDecimal p = cacheService.getCryptoPrice(symbol);
         if (p != null) return p;
         // Redis 未命中（如刚启动 WS 未推）→ 回退 REST
