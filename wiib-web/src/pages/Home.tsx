@@ -162,7 +162,8 @@ export function Home() {
 
   const entriesRef = useStagger<HTMLDivElement>();
 
-  useEffect(() => { if (shouldShowNotice()) navigate('/intro', { replace: true }); }, [navigate]);
+  // 首访自动跳玩法说明只给登录用户；游客打开根路径就是首页，说明页从顶部那条链接自己点
+  useEffect(() => { if (!guest && shouldShowNotice()) navigate('/intro', { replace: true }); }, [guest, navigate]);
 
   useEffect(() => {
     if (ready) buffApi.status().then(setBuffStatus).catch(() => {});
