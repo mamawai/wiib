@@ -84,9 +84,11 @@
     "toastInsufficient": "Insufficient holdings",
     "toastBought": "Buy filled",
     "toastSold": "Sell filled · settled instantly",
-    "toastOrderFailed": "Order failed"
+    "toastOrderFailed": "Order failed",
+    "loginToTrade": "Log in to buy or sell this stock"
   },
   "coin": {
+    "loginToTrade": "Log in to place orders and see your positions and open orders here",
     "backToList": "Back to list",
     "spot": "Spot",
     "futures": "Futures",

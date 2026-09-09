@@ -14,7 +14,9 @@
     "balance": "Available balance",
     "totalPnl": "Total PnL",
     "positionValue": "Position value",
-    "startCapital": "Starting capital {{amount}}"
+    "startCapital": "Starting capital {{amount}}",
+    "guestTitle": "Browse first, trade after login",
+    "guestDesc": "Guests can view markets, rankings, the arena and comments. Log in to trade, draw buffs and post."
   },
   "quick": {
     "stocks": "Stocks",

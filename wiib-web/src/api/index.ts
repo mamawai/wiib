@@ -51,8 +51,12 @@ api.interceptors.response.use(
     const { code, msg, data } = res.data;
     // msg 是后端下发的，原样透传；只有后端没给话时才用词表兜底那半句
     if (code === 401) {
-      localStorage.removeItem('wiib-user');
-      window.location.href = '/login';
+      // 带着 token 还 401 = token 过期/失效，清掉回登录页；
+      // 游客本来没 token，401 只是这一个请求失败，不弹人
+      if (res.config.headers['satoken']) {
+        localStorage.removeItem('wiib-user');
+        window.location.href = '/login';
+      }
       return Promise.reject(new ApiError(msg || i18n.t('errors:unauthorized'), code));
     }
     if (code !== 0) {
@@ -130,7 +134,7 @@ export const rankingApi = {
   /**
    * 当前用户的榜单行，名次跟着 sort 维度走（与 list 同口径）。
    * 分页一次只给 20 条，自己在第几页无从得知，所以按 userId 单独直取。
-   * 没上榜返回 null（不是错误）；未登录别调，会 401 弹回登录页。
+   * 没上榜返回 null（不是错误）；未登录别调，会 401。
    */
   me: (sort: RankingSort = 'ASSETS') =>
     api.get<unknown, RankingItem | null>('/ranking/me', { params: { sort } }),

@@ -83,9 +83,11 @@
     "toastInsufficient": "持仓不足",
     "toastBought": "买入成功",
     "toastSold": "卖出成功 · 瞬时到账",
-    "toastOrderFailed": "下单失败"
+    "toastOrderFailed": "下单失败",
+    "loginToTrade": "登录后可买卖这只股票"
   },
   "coin": {
+    "loginToTrade": "登录后可下单，持仓和委托也在这里看",
     "backToList": "返回列表",
     "spot": "现货",
     "futures": "合约",

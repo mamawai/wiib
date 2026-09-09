@@ -1,5 +1,5 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { useMemo, type ReactNode, useEffect } from 'react';
+import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom';
+import { useMemo, useEffect } from 'react';
 import { Layout } from './components/Layout';
 import { LanguageGate } from './components/LanguageGate';
 import { Home } from './pages/Home';
@@ -43,14 +43,13 @@ declare global {
 }
 
 /**
- * 全站唯一登录守卫，挂在 /* 上。
+ * 登录守卫，作为无路径的分组路由套住"本人账户/操作"那批页面，游客直接去登录。
  * 判 token 不判 user，这么写为了刷新不闪登录页（token 同步恢复、user 异步）；
  * 页面内要用 user 的自己判 null 等它到（见 Portfolio）
  */
-function RequireAuth({ children }: { children: ReactNode }) {
+function RequireAuth() {
   const token = useUserStore(s => s.token);
-  if (!token) return <Navigate to="/login" replace />;
-  return <>{children}</>;
+  return token ? <Outlet /> : <Navigate to="/login" replace />;
 }
 
 function App() {
@@ -70,48 +69,49 @@ function App() {
       <LanguageGate />
       <Routes>
         <Route path="/login" element={<Login />} />
-        {/* 全站唯一免登录页。其余页面进来都要发 API，游客第一个 401 就被响应拦截器弹去 /login，
-            与其让人卡在半路被莫名弹走，不如在路由这层一次挡干净 */}
-        <Route path="/intro" element={<Layout><Intro /></Layout>} />
         <Route
           path="/*"
           element={
-            <RequireAuth>
-              <Layout>
-                <Routes>
-                  <Route path="/" element={<Home />} />
-                  <Route path="/bstock" element={<BStockList />} />
-                  <Route path="/bstock/:symbol" element={<BStockRoute />} />
+            <Layout>
+              <Routes>
+                {/* 游客能看的页：行情、榜单、竞技场、全站成交、留言板、爆仓。
+                    页里要登录的接口自己按 token 判，游客不发；游客误发的 401 拦截器不弹人 */}
+                <Route path="/" element={<Home />} />
+                <Route path="/intro" element={<Intro />} />
+                <Route path="/bstock" element={<BStockList />} />
+                <Route path="/bstock/:symbol" element={<BStockRoute />} />
+                <Route path="/trades" element={<Trades />} />
+                <Route path="/coin" element={<CoinSelect />} />
+                <Route path="/coin/:symbol" element={<CoinRoute />} />
+                <Route path="/commodity" element={<CommoditySelect />} />
+                <Route path="/tradfi" element={<TradFiSelect />} />
+                <Route path="/ranking" element={<Ranking />} />
+                <Route path="/comments" element={<Comments />} />
+                <Route path="/games" element={<Games />} />
+                <Route path="/arena" element={<Arena />} />
+                <Route path="/arena/:id" element={<ArenaDetail />} />
+                <Route path="/force-orders" element={<ForceOrders />} />
+                {/* 本人账户/操作页，没登录没意义 */}
+                <Route element={<RequireAuth />}>
                   <Route path="/portfolio" element={<Portfolio />} />
                   <Route path="/portfolio/history" element={<PositionHistory />} />
                   <Route path="/ledger" element={<Ledger />} />
-                  <Route path="/trades" element={<Trades />} />
-                  <Route path="/coin" element={<CoinSelect />} />
-                  <Route path="/coin/:symbol" element={<CoinRoute />} />
-                  <Route path="/commodity" element={<CommoditySelect />} />
-                  <Route path="/tradfi" element={<TradFiSelect />} />
-                  <Route path="/ranking" element={<Ranking />} />
                   <Route path="/user/:id" element={<UserProfile />} />
-                  <Route path="/comments" element={<Comments />} />
                   <Route path="/admin" element={<Admin />} />
-                  <Route path="/games" element={<Games />} />
                   <Route path="/me" element={<Me />} />
                   <Route path="/blackjack" element={<Blackjack />} />
                   <Route path="/mines" element={<Mines />} />
                   <Route path="/videopoker" element={<VideoPoker />} />
                   <Route path="/prediction" element={<Prediction />} />
                   <Route path="/ai" element={<AiAgent />} />
-                  <Route path="/arena" element={<Arena />} />
-                  <Route path="/arena/:id" element={<ArenaDetail />} />
                   <Route path="/my-trader" element={<MyTrader />} />
                   <Route path="/strategies" element={<Strategies />} />
                   <Route path="/backtest" element={<Backtest />} />
                   <Route path="/testnet" element={<TestnetMonitor />} />
-                  <Route path="/force-orders" element={<ForceOrders />} />
-                  <Route path="*" element={<Navigate to="/" replace />} />
-                </Routes>
-              </Layout>
-            </RequireAuth>
+                </Route>
+                <Route path="*" element={<Navigate to="/" replace />} />
+              </Routes>
+            </Layout>
           }
         />
       </Routes>

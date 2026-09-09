@@ -3,6 +3,7 @@ package com.mawai.wiibcommon.config;
 import cn.dev33.satoken.config.SaTokenConfig;
 import cn.dev33.satoken.interceptor.SaInterceptor;
 import cn.dev33.satoken.listener.SaTokenListener;
+import cn.dev33.satoken.router.SaHttpMethod;
 import cn.dev33.satoken.router.SaRouter;
 import cn.dev33.satoken.stp.StpUtil;
 import cn.dev33.satoken.stp.parameter.SaLoginParameter;
@@ -117,11 +118,20 @@ public abstract class BaseSaTokenConfig implements WebMvcConfigurer {
 
     protected abstract List<String> getExcludePaths();
 
+    /**
+     * 游客可读的接口：只放 GET，同一路径上的 POST/PUT/DELETE 照样要登录。
+     * 写精确路径或单段 *，别用 **，否则会把下面挂着的写接口一起放出去
+     */
+    protected List<String> getAnonymousGetPaths() {
+        return List.of();
+    }
+
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
         registry.addInterceptor(new SaInterceptor(_ ->
                 SaRouter.match("/**")
                         .notMatch(getExcludePaths())
+                        .notMatch(SaRouter.isMatchCurrMethod(new SaHttpMethod[]{SaHttpMethod.GET}) && SaRouter.isMatchCurrURI(getAnonymousGetPaths()))
                         .check(_ -> StpUtil.checkLogin())
         ) {
             @Override

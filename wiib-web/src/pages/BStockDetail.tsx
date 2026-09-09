@@ -12,6 +12,7 @@ import { Skeleton } from '../components/ui/skeleton';
 import { CandleChart } from '../components/CandleChart';
 import { newsTagForSymbol } from '../components/chart/newsTag';
 import { FuturesActionButton } from '../components/FuturesActionButton';
+import { LoginPrompt } from '../components/LoginPrompt';
 import { useQuantityAnimation } from '../components/coin/useQuantityAnimation';
 import { floorToStep } from '../components/coin/futuresMath';
 import { cn, fmtNum } from '../lib/utils';
@@ -42,6 +43,8 @@ function BStockDetail({ symbol }: { symbol: string }) {
   const { toast } = useToast();
   const user = useUserStore(s => s.user);
   const fetchUser = useUserStore(s => s.fetchUser);
+  // 游客只看行情和公司信息，持仓不拉、交易面板换成去登录
+  const loggedIn = useUserStore(s => !!s.token);
 
   const [info, setInfo] = useState<BStock | null>(null);
   const [position, setPosition] = useState<CryptoPosition | null>(null);
@@ -62,10 +65,11 @@ function BStockDetail({ symbol }: { symbol: string }) {
 
   const load = useCallback(() => {
     bstockApi.detail(symbol).then(setInfo).catch(() => { /* keep */ });
+    if (!loggedIn) return;
     bstockApi.positions()
       .then(ps => setPosition(ps.find(p => p.symbol === symbol) ?? null))
       .catch(() => setPosition(null));
-  }, [symbol]);
+  }, [symbol, loggedIn]);
   useEffect(load, [load]);
 
   useEffect(() => {
@@ -230,8 +234,15 @@ function BStockDetail({ symbol }: { symbol: string }) {
           </Card>
         </div>
 
-        {/* 右：交易面板（flex 拉伸补齐左栏高度）+ 持仓 */}
+        {/* 右：交易面板（flex 拉伸补齐左栏高度）+ 持仓；游客这格换成去登录 */}
         <div className="flex flex-col gap-4">
+          {!loggedIn ? (
+            <Card className="flex-1">
+              <CardContent className="p-5">
+                <LoginPrompt text={t('bstockDetail.loginToTrade')} />
+              </CardContent>
+            </Card>
+          ) : (
           <Card className="overflow-hidden flex-1 flex flex-col">
             <CardContent className="p-5 flex-1 flex flex-col gap-5">
               {/* 买/卖切换：终端段控件 */}
@@ -348,6 +359,7 @@ function BStockDetail({ symbol }: { symbol: string }) {
               </div>
             </CardContent>
           </Card>
+          )}
 
           {/* 当前持仓 */}
           {held > 0 && (

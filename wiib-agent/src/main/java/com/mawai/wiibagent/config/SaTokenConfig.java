@@ -22,4 +22,24 @@ public class SaTokenConfig extends BaseSaTokenConfig {
     protected List<String> getExcludePaths() {
         return getDefaultExcludePaths();
     }
+
+    /**
+     * 游客只读：快讯/财经日历、竞技场。
+     * /api/ai/trader/* 单段通配连 GET /mine、/action-panel 也会放进来，它们形参是 @CurrentUserId long，游客照样 401；
+     * /{id}/live 和 trace 不放，只有主人能看
+     */
+    @Override
+    protected List<String> getAnonymousGetPaths() {
+        return List.of(
+                "/api/ai/quant/news",
+                "/api/ai/quant/news-events",
+                "/api/ai/quant/econ-calendar",
+                "/api/ai/trader/arena",
+                "/api/ai/trader/*",
+                "/api/ai/trader/*/decisions",
+                "/api/ai/trader/*/trades",
+                "/api/ai/trader/*/equity-curve",
+                "/api/ai/trader/*/token-usage"
+        );
+    }
 }
