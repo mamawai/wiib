@@ -4,6 +4,7 @@ import com.mawai.wiibcommon.util.Result;
 import com.mawai.wiibcommon.market.BinanceRestClient;
 import com.mawai.wiibcommon.cache.CacheService;
 import com.mawai.wiibsim.service.KlineCacheService;
+import cn.dev33.satoken.stp.StpUtil;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
@@ -29,6 +30,8 @@ public class CryptoMarketController {
             @RequestParam(defaultValue = "1m") String interval,
             @RequestParam(defaultValue = "500") int limit,
             @RequestParam(required = false) Long endTime) {
+        // 翻历史（带 endTime）要登录：最新一屏全站共用一个缓存键，endTime 每个值都是新键，游客拿它能穿透缓存打币安
+        if (endTime != null) StpUtil.checkLogin();
         return klineCacheService.spotKlines(symbol, interval, limit, endTime);
     }
 

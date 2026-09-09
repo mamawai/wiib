@@ -183,6 +183,7 @@ function BStockDetail({ symbol }: { symbol: string }) {
                 marketLabel={`BINANCE ${t('coin.spot')}`}
                 newsTag={newsTagForSymbol(symbol)}
                 klinesFn={bstockApi.klines}
+                loadHistory={loggedIn}
                 streamLive={false}
                 onIntervalChange={setChartIv}
                 tick={tick?.price != null && tick?.ts != null ? { price: tick.price, ts: tick.ts } : null}

@@ -302,6 +302,7 @@ export function Coin({ symbol = DEFAULT_SYMBOL }: { symbol?: string }) {
               tradeMarks={isFuturesMode ? tradeMarks : undefined}
               newsTag={newsTagForSymbol(symbol)}
               klinesFn={isFuturesMode ? futuresApi.klines : cryptoApi.klines}
+              loadHistory={loggedIn}
               streamLive={klineLive}
               tick={klineLive ? null : chartTick}
               indicators

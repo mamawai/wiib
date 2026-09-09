@@ -16,6 +16,7 @@ import com.mawai.wiibsim.service.FuturesRiskService;
 import com.mawai.wiibsim.service.FuturesTradingService;
 import com.mawai.wiibsim.service.KlineCacheService;
 import com.mawai.wiibsim.service.PositionHistoryService;
+import cn.dev33.satoken.stp.StpUtil;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
@@ -177,6 +178,8 @@ public class FuturesController {
             @RequestParam(defaultValue = "1m") String interval,
             @RequestParam(defaultValue = "500") int limit,
             @RequestParam(required = false) Long endTime) {
+        // 翻历史要登录，同 CryptoMarketController.klines
+        if (endTime != null) StpUtil.checkLogin();
         return klineCacheService.futuresKlines(symbol, interval, limit, endTime);
     }
 

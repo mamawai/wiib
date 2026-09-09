@@ -134,6 +134,7 @@
     "limitReached": "Bar limit reached",
     "loadingHistory": "Loading history…",
     "earliest": "Earliest data reached",
+    "loginForHistory": "Log in to load earlier history",
     "entry": "Entry",
     "liq": "Liq",
     "newsSource": "Source ↗",
